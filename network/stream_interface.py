@@ -36,3 +36,12 @@ class Stream(ABC):
 		:return: number of bytes written
 		"""
 		pass
+
+	@abstractmethod
+	def close():
+		"""
+		close stream
+		:return: true if successful
+		"""
+		pass
+

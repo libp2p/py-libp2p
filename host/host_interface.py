@@ -33,17 +33,19 @@ class Host(ABC):
 		"""
 		set stream handler for host
 		:param protocol_id: protocol id used on stream
-		:param stream_handler: a stream handler instance
+		:param stream_handler: a stream handler function
 		:return: true if successful
 		"""
 		pass
 
+	# protocol_id can be a list of protocol_ids
+	# stream will decide which protocol_id to run on
 	@abstractmethod
-	def new_stream(self, context, peer_id, protocol_ids):
+	def new_stream(self, context, peer_id, protocol_id):
 		"""
 		:param context: a context instance
 		:param peer_id: peer_id that host is connecting
-		:param proto_ids: list of protocol ids that stream runs on
+		:param proto_id: protocol id that stream runs on
 		:return: true if successful
 		"""
 		pass
