@@ -1,19 +1,17 @@
-from abc import ABC, abstractmethod
+from .stream_interface import IStream
 
-class IStream(ABC):
+class Stream(IStream):
 
     def __init__(self, context, peer_id):
         self.context = context
         self.peer_id = peer_id
 
-    @abstractmethod
     def protocol(self):
         """
         :return: protocol id that stream runs on
         """
         pass
 
-    @abstractmethod
     def set_protocol(self, protocol_id):
         """
         :param protocol_id: protocol id that stream runs on
@@ -21,7 +19,6 @@ class IStream(ABC):
         """
         pass
 
-    @abstractmethod
     def read(self):
         """
         read from stream
@@ -29,7 +26,6 @@ class IStream(ABC):
         """
         pass
 
-    @abstractmethod
     def write(self, _bytes):
         """
         write to stream
@@ -37,7 +33,6 @@ class IStream(ABC):
         """
         pass
 
-    @abstractmethod
     def close(self):
         """
         close stream
