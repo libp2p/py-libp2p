@@ -2,31 +2,30 @@ from .peerdata_interface import IPeerData
 
 class PeerData(IPeerData):
 
-    def __init__(self, context):
-    	self.metadata = {}
+    def __init__(self):
+        self.metadata = {}
         self.protocols = []
         self.addrs = []
 
     def get_protocols(self):
-    	return self.protocols
+        return self.protocols
 
     def add_protocols(self, protocols):
         self.protocols.extend(protocols)
 
     def add_addrs(self, addrs):
-    	self.addrs.extend(addrs)
+        self.addrs.extend(addrs)
 
     def get_addrs(self):
-    	return self.addrs
+        return self.addrs
 
     def clear_addrs(self):
-    	self.addrs = []
+        self.addrs = []
 
     def put_metadata(self, key, val):
-    	self.metadata[key] = val
+        self.metadata[key] = val
 
     def get_metadata(self, key):
-    	if key in self.metadata:
+        if key in self.metadata:
             return self.metadata[key], None
-        else:
-            return None, "key not found"
+        return None, "key not found"
