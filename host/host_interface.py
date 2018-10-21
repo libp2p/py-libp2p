@@ -2,11 +2,6 @@ from abc import ABC, abstractmethod
 
 class IHost(ABC):
 
-    # default options constructor
-    def __init__(self, context, network):
-        self.context = context
-        self.network = network
-
     @abstractmethod
     def get_id(self):
         """
@@ -22,7 +17,7 @@ class IHost(ABC):
         pass
 
     @abstractmethod
-    def mux(self):
+    def get_mux(self):
         """
         :return: mux instance of host
         """

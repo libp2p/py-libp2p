@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 
 class IStream(ABC):
 
-    def __init__(self, context, peer_id):
-        self.context = context
+    def __init__(self, peer_id):
         self.peer_id = peer_id
 
     @abstractmethod

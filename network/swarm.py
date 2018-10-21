@@ -2,8 +2,7 @@ from .network_interface import INetwork
 
 class Swarm(INetwork):
 
-    def __init__(self, context, my_peer_id, peer_store):
-        self.context = context
+    def __init__(self, my_peer_id, peer_store):
         self.my_peer_id = my_peer_id
         self.peer_store = peer_store
 
@@ -14,9 +13,8 @@ class Swarm(INetwork):
         """
         pass
 
-    def new_stream(self, context, peer_id):
+    def new_stream(self, peer_id):
         """
-        :param context: context instance
         :param peer_id: peer_id of destination
         :return: stream instance
         """
