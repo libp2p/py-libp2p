@@ -9,6 +9,8 @@ class Stream(IStream):
 
         peer_store = context.peer_store
         peer_addr = peer_store.get(peer_id)
+        ip = peer_addr.get_protocol("ip4")
+        port = peer_addr.get_protocol("tcp")
 
         # look up peer_id -> multiaddr in peer store
         # parse multiaddr and set_protocol based on it
@@ -37,18 +39,23 @@ class Stream(IStream):
         read from stream
         :return: bytes of input
         """
-        pass
+        return self.reader.read(-1)
 
     def write(self, _bytes):
         """
         write to stream
         :return: number of bytes written
         """
-        pass
+        return self.write_to_stream(_bytes)
+
+    async def write_to_stream(self, _bytes):
+        to_return = self.writer.write(_bytes)
+        await self.writer.drain()
+        return to_return
 
     def close(self):
         """
         close stream
         :return: true if successful
         """
-        pass
+        self.writer.close()
