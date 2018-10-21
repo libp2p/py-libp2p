@@ -3,13 +3,11 @@ import asyncio
 
 class Stream(IStream):
 
-    def __init__(self, peer_id):
+    def __init__(self, peer_id, maddr):
         self.peer_id = peer_id
 
-        peer_store = context.peer_store
-        peer_addr = peer_store.get(peer_id)
-        ip = peer_addr.get_protocol("ip4")
-        port = peer_addr.get_protocol("tcp")
+        ip = maddr.get_protocol_value("ip4")
+        port = maddr.get_protocol_value("tcp")
 
         # look up peer_id -> multiaddr in peer store
         # parse multiaddr and set_protocol based on it
