@@ -3,12 +3,13 @@ import asyncio
 
 class Stream(IStream):
 
-    def __init__(self, peer_id, maddr):
+    def __init__(self, peer_id, multi_addr):
+        IStream.__init__(self, peer_id, multi_addr)
         self.peer_id = peer_id
 
-        ip = maddr.get_protocol_value("ip4")
-        port = maddr.get_protocol_value("tcp")
-        
+        ip = multi_addr.get_protocol_value("ip4")
+        port = multi_addr.get_protocol_value("tcp")
+
         self.open_connection(ip, port)
 
     async def open_connection(self, ip, port):
