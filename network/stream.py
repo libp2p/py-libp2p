@@ -2,8 +2,7 @@ from .stream_interface import IStream
 
 class Stream(IStream):
 
-    def __init__(self, context, peer_id):
-        self.context = context
+    def __init__(self, peer_id):
         self.peer_id = peer_id
 
     def protocol(self):
