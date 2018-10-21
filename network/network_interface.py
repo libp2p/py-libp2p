@@ -21,3 +21,10 @@ class INetwork(ABC):
         :return: stream instance
         """
         pass
+
+    @abstractmethod
+    def listen(self, *args):
+        """
+        :param *args: one or many multiaddrs to start listening on
+        :return: true if at least one success
+        """
