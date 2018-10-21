@@ -8,7 +8,7 @@ class Multiaddr:
         protocol_map = dict()
         split_addr = addr.split("/")
 
-        if len(split_addr) == 0 or len(split_addr) % 2 != 0:
+        if not split_addr or len(split_addr) % 2 != 0:
             raise MultiaddrValueError("Invalid input multiaddr.")
 
         is_protocol = True
