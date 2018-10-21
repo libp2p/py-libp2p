@@ -1,0 +1,1 @@
+pytest gathers tests according to a naming convention. By default any file that is to contain tests must be named starting with test_ and any function in a file that should be treated as a test must also start with test_.
