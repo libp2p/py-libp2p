@@ -8,11 +8,7 @@ class Stream(IStream):
 
         ip = maddr.get_protocol_value("ip4")
         port = maddr.get_protocol_value("tcp")
-
-        # look up peer_id -> multiaddr in peer store
-        # parse multiaddr and set_protocol based on it
-        # open connection to multiaddr
-        # save connection to stream's state
+        
         self.open_connection(ip, port)
 
     async def open_connection(self, ip, port):
