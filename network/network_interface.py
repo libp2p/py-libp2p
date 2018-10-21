@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 
 class INetwork(ABC):
 
-    def __init__(self, context, my_peer_id, peer_store):
-        self.context = context
+    def __init__(self, my_peer_id, peer_store):
         self.my_peer_id = my_peer_id
         self.peer_store = peer_store
 
@@ -16,10 +15,16 @@ class INetwork(ABC):
         pass
 
     @abstractmethod
-    def new_stream(self, context, peer_id):
+    def new_stream(self, peer_id):
         """
-        :param context: context instance
         :param peer_id: peer_id of destination
         :return: stream instance
         """
         pass
+
+    @abstractmethod
+    def listen(self, *args):
+        """
+        :param *args: one or many multiaddrs to start listening on
+        :return: true if at least one success
+        """
