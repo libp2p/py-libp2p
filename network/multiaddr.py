@@ -1,4 +1,4 @@
-class Multiaddr:
+class MultiAddr:
 
     # Validates input string and constructs internal representation.
     def __init__(self, addr):
@@ -8,14 +8,14 @@ class Multiaddr:
             return
 
         if not addr[0] == "/":
-            raise MultiaddrValueError("Invalid input multiaddr.")
+            raise MultiAddrValueError("Invalid input multiaddr.")
 
         addr = addr[1:]
         protocol_map = dict()
         split_addr = addr.split("/")
 
         if not split_addr or len(split_addr) % 2 != 0:
-            raise MultiaddrValueError("Invalid input multiaddr.")
+            raise MultiAddrValueError("Invalid input multiaddr.")
 
         is_protocol = True
         curr_protocol = ""
@@ -76,6 +76,6 @@ class Multiaddr:
         return addr
 
 
-class MultiaddrValueError(ValueError):
+class MultiAddrValueError(ValueError):
     """Raised when the input string to the Multiaddr constructor was invalid."""
     pass
