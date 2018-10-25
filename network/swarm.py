@@ -30,3 +30,10 @@ class Swarm(INetwork):
         :return: true if at least one success
         """
         pass
+
+    def listen(self, *args):
+        """
+        :param *args: one or many multiaddrs to start listening on
+        :return: true if at least one success
+        """
+        pass
