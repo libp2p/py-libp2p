@@ -15,9 +15,10 @@ class INetwork(ABC):
         pass
 
     @abstractmethod
-    def new_stream(self, peer_id):
+    def new_stream(self, peer_id, multi_addr):
         """
         :param peer_id: peer_id of destination
+        :param multi_addr: multiaddr to connect to
         :return: stream instance
         """
         pass
