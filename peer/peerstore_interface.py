@@ -4,9 +4,9 @@ from .peermetadata_interface import IPeerMetadata
 
 class IPeerStore(ABC, IAddrBook, IPeerMetadata):
 
-    def __init__(self, context):
-        IPeerMetadata.__init__(self, context)
-        IAddrBook.__init__(self, context)
+    def __init__(self):
+        IPeerMetadata.__init__(self)
+        IAddrBook.__init__(self)
 
     @abstractmethod
     def peer_info(self, peer_id):

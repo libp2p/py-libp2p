@@ -3,8 +3,8 @@ from .peerdata import PeerData
 
 class PeerStore(IPeerStore):
 
-    def __init__(self, context):
-        IPeerStore.__init__(self, context)
+    def __init__(self):
+        IPeerStore.__init__(self)
         self.peer_map = {}
 
     def __create_or_get_peer(self, peer_id):

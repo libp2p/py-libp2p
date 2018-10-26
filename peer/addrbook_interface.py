@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 
 class IAddrBook(ABC):
 
-    def __init__(self, context):
-        self.context = context
+    def __init__(self):
+        pass
 
     @abstractmethod
     def add_addr(self, peer_id, addr, ttl):

@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 
 class IPeerMetadata(ABC):
 
-    def __init__(self, context):
-        self.context = context
+    def __init__(self):
+        pass
 
     @abstractmethod
     def get(self, peer_id, key):
