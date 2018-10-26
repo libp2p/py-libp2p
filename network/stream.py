@@ -1,5 +1,5 @@
-from .stream_interface import IStream
 import asyncio
+from .stream_interface import IStream
 
 class Stream(IStream):
 
@@ -7,15 +7,15 @@ class Stream(IStream):
         IStream.__init__(self, peer_id, multi_addr)
         self.peer_id = peer_id
 
-        ip = multi_addr.get_protocol_value("ip4")
-        port = multi_addr.get_protocol_value("tcp")
+        _ip = multi_addr.get_protocol_value("ip4")
+        _port = multi_addr.get_protocol_value("tcp")
 
-        self.open_connection(ip, port)
+        self.open_connection(_ip, _port)
 
-    async def open_connection(self, ip, port):
-        self.reader, self.writer = await asyncio.open_connection(ip, port)
+    async def open_connection(self, _ip, _port):
+        self.reader, self.writer = await asyncio.open_connection(_ip, _port)
 
-    def protocol(self):
+    def get_protocol(self):
         """
         :return: protocol id that stream runs on
         """

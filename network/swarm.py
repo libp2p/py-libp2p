@@ -1,6 +1,6 @@
-from .network_interface import INetwork
-from stream import Stream
 import asyncio
+from .network_interface import INetwork
+from .stream import Stream
 
 class Swarm(INetwork):
 

@@ -7,7 +7,7 @@ class IStream(ABC):
         self.multi_addr = multi_addr
 
     @abstractmethod
-    def protocol(self):
+    def get_protocol(self):
         """
         :return: protocol id that stream runs on
         """
