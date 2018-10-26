@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 class IListener(ABC):
 
-	@abstractmethod
+    @abstractmethod
     def listen(self, multiaddr):
         """
         put listener in listening mode and wait for incoming connections
@@ -29,4 +29,3 @@ class IListener(ABC):
         :return: return True if successful
         """
         pass
-
