@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from .addrbook_interface import IAddrBook
 from .peermetadata_interface import IPeerMetadata
 
-class IPeerStore(ABC, IAddrBook, IPeerMetadata):
+class IPeerStore(IAddrBook, IPeerMetadata):
 
     def __init__(self):
         IPeerMetadata.__init__(self)

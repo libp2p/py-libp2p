@@ -39,6 +39,10 @@ class PeerStore(IPeerStore):
         peer = self.__create_or_get_peer(peer_id)
         peer.add_protocols(protocols)
 
+    # TODO(@stuckinaboot): Implement
+    def set_protocols(self, peer_id, protocols):
+        pass
+
     def peers(self):
         return self.peer_map.keys()
 
