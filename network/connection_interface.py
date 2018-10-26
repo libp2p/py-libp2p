@@ -22,5 +22,6 @@ class IConnection(ABC):
     def set_peer_info(self, peer_info):
         """
         :param peer_info: a peer info object that contains info of peer
-        :return: true if successful
+        :return: True if successful
         """
+        pass
