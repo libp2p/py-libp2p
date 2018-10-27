@@ -5,11 +5,11 @@ from .listener_interface import IListener
 class TCP(ITransport):
 
     def __init__(self):
-        self.multiaddr = None
+        self.listener = self.Listener()
 
     class Listener(IListener):
 
-        def __init__(self, handler_function):
+        def __init__(self, handler_function=None):
             self.multiaddrs = []
             self.server = None
             self.handler = staticmethod(handler_function)
@@ -64,9 +64,15 @@ class TCP(ITransport):
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer
         :param options: optional object
-        :return: list of multiaddrs
+        :return: True if successful
         """
-        pass
+        _multiaddr_dict = multiaddr.to_dict()
+        reader, writer = await asyncio.open_connection(_multiaddr_dict.host,\
+            _multiaddr_dict.port)
+        return False
+        # TODO dial behavior not fully understood
+
+
 
     def create_listener(self, handler_function, options=None):
         """
@@ -76,4 +82,4 @@ class TCP(ITransport):
         that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
-        pass
+        return self.Listener(handler_function)
