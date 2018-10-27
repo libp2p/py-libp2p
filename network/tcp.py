@@ -9,20 +9,38 @@ class TCP(ITransport):
 
     class Listener(IListener):
 
+        def __init__(self, handler_function):
+            self.multiaddrs = []
+            self.server = None
+            self.handler = staticmethod(handler_function)
+
         def listen(self, multiaddr):
             """
             put listener in listening mode and wait for incoming connections
             :param multiaddr: multiaddr of peer
             :return: return True if successful
             """
-            pass
+            # TODO check for exceptions
+            _multiaddr = multiaddr
+            if "ipfs" in multiaddr.get_protocols():
+                # ipfs_id = multiaddr.get_ipfs_id()
+                _multiaddr = multiaddr.decapsulate("ipfs")
+
+            self.multiaddrs.append(_multiaddr)
+            _multiaddr_dict = _multiaddr.to_dict()
+            _loop = asyncio.get_event_loop()
+            _coroutine = asyncio.start_server(self.handler, _multiaddr_dict.host,\
+                _multiaddr_dict.port, loop=_loop)
+            self.server = _loop.run_until_complete(_coroutine)
+            return True
 
         def get_addrs(self):
             """
             retrieve list of addresses the listener is listening on
             :return: return list of addrs
             """
-            pass
+            # TODO check if server is listening
+            return self.multiaddrs
 
         def close(self, options=None):
             """
@@ -32,7 +50,14 @@ class TCP(ITransport):
             a timeout value in ms that fires and destroy all connections
             :return: return True if successful
             """
-            pass
+            if self.server is None:
+                return False
+            self.server.close()
+            _loop = asyncio.get_event_loop()
+            _loop.run_until_complete(self.server.wait_closed())
+            _loop.close()
+            self.server = None
+            return True
 
     def dial(self, multiaddr, options=None):
         """
