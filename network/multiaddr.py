@@ -27,6 +27,14 @@ class MultiAddr:
                 protocol_map[curr_protocol] = addr_part
             is_protocol = not is_protocol
 
+        # Basic validation of protocols
+        # TODO(rzajac): Add more validation as necessary.
+        if 'ip4' in self.protocol_map and 'ip6' in self.protocol_map:
+            raise MultiAddrValueError("Multiaddr should not specify two IP layers.")
+
+        if 'tcp' in self.protocol_map and 'udp' in self.protocol_map:
+            raise MultiAddrValueError("Multiaddr should not specify two transport layers.")
+
         self.protocol_map = protocol_map
 
     def get_protocols(self):
@@ -74,6 +82,37 @@ class MultiAddr:
             addr += "/" + protocol + "/" + self.get_protocol_value(protocol)
 
         return addr
+
+    def to_options(self):
+        """
+        Gives back a dictionary with access to transport information from this multiaddr.
+        Example: MultiAddr('/ip4/127.0.0.1/tcp/4001').to_options()
+        = { family: 'ipv4', host: '127.0.0.1', transport: 'tcp', port: '4001' }
+        :return: {{family: String, host: String, transport: String, port: String}} with None if field does not exist
+        """
+        options = dict()
+
+        if 'ip4' in self.protocol_map:
+            options['family'] = 'ipv4'
+            options['host'] = self.protocol_map['ip4']
+        elif 'ip6' in self.protocol_map:
+            options['family'] = 'ipv6'
+            options['host'] = self.protocol_map['ip6']
+        else:
+            options['family'] = None
+            options['host'] = None
+
+        if 'tcp' in self.protocol_map:
+            options['transport'] = 'tcp'
+            options['port'] = self.protocol_map['tcp']
+        elif 'udp' in self.protocol_map:
+            options['transport'] = 'udp'
+            options['port'] = self.protocol_map['udp']
+        else:
+            options['transport'] = None
+            options['port'] = None
+
+        return options
 
 
 class MultiAddrValueError(ValueError):
