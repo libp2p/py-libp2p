@@ -24,7 +24,7 @@ class TCP(ITransport):
             _multiaddr = multiaddr
             if "ipfs" in multiaddr.get_protocols():
                 # ipfs_id = multiaddr.get_ipfs_id()
-                _multiaddr = multiaddr.decapsulate("ipfs")
+                _multiaddr = multiaddr.remove_protocol("ipfs")
 
             self.multiaddrs.append(_multiaddr)
             _multiaddr_dict = _multiaddr.to_dict()
@@ -71,8 +71,6 @@ class TCP(ITransport):
             _multiaddr_dict.port)
         return False
         # TODO dial behavior not fully understood
-
-
 
     def create_listener(self, handler_function, options=None):
         """
