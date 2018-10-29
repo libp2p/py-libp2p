@@ -27,6 +27,10 @@ class PeerData(IPeerData):
 
     def get_metadata(self, key):
         if key in self.metadata:
-            return self.metadata[key], None
+            return self.metadata[key]
         else:
-            raise Exception("key not found")
+            raise PeerDataError("key not found")
+
+class PeerDataError(KeyError):
+    """Raised when a key is not found in peer metadata"""
+    pass

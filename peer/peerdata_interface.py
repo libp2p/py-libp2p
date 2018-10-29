@@ -35,6 +35,7 @@ class IPeerData(ABC):
     """
     :param key: key in KV pair
     :param val: val to associate with key
+    :raise Exception: unsuccesful put
     """
     def put_metadata(self, key, val):
         pass
@@ -42,7 +43,7 @@ class IPeerData(ABC):
     """
     :param key: key in KV pair
     :return: val for key
-    :raise Exception: key not found exception
+    :raise Exception: key not found
     """
     def get_metadata(self, key):
         pass

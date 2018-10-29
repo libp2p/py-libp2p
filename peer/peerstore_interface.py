@@ -30,7 +30,7 @@ class IPeerStore(ABC, IAddrBook, IPeerMetadata):
         """
         :param peer_id: peer ID to add protocols for
         :param protocols: protocols to add
-        :raise Exception: peer ID not found exception
+        :raise Exception: peer ID not found
         """
         pass
 
@@ -39,7 +39,7 @@ class IPeerStore(ABC, IAddrBook, IPeerMetadata):
         """
         :param peer_id: peer ID to set protocols for
         :param protocols: protocols to set
-        :raise Exception: peer ID not found exception
+        :raise Exception: peer ID not found
         """
         pass
 
