@@ -41,7 +41,8 @@ class IPeerData(ABC):
 
     """
     :param key: key in KV pair
-    :return: val for key, error (only defined if key not found)
+    :return: val for key
+    :raise Exception: key not found exception
     """
     def get_metadata(self, key):
         pass
