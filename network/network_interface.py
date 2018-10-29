@@ -27,5 +27,5 @@ class INetwork(ABC):
     def listen(self, *args):
         """
         :param *args: one or many multiaddrs to start listening on
-        :return: true if at least one success
+        :return: True if at least one success
         """
