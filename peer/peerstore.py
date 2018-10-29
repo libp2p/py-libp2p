@@ -1,5 +1,6 @@
 from .peerstore_interface import IPeerStore
 from .peerdata import PeerData
+from .peerinfo import PeerInfo
 
 class PeerStore(IPeerStore):
 
@@ -24,10 +25,7 @@ class PeerStore(IPeerStore):
     def peer_info(self, peer_id):
         if peer_id in self.peer_map:
             peer = self.peer_map[peer_id]
-            return {
-                "peer_id": peer_id,
-                "addrs": peer.get_addrs()
-            }
+            return PeerInfo(peer_id, peer)
         return None
 
     def get_protocols(self, peer_id):
