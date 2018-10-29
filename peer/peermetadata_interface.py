@@ -10,7 +10,8 @@ class IPeerMetadata(ABC):
         """
         :param peer_id: peer ID to lookup key for
         :param key: key to look up
-        :return: value at key for given peer, error
+        :return: value at key for given peer
+        :raise Exception: peer ID not found
         """
         pass
 
@@ -20,7 +21,7 @@ class IPeerMetadata(ABC):
         :param peer_id: peer ID to lookup key for
         :param key: key to associate with peer
         :param val: value to associated with key
-        :return: error
+        :raise Exception: unsuccessful put
         """
         pass
         

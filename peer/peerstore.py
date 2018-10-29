@@ -1,5 +1,6 @@
 from .peerstore_interface import IPeerStore
 from .peerdata import PeerData
+from .peerinfo import PeerInfo
 
 class PeerStore(IPeerStore):
 
@@ -24,16 +25,14 @@ class PeerStore(IPeerStore):
     def peer_info(self, peer_id):
         if peer_id in self.peer_map:
             peer = self.peer_map[peer_id]
-            return {
-                "peer_id": peer_id,
-                "addrs": peer.get_addrs()
-            }
+            return PeerInfo(peer_id, peer)
         return None
 
     def get_protocols(self, peer_id):
         if peer_id in self.peer_map:
-            return self.peer_map[peer_id].get_protocols(), None
-        return None, peer_id + " not found"
+            return self.peer_map[peer_id].get_protocols()
+        else:
+            raise PeerStoreError("peer ID not found")
 
     def add_protocols(self, peer_id, protocols):
         peer = self.__create_or_get_peer(peer_id)
@@ -44,9 +43,10 @@ class PeerStore(IPeerStore):
 
     def get(self, peer_id, key):
         if peer_id in self.peer_map:
-            val, error = self.peer_map[peer_id].get_metadata(key)
-            return val, error
-        return None, peer_id + " not found"
+            val = self.peer_map[peer_id].get_metadata(key)
+            return val
+        else:
+            raise PeerStoreError("peer ID not found")
 
     def put(self, peer_id, key, val):
         # <<?>>
@@ -64,8 +64,9 @@ class PeerStore(IPeerStore):
 
     def addrs(self, peer_id):
         if peer_id in self.peer_map:
-            return self.peer_map[peer_id].get_addrs(), None
-        return None, peer_id + " not found"
+            return self.peer_map[peer_id].get_addrs()
+        else:
+            raise PeerStoreError("peer ID not found")
 
     def clear_addrs(self, peer_id):
         # Only clear addresses if the peer is in peer map
@@ -80,3 +81,7 @@ class PeerStore(IPeerStore):
             if len(self.peer_map[key].get_addrs()) >= 1:
                 output.append(key)
         return output
+
+class PeerStoreError(KeyError):
+    """Raised when peer ID is not found in peer store"""
+    pass
