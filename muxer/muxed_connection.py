@@ -1,6 +1,6 @@
-from .muxed_connection_interface import IMuxedConnection
+from .muxed_connection_interface import IMuxedConn
 
-class MuxedConnection(IMuxedConnection):
+class MuxedConn(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
@@ -26,7 +26,7 @@ class MuxedConnection(IMuxedConnection):
         """
         pass
 
-    def open_stream(self):
+    def open_stream(self, protocol_id, stream_name):
         """
         creates a new muxed_stream
         :return: a new stream
@@ -38,4 +38,4 @@ class MuxedConnection(IMuxedConnection):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        pass    
+        pass

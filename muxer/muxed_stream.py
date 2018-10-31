@@ -1,11 +1,12 @@
 from .muxed_stream_interface import IMuxedStream
 
 class MuxedStream(IMuxedStream):
-	"""
-	reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
-	"""
-    def __init__(self, stream_id, stream_name):
-        self.id = stream_id
+    """
+    reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
+    """
+
+    def __init__(self, protocol_id, stream_name):
+        self.protocol_id = protocol_id
         self.name = stream_name
 
     def read(self):
@@ -15,7 +16,7 @@ class MuxedStream(IMuxedStream):
         pass
 
     def close(self):
-    	pass
+        pass
 
     def reset(self):
         """

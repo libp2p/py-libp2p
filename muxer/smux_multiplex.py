@@ -25,19 +25,19 @@ class Multiplex(object):
         """
         return self.muxed_conn.is_closed()
 
-    def open_stream(self):
+    def open_stream(self, protocol_id, stream_name):
         """
         creates a new muxed_stream
         :return: a new stream
         """
-        return self.muxed_conn.open_stream()
+        return self.muxed_conn.open_stream(protocol_id, stream_name)
 
     def accept_stream(self, _muxed_stream):
-    	"""
-    	accepts a muxed stream opened by the other end
-    	:param _muxed_stream: stream to be accepted
+        """
+        accepts a muxed stream opened by the other end
+        :param _muxed_stream: stream to be accepted
         :return: the accepted stream
-    	"""
+        """
         pass
 
     # def new_conn(raw_conn, is_server):

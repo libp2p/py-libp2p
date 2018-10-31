@@ -16,9 +16,11 @@ class IMuxedConn(ABC):
         pass
 
     @abstractmethod
-    def open_stream(self):
+    def open_stream(self, protocol_id, stream_name):
         """
         creates a new muxed_stream
+        :param protocol_id: id to be associated with stream
+        :param stream_name: name as part of identifier
         :return: a new stream
         """
         pass
@@ -29,4 +31,4 @@ class IMuxedConn(ABC):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        pass    
+        pass
