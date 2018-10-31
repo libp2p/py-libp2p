@@ -2,9 +2,10 @@ from abc import ABC, abstractmethod
 
 class IStream(ABC):
 
-    def __init__(self, peer_id, multi_addr):
+    def __init__(self, peer_id, multi_addr, connection):
         self.peer_id = peer_id
         self.multi_addr = multi_addr
+        self.connection = connection
 
     @abstractmethod
     def protocol(self):
