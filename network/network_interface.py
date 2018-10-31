@@ -2,10 +2,6 @@ from abc import ABC, abstractmethod
 
 class INetwork(ABC):
 
-    def __init__(self, my_peer_id, peer_store):
-        self.my_peer_id = my_peer_id
-        self.peer_store = peer_store
-
     @abstractmethod
     def set_stream_handler(self, stream_handler):
         """

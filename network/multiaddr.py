@@ -88,7 +88,8 @@ class MultiAddr:
         Gives back a dictionary with access to transport information from this multiaddr.
         Example: MultiAddr('/ip4/127.0.0.1/tcp/4001').to_options()
         = { family: 'ipv4', host: '127.0.0.1', transport: 'tcp', port: '4001' }
-        :return: {{family: String, host: String, transport: String, port: String}} with None if field does not exist
+        :return: {{family: String, host: String, transport: String, port: String}}
+        with None if field does not exist
         """
         options = dict()
 

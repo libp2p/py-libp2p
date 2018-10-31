@@ -18,28 +18,26 @@ class Swarm(INetwork):
 
     def new_stream(self, peer_id, protocol_id):
         """
-        :param peer_id: peer_id of destination
-        :param protocol_id: protocol id
-        :return: stream instance
-        """
-
-        """
         Determine if a connection to peer_id already exists
         If a connection to peer_id exists, then
-        c = existing connection, 
+        c = existing connection,
         otherwise c = new muxed connection to peer_id
         s = c.open_stream(protocol_id)
         return s
+
+        :param peer_id: peer_id of destination
+        :param protocol_id: protocol id
+        :return: stream instance
         """
         muxed_connection = None
         if peer_id in self.connections:
             muxed_connection = self.connections[peer_id]
         else:
             addrs = self.peer_store.addrs(peer_id)
-            ip = addrs.get_protocol_value("ip")
-            port = addrs.get_protocol_value("port")
+            stream_ip = addrs.get_protocol_value("ip")
+            stream_port = addrs.get_protocol_value("port")
             if len(addrs) > 0:
-                conn = RawConnection(ip, port)
+                conn = RawConnection(stream_ip, stream_port)
                 muxed_connection = MuxedConnection(conn, True)
             else:
                 raise Exception("No IP and port in addr")
