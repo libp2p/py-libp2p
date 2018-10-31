@@ -1,10 +1,14 @@
-from .raw_connection import IRawConnection
+import asyncio
+from .raw_connection_interface import IRawConnection
 
 class RawConnection(IRawConnection):
 
     def __init__(self, ip, port):
-        self.ip = ip
-        self.port = port
-        
+        self.conn_ip = ip
+        self.conn_port = port
+        self.reader = None
+        self.writer = None
+
     async def open_connection(self):
-    	self.reader, self.writer = await asyncio.open_connection(self.ip, self.port)
+        self.reader, self.writer = \
+            await asyncio.open_connection(self.conn_ip, self.conn_port)
