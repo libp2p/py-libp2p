@@ -8,7 +8,7 @@ class IStream(ABC):
         self.connection = connection
 
     @abstractmethod
-    def protocol(self):
+    def get_protocol(self):
         """
         :return: protocol id that stream runs on
         """
