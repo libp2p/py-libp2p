@@ -38,6 +38,10 @@ class PeerStore(IPeerStore):
         peer = self.__create_or_get_peer(peer_id)
         peer.add_protocols(protocols)
 
+    def set_protocols(self, peer_id, protocols):
+        peer = self.__create_or_get_peer(peer_id)
+        peer.set_protocols(protocols)
+
     def peers(self):
         return self.peer_map.keys()
 
@@ -55,7 +59,7 @@ class PeerStore(IPeerStore):
         peer.put_metadata(key, val)
 
     def add_addr(self, peer_id, addr, ttl):
-        self.add_addrs(self, peer_id, [addr])
+        self.add_addrs(peer_id, [addr], ttl)
 
     def add_addrs(self, peer_id, addrs, ttl):
         # Ignore ttl for now

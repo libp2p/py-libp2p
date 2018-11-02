@@ -13,6 +13,9 @@ class PeerData(IPeerData):
     def add_protocols(self, protocols):
         self.protocols.extend(protocols)
 
+    def set_protocols(self, protocols):
+        self.protocols = protocols
+
     def add_addrs(self, addrs):
         self.addrs.extend(addrs)
 
