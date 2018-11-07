@@ -9,3 +9,11 @@ virtualenv -p python3.6 venv
 . venv/bin/activate
 pip install -r requirements.txt
 ```
+
+## Testing
+
+After installing our requirements (see above), you can:
+```sh
+cd tests
+pytest
+```
