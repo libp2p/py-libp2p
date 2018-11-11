@@ -32,9 +32,7 @@ class MuxedConn(IMuxedConn):
         creates a new muxed_stream
         :return: a new stream
         """
-
         return Stream(peer_id, multi_addr, self)
-
 
     def accept_stream(self):
         """
