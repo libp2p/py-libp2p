@@ -10,6 +10,7 @@ class BasicHost(IHost):
     # default options constructor
     def __init__(self, _network):
         self.network = _network
+        self.peerstore = self.network.peerstore
         # self.stream_handlers = {}
 
     def get_id(self):
@@ -23,6 +24,11 @@ class BasicHost(IHost):
         :return: network instance of host
         """
         return self.network
+
+    def get_peerstore(self):
+        """
+        :return: peerstore of the host (same one as in its network instance)
+        """
 
     def get_mux(self):
         """

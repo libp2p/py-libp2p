@@ -6,7 +6,7 @@ class Swarm(INetwork):
 
     def __init__(self, my_peer_id, peerstore):
         self.my_peer_id = my_peer_id
-        self.peer_store = peer_store
+        self.peerstore = peerstore
         self.connections = {}
 
     def set_stream_handler(self, stream_handler):
@@ -33,7 +33,7 @@ class Swarm(INetwork):
         if peer_id in self.connections:
             muxed_connection = self.connections[peer_id]
         else:
-            addrs = self.peer_store.addrs(peer_id)
+            addrs = self.peerstore.addrs(peer_id)
             stream_ip = addrs.get_protocol_value("ip")
             stream_port = addrs.get_protocol_value("port")
             if len(addrs) > 0:
