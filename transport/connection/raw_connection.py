@@ -9,6 +9,10 @@ class RawConnection(IRawConnection):
         self.reader = reader
         self.writer = writer
 
+
+    def close(self):
+        self.writer.close()
+
     # def __init__(self, ip, port):
     #     self.conn_ip = ip
     #     self.conn_port = port
