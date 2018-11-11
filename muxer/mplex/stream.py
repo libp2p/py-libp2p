@@ -30,3 +30,29 @@ class Stream(IStream):
         :return: true if successful
         """
         self.protocol_id = protocol_id
+
+    def read(self):
+        """
+        read from stream
+        :return: bytes of input
+        """
+        return self.reader.read(-1)
+
+    def write(self, _bytes):
+        """
+        write to stream
+        :return: number of bytes written
+        """
+        return self.write_to_stream(_bytes)
+
+    async def write_to_stream(self, _bytes):
+        to_return = self.writer.write(_bytes)
+        await self.writer.drain()
+        return to_return
+
+    def close(self):
+        """
+        close stream
+        :return: true if successful
+        """
+        self.writer.close()

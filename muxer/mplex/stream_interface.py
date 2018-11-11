@@ -45,3 +45,20 @@ class IStream(ABC):
         :return: true if successful
         """
         pass
+
+    @abstractmethod
+    def reset(self):
+        """
+        closes both ends of the stream
+        tells this remote side to hang up
+        :return: error/exception
+        """
+        pass
+
+    @abstractmethod
+    def set_deadline(self, ttl):
+        """
+        set deadline for stream
+        :return: a new stream
+        """
+        pass
