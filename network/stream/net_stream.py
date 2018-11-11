@@ -1,47 +1,42 @@
-from abc import ABC, abstractmethod
+import asyncio
+from .net_stream_interface import INetStream
 
-class IStream(ABC):
+class NetStream(INetStream):
 
-    def __init__(self, peer_id, multi_addr, connection):
-        self.peer_id = peer_id
-        self.multi_addr = multi_addr
-        self.connection = connection
+    def __init__(self, muxed_stream):
+        self.muxed_stream = muxed_stream
 
-    @abstractmethod
     def get_protocol(self):
         """
         :return: protocol id that stream runs on
         """
-        pass
+        return self.protocol_id
 
-    @abstractmethod
     def set_protocol(self, protocol_id):
         """
         :param protocol_id: protocol id that stream runs on
         :return: true if successful
         """
-        pass
+        self.protocol_id = protocol_id
 
-    @abstractmethod
     def read(self):
         """
         read from stream
-        :return: bytes of input
+        :return: bytes of input until EOF
         """
-        pass
+        return self.muxed_stream.read()
 
-    @abstractmethod
-    def write(self, _bytes):
+    def write(self, bytes):
         """
         write to stream
         :return: number of bytes written
         """
-        pass
+        return self.muxed_stream.write(bytes)
 
-    @abstractmethod
     def close(self):
         """
         close stream
         :return: true if successful
         """
-        pass
+        self.muxed_stream.close()
+        return True
