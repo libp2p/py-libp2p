@@ -1,6 +1,6 @@
 from .network_interface import INetwork
-from ..connection.muxed_connection import MuxedConnection
-from ..connection.raw_connection import RawConnection
+from muxer.mplex.muxed_connection import MuxedConn
+from transport.connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
 
