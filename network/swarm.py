@@ -7,8 +7,9 @@ class Swarm(INetwork):
     def __init__(self, my_peer_id, peerstore, upgrader):
         self.my_peer_id = my_peer_id
         self.peerstore = peerstore
-        self.connections = {}
         self.upgrader = upgrader
+        self.connections = dict()
+        self.listeners = dict()
 
     def set_stream_handler(self, stream_handler):
         """
@@ -62,7 +63,24 @@ class Swarm(INetwork):
         :param *args: one or many multiaddrs to start listening on
         :return: true if at least one success
         """
-        pass
+
+        # Create a closure C that takes in a multiaddr and 
+        # returns a function object O that takes in a reader and writer.
+        # This function O looks up the stream handler
+        # for the given protocol, creates the net_stream 
+        # for the listener and calls the stream handler function
+        # passing in the net_stream
+
+        # For each multiaddr in args
+            # Check if a listener for multiaddr exists already
+            # If listener already exists, continue
+            # Otherwise, do the following:
+                # Pass multiaddr into C and get back function H
+                # listener = transport.create_listener(H)
+                # Call listener listen with the multiaddr
+                # Map multiaddr to listener
+
+        return True
 
     def add_transport(self, transport):
         # TODO: Support more than one transport
