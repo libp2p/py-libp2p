@@ -83,7 +83,15 @@ class MuxedConn(IMuxedConn):
             if not chunk:
                 break
             data += chunk
+        header, end_index = decode_uvarint(data, 0)
+        length, end_index = decode_uvarint(data, end_index)
+        message = data[end_index, end_index + length]
 
+        # Deal with other types of messages
+        flag = header & 0x07
+        stream_id = header >> 3
+
+        self.buffers[stream_id] = self.buffers[stream_id] + message
         # Read header
         # Read message length
         # Read message into corresponding buffer

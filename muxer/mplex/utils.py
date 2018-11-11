@@ -11,10 +11,9 @@ def encode_uvarint(number):
             break
     return buf
 
-def decode_uvarint(buff):
+def decode_uvarint(buff, index):
     shift = 0
     result = 0
-    index = 0
     while True:
         i = buff[index]
         result |= (i & 0x7f) << shift
