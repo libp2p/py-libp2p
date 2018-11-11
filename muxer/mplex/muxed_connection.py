@@ -1,7 +1,7 @@
 import asyncio
 from .utils import encode_uvarint, decode_uvarint
 from .muxed_connection_interface import IMuxedConn
-from transport.stream.Stream import Stream
+from .muxed_stream import MuxedStream
 
 class MuxedConn(IMuxedConn):
     """
@@ -43,7 +43,7 @@ class MuxedConn(IMuxedConn):
         creates a new muxed_stream
         :return: a new stream
         """
-        stream = Stream(peer_id, multi_addr, self)
+        stream = MuxedStream(peer_id, multi_addr, self)
         self.streams[stream_id] = stream
         self.buffers[stream_id] = bytearray()
         return stream
