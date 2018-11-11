@@ -4,7 +4,7 @@ from ..connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
 
-    def __init__(self, my_peer_id, peer_store):
+    def __init__(self, my_peer_id, peerstore):
         self.my_peer_id = my_peer_id
         self.peer_store = peer_store
         self.connections = {}
