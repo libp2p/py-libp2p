@@ -1,4 +1,5 @@
 import asyncio
+from .utils import encode_uvarint, decode_uvarint
 from .muxed_connection_interface import IMuxedConn
 from transport.stream.Stream import Stream
 
@@ -50,14 +51,25 @@ class MuxedConn(IMuxedConn):
         """
         pass
 
-    def send_message(self, header, data):
+    def send_message(self, flag, data, stream_id):
         """
         sends a message over the connection
         :param header: header to use
         :param data: data to send in the message
+        :param stream_id: stream the message is in
         :return: True if success
         """
-        pass
+        # << by 3, then or with flag
+        header = (stream_id << 3) | flag
+        header = encode_uvarint(header)
+        data_length = encode_uvarint(len(data))
+        _bytes = header + data_length + data
+        return self.write_to_stream(_bytes)
+
+    async def write_to_stream(self, _bytes):
+        to_return = self.raw_conn.writer.write(_bytes)
+        await self.raw_conn.writer.drain()
+        return to_return
 
     async def handle_incoming(self):
         data = bytearray()
