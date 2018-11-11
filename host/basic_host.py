@@ -29,6 +29,7 @@ class BasicHost(IHost):
         """
         :return: peerstore of the host (same one as in its network instance)
         """
+        return self.peerstore
 
     def get_mux(self):
         """
