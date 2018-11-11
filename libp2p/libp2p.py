@@ -22,7 +22,7 @@ class Libp2p(object):
             self.private_key = new_key.exportKey("PEM")
             
         self.transportOpt = transportOpt
-        self.muxerOpt =  muxerOpt
+        self.muxerOpt = muxerOpt
         self.secOpt = secOpt
         self.peerstore = peerstore
 
