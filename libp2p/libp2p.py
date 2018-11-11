@@ -1,4 +1,3 @@
-from .config import Config
 from ..peer.peerstore import PeerStore
 from ..network.swarm import Swarm
 from ..host.basic_host import BasicHost
@@ -7,7 +6,7 @@ from ..transport.upgrader import TransportUpgrader
 class Libp2p(object):
 
     def __init__(self, idOpt, \
-        transportOpt = ["/ip4/0.0.0.0/tcp/0"], \
+        transportOpt = ["/ip4/127.0.0.1/tcp/10000"], \
         muxerOpt = ["mplex/6.7.0"], \
         secOpt = ["secio"], \
         peerstore = PeerStore()):
@@ -16,6 +15,7 @@ class Libp2p(object):
             self.idOpt = idOpt
         else:
             # TODO generate RSA public key pair
+            pass
 
         self.transportOpt = transportOpt
         self.muxerOpt =  muxerOpt
@@ -33,3 +33,5 @@ class Libp2p(object):
         # TODO listen on addrs
 
         # TODO swarm add transports
+
+        # TODO: return host
