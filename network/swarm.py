@@ -6,7 +6,7 @@ class Swarm(INetwork):
 
     def __init__(self, my_peer_id, peerstore):
         self.my_peer_id = my_peer_id
-        self.peer_store = peer_store
+        self.peer_store = peerstore
         self.connections = {}
 
     def set_stream_handler(self, stream_handler):
@@ -41,7 +41,7 @@ class Swarm(INetwork):
                 muxed_connection = MuxedConnection(conn, True)
             else:
                 raise Exception("No IP and port in addr")
-        return muxed_connection.open_stream(protocol_id, "")
+        return muxed_connection.open_stream(protocol_id, "", peer_id, addrs)
 
     def listen(self, *args):
         """

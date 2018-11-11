@@ -1,4 +1,5 @@
 from .muxed_connection_interface import IMuxedConn
+from transport.stream.Stream import Stream
 
 class MuxedConn(IMuxedConn):
     """
@@ -26,12 +27,14 @@ class MuxedConn(IMuxedConn):
         """
         pass
 
-    def open_stream(self, protocol_id, stream_name):
+    def open_stream(self, protocol_id, stream_name, peer_id, multi_addr):
         """
         creates a new muxed_stream
         :return: a new stream
         """
-        pass
+
+        return Stream(peer_id, multi_addr, self)
+
 
     def accept_stream(self):
         """
