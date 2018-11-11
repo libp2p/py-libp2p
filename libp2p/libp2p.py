@@ -1,4 +1,3 @@
-from .config import Config
 from ..peer.peerstore import PeerStore
 from ..network.swarm import Swarm
 from ..host.basic_host import BasicHost
@@ -8,7 +7,7 @@ from Crypto.PublicKey import RSA
 class Libp2p(object):
 
     def __init__(self, idOpt, \
-        transportOpt = ["/ip4/0.0.0.0/tcp/0"], \
+        transportOpt = ["/ip4/127.0.0.1/tcp/10000"], \
         muxerOpt = ["mplex/6.7.0"], \
         secOpt = ["secio"], \
         peerstore = PeerStore()):
@@ -20,7 +19,7 @@ class Libp2p(object):
             new_key = RSA.generate(2048, e=65537)
             self.idOpt = new_key.publickey().exportKey("PEM")
             self.private_key = new_key.exportKey("PEM")
-            
+      
         self.transportOpt = transportOpt
         self.muxerOpt = muxerOpt
         self.secOpt = secOpt
@@ -37,3 +36,5 @@ class Libp2p(object):
         # TODO listen on addrs
 
         # TODO swarm add transports
+
+        # TODO: return host
