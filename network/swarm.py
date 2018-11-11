@@ -4,7 +4,7 @@ from transport.connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
 
-    def __init__(self, my_peer_id, peerstore):
+    def __init__(self, my_peer_id, peerstore, upgrader):
         self.my_peer_id = my_peer_id
         self.peerstore = peerstore
         self.connections = {}
@@ -18,19 +18,17 @@ class Swarm(INetwork):
 
     def new_stream(self, peer_id, protocol_id):
         """
-        Determine if a connection to peer_id already exists
-        If a connection to peer_id exists, then
-        c = existing connection,
-        otherwise c = new muxed connection to peer_id
-        s = c.open_stream(protocol_id)
-        return s
-
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
         :return: stream instance
         """
         muxed_connection = None
         if peer_id in self.connections:
+            """
+            If muxed connection already exists for peer_id,
+            set muxed connection equal to 
+            existing muxed connection
+            """ 
             muxed_connection = self.connections[peer_id]
         else:
             addrs = self.peerstore.addrs(peer_id)
