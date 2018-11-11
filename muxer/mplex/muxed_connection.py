@@ -33,6 +33,11 @@ class MuxedConn(IMuxedConn):
         """
         pass
 
+    def read_buffer(self, stream_id):
+        data = self.buffers[stream_id]
+        self.buffers[stream_id] = bytearray()
+        return data
+
     def open_stream(self, protocol_id, stream_id, peer_id, multi_addr):
         """
         creates a new muxed_stream
@@ -67,9 +72,9 @@ class MuxedConn(IMuxedConn):
         return self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
-        to_return = self.raw_conn.writer.write(_bytes)
+        self.raw_conn.writer.write(_bytes)
         await self.raw_conn.writer.drain()
-        return to_return
+        return len(_bytes)
 
     async def handle_incoming(self):
         data = bytearray()
