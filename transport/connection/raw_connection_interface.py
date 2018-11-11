@@ -6,10 +6,10 @@ class IRawConnection(ABC):
     open_connection should return such a connection
     """
 
-    @abstractmethod
-    async def open_connection(self):
-        """
-        opens a connection on ip and port
-        :return: a raw connection
-        """
-        pass
+    # @abstractmethod
+    # async def open_connection(self):
+    #     """
+    #     opens a connection on ip and port
+    #     :return: a raw connection
+    #     """
+    #     pass
