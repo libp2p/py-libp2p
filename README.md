@@ -1,6 +1,6 @@
 # py-libp2p
 
-<img width="250" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
+<img width="250" align="middle" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
 
 ## Development
 
