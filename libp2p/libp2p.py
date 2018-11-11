@@ -2,6 +2,7 @@ from ..peer.peerstore import PeerStore
 from ..network.swarm import Swarm
 from ..host.basic_host import BasicHost
 from ..transport.upgrader import TransportUpgrader
+from Crypto.PublicKey import RSA
 
 class Libp2p(object):
 
@@ -15,16 +16,18 @@ class Libp2p(object):
             self.idOpt = idOpt
         else:
             # TODO generate RSA public key pair
-            pass
-
+            new_key = RSA.generate(2048, e=65537)
+            self.idOpt = new_key.publickey().exportKey("PEM")
+            self.private_key = new_key.exportKey("PEM")
+      
         self.transportOpt = transportOpt
-        self.muxerOpt =  muxerOpt
+        self.muxerOpt = muxerOpt
         self.secOpt = secOpt
         self.peerstore = peerstore
 
     def new_node(self):
 
-        swarm = Swarm(self.id, self.peerstore)
+        swarm = Swarm(self.idOpt, self.peerstore)
         host = BasicHost(swarm)
         upgrader = TransportUpgrader(self.secOpt, self.transportOpt)
 
