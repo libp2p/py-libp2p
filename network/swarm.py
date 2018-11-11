@@ -1,6 +1,6 @@
 from .network_interface import INetwork
-from ..connection.muxed_connection import MuxedConnection
-from ..connection.raw_connection import RawConnection
+from muxer.mplex.muxed_connection import MuxedConn
+from transport.connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
 
@@ -41,7 +41,7 @@ class Swarm(INetwork):
                 muxed_connection = MuxedConnection(conn, True)
             else:
                 raise Exception("No IP and port in addr")
-        return muxed_connection.open_stream(protocol_id, "")
+        return muxed_connection.open_stream(protocol_id, "", peer_id, addrs)
 
     def listen(self, *args):
         """

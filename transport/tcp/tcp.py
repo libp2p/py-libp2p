@@ -1,6 +1,7 @@
 import asyncio
-from .transport_interface import ITransport
-from .listener_interface import IListener
+from transport.transport_interface import ITransport
+from transport.listener_interface import IListener
+from transport.connection.raw_connection import RawConnection
 
 class TCP(ITransport):
 
@@ -67,9 +68,10 @@ class TCP(ITransport):
         :return: True if successful
         """
         _multiaddr_dict = multiaddr.to_dict()
-        reader, writer = await asyncio.open_connection(_multiaddr_dict.host,\
-            _multiaddr_dict.port)
-        return False
+        host = _multiaddr_dict.host
+        port = _multiaddr_dict.port
+        reader, writer = open_conn(host, port)
+        return RawConnection(host, port, reader, writer)
         # TODO dial behavior not fully understood
 
     def create_listener(self, handler_function, options=None):
@@ -81,3 +83,7 @@ class TCP(ITransport):
         :return: a listener object that implements listener_interface.py
         """
         return self.Listener(handler_function)
+
+async def open_conn(host, port):
+    reader, writer = await asyncio.open_connection(host, port)
+    return reader, writer
