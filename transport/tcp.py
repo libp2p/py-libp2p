@@ -5,9 +5,14 @@ from .listener_interface import IListener
 class TCP(ITransport):
 
     def __init__(self):
-        self.multiaddr = None
+        self.listener = self.Listener()
 
     class Listener(IListener):
+
+        def __init__(self, handler_function=None):
+            self.multiaddrs = []
+            self.server = None
+            self.handler = staticmethod(handler_function)
 
         def listen(self, multiaddr):
             """
@@ -15,14 +20,27 @@ class TCP(ITransport):
             :param multiaddr: multiaddr of peer
             :return: return True if successful
             """
-            pass
+            # TODO check for exceptions
+            _multiaddr = multiaddr
+            if "ipfs" in multiaddr.get_protocols():
+                # ipfs_id = multiaddr.get_ipfs_id()
+                _multiaddr = multiaddr.remove_protocol("ipfs")
+
+            self.multiaddrs.append(_multiaddr)
+            _multiaddr_dict = _multiaddr.to_dict()
+            _loop = asyncio.get_event_loop()
+            _coroutine = asyncio.start_server(self.handler, _multiaddr_dict.host,\
+                _multiaddr_dict.port, loop=_loop)
+            self.server = _loop.run_until_complete(_coroutine)
+            return True
 
         def get_addrs(self):
             """
             retrieve list of addresses the listener is listening on
             :return: return list of addrs
             """
-            pass
+            # TODO check if server is listening
+            return self.multiaddrs
 
         def close(self, options=None):
             """
@@ -32,16 +50,27 @@ class TCP(ITransport):
             a timeout value in ms that fires and destroy all connections
             :return: return True if successful
             """
-            pass
+            if self.server is None:
+                return False
+            self.server.close()
+            _loop = asyncio.get_event_loop()
+            _loop.run_until_complete(self.server.wait_closed())
+            _loop.close()
+            self.server = None
+            return True
 
     def dial(self, multiaddr, options=None):
         """
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer
         :param options: optional object
-        :return: list of multiaddrs
+        :return: True if successful
         """
-        pass
+        _multiaddr_dict = multiaddr.to_dict()
+        reader, writer = await asyncio.open_connection(_multiaddr_dict.host,\
+            _multiaddr_dict.port)
+        return False
+        # TODO dial behavior not fully understood
 
     def create_listener(self, handler_function, options=None):
         """
@@ -51,4 +80,4 @@ class TCP(ITransport):
         that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
-        pass
+        return self.Listener(handler_function)
