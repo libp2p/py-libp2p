@@ -1,8 +1,9 @@
-from .muxed_stream import MuxedStream
 from .muxed_connection import MuxedConn
+
 
 class Multiplex(object):
     """
+    muxing logic currently lives in MuxedConn
     reference: https://github.com/whyrusleeping/go-smux-multiplex/blob/master/multiplex.go
     """
     def __init__(self, conn, initiator):

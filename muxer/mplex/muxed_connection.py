@@ -3,6 +3,7 @@ from .utils import encode_uvarint, decode_uvarint
 from .muxed_connection_interface import IMuxedConn
 from .muxed_stream import MuxedStream
 
+
 class MuxedConn(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
@@ -47,6 +48,10 @@ class MuxedConn(IMuxedConn):
     def open_stream(self, protocol_id, stream_id, peer_id, multi_addr):
         """
         creates a new muxed_stream
+        :param protocol_id: protocol_id of stream
+        :param stream_id: stream_id of stream
+        :param peer_id: peer_id that stream connects to
+        :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
         stream = MuxedStream(stream_id, multi_addr, self)

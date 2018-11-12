@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class IListener(ABC):
 
     @abstractmethod

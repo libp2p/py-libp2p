@@ -4,6 +4,7 @@ from .stream.net_stream import NetStream
 from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
 
+
 class Swarm(INetwork):
 
     def __init__(self, my_peer_id, peerstore, upgrader):
@@ -13,6 +14,7 @@ class Swarm(INetwork):
         self.connections = dict()
         self.listeners = dict()
         self.stream_handlers = dict()
+        self.transport = None
 
     def set_stream_handler(self, protocol_id, stream_handler):
         """
@@ -37,11 +39,8 @@ class Swarm(INetwork):
         multiaddr = addrs[0]
 
         if peer_id in self.connections:
-            """
-            If muxed connection already exists for peer_id,
-            set muxed connection equal to
-            existing muxed connection
-            """
+            # If muxed connection already exists for peer_id,
+            # set muxed connection equal to existing muxed connection
             muxed_conn = self.connections[peer_id]
         else:
             # Transport dials peer (gets back a raw conn)
@@ -68,8 +67,7 @@ class Swarm(INetwork):
         """
         :param *args: one or many multiaddrs to start listening on
         :return: true if at least one success
-        """
-        """
+
         For each multiaddr in args
             Check if a listener for multiaddr exists already
             If listener already exists, continue
@@ -87,8 +85,10 @@ class Swarm(INetwork):
             multiaddr_dict = multiaddr.to_options()
 
             async def conn_handler(reader, writer):
-                # Upgrade reader/write to a net_stream and pass to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(multiaddr_dict['host'], multiaddr_dict['port'], reader, writer)
+                # Upgrade reader/write to a net_stream and pass \
+                # to appropriate stream handler (using multiaddr)
+                raw_conn = RawConnection(multiaddr_dict['host'], \
+                    multiaddr_dict['port'], reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
                 muxed_stream, stream_id, protocol_id = await muxed_conn.accept_stream()

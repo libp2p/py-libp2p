@@ -1,5 +1,6 @@
 from .host_interface import IHost
 
+
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
@@ -51,7 +52,7 @@ class BasicHost(IHost):
     async def new_stream(self, peer_id, protocol_id):
         """
         :param peer_id: peer_id that host is connecting
-        :param proto_id: protocol id that stream runs on
+        :param protocol_id: protocol id that stream runs on
         :return: true if successful
         """
         # TODO: host should return a mux stream not a raw stream
