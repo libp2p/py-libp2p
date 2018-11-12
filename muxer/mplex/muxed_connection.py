@@ -92,9 +92,9 @@ class MuxedConn(IMuxedConn):
             data += chunk
 
             header, end_index = decode_uvarint(data, 0)
-            length, end_index = decode_uvarint(data, end_index + 1)
+            length, end_index = decode_uvarint(data, end_index)
 
-            message = data[-length:]
+            message = data[end_index:end_index + length + 1]
 
             # Deal with other types of messages
             flag = header & 0x07
