@@ -8,7 +8,7 @@ class Multiplex(object):
     def __init__(self, conn, initiator):
         """
         :param conn: an instance of raw connection
-    :    param initiator: boolean to prevent multiplex with self
+        :param initiator: boolean to prevent multiplex with self
         """
         self.muxed_conn = MuxedConn(conn, initiator)
 

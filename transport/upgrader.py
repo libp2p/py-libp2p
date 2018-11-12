@@ -21,4 +21,3 @@ class TransportUpgrader(object):
         # For PoC, no security
         # Default to mplex
         pass
-        
