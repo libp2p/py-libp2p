@@ -1,11 +1,31 @@
 from abc import ABC, abstractmethod
-# from datetime import time
+
 
 class IMuxedStream(ABC):
 
-    # TODO Reader
-    # TODO Writer
-    # TODO Closer
+    @abstractmethod
+    def read(self):
+        """
+        read from stream
+        :return: bytes of input
+        """
+        pass
+
+    @abstractmethod
+    def write(self, _bytes):
+        """
+        write to stream
+        :return: number of bytes written
+        """
+        pass
+
+    @abstractmethod
+    def close(self):
+        """
+        close stream
+        :return: true if successful
+        """
+        pass
 
     @abstractmethod
     def reset(self):
