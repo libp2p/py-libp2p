@@ -38,7 +38,7 @@ class MuxedStream(IMuxedStream):
 
     def read(self):
         """
-        read from stream til end of file
+        read messages associated with stream from buffer til end of file
         :return: bytes of input
         """
         return self.muxed_conn.read_buffer(self.id)
