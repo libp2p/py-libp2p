@@ -22,7 +22,7 @@ def test_simple_messages():
     # associate the peer with local ip address (see default parameters of Libp2p())
     hostA.get_peerstore().add_addr("hostB", "/ip4/127.0.0.1/tcp/10000")
 
-    stream = hostA.new_stream("hostB", "/echo/1.0.0")
+    stream = hostA.new_stream("hostB", "/app/1.0.0")
     message = "hello"
     stream.write(message.encode())
 

@@ -1,13 +1,13 @@
-from ..peer.peerstore import PeerStore
-from ..network.swarm import Swarm
-from ..host.basic_host import BasicHost
-from ..transport.upgrader import TransportUpgrader
+from peer.peerstore import PeerStore
+from network.swarm import Swarm
+from host.basic_host import BasicHost
+from transport.upgrader import TransportUpgrader
 from Crypto.PublicKey import RSA
 
 class Libp2p(object):
 
     def __init__(self, idOpt, \
-        transportOpt = ["/ip4/127.0.0.1/tcp/10000"], \
+        transportOpt = ["/ip4/127.0.0.1/tcp/10000/app/1.0.0"], \
         muxerOpt = ["mplex/6.7.0"], \
         secOpt = ["secio"], \
         peerstore = PeerStore()):
@@ -15,7 +15,6 @@ class Libp2p(object):
         if idOpt:
             self.idOpt = idOpt
         else:
-            # TODO generate RSA public key pair
             new_key = RSA.generate(2048, e=65537)
             self.idOpt = new_key.publickey().exportKey("PEM")
             self.private_key = new_key.exportKey("PEM")
@@ -29,7 +28,7 @@ class Libp2p(object):
 
         swarm = Swarm(self.idOpt, self.peerstore)
         host = BasicHost(swarm)
-        upgrader = TransportUpgrader(self.secOpt, self.transportOpt)
+        upgrader = TransportUpgrader(self.secOpt, self.muxerOpt)
 
         # TODO transport upgrade
 

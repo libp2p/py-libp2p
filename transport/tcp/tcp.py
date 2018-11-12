@@ -1,7 +1,7 @@
 import asyncio
 from transport.transport_interface import ITransport
 from transport.listener_interface import IListener
-from transport.connection.raw_connection import RawConnection
+from network.connection.raw_connection import RawConnection
 
 class TCP(ITransport):
 
@@ -22,17 +22,16 @@ class TCP(ITransport):
             :return: return True if successful
             """
             # TODO check for exceptions
-            _multiaddr = multiaddr
             if "ipfs" in multiaddr.get_protocols():
                 # ipfs_id = multiaddr.get_ipfs_id()
                 _multiaddr = multiaddr.remove_protocol("ipfs")
 
-            self.multiaddrs.append(_multiaddr)
-            _multiaddr_dict = _multiaddr.to_dict()
-            _loop = asyncio.get_event_loop()
-            _coroutine = asyncio.start_server(self.handler, _multiaddr_dict.host,\
-                _multiaddr_dict.port, loop=_loop)
-            self.server = _loop.run_until_complete(_coroutine)
+            self.multiaddrs.append(multiaddr)
+            multiaddr_dict = _multiaddr.to_options()
+            loop = asyncio.get_event_loop()
+            coroutine = asyncio.start_server(self.handler, multiaddr_dict.host,\
+                multiaddr_dict.port, loop=loop)
+            self.server = loop.run_until_complete(coroutine)
             return True
 
         def get_addrs(self):
@@ -72,7 +71,6 @@ class TCP(ITransport):
         port = _multiaddr_dict.port
         reader, writer = open_conn(host, port)
         return RawConnection(host, port, reader, writer)
-        # TODO dial behavior not fully understood
 
     def create_listener(self, handler_function, options=None):
         """
