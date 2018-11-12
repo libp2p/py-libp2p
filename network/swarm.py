@@ -76,7 +76,6 @@ class Swarm(INetwork):
                 # Have conn handler delegate to stream handler
                 # Call listener listen with the multiaddr
                 # Map multiaddr to listener
-
         for multiaddr_str in args:
             if multiaddr_str in self.listeners:
                 return True
@@ -87,7 +86,7 @@ class Swarm(INetwork):
             def conn_handler(reader, writer):
                 # Upgrade reader/write to a net_stream and pass to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr_dict.host, multiaddr_dict.port, reader, writer)
-                muxed_conn = self.upgrader.upgrade_connection(raw_conn)
+                muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
                 # TODO: make generic protocols work
                 muxed_stream, stream_id, protocol_id = muxed_conn.accept_stream()
