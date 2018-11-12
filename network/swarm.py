@@ -47,7 +47,7 @@ class Swarm(INetwork):
             raw_conn = self.transport.dial(first_addr)
 
             # Use upgrader to upgrade raw conn to muxed conn
-            muxed_conn = self.upgrader.upgrade_connection(raw_conn)
+            muxed_conn = self.upgrader.upgrade_connection(raw_conn, True)
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn

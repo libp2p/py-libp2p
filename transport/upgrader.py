@@ -1,3 +1,5 @@
+from muxer.mplex.muxed_connection import MuxedConn
+
 class TransportUpgrader(object):
 
     def __init__(self, secOpt, muxerOpt):
@@ -14,11 +16,13 @@ class TransportUpgrader(object):
     def upgrade_security(self):
         pass
 
-    def upgrade_connection(self, conn):
+    def upgrade_connection(self, conn, initiator):
         """
         upgrade raw connection to muxed connection
         """
         # For PoC, no security
         # Default to mplex
-        pass
         
+        # TODO do exchange to determine multiplexer
+        
+        return MuxedConn(conn, initiator)

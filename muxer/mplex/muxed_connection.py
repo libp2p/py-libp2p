@@ -48,7 +48,6 @@ class MuxedConn(IMuxedConn):
         self.buffers[stream_id] = bytearray()
         return stream
 
-
     def accept_stream(self):
         """
         accepts a muxed stream opened by the other end

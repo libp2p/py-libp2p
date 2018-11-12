@@ -6,8 +6,8 @@ from Crypto.PublicKey import RSA
 
 class Libp2p(object):
 
-    def __init__(self, idOpt, \
-        transportOpt = ["/ip4/127.0.0.1/tcp/10000/app/1.0.0"], \
+    def __init__(self, idOpt = None, \
+        transportOpt = ["/ip4/127.0.0.1/tcp/10000"], \
         muxerOpt = ["mplex/6.7.0"], \
         secOpt = ["secio"], \
         peerstore = PeerStore()):
