@@ -1,5 +1,9 @@
 # py-libp2p
 
+<h1 align="center">
+  <img width="250" align="center" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
+</h1>
+
 ## Development
 
 py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
@@ -55,3 +59,11 @@ Right now, the negotiation phase is done following the request-response paradigm
 ## Listener accepting Connection
 
 An upgraded listener UL holds a raw listener (using the built-in server object) that is used to accept incoming connections. When UL on host B accepts an incoming connection RC from host A, UL will "upgrade" connection RC in a muxed connection object (smux.conn) MC. Then, for all time after, any time the host B receives a message sent to this muxed connection MC, the multiplexer for this connection M will be responsible for relaying the message to the appropriate stream, based of the stream id specified in the message header.
+
+## Testing
+
+After installing our requirements (see above), you can:
+```sh
+cd tests
+pytest
+```
