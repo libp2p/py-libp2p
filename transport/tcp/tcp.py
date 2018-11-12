@@ -13,25 +13,26 @@ class TCP(ITransport):
         def __init__(self, handler_function=None):
             self.multiaddrs = []
             self.server = None
-            self.handler = staticmethod(handler_function)
+            self.handler = handler_function
 
-        def listen(self, multiaddr):
+        async def listen(self, multiaddr):
             """
             put listener in listening mode and wait for incoming connections
             :param multiaddr: multiaddr of peer
             :return: return True if successful
             """
-            # TODO check for exceptions
-            if "ipfs" in multiaddr.get_protocols():
-                # ipfs_id = multiaddr.get_ipfs_id()
-                _multiaddr = multiaddr.remove_protocol("ipfs")
+            _multiaddr = multiaddr
 
-            self.multiaddrs.append(multiaddr)
+            # TODO check for exceptions
+            if "ipfs" in _multiaddr.get_protocols():
+                # ipfs_id = multiaddr.get_ipfs_id()
+                _multiaddr.remove_protocol("ipfs")
+
+            self.multiaddrs.append(_multiaddr)
             multiaddr_dict = _multiaddr.to_options()
-            loop = asyncio.get_event_loop()
-            coroutine = asyncio.start_server(self.handler, multiaddr_dict.host,\
-                multiaddr_dict.port, loop=loop)
-            self.server = loop.run_until_complete(coroutine)
+            coroutine = asyncio.start_server(self.handler, multiaddr_dict['host'],\
+                multiaddr_dict['port'])
+            self.server = await coroutine
             return True
 
         def get_addrs(self):
@@ -59,17 +60,19 @@ class TCP(ITransport):
             self.server = None
             return True
 
-    def dial(self, multiaddr, options=None):
+    async def dial(self, multiaddr, options=None):
         """
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer
         :param options: optional object
         :return: True if successful
         """
-        _multiaddr_dict = multiaddr.to_dict()
-        host = _multiaddr_dict.host
-        port = _multiaddr_dict.port
-        reader, writer = open_conn(host, port)
+        _multiaddr_dict = multiaddr.to_options()
+        host = _multiaddr_dict['host']
+        port = _multiaddr_dict['port']
+
+        reader, writer = await asyncio.open_connection(host, port)
+
         return RawConnection(host, port, reader, writer)
 
     def create_listener(self, handler_function, options=None):
@@ -81,7 +84,3 @@ class TCP(ITransport):
         :return: a listener object that implements listener_interface.py
         """
         return self.Listener(handler_function)
-
-async def open_conn(host, port):
-    reader, writer = await asyncio.open_connection(host, port)
-    return reader, writer

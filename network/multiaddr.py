@@ -2,6 +2,8 @@ class MultiAddr:
 
     # Validates input string and constructs internal representation.
     def __init__(self, addr):
+        self.protocol_map = dict()
+
         # Empty multiaddrs are valid.
         if not addr:
             self.protocol_map = dict()

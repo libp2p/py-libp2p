@@ -36,19 +36,19 @@ class MuxedStream(IMuxedStream):
         else:
             return HEADER_TAGS[action] - 1
 
-    def read(self):
+    async def read(self):
         """
         read messages associated with stream from buffer til end of file
         :return: bytes of input
         """
-        return self.muxed_conn.read_buffer(self.id)
+        return await self.muxed_conn.read_buffer(self.id)
 
-    def write(self, data):
+    async def write(self, data):
         """
         write to stream
         :return: number of bytes written
         """
-        return self.muxed_conn.send_message(self.get_flag("MESSAGE"), data, self.id)
+        return await self.muxed_conn.send_message(self.get_flag("MESSAGE"), data, self.id)
 
     def close(self):
         """
