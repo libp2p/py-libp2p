@@ -2,7 +2,7 @@ from peer.peerstore import PeerStore
 from network.swarm import Swarm
 from host.basic_host import BasicHost
 from transport.upgrader import TransportUpgrader
-from transport.tcp import TCP
+from transport.tcp.tcp import TCP
 from Crypto.PublicKey import RSA
 
 class Libp2p(object):

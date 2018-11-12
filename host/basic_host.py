@@ -55,6 +55,7 @@ class BasicHost(IHost):
         :param proto_id: protocol id that stream runs on
         :return: true if successful
         """
+        # TODO: host should return a mux stream not a raw stream
         stream = self.network.new_stream(peer_id)
         stream.set_protocol(protocol_id)
         return stream

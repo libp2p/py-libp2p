@@ -3,8 +3,9 @@ from abc import ABC, abstractmethod
 class INetwork(ABC):
 
     @abstractmethod
-    def set_stream_handler(self, stream_handler):
+    def set_stream_handler(self, protocol_id, stream_handler):
         """
+        :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
         :return: true if successful
         """

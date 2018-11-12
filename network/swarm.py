@@ -1,6 +1,8 @@
 import uuid
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
+from .multiaddr import MultiAddr
+from .connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
 
@@ -10,13 +12,15 @@ class Swarm(INetwork):
         self.upgrader = upgrader
         self.connections = dict()
         self.listeners = dict()
+        self.stream_handlers = dict()
 
-    def set_stream_handler(self, stream_handler):
+    def set_stream_handler(self, protocol_id, stream_handler):
         """
+        :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
         :return: true if successful
         """
-        pass
+        self.stream_handlers[protocol_id] = stream_handler
 
     def new_stream(self, peer_id, protocol_id):
         """
@@ -64,23 +68,45 @@ class Swarm(INetwork):
         :return: true if at least one success
         """
 
-        # Create a closure C that takes in a multiaddr and 
-        # returns a function object O that takes in a reader and writer.
-        # This function O looks up the stream handler
-        # for the given protocol, creates the net_stream 
-        # for the listener and calls the stream handler function
-        # passing in the net_stream
-
         # For each multiaddr in args
             # Check if a listener for multiaddr exists already
             # If listener already exists, continue
             # Otherwise, do the following:
-                # Pass multiaddr into C and get back function H
-                # listener = transport.create_listener(H)
+                # Pass multiaddr into conn handler
+                # Have conn handler delegate to stream handler
                 # Call listener listen with the multiaddr
                 # Map multiaddr to listener
+        for multiaddr_str in args:
+            if multiaddr_str in self.listeners:
+                return True
 
-        return True
+            multiaddr = MultiAddr(multiaddr_str)
+            multiaddr_dict = multiaddr.to_options()
+
+            def conn_handler(reader, writer):
+                # Upgrade reader/write to a net_stream and pass to appropriate stream handler (using multiaddr)
+                raw_conn = RawConnection(multiaddr_dict.host, multiaddr_dict.port, reader, writer)
+                muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
+
+                muxed_stream, stream_id, protocol_id = muxed_conn.accept_stream()
+                net_stream = NetStream(muxed_stream)
+                net_stream.set_protocol(protocol_id)
+
+                # Give to stream handler
+                # TODO: handle case when stream handler is set
+                self.stream_handlers[protocol_id](net_stream)
+
+            try:
+                # Success
+                listener = self.transport.create_listener(conn_handler)
+                listener.listen(multiaddr)
+                return True
+            except IOError:
+                # Failed. Continue looping.
+                print("Failed to connect to: " + multiaddr)
+
+        # No multiaddr succeeded
+        return False
 
     def add_transport(self, transport):
         # TODO: Support more than one transport

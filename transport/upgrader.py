@@ -24,5 +24,4 @@ class TransportUpgrader(object):
         # Default to mplex
         
         # TODO do exchange to determine multiplexer
-        
         return MuxedConn(conn, initiator)
