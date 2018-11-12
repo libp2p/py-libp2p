@@ -2,6 +2,7 @@ from peer.peerstore import PeerStore
 from network.swarm import Swarm
 from host.basic_host import BasicHost
 from transport.upgrader import TransportUpgrader
+from transport.tcp.tcp import TCP
 from Crypto.PublicKey import RSA
 
 class Libp2p(object):
@@ -26,14 +27,14 @@ class Libp2p(object):
 
     def new_node(self):
 
-        swarm = Swarm(self.idOpt, self.peerstore)
+        upgrader = TransportUpgrader(self.secOpt, self.transportOpt)
+        swarm = Swarm(self.idOpt, self.peerstore, upgrader)
+        tcp = TCP()
+        swarm.add_transport(tcp)
+        swarm.listen(self.transportOpts)
         host = BasicHost(swarm)
-        upgrader = TransportUpgrader(self.secOpt, self.muxerOpt)
 
-        # TODO transport upgrade
+        # TODO MuxedConnection currently contains all muxing logic
+        # TODO routing unimplemented
 
-        # TODO listen on addrs
-
-        # TODO swarm add transports
-
-        # TODO: return host
+        return host

@@ -88,7 +88,6 @@ class Swarm(INetwork):
                 raw_conn = RawConnection(multiaddr_dict.host, multiaddr_dict.port, reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
-                # TODO: make generic protocols work
                 muxed_stream, stream_id, protocol_id = muxed_conn.accept_stream()
                 net_stream = NetStream(muxed_stream)
                 net_stream.set_protocol(protocol_id)
