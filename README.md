@@ -21,3 +21,5 @@ After installing our requirements (see above), you can:
 cd tests
 pytest
 ```
+
+Note that tests/libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of compass.
