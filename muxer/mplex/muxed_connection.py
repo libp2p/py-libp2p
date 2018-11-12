@@ -53,7 +53,25 @@ class MuxedConn(IMuxedConn):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        pass
+        data = bytearray()
+        while True:
+            chunk = self.raw_conn.reader.read(100)
+            if not chunk:
+                break
+            data += chunk
+        header, end_index = decode_uvarint(data, 0)
+        length, end_index = decode_uvarint(data, end_index)
+        message = data[end_index, end_index + length]
+        
+        flag = header & 0x07
+        stream_id = header >> 3
+
+        # TODO update to pull out protocol_id from message
+        protocol_id = "/echo/1.0.0"
+
+        stream = MuxedStream(stream_id, False, self)
+
+        return stream, stream_id, protocol_id
 
     def send_message(self, flag, data, stream_id):
         """
@@ -94,7 +112,6 @@ class MuxedConn(IMuxedConn):
         # Read header
         # Read message length
         # Read message into corresponding buffer
-
 
     def add_incoming_task(self):
         loop = asyncio.get_event_loop()
