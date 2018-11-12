@@ -1,11 +1,7 @@
 from abc import ABC, abstractmethod
 
-class INetStream(ABC):
 
-    def __init__(self, peer_id, multi_addr, connection):
-        self.peer_id = peer_id
-        self.multi_addr = multi_addr
-        self.connection = connection
+class INetStream(ABC):
 
     @abstractmethod
     def get_protocol(self):

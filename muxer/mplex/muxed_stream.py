@@ -1,4 +1,3 @@
-import asyncio
 from .muxed_stream_interface import IMuxedStream
 from .constants import HEADER_TAGS
 
@@ -15,12 +14,12 @@ class MuxedStream(IMuxedStream):
         :param initiator: boolean if this is an initiator
         :param muxed_conn: muxed connection of this muxed_stream
         """
-        self.id = stream_id
+        self.stream_id = stream_id
         self.initiator = initiator
         self.muxed_conn = muxed_conn
 
-        # self.read_deadline = None
-        # self.write_deadline = None
+        self.read_deadline = None
+        self.write_deadline = None
 
         self.local_closed = False
         self.remote_closed = False
@@ -33,22 +32,22 @@ class MuxedStream(IMuxedStream):
         """
         if self.initiator:
             return HEADER_TAGS[action]
-        else:
-            return HEADER_TAGS[action] - 1
+
+        return HEADER_TAGS[action] - 1
 
     async def read(self):
         """
         read messages associated with stream from buffer til end of file
         :return: bytes of input
         """
-        return await self.muxed_conn.read_buffer(self.id)
+        return await self.muxed_conn.read_buffer(self.stream_id)
 
     async def write(self, data):
         """
         write to stream
         :return: number of bytes written
         """
-        return await self.muxed_conn.send_message(self.get_flag("MESSAGE"), data, self.id)
+        return await self.muxed_conn.send_message(self.get_flag("MESSAGE"), data, self.stream_id)
 
     def close(self):
         """
@@ -59,8 +58,8 @@ class MuxedStream(IMuxedStream):
         if self.local_closed and self.remote_closed:
             return True
 
-        self.muxed_conn.send_message(self.get_flag("CLOSE"), None, self.id)
-        self.muxed_conn.streams.pop(self.id)
+        self.muxed_conn.send_message(self.get_flag("CLOSE"), None, self.stream_id)
+        self.muxed_conn.streams.pop(self.stream_id)
 
         self.local_closed = True
         self.remote_closed = True

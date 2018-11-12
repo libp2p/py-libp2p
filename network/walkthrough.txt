@@ -1,4 +1,0 @@
-host.go --> config.go 
-    config.go: newNode --> swarm.go: newSwarm
-        newSwarm | initializes data stores
-
