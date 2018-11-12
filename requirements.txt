@@ -2,3 +2,4 @@ asyncio
 pylint
 pytest
 pycryptodome
+pytest-asyncio

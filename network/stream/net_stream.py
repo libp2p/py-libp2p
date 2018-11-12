@@ -19,19 +19,19 @@ class NetStream(INetStream):
         """
         self.protocol_id = protocol_id
 
-    def read(self):
+    async def read(self):
         """
         read from stream
         :return: bytes of input until EOF
         """
-        return self.muxed_stream.read()
+        return await self.muxed_stream.read()
 
-    def write(self, bytes):
+    async def write(self, bytes):
         """
         write to stream
         :return: number of bytes written
         """
-        return self.muxed_stream.write(bytes)
+        return await self.muxed_stream.write(bytes)
 
     def close(self):
         """

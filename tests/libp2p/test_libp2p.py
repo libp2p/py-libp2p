@@ -1,30 +1,39 @@
+import pytest
+
 from libp2p.libp2p import Libp2p
 
+@pytest.mark.asyncio
+async def test_simple_messages():
+    libA = Libp2p(transportOpt=["/ip4/127.0.0.1/tcp/8001/ipfs/hostA"])
+    libB = Libp2p(transportOpt=["/ip4/127.0.0.1/tcp/8000/ipfs/hostB"])
 
-# TODO: are these connections async? how do we wait on responses?
-def test_simple_messages():
-    lib = Libp2p()
+    hostA = await libA.new_node()
+    hostB = await libB.new_node()
 
-    hostA = lib.new_node()
-    hostB = lib.new_node()
+    async def stream_handler(stream):
+        while True:
+            read_string = (await stream.read()).decode()
+            print("host B received:" + read_string)
 
-    def stream_handler(stream):
-        print("stream received in host B")
-
-        read_string = stream.read().decode()
-        print("host B received: " + read_string)
-
-        response = "ack: " + read_string
-        stream.write(response.encode())
+            response = "ack:" + read_string
+            print("sending response:" + response)
+            await stream.write(response.encode())
 
     hostB.set_stream_handler("/echo/1.0.0", stream_handler)
 
-    # associate the peer with local ip address (see default parameters of Libp2p())
-    hostA.get_peerstore().add_addr("hostB", "/ip4/127.0.0.1/tcp/10000")
+    # Associate the peer with local ip address (see default parameters of Libp2p())
+    hostA.get_peerstore().add_addr("hostB", "/ip4/127.0.0.1/tcp/8000", 10)
 
-    stream = hostA.new_stream("hostB", "/app/1.0.0")
-    message = "hello"
-    stream.write(message.encode())
+    stream = await hostA.new_stream("hostB", "/echo/1.0.0")
+    messages = ["hello" + str(x) for x in range(10)]
 
-    response = stream.read().decode()
-    assert response == ("ack: " + message)
+    for message in messages:
+        await stream.write(message.encode())
+
+        response = (await stream.read()).decode()
+
+        print("res: " + response)
+        assert response == ("ack:" + message)
+
+    # Success, terminate pending tasks.
+    return

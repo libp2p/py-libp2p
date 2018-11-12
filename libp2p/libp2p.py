@@ -8,7 +8,7 @@ from Crypto.PublicKey import RSA
 class Libp2p(object):
 
     def __init__(self, idOpt = None, \
-        transportOpt = ["/ip4/127.0.0.1/tcp/10000"], \
+        transportOpt = ["/ip4/127.0.0.1/tcp/8001"], \
         muxerOpt = ["mplex/6.7.0"], \
         secOpt = ["secio"], \
         peerstore = PeerStore()):
@@ -25,16 +25,15 @@ class Libp2p(object):
         self.secOpt = secOpt
         self.peerstore = peerstore
 
-    def new_node(self):
+    async def new_node(self):
 
         upgrader = TransportUpgrader(self.secOpt, self.transportOpt)
         swarm = Swarm(self.idOpt, self.peerstore, upgrader)
         tcp = TCP()
         swarm.add_transport(tcp)
-        swarm.listen(self.transportOpts)
+        await swarm.listen(self.transportOpt[0])
         host = BasicHost(swarm)
 
-        # TODO MuxedConnection currently contains all muxing logic
+        # TODO MuxedConnection currently contains all muxing logic (move to a Muxer)
         # TODO routing unimplemented
-
         return host

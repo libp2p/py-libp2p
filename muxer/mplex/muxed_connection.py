@@ -17,8 +17,9 @@ class MuxedConn(IMuxedConn):
         self.initiator = initiator
         self.buffers = {}
         self.streams = {}
+        self.stream_queue = asyncio.Queue()
 
-        self.add_incoming_task()
+        asyncio.ensure_future(self.handle_incoming())
 
     def close(self):
         """
@@ -33,7 +34,12 @@ class MuxedConn(IMuxedConn):
         """
         pass
 
-    def read_buffer(self, stream_id):
+    async def read_buffer(self, stream_id):
+        # Empty buffer or nonexistent stream
+        # TODO: propagate up timeout exception and catch
+        if stream_id not in self.buffers or not self.buffers[stream_id]:
+            await self.handle_incoming()
+
         data = self.buffers[stream_id]
         self.buffers[stream_id] = bytearray()
         return data
@@ -43,37 +49,22 @@ class MuxedConn(IMuxedConn):
         creates a new muxed_stream
         :return: a new stream
         """
-        stream = MuxedStream(peer_id, multi_addr, self)
+        stream = MuxedStream(stream_id, multi_addr, self)
         self.streams[stream_id] = stream
-        self.buffers[stream_id] = bytearray()
         return stream
 
-    def accept_stream(self):
+    async def accept_stream(self):
         """
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        data = bytearray()
-        while True:
-            chunk = self.raw_conn.reader.read(100)
-            if not chunk:
-                break
-            data += chunk
-        header, end_index = decode_uvarint(data, 0)
-        length, end_index = decode_uvarint(data, end_index)
-        message = data[end_index, end_index + length]
-        
-        flag = header & 0x07
-        stream_id = header >> 3
-
         # TODO update to pull out protocol_id from message
         protocol_id = "/echo/1.0.0"
-
+        stream_id = await self.stream_queue.get()
         stream = MuxedStream(stream_id, False, self)
-
         return stream, stream_id, protocol_id
 
-    def send_message(self, flag, data, stream_id):
+    async def send_message(self, flag, data, stream_id):
         """
         sends a message over the connection
         :param header: header to use
@@ -86,7 +77,8 @@ class MuxedConn(IMuxedConn):
         header = encode_uvarint(header)
         data_length = encode_uvarint(len(data))
         _bytes = header + data_length + data
-        return self.write_to_stream(_bytes)
+
+        return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
         self.raw_conn.writer.write(_bytes)
@@ -95,25 +87,23 @@ class MuxedConn(IMuxedConn):
 
     async def handle_incoming(self):
         data = bytearray()
-        while True:
-            chunk = self.raw_conn.reader.read(100)
-            if not chunk:
-                break
+        try:
+            chunk = await asyncio.wait_for(self.raw_conn.reader.read(1024), timeout=5)
             data += chunk
-        header, end_index = decode_uvarint(data, 0)
-        length, end_index = decode_uvarint(data, end_index)
-        message = data[end_index, end_index + length]
 
-        # Deal with other types of messages
-        flag = header & 0x07
-        stream_id = header >> 3
+            header, end_index = decode_uvarint(data, 0)
+            length, end_index = decode_uvarint(data, end_index)
 
-        self.buffers[stream_id] = self.buffers[stream_id] + message
-        # Read header
-        # Read message length
-        # Read message into corresponding buffer
+            message = data[end_index:end_index + length + 1]
 
-    def add_incoming_task(self):
-        loop = asyncio.get_event_loop()
-        handle_incoming_task = loop.create_task(self.handle_incoming())
-        handle_incoming_task.add_done_callback(self.add_incoming_task)
+            # Deal with other types of messages
+            flag = header & 0x07
+            stream_id = header >> 3
+
+            if stream_id not in self.buffers:
+                self.buffers[stream_id] = message
+                await self.stream_queue.put(stream_id)
+            else:
+                self.buffers[stream_id] = self.buffers[stream_id] + message
+        except asyncio.TimeoutError:
+            print('timeout!')

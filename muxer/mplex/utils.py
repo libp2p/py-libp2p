@@ -22,4 +22,4 @@ def decode_uvarint(buff, index):
             break
         index += 1
 
-    return result, index
+    return result, index + 1

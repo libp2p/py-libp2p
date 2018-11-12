@@ -11,7 +11,6 @@ class BasicHost(IHost):
     def __init__(self, _network):
         self.network = _network
         self.peerstore = self.network.peerstore
-        # self.stream_handlers = {}
 
     def get_id(self):
         """
@@ -49,13 +48,13 @@ class BasicHost(IHost):
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
-    def new_stream(self, peer_id, protocol_id):
+    async def new_stream(self, peer_id, protocol_id):
         """
         :param peer_id: peer_id that host is connecting
         :param proto_id: protocol id that stream runs on
         :return: true if successful
         """
         # TODO: host should return a mux stream not a raw stream
-        stream = self.network.new_stream(peer_id)
+        stream = await self.network.new_stream(peer_id, protocol_id)
         stream.set_protocol(protocol_id)
         return stream
