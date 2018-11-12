@@ -22,8 +22,7 @@ class TransportUpgrader(object):
         """
         # For PoC, no security
         # Default to mplex
-
+        
         # TODO do exchange to determine multiplexer
         
         return MuxedConn(conn, initiator)
-        
