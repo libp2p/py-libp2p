@@ -27,13 +27,22 @@ Note that tests/libp2p/test_libp2p.py contains an end-to-end messaging test betw
 
 ## Core Concepts
 
-The libp2p library is focused on four main concepts: 
-(1) **Host**: a node in the libp2p network
-(2) **Connection**: the connection between two nodes in a libp2p network over which all communication between those two nodes takes place
-(3) **Streams**: an abstraction on top of a connection that is used to represent communication about a particular topic over a given connection. There can be many streams over a single connection.
-(4) **Multiplexer**: a module that is responsible for encoding messages to be sent across a connection such that the message contains information about the sender stream so that the receiving host's multiplexer knows which stream the message should be routed to.
+_(non-normative, useful for team notes, not a reference)_
+
+Several components of the libp2p stack take part when establishing a connection between two nodes:
+
+1. **Host**: a node in the libp2p network.
+2. **Connection**: the layer 3 connection between two nodes in a libp2p network.
+3. **Transport**: the component that creates a _Connection_, e.g. TCP, UDP, QUIC, etc.
+3. **Streams**: an abstraction on top of a _Connection_ representing parallel conversations about different matters, each of which is identified by a protocol ID. Multiple streams are layered on top of a _Connection_ via the _Multiplexer_.
+4. **Multiplexer**: a component that is responsible for wrapping messages sent on a stream with an envelope that identifies the stream they pertain to, normally via an ID. The multiplexer on the other unwraps the message and routes it internally based on the stream identification.
+5. **Secure channel**: optionally establishes a secure, encrypted, and authenticated channel over the _Connection_.
+5. **Upgrader**: a component that takes a raw layer 3 connection returned by the _Transport_, and performs the security and multiplexing negotiation to set up a secure, multiplexed channel on top of which _Streams_ can be opened.
 
 ## Communication between two hosts X and Y
+
+_(non-normative, useful for team notes, not a reference)_
+
 **Initiate the connection**: A host is simply a node in the libp2p network that is able to communicate with other nodes in the network. In order for X and Y to communicate with one another, one of the hosts must initiate the connection.  Let's say that X is going to initiate the connection. X will first open a connection to Y. This connection is where all of the actual communication will take place. 
 
 **Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y. 
