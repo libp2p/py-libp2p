@@ -20,7 +20,10 @@ class MuxedConn(IMuxedConn):
         self.streams = {}
         self.stream_queue = asyncio.Queue()
 
-        asyncio.ensure_future(self.handle_incoming())
+        # The initiator need not read upon construction time.
+        # It should read when the user decides that it wants to read from the constructed stream.
+        if not initiator:
+            asyncio.ensure_future(self.handle_incoming())
 
     def close(self):
         """
