@@ -34,10 +34,10 @@ class NetStream(INetStream):
         """
         return await self.muxed_stream.write(data)
 
-    def close(self):
+    async def close(self):
         """
         close stream
         :return: true if successful
         """
-        self.muxed_stream.close()
+        await self.muxed_stream.close()
         return True
