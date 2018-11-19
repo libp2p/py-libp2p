@@ -83,8 +83,12 @@ class MuxedConn(IMuxedConn):
         # << by 3, then or with flag
         header = (stream_id << 3) | flag
         header = encode_uvarint(header)
-        data_length = encode_uvarint(len(data))
-        _bytes = header + data_length + data
+        if data is None:
+            data_length = encode_uvarint(0)
+            _bytes = header + data_length
+        else:
+            data_length = encode_uvarint(len(data))
+            _bytes = header + data_length + data
 
         return await self.write_to_stream(_bytes)
 

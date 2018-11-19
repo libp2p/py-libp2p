@@ -49,7 +49,7 @@ class MuxedStream(IMuxedStream):
         """
         return await self.muxed_conn.send_message(self.get_flag("MESSAGE"), data, self.stream_id)
 
-    def close(self):
+    async def close(self):
         """
         close stream
         :return: true if successful
@@ -58,7 +58,7 @@ class MuxedStream(IMuxedStream):
         if self.local_closed and self.remote_closed:
             return True
 
-        self.muxed_conn.send_message(self.get_flag("CLOSE"), None, self.stream_id)
+        await self.muxed_conn.send_message(self.get_flag("CLOSE"), None, self.stream_id)
         self.muxed_conn.streams.pop(self.stream_id)
 
         self.local_closed = True

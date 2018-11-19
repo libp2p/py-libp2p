@@ -4,6 +4,13 @@ from abc import ABC, abstractmethod
 class INetwork(ABC):
 
     @abstractmethod
+    def get_peer_id(self):
+        """
+        :return: the peer id
+        """
+        pass
+
+    @abstractmethod
     def set_stream_handler(self, protocol_id, stream_handler):
         """
         :param protocol_id: protocol id used on stream
