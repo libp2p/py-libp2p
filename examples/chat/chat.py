@@ -1,12 +1,13 @@
 #!/bin/env python3
-import asyncio
 import sys
+from os.path import dirname, abspath
+sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
+
+import asyncio
 
 import click
-
 from libp2p.libp2p import Libp2p
 from network.multiaddr import MultiAddr
-
 
 # TODO: change once muxed_connection supports extracting protocol id from messages
 PROTOCOL_ID = '/echo/1.0.0'
