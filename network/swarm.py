@@ -11,7 +11,6 @@ class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
     def __init__(self, my_peer_id, peerstore, upgrader):
-        self._my_peer_id = my_peer_id
         self.self_id = ID(my_peer_id)
         self.peerstore = peerstore
         self.upgrader = upgrader
@@ -102,8 +101,8 @@ class Swarm(INetwork):
             async def conn_handler(reader, writer):
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(multiaddr_dict['host'], \
-                    multiaddr_dict['port'], reader, writer)
+                raw_conn = RawConnection(multiaddr_dict['host'],
+                                         multiaddr_dict['port'], reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
                 # TODO: Remove protocol id from muxed_conn accept stream or
@@ -137,6 +136,7 @@ class Swarm(INetwork):
     def add_transport(self, transport):
         # TODO: Support more than one transport
         self.transport = transport
+
 
 class SwarmException(Exception):
     pass
