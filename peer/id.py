@@ -52,7 +52,7 @@ def id_from_public_key(key):
     #     algo multihash.func.identity
 
     mh = multihash.digest(b, algo)
-    return ID(mh.encode('base64'))
+    return ID(mh.encode())
 
 
 def id_from_private_key(key):
