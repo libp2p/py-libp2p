@@ -5,3 +5,4 @@ pycryptodome
 pytest-asyncio
 click
 base58
+pymultihash
