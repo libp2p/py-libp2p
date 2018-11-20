@@ -5,6 +5,7 @@ from network.swarm import Swarm
 from host.basic_host import BasicHost
 from transport.upgrader import TransportUpgrader
 from transport.tcp.tcp import TCP
+import multiaddr
 
 
 async def new_node(id_opt=None, transport_opt=None, \
@@ -16,6 +17,7 @@ async def new_node(id_opt=None, transport_opt=None, \
         # private_key = new_key.exportKey("PEM")
 
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
+    transport_opt = [multiaddr.Multiaddr(t) for t in transport_opt]
     muxer_opt = muxer_opt or ["mplex/6.7.0"]
     sec_opt = sec_opt or ["secio"]
     peerstore = peerstore or PeerStore()

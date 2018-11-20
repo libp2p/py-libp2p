@@ -2,10 +2,11 @@ import pytest
 
 from libp2p.libp2p import new_node
 
+
 @pytest.mark.asyncio
 async def test_simple_messages():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001/ipfs/node_a"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000/ipfs/node_b"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000"])
 
     async def stream_handler(stream):
         while True:
@@ -19,10 +20,9 @@ async def test_simple_messages():
     node_b.set_stream_handler("/echo/1.0.0", stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addr("node_b", "/ip4/127.0.0.1/tcp/8000", 10)
+    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.all_addrs(), 10)
 
-    print("node_a about to open stream")
-    stream = await node_a.new_stream("node_b", ["/echo/1.0.0"])
+    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
 
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
@@ -36,10 +36,11 @@ async def test_simple_messages():
     # Success, terminate pending tasks.
     return
 
+
 @pytest.mark.asyncio
 async def test_double_response():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8002/ipfs/node_a"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8003/ipfs/node_b"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8002"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8003"])
 
     async def stream_handler(stream):
         while True:
@@ -57,9 +58,9 @@ async def test_double_response():
     node_b.set_stream_handler("/echo/1.0.0", stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addr("node_b", "/ip4/127.0.0.1/tcp/8003", 10)
+    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.all_addrs(), 10)
     print("node_a about to open stream")
-    stream = await node_a.new_stream("node_b", ["/echo/1.0.0"])
+    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
         await stream.write(message.encode())

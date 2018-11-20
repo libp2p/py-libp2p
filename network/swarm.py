@@ -1,17 +1,16 @@
-from peer.id import ID
 from protocol_muxer.multiselect_client import MultiselectClient
 from protocol_muxer.multiselect import Multiselect
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
-from .multiaddr import MultiAddr
+# from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
 
 
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
-    def __init__(self, my_peer_id, peerstore, upgrader):
-        self.self_id = ID(my_peer_id)
+    def __init__(self, peer_id, peerstore, upgrader):
+        self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.connections = dict()
@@ -55,7 +54,7 @@ class Swarm(INetwork):
             muxed_conn = self.connections[peer_id]
         else:
             # Transport dials peer (gets back a raw conn)
-            raw_conn = await self.transport.dial(MultiAddr(multiaddr))
+            raw_conn = await self.transport.dial(multiaddr)
 
             # Use upgrader to upgrade raw conn to muxed conn
             muxed_conn = self.upgrader.upgrade_connection(raw_conn, True)
@@ -91,18 +90,15 @@ class Swarm(INetwork):
                 Call listener listen with the multiaddr
                 Map multiaddr to listener
         """
-        for multiaddr_str in args:
-            if multiaddr_str in self.listeners:
+        for multiaddr in args:
+            if str(multiaddr) in self.listeners:
                 return True
-
-            multiaddr = MultiAddr(multiaddr_str)
-            multiaddr_dict = multiaddr.to_options()
 
             async def conn_handler(reader, writer):
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(multiaddr_dict['host'],
-                                         multiaddr_dict['port'], reader, writer)
+                raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
+                                         multiaddr.value_for_protocol('tcp'), reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
                 # TODO: Remove protocol id from muxed_conn accept stream or
@@ -123,7 +119,7 @@ class Swarm(INetwork):
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
-                self.listeners[multiaddr_str] = listener
+                self.listeners[str(multiaddr)] = listener
                 await listener.listen(multiaddr)
                 return True
             except IOError:

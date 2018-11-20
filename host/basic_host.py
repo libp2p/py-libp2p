@@ -1,10 +1,12 @@
-from .host_interface import IHost
+import multiaddr
 
+from .host_interface import IHost
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
+
 
 class BasicHost(IHost):
 
@@ -36,6 +38,16 @@ class BasicHost(IHost):
         :return: mux instance of host
         """
 
+    def all_addrs(self):
+        id = self.get_id()
+        p2p_part = multiaddr.Multiaddr('/ipfs/{}'.format(id.pretty()))
+
+        addrs = []
+        for transport in self.network.listeners.values():
+            for addr in transport.get_addrs():
+                addrs.append(addr.encapsulate(p2p_part))
+        return addrs
+
     def set_stream_handler(self, protocol_id, stream_handler):
         """
         set stream handler for host
@@ -44,7 +56,6 @@ class BasicHost(IHost):
         :return: true if successful
         """
         return self.network.set_stream_handler(protocol_id, stream_handler)
-
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
