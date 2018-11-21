@@ -19,6 +19,7 @@ class Mplex(IMuxedConn):
         self.buffers = {}
         self.streams = {}
         self.stream_queue = asyncio.Queue()
+        self.conn_lock = asyncio.Lock()
 
         # The initiator need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
