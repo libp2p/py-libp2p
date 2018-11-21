@@ -55,7 +55,8 @@ class MplexStream(IMuxedStream):
         but allows writing in the other direction.
         :return: true if successful
         """
-        #TODO error handling with timeout
+        # TODO error handling with timeout
+        # TODO understand better how mutexes are used from go repo
         await self.mplex_conn.send_message(self.get_flag("CLOSE"), None, self.stream_id)
 
         remote_lock = ""
@@ -77,6 +78,8 @@ class MplexStream(IMuxedStream):
         tells this remote side to hang up
         :return: true if successful
         """
+        # TODO understand better how mutexes are used here
+        # TODO understand the difference between close and reset
         async with self.stream_lock:
             if self.remote_closed and self.local_closed:
                 return True
