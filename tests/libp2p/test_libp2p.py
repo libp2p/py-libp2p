@@ -23,7 +23,7 @@ async def test_simple_messages():
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
     hostA.get_peerstore().add_addr("hostB", "/ip4/127.0.0.1/tcp/8000", 10)
-
+    print("hostA about to open stream")
     stream = await hostA.new_stream("hostB", "/echo/1.0.0")
     messages = ["hello" + str(x) for x in range(10)]
 

@@ -56,7 +56,7 @@ class TCP(ITransport):
             self.server.close()
             _loop = asyncio.get_event_loop()
             _loop.run_until_complete(self.server.wait_closed())
-            _loop.close()
+            # _loop.close()
             self.server = None
             return True
 

@@ -1,4 +1,6 @@
 import asyncio
+import queue
+from threading import Thread
 from .utils import encode_uvarint, decode_uvarint
 from .mplex_stream import MplexStream
 from ..muxed_connection_interface import IMuxedConn
@@ -8,6 +10,12 @@ class Mplex(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
+
+    def monitor_thread(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        task = loop.create_task(self.handle_incoming())
+
     def __init__(self, conn, initiator):
         """
         create a new muxed connection
@@ -20,11 +28,26 @@ class Mplex(IMuxedConn):
         self.streams = {}
         self.stream_queue = asyncio.Queue()
         self.conn_lock = asyncio.Lock()
+        self.buffers_lock = asyncio.Lock()
 
         # The initiator need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
-        if not initiator:
-            asyncio.ensure_future(self.handle_incoming())
+        # if not initiator:
+        #     asyncio.ensure_future(self.handle_incoming())
+
+        # t = Thread(target=self.monitor_thread, daemon=True)
+        # self.reading_thread = t
+        # t.start()    
+        
+        # asyncio.ensure_future(self.handle_incoming())
+        # loop = asyncio.get_event_loop()
+        # task = loop.create_task(self.handle_incoming())
+        
+        self.schedule_handle_incoming()
+
+    def schedule_handle_incoming(self):
+        loop = asyncio.get_event_loop()
+        self.handle_incoming_task = loop.create_task(self.handle_incoming())
 
     def close(self):
         """
@@ -40,13 +63,31 @@ class Mplex(IMuxedConn):
         pass
 
     async def read_buffer(self, stream_id):
+        print("reading buffer")
+        print("READ BUFFER ID: " + str(stream_id))
+        print(type(stream_id))
         # Empty buffer or nonexistent stream
         # TODO: propagate up timeout exception and catch
-        if stream_id not in self.buffers or not self.buffers[stream_id]:
-            await self.handle_incoming()
+        # if stream_id not in self.buffers:
+        #     print("handling incoming")
+        #     await self.handle_incoming()
+        if stream_id not in self.buffers or self.buffers[stream_id].empty():
+            await self.handle_incoming_task
+            self.schedule_handle_incoming()
+            async with self.buffers_lock:
+                if stream_id in self.buffers:
+                    print("stream ID exists, pulling out of it")
+                    return await self._read_buffer_exists(stream_id)
+                else:
+                    print("after handle incoming, buffer still wasnt created")
+            return ""
 
-        data = self.buffers[stream_id]
-        self.buffers[stream_id] = bytearray()
+    async def _read_buffer_exists(self, stream_id):
+        print("READ BUFFER ID: " + str(stream_id))
+        buffer_size = self.buffers[stream_id].qsize()
+        print('buffer size: ' + str(buffer_size))
+        data = await self.buffers[stream_id].get()
+        print("data recieved: " + str(data))
         return data
 
     def open_stream(self, protocol_id, stream_id, peer_id, multi_addr):
@@ -84,6 +125,7 @@ class Mplex(IMuxedConn):
         # << by 3, then or with flag
         header = (stream_id << 3) | flag
         header = encode_uvarint(header)
+
         if data is None:
             data_length = encode_uvarint(0)
             _bytes = header + data_length
@@ -91,32 +133,72 @@ class Mplex(IMuxedConn):
             data_length = encode_uvarint(len(data))
             _bytes = header + data_length + data
 
+        # data_length = encode_uvarint(len(data))
+        # _bytes = header + data_length + data
+        # print(str(_bytes) + " was written")
         return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
         self.raw_conn.writer.write(_bytes)
         await self.raw_conn.writer.drain()
+        print("_bytes was written")
         return len(_bytes)
 
     async def handle_incoming(self):
+        # print('handle_incoming entered')
         data = bytearray()
         try:
-            chunk = await asyncio.wait_for(self.raw_conn.reader.read(1024), timeout=5)
+            print("about to read")
+            # chunk = await self.raw_conn.reader.read(1024)
+            chunk = await asyncio.wait_for(self.raw_conn.reader.read(1024), timeout=4)
             data += chunk
-
+            print("read finished! - " + str(chunk))
+            print("after read finished")
+            # message = "hello"
             header, end_index = decode_uvarint(data, 0)
             length, end_index = decode_uvarint(data, end_index)
-
+            print("after decoding")
             message = data[end_index:end_index + length + 1]
-
-            # Deal with other types of messages
+            print("after getting message")
             flag = header & 0x07
+            print("after getting flag")
             stream_id = header >> 3
-
-            if stream_id not in self.buffers:
-                self.buffers[stream_id] = message
-                await self.stream_queue.put(stream_id)
-            else:
-                self.buffers[stream_id] = self.buffers[stream_id] + message
+            print("HANDLE INCOMING ID: " + str(stream_id))
+            print(type(stream_id))
+            async with self.buffers_lock:
+                if stream_id not in self.buffers:
+                        self.buffers[stream_id] = asyncio.Queue()
+                        print("creating queue!")
+                        await self.stream_queue.put(stream_id)
+                else:
+                    print("stream_id " + str(stream_id) + " was already in buffers according to handle_incoming")
+                await self.buffers[stream_id].put(message)
+            print("put into buffer")
+            print("buffer size: " + str(self.buffers[stream_id].qsize()))
         except asyncio.TimeoutError:
-            print('timeout!')
+            print('timeout! ' + str(self.initiator))
+
+
+        # data = bytearray()
+        # try:
+        #     chunk = await asyncio.wait_for(self.raw_conn.reader.read(-1), timeout=1)
+        #     # data += chunk
+
+        #     # print("data read in!")
+
+        #     # header, end_index = decode_uvarint(data, 0)
+        #     # length, end_index = decode_uvarint(data, end_index)
+
+        #     # message = data[end_index:end_index + length + 1]
+        #     # message = "hello"
+
+        #     # Deal with other types of messages
+        #     flag = header & 0x07
+        #     stream_id = header >> 3
+        #     # stream_id = 7
+        #     if stream_id not in self.buffers:
+        #         self.buffers[stream_id] = asyncio.Queue()
+        #         await self.stream_queue.put(stream_id)
+        #     self.buffers[stream_id].put_nowait(message)
+        # except asyncio.TimeoutError:
+        #     print('timeout! ' + str(self.initiator))
