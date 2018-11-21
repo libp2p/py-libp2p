@@ -9,6 +9,5 @@ class RawConnection(IRawConnection):
         self.reader = reader
         self.writer = writer
 
-
     def close(self):
         self.writer.close()
