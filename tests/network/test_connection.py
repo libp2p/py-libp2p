@@ -12,6 +12,7 @@ async def handle_echo(reader, writer):
     writer.close()
 
 @pytest.mark.asyncio
+# TODO: this test should develop out into a fuller test between MPlex modules communicating with each other.
 async def test_simple_echo():
     server_ip = '127.0.0.1'
     server_port = 8888
