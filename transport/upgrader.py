@@ -1,4 +1,4 @@
-from muxer.mplex.muxed_connection import MuxedConn
+from stream_muxer.mplex.mplex import Mplex
 
 
 class TransportUpgrader():
@@ -24,4 +24,4 @@ class TransportUpgrader():
 
         # For PoC, no security, default to mplex
         # TODO do exchange to determine multiplexer
-        return MuxedConn(conn, initiator)
+        return Mplex(conn, initiator)

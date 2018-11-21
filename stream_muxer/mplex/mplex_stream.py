@@ -1,8 +1,8 @@
-from .muxed_stream_interface import IMuxedStream
 from .constants import HEADER_TAGS
+from ..muxed_stream_interface import IMuxedStream
 
 
-class MuxedStream(IMuxedStream):
+class MplexStream(IMuxedStream):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
     """

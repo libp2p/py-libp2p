@@ -1,10 +1,10 @@
 import asyncio
 from .utils import encode_uvarint, decode_uvarint
-from .muxed_connection_interface import IMuxedConn
-from .muxed_stream import MuxedStream
+from .mplex_stream import MplexStream
+from ..muxed_connection_interface import IMuxedConn
 
 
-class MuxedConn(IMuxedConn):
+class Mplex(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
@@ -57,7 +57,7 @@ class MuxedConn(IMuxedConn):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
-        stream = MuxedStream(stream_id, multi_addr, self)
+        stream = MplexStream(stream_id, multi_addr, self)
         self.streams[stream_id] = stream
         return stream
 
@@ -69,7 +69,7 @@ class MuxedConn(IMuxedConn):
         # TODO update to pull out protocol_id from message
         protocol_id = "/echo/1.0.0"
         stream_id = await self.stream_queue.get()
-        stream = MuxedStream(stream_id, False, self)
+        stream = MplexStream(stream_id, False, self)
         return stream, stream_id, protocol_id
 
     async def send_message(self, flag, data, stream_id):
