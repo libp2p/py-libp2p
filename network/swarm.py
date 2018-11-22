@@ -2,7 +2,6 @@ from protocol_muxer.multiselect_client import MultiselectClient
 from protocol_muxer.multiselect import Multiselect
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
-# from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
 
 
@@ -34,18 +33,21 @@ class Swarm(INetwork):
         self.multiselect.add_handler(protocol_id, stream_handler)
         return True
 
-    async def new_stream(self, peer_id, protocol_ids):
+    async def dial_peer(self, peer_id):
         """
-        :param peer_id: peer_id of destination
-        :param protocol_id: protocol id
-        :return: net stream instance
+        dial_peer try to create a connection to peer_id
+        :param peer_id: peer if we want to dial
+        :raises SwarmException: raised when no address if found for peer_id
+        :return: muxed connection
         """
+
         # Get peer info from peer store
         addrs = self.peerstore.addrs(peer_id)
 
         if not addrs:
             raise SwarmException("No known addresses to peer")
 
+        # TODO: define logic to choose which address to use, or try them all ?
         multiaddr = addrs[0]
 
         if peer_id in self.connections:
@@ -61,6 +63,24 @@ class Swarm(INetwork):
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
+
+        return muxed_conn
+
+    async def new_stream(self, peer_id, protocol_ids):
+        """
+        :param peer_id: peer_id of destination
+        :param protocol_id: protocol id
+        :return: net stream instance
+        """
+        # Get peer info from peer store
+        addrs = self.peerstore.addrs(peer_id)
+
+        if not addrs:
+            raise SwarmException("No known addresses to peer")
+
+        multiaddr = addrs[0]
+
+        muxed_conn = await self.dial_peer(peer_id)
 
         # Use muxed conn to open stream, which returns
         # a muxed stream

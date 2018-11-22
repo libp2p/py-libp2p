@@ -66,7 +66,7 @@ async def run(port, destination):
         m = multiaddr.Multiaddr(destination)
         info = info_from_p2p_addr(m)
         # Associate the peer with local ip address
-        host.get_peerstore().add_addrs(info.peer_id, info.addrs, 10)
+        await host.connect(info)
 
         # Start a stream with the destination.
         # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.

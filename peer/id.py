@@ -26,6 +26,12 @@ class ID:
 
     __repr__ = __str__
 
+    def __eq__(self, other):
+        return self._id_str == other._id_str
+
+    def __hash__(self):
+        return hash(self._id_str)
+
 
 def id_b58_encode(id):
     """

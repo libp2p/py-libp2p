@@ -42,7 +42,7 @@ class PeerStore(IPeerStore):
         peer.set_protocols(protocols)
 
     def peers(self):
-        return self.peer_map.keys()
+        return list(self.peer_map.keys())
 
     def get(self, peer_id, key):
         if peer_id in self.peer_map:
