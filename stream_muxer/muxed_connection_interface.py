@@ -23,7 +23,7 @@ class IMuxedConn(ABC):
         pass
 
     @abstractmethod
-    def open_stream(self, protocol_id, stream_id, peer_id, multi_addr):
+    def open_stream(self, protocol_id, peer_id, multi_addr):
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream
