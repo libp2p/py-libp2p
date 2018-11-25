@@ -16,15 +16,23 @@ class Mplex(IMuxedConn):
         """
         self.raw_conn = conn
         self.initiator = initiator
+
+        # Mapping from stream ID -> buffer of messages for that stream
         self.buffers = {}
-        self.streams = {}
+
         self.stream_queue = asyncio.Queue()
         self.conn_lock = asyncio.Lock()
+        self._next_id = 0
 
         # The initiator need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
         if not initiator:
             asyncio.ensure_future(self.handle_incoming())
+
+    def _next_stream_id(self):
+        next_id = self._next_id
+        self._next_id += 1
+        return next_id
 
     def close(self):
         """
@@ -49,7 +57,7 @@ class Mplex(IMuxedConn):
         self.buffers[stream_id] = bytearray()
         return data
 
-    def open_stream(self, protocol_id, stream_id, peer_id, multi_addr):
+    async def open_stream(self, protocol_id, peer_id, multi_addr):
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream
@@ -58,8 +66,9 @@ class Mplex(IMuxedConn):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
+        stream_id = self._next_stream_id()
         stream = MplexStream(stream_id, multi_addr, self)
-        self.streams[stream_id] = stream
+        self.buffers[stream_id] = bytearray()
         return stream
 
     async def accept_stream(self):
