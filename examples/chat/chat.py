@@ -6,7 +6,7 @@ sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
 import asyncio
 
 import click
-from libp2p.libp2p import Libp2p
+from libp2p.libp2p import *
 from network.multiaddr import MultiAddr
 
 # TODO: change once muxed_connection supports extracting protocol id from messages
@@ -37,8 +37,7 @@ async def write_data(stream):
 async def run(port, destination):
 
     if not destination:
-        lib = Libp2p(transport_opt=["/ip4/127.0.0.1/tcp/%s/p2p/hostA" % port])
-        host = await lib.new_node()
+        host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s/p2p/hostA" % port])
 
         async def stream_handler(stream):
             asyncio.ensure_future(read_data(stream))
@@ -57,13 +56,12 @@ async def run(port, destination):
         if not port:
             raise RuntimeError("was not able to find the actual local port")
 
-        print("Run './chat.py --port %s -d /ip4/127.0.0.1/tcp/%s/p2p/%s' on another console.\n" % (int(port)+1, port, host.get_id().pretty()))
+        print("Run './examples/chat/chat.py --port %s -d /ip4/127.0.0.1/tcp/%s/p2p/%s' on another console.\n" % (int(port)+1, port, host.get_id().pretty()))
         print("You can replace 127.0.0.1 with public IP as well.")
         print("\nWaiting for incoming connection\n\n")
 
     else:
-        lib = Libp2p(transport_opt=["/ip4/127.0.0.1/tcp/%s/p2p/hostB" % port])
-        host = await lib.new_node()
+        host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s/p2p/hostB" % port])
 
         # TODO: improve multiaddr module to have proper function to do this
         multiaddr = MultiAddr(destination)

@@ -1,14 +1,11 @@
 import pytest
 
-from libp2p.libp2p import Libp2p
+from libp2p.libp2p import *
 
 @pytest.mark.asyncio
 async def test_simple_messages():
-    libA = Libp2p(transport_opt=["/ip4/127.0.0.1/tcp/8001/ipfs/hostA"])
-    libB = Libp2p(transport_opt=["/ip4/127.0.0.1/tcp/8000/ipfs/hostB"])
-
-    hostA = await libA.new_node()
-    hostB = await libB.new_node()
+    hostA = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001/ipfs/hostA"])
+    hostB = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000/ipfs/hostB"])
 
     async def stream_handler(stream):
         while True:
