@@ -13,3 +13,6 @@ script:
 
 after_success:
   - codecov
+
+notifications:
+    slack: py-libp2p:RK0WVoQZhQXLgIKfHNPL1TR2
