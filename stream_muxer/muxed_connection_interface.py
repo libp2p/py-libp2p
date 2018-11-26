@@ -12,7 +12,6 @@ class IMuxedConn(ABC):
         close connection
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def is_closed(self):
@@ -20,7 +19,6 @@ class IMuxedConn(ABC):
         check connection is fully closed
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def open_stream(self, protocol_id, peer_id, multi_addr):
@@ -32,7 +30,6 @@ class IMuxedConn(ABC):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
-        pass
 
     @abstractmethod
     def accept_stream(self):
@@ -40,4 +37,3 @@ class IMuxedConn(ABC):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        pass

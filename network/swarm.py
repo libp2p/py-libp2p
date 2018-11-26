@@ -1,16 +1,15 @@
-import uuid
+from peer.id import ID
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
 from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
 
-from peer.id import ID
-
 class Swarm(INetwork):
+    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
     def __init__(self, my_peer_id, peerstore, upgrader):
         self._my_peer_id = my_peer_id
-        self.id = ID(my_peer_id)
+        self.self_id = ID(my_peer_id)
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.connections = dict()
@@ -19,7 +18,7 @@ class Swarm(INetwork):
         self.transport = None
 
     def get_peer_id(self):
-        return self.id
+        return self.self_id
 
     def set_stream_handler(self, protocol_id, stream_handler):
         """
@@ -94,7 +93,7 @@ class Swarm(INetwork):
                     multiaddr_dict['port'], reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
-                muxed_stream, stream_id, protocol_id = await muxed_conn.accept_stream()
+                muxed_stream, _, protocol_id = await muxed_conn.accept_stream()
                 net_stream = NetStream(muxed_stream)
                 net_stream.set_protocol(protocol_id)
 
@@ -106,7 +105,7 @@ class Swarm(INetwork):
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
-                self.listeners[multiaddr_str]  = listener
+                self.listeners[multiaddr_str] = listener
                 await listener.listen(multiaddr)
                 return True
             except IOError:

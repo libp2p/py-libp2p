@@ -8,7 +8,6 @@ class INetwork(ABC):
         """
         :return: the peer id
         """
-        pass
 
     @abstractmethod
     def set_stream_handler(self, protocol_id, stream_handler):
@@ -17,7 +16,6 @@ class INetwork(ABC):
         :param stream_handler: a stream handler instance
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def new_stream(self, peer_id, protocol_id):
@@ -26,7 +24,6 @@ class INetwork(ABC):
         :param protocol_id: protocol id
         :return: stream instance
         """
-        pass
 
     @abstractmethod
     def listen(self, *args):
@@ -34,4 +31,3 @@ class INetwork(ABC):
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success
         """
-        pass

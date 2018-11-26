@@ -5,7 +5,6 @@ from peer.peerstore import PeerStore
 
 # Testing methods from IPeerMetadata base class.
 
-
 def test_get_empty():
     with pytest.raises(PeerStoreError):
         store = PeerStore()

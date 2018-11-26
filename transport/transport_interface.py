@@ -11,7 +11,6 @@ class ITransport(ABC):
         :param options: optional object
         :return: list of multiaddrs
         """
-        pass
 
     @abstractmethod
     def create_listener(self, handler_function, options=None):
@@ -22,4 +21,3 @@ class ITransport(ABC):
         that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
-        pass
