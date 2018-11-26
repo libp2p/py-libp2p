@@ -106,7 +106,7 @@ class Swarm(INetwork):
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
-                self.listeners[multiaddr_str]  = listener
+                self.listeners[multiaddr_str] = listener
                 await listener.listen(multiaddr)
                 return True
             except IOError:

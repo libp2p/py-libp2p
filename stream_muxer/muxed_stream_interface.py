@@ -9,7 +9,6 @@ class IMuxedStream(ABC):
         read from stream
         :return: bytes of input
         """
-        pass
 
     @abstractmethod
     def write(self, _bytes):
@@ -17,7 +16,6 @@ class IMuxedStream(ABC):
         write to stream
         :return: number of bytes written
         """
-        pass
 
     @abstractmethod
     def close(self):
@@ -25,7 +23,6 @@ class IMuxedStream(ABC):
         close stream
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def reset(self):
@@ -34,7 +31,6 @@ class IMuxedStream(ABC):
         tells this remote side to hang up
         :return: error/exception
         """
-        pass
 
     @abstractmethod
     def set_deadline(self, ttl):
@@ -42,4 +38,3 @@ class IMuxedStream(ABC):
         set deadline for muxed stream
         :return: a new stream
         """
-        pass

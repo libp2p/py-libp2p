@@ -13,7 +13,6 @@ class IPeerMetadata(ABC):
         :return: value at key for given peer
         :raise Exception: peer ID not found
         """
-        pass
 
     @abstractmethod
     def put(self, peer_id, key, val):
@@ -23,5 +22,4 @@ class IPeerMetadata(ABC):
         :param val: value to associated with key
         :raise Exception: unsuccessful put
         """
-        pass
         

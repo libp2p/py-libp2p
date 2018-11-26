@@ -12,7 +12,6 @@ class TransportUpgrader():
         upgrade multiaddr listeners to libp2p-transport listeners
 
         """
-        pass
 
     def upgrade_security(self):
         pass

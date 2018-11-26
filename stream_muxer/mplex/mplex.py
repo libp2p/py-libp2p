@@ -45,7 +45,6 @@ class Mplex(IMuxedConn):
         check connection is fully closed
         :return: true if successful
         """
-        pass
 
     async def read_buffer(self, stream_id):
         # Empty buffer or nonexistent stream

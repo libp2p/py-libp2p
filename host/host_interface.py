@@ -8,21 +8,18 @@ class IHost(ABC):
         """
         :return: peer_id of host
         """
-        pass
 
     @abstractmethod
     def get_network(self):
         """
         :return: network instance of host
         """
-        pass
 
     @abstractmethod
     def get_mux(self):
         """
         :return: mux instance of host
         """
-        pass
 
     @abstractmethod
     def set_stream_handler(self, protocol_id, stream_handler):
@@ -32,7 +29,6 @@ class IHost(ABC):
         :param stream_handler: a stream handler function
         :return: true if successful
         """
-        pass
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
@@ -43,4 +39,3 @@ class IHost(ABC):
         :param proto_id: protocol id that stream runs on
         :return: true if successful
         """
-        pass
