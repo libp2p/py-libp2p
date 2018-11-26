@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+# pylint: disable=duplicate-code
 
 class IMuxedStream(ABC):
 
