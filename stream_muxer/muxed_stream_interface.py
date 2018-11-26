@@ -1,27 +1,25 @@
 from abc import ABC, abstractmethod
 
-# pylint: disable=duplicate-code
-
 class IMuxedStream(ABC):
 
     @abstractmethod
     def read(self):
         """
-        read from stream
+        reads from the underlying muxed_conn
         :return: bytes of input
         """
 
     @abstractmethod
     def write(self, _bytes):
         """
-        write to stream
+        writes to the underlying muxed_conn
         :return: number of bytes written
         """
 
     @abstractmethod
     def close(self):
         """
-        close stream
+        close the underlying muxed_conn
         :return: true if successful
         """
 

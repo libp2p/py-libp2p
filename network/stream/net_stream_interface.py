@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-# pylint: disable=duplicate-code
-
 class INetStream(ABC):
 
     @abstractmethod
@@ -20,20 +18,20 @@ class INetStream(ABC):
     @abstractmethod
     def read(self):
         """
-        read from stream
+        reads from the underlying muxed_stream
         :return: bytes of input
         """
 
     @abstractmethod
     def write(self, _bytes):
         """
-        write to stream
+        write to the underlying muxed_stream
         :return: number of bytes written
         """
 
     @abstractmethod
     def close(self):
         """
-        close stream
+        close the underlying muxed stream
         :return: true if successful
         """
