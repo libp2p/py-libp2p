@@ -1,4 +1,6 @@
-# py-libp2p
+# py-libp2p [![Build Status](https://travis-ci.com/zixuanzh/py-libp2p.svg?branch=master)](https://travis-ci.com/zixuanzh/py-libp2p) [![codecov](https://codecov.io/gh/zixuanzh/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/zixuanzh/py-libp2p)
+
+
 
 <h1 align="center">
   <img width="250" align="center" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
