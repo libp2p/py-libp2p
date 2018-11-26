@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from .addrbook_interface import IAddrBook
 from .peermetadata_interface import IPeerMetadata
 
