@@ -59,9 +59,7 @@ class Swarm(INetwork):
 
         # Use muxed conn to open stream, which returns
         # a muxed stream
-        # TODO: use better stream IDs
-        stream_id = (uuid.uuid4().int & (1<<64)-1) >> 3
-        muxed_stream = muxed_conn.open_stream(protocol_id, stream_id, peer_id, multiaddr)
+        muxed_stream = await muxed_conn.open_stream(protocol_id, peer_id, multiaddr)
 
         # Create a net stream
         net_stream = NetStream(muxed_stream)

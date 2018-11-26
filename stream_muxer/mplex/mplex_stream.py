@@ -68,7 +68,7 @@ class MplexStream(IMuxedStream):
 
         if remote_lock:
             async with self.mplex_conn.conn_lock:
-                self.mplex_conn.streams.pop(self.stream_id)
+                self.mplex_conn.buffers.pop(self.stream_id)
 
         return True
 
@@ -91,7 +91,7 @@ class MplexStream(IMuxedStream):
             self.remote_closed = True
 
         async with self.mplex_conn.conn_lock:
-            self.mplex_conn.streams.pop(self.stream_id, None)
+            self.mplex_conn.buffers.pop(self.stream_id, None)
 
         return True
 
