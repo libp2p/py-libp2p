@@ -118,7 +118,8 @@ class Mplex(IMuxedConn):
             message = data[end_index:end_index + length + 1]
 
             # Deal with other types of messages
-            flag = header & 0x07
+            # TODO use flag
+            # flag = header & 0x07
             stream_id = header >> 3
 
             if stream_id not in self.buffers:

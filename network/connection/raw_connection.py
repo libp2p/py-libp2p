@@ -2,6 +2,7 @@ from .raw_connection_interface import IRawConnection
 
 
 class RawConnection(IRawConnection):
+	# pylint: disable=too-few-public-methods
 
     def __init__(self, ip, port, reader, writer):
         self.conn_ip = ip

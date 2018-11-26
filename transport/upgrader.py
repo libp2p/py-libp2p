@@ -2,6 +2,7 @@ from stream_muxer.mplex.mplex import Mplex
 
 
 class TransportUpgrader():
+    # pylint: disable=no-self-use
 
     def __init__(self, secOpt, muxerOpt):
         self.sec = secOpt
