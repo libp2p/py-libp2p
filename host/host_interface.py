@@ -33,9 +33,9 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    def new_stream(self, peer_id, protocol_id):
+    def new_stream(self, peer_id, protocol_ids):
         """
         :param peer_id: peer_id that host is connecting
-        :param proto_id: protocol id that stream runs on
+        :param protocol_ids: protocol ids that stream can run on
         :return: true if successful
         """
