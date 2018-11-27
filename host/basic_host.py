@@ -35,7 +35,6 @@ class BasicHost(IHost):
         """
         :return: mux instance of host
         """
-        pass
 
     def set_stream_handler(self, protocol_id, stream_handler):
         """

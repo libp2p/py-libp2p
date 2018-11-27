@@ -1,6 +1,3 @@
-import pytest
-
-from peer.peerstore import PeerStoreError
 from peer.peerstore import PeerStore
 
 # Testing methods from IPeerStore base class.

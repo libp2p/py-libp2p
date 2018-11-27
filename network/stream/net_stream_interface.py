@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-
 class INetStream(ABC):
 
     @abstractmethod
@@ -8,7 +7,6 @@ class INetStream(ABC):
         """
         :return: protocol id that stream runs on
         """
-        pass
 
     @abstractmethod
     def set_protocol(self, protocol_id):
@@ -16,28 +14,24 @@ class INetStream(ABC):
         :param protocol_id: protocol id that stream runs on
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def read(self):
         """
-        read from stream
+        reads from the underlying muxed_stream
         :return: bytes of input
         """
-        pass
 
     @abstractmethod
     def write(self, _bytes):
         """
-        write to stream
+        write to the underlying muxed_stream
         :return: number of bytes written
         """
-        pass
 
     @abstractmethod
     def close(self):
         """
-        close stream
+        close the underlying muxed stream
         :return: true if successful
         """
-        pass

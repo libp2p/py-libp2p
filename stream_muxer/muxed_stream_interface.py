@@ -1,31 +1,27 @@
 from abc import ABC, abstractmethod
 
-
 class IMuxedStream(ABC):
 
     @abstractmethod
     def read(self):
         """
-        read from stream
+        reads from the underlying muxed_conn
         :return: bytes of input
         """
-        pass
 
     @abstractmethod
     def write(self, _bytes):
         """
-        write to stream
+        writes to the underlying muxed_conn
         :return: number of bytes written
         """
-        pass
 
     @abstractmethod
     def close(self):
         """
-        close stream
+        close the underlying muxed_conn
         :return: true if successful
         """
-        pass
 
     @abstractmethod
     def reset(self):
@@ -34,7 +30,6 @@ class IMuxedStream(ABC):
         tells this remote side to hang up
         :return: error/exception
         """
-        pass
 
     @abstractmethod
     def set_deadline(self, ttl):
@@ -42,4 +37,3 @@ class IMuxedStream(ABC):
         set deadline for muxed stream
         :return: a new stream
         """
-        pass

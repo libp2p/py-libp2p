@@ -2,6 +2,7 @@ from stream_muxer.mplex.mplex import Mplex
 
 
 class TransportUpgrader():
+    # pylint: disable=no-self-use
 
     def __init__(self, secOpt, muxerOpt):
         self.sec = secOpt
@@ -12,7 +13,6 @@ class TransportUpgrader():
         upgrade multiaddr listeners to libp2p-transport listeners
 
         """
-        pass
 
     def upgrade_security(self):
         pass

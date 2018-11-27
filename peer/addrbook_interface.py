@@ -13,7 +13,6 @@ class IAddrBook(ABC):
         :param addr: multiaddress of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid)
         """
-        pass
 
     @abstractmethod
     def add_addrs(self, peer_id, addrs, ttl):
@@ -25,7 +24,6 @@ class IAddrBook(ABC):
         :param addr: multiaddresses of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid
         """
-        pass
 
     @abstractmethod
     def addrs(self, peer_id):
@@ -33,7 +31,6 @@ class IAddrBook(ABC):
         :param peer_id: peer to get addresses of
         :return: all known (and valid) addresses for the given peer
         """
-        pass
 
     @abstractmethod
     def clear_addrs(self, peer_id):
@@ -41,12 +38,10 @@ class IAddrBook(ABC):
         Removes all previously stored addresses
         :param peer_id: peer to remove addresses of
         """
-        pass
 
     @abstractmethod
     def peers_with_addrs(self):
         """
         :return: all of the peer IDs stored with addresses
         """
-        pass
         

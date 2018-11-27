@@ -31,8 +31,7 @@ class PeerStore(IPeerStore):
     def get_protocols(self, peer_id):
         if peer_id in self.peer_map:
             return self.peer_map[peer_id].get_protocols()
-        else:
-            raise PeerStoreError("peer ID not found")
+        raise PeerStoreError("peer ID not found")
 
     def add_protocols(self, peer_id, protocols):
         peer = self.__create_or_get_peer(peer_id)
@@ -49,8 +48,7 @@ class PeerStore(IPeerStore):
         if peer_id in self.peer_map:
             val = self.peer_map[peer_id].get_metadata(key)
             return val
-        else:
-            raise PeerStoreError("peer ID not found")
+        raise PeerStoreError("peer ID not found")
 
     def put(self, peer_id, key, val):
         # <<?>>
@@ -69,8 +67,7 @@ class PeerStore(IPeerStore):
     def addrs(self, peer_id):
         if peer_id in self.peer_map:
             return self.peer_map[peer_id].get_addrs()
-        else:
-            raise PeerStoreError("peer ID not found")
+        raise PeerStoreError("peer ID not found")
 
     def clear_addrs(self, peer_id):
         # Only clear addresses if the peer is in peer map
@@ -88,4 +85,3 @@ class PeerStore(IPeerStore):
 
 class PeerStoreError(KeyError):
     """Raised when peer ID is not found in peer store"""
-    pass
