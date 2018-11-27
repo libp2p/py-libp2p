@@ -38,7 +38,7 @@ class Swarm(INetwork):
         self.multiselect.add_handler(protocol_id, stream_handler)
         return True
 
-    async def new_stream(self, peer_id, protocol_id):
+    async def new_stream(self, peer_id, protocol_ids):
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
@@ -68,14 +68,15 @@ class Swarm(INetwork):
 
         # Use muxed conn to open stream, which returns
         # a muxed stream
-        muxed_stream = await muxed_conn.open_stream(protocol_id, peer_id, multiaddr)
+        # TODO: Remove protocol id from being passed into muxed_conn
+        muxed_stream = await muxed_conn.open_stream(protocol_ids[0], peer_id, multiaddr)
 
         # Perform protocol muxing to determine protocol to use
-        await self.multiselect_client.select_proto_or_fail(protocol_id, muxed_stream)
+        selected_protocol = await self.multiselect_client.select_one_of(protocol_ids, muxed_stream)
 
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
-        net_stream.set_protocol(protocol_id)
+        net_stream.set_protocol(selected_protocol)
 
         return net_stream
 

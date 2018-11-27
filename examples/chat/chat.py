@@ -74,7 +74,7 @@ async def run(port, destination):
 
         # Start a stream with the destination.
         # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
-        stream = await host.new_stream(peer_id, PROTOCOL_ID)
+        stream = await host.new_stream(peer_id, [PROTOCOL_ID])
 
         asyncio.ensure_future(read_data(stream))
         asyncio.ensure_future(write_data(stream))
