@@ -111,8 +111,7 @@ class Swarm(INetwork):
                 muxed_stream, _, protocol_id = await muxed_conn.accept_stream()
                 
                 # Perform protocol muxing to determine protocol to use
-                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
-                
+                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)        
 
                 net_stream = NetStream(muxed_stream)
                 net_stream.set_protocol(selected_protocol)
