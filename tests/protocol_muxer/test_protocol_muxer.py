@@ -3,6 +3,9 @@ import pytest
 from libp2p.libp2p import new_node
 from protocol_muxer.multiselect_client import MultiselectClientError
 
+# TODO: Add tests for multiple streams being opened on different
+# protocols through the same connection
+
 async def perform_simple_test(protocols_for_client, protocols_with_handlers):
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001/ipfs/node_a"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000/ipfs/node_b"])
