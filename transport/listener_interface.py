@@ -10,7 +10,6 @@ class IListener(ABC):
         :param multiaddr: multiaddr of peer
         :return: return True if successful
         """
-        pass
 
     @abstractmethod
     def get_addrs(self):
@@ -18,7 +17,6 @@ class IListener(ABC):
         retrieve list of addresses the listener is listening on
         :return: return list of addrs
         """
-        pass
 
     @abstractmethod
     def close(self, options=None):
@@ -29,4 +27,3 @@ class IListener(ABC):
         a timeout value in ms that fires and destroy all connections
         :return: return True if successful
         """
-        pass

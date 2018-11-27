@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from .addrbook_interface import IAddrBook
 from .peermetadata_interface import IPeerMetadata
 
@@ -14,7 +14,6 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param peer_id: peer ID to get info for
         :return: peer info object
         """
-        pass
 
     @abstractmethod
     def get_protocols(self, peer_id):
@@ -23,7 +22,6 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :return: protocols (as strings)
         :raise Exception: peer ID not found exception
         """
-        pass
 
     @abstractmethod
     def add_protocols(self, peer_id, protocols):
@@ -32,7 +30,6 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param protocols: protocols to add
         :raise Exception: peer ID not found
         """
-        pass
 
     @abstractmethod
     def set_protocols(self, peer_id, protocols):
@@ -41,11 +38,9 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param protocols: protocols to set
         :raise Exception: peer ID not found
         """
-        pass
 
     @abstractmethod
     def peers(self):
         """
         :return: all of the peer IDs stored in peer store
         """
-        pass

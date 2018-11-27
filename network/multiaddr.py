@@ -120,4 +120,3 @@ class MultiAddr:
 
 class MultiAddrValueError(ValueError):
     """Raised when the input string to the MultiAddr constructor was invalid."""
-    pass

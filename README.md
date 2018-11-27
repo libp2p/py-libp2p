@@ -1,4 +1,6 @@
-# py-libp2p
+# py-libp2p [![Build Status](https://travis-ci.com/zixuanzh/py-libp2p.svg?branch=master)](https://travis-ci.com/zixuanzh/py-libp2p) [![codecov](https://codecov.io/gh/zixuanzh/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/zixuanzh/py-libp2p)
+
+
 
 <h1 align="center">
   <img width="250" align="center" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
@@ -14,7 +16,7 @@ py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 e
 ```sh
 virtualenv -p python3.6 venv
 . venv/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Testing

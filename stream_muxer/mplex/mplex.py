@@ -49,7 +49,6 @@ class Mplex(IMuxedConn):
         check connection is fully closed
         :return: true if successful
         """
-        pass
 
     async def read_buffer(self, stream_id):
         # Empty buffer or nonexistent stream
@@ -135,7 +134,10 @@ class Mplex(IMuxedConn):
             header, end_index = decode_uvarint(data, 0)
             length, end_index = decode_uvarint(data, end_index)
             message = data[end_index:end_index + length + 1]
-            flag = header & 0x07
+
+            # Deal with other types of messages
+            # TODO use flag
+            # flag = header & 0x07
             stream_id = header >> 3
             if stream_id not in self.buffers:
                 self.buffers[stream_id] = asyncio.Queue()
