@@ -39,7 +39,7 @@ class MultiselectClient(IMultiselectClient):
 
         return selected_protocol
 
-    async def select_one_of(self, stream, protocols):
+    async def select_one_of(self, protocols, stream):
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
