@@ -3,6 +3,11 @@ from .network_interface import INetwork
 from .stream.net_stream import NetStream
 from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
+from protocol_muxer.multiselect_client import MultiselectClient
+from protocol_muxer.multiselect_client import MultiselectClientError
+from protocol_muxer.multiselect import Multiselect
+from protocol_muxer.multiselect import MultiselectError
+
 
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
@@ -17,6 +22,10 @@ class Swarm(INetwork):
         self.stream_handlers = dict()
         self.transport = None
 
+        # Protocol muxing
+        self.multiselect = Multiselect()
+        self.multiselect_client = MultiselectClient()
+
     def get_peer_id(self):
         return self.self_id
 
@@ -26,7 +35,8 @@ class Swarm(INetwork):
         :param stream_handler: a stream handler instance
         :return: true if successful
         """
-        self.stream_handlers[protocol_id] = stream_handler
+        self.multiselect.add_handler(protocol_id, stream_handler)
+        return True
 
     async def new_stream(self, peer_id, protocol_id):
         """
@@ -60,8 +70,12 @@ class Swarm(INetwork):
         # a muxed stream
         muxed_stream = await muxed_conn.open_stream(protocol_id, peer_id, multiaddr)
 
-        # Create a net stream
+        # Perform protocol muxing to determine protocol to use
+        await self.multiselect_client.select_proto_or_fail(protocol_id, muxed_stream)
+
+        # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
+        net_stream.set_protocol(protocol_id)
 
         return net_stream
 
@@ -93,14 +107,20 @@ class Swarm(INetwork):
                     multiaddr_dict['port'], reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
+                # TODO: Remove protocol id from muxed_conn accept stream or move protocol muxing into accept_stream
                 muxed_stream, _, protocol_id = await muxed_conn.accept_stream()
+                
+                # Perform protocol muxing to determine protocol to use
+                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
+                
+
                 net_stream = NetStream(muxed_stream)
-                net_stream.set_protocol(protocol_id)
+                net_stream.set_protocol(selected_protocol)
 
                 # Give to stream handler
                 # TODO: handle case when stream handler is set
                 # TODO: handle case of multiple protocols over same raw connection
-                await self.stream_handlers[protocol_id](net_stream)
+                await handler(net_stream)
 
             try:
                 # Success
