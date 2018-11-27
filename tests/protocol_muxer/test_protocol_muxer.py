@@ -6,6 +6,11 @@ from protocol_muxer.multiselect_client import MultiselectClientError
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
 
+# Note: async issues occurred when using the same port
+# so that's why I use different ports here.
+# TODO: modify tests so that those async issues don't occur
+# when using the same ports across tests
+
 async def perform_simple_test(expected_selected_protocol, \
     protocols_for_client, protocols_with_handlers, \
     node_a_port, node_b_port):
