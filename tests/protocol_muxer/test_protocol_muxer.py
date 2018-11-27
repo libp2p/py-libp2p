@@ -6,9 +6,15 @@ from protocol_muxer.multiselect_client import MultiselectClientError
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
 
-async def perform_simple_test(expected_selected_protocol, protocols_for_client, protocols_with_handlers, node_a_port, node_b_port):
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/" + str(node_a_port) + "/ipfs/node_a"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/" + str(node_b_port) + "/ipfs/node_b"])
+async def perform_simple_test(expected_selected_protocol, \
+    protocols_for_client, protocols_with_handlers, \
+    node_a_port, node_b_port):
+    transport_opt_a = ["/ip4/127.0.0.1/tcp/" + str(node_a_port) + "/ipfs/node_a"]
+    transport_opt_b = ["/ip4/127.0.0.1/tcp/" + str(node_b_port) + "/ipfs/node_b"]
+    node_a = await new_node(\
+        transport_opt=transport_opt_a)
+    node_b = await new_node(\
+        transport_opt=transport_opt_b)
 
     async def stream_handler(stream):
         while True:
@@ -43,30 +49,35 @@ async def perform_simple_test(expected_selected_protocol, protocols_for_client, 
 @pytest.mark.asyncio
 async def test_single_protocol_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
-    await perform_simple_test(expected_selected_protocol, ["/echo/1.0.0"], ["/echo/1.0.0"], 8000, 8001)
+    await perform_simple_test(expected_selected_protocol, \
+        ["/echo/1.0.0"], ["/echo/1.0.0"], 8000, 8001)
 
 @pytest.mark.asyncio
 async def test_single_protocol_fails():
-    with pytest.raises(MultiselectClientError) as e_info:
-        await perform_simple_test("", ["/echo/1.0.0"], ["/potato/1.0.0"], 8002, 8003)
+    with pytest.raises(MultiselectClientError):
+        await perform_simple_test("", ["/echo/1.0.0"], \
+            ["/potato/1.0.0"], 8002, 8003)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_first_is_valid_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
     protocols_for_client = ["/echo/1.0.0", "/potato/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
-    await perform_simple_test(expected_selected_protocol, protocols_for_client, protocols_for_listener, 8004, 8005)
+    await perform_simple_test(expected_selected_protocol, protocols_for_client, \
+        protocols_for_listener, 8004, 8005)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_second_is_valid_succeeds():
     expected_selected_protocol = "/foo/1.0.0"
     protocols_for_client = ["/rock/1.0.0", "/foo/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
-    await perform_simple_test(expected_selected_protocol, protocols_for_client, protocols_for_listener, 8006, 8007)
+    await perform_simple_test(expected_selected_protocol, protocols_for_client, \
+        protocols_for_listener, 8006, 8007)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_fails():
     protocols_for_client = ["/rock/1.0.0", "/foo/1.0.0", "/bar/1.0.0"]
     protocols_for_listener = ["/aspyn/1.0.0", "/rob/1.0.0", "/zx/1.0.0", "/alex/1.0.0"]
-    with pytest.raises(MultiselectClientError) as e_info:
-        await perform_simple_test("", protocols_for_client, protocols_for_listener, 8008, 8009)
+    with pytest.raises(MultiselectClientError):
+        await perform_simple_test("", protocols_for_client, \
+            protocols_for_listener, 8008, 8009)
