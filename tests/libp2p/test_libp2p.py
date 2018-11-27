@@ -55,9 +55,9 @@ async def test_double_response():
     host_b.set_stream_handler("/echo/1.0.0", stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
-    host_a.get_peerstore().add_addr("host_b", "/ip4/127.0.0.1/tcp/8003", 10)
-    print("host_a about to open stream")
-    stream = await host_a.new_stream("host_b", "/echo/1.0.0")
+    host_a.get_peerstore().add_addr("hostB", "/ip4/127.0.0.1/tcp/8003", 10)
+    print("hostA about to open stream")
+    stream = await host_a.new_stream("hostB", "/echo/1.0.0")
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
         await stream.write(message.encode())
