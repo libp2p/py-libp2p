@@ -1,23 +1,32 @@
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator import MultiselectCommunicator
 
+MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
+PROTOCOL_NOT_FOUND_MSG = "na"
+
 class MultiselectClient(IMultiselectClient):
 
     def __init__(self):
-        self.MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
-        self.PROTOCOL_NOT_FOUND_MSG = "na"
-    
+        pass
+
     async def handshake(self, communicator):
+        """
+        Ensure that the client and multiselect
+        are both using the same multiselect protocol
+        :param stream: stream to communicate with multiselect over
+        :raise Exception: multiselect protocol ID mismatch
+        """
+
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to counterparty
-        await communicator.write(self.MULTISELECT_PROTOCOL_ID)
+        await communicator.write(MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
         handshake_contents = await communicator.read_stream_until_eof()
-        
+
         # Confirm that the protocols are the same
-        if not(self.validate_handshake(handshake_contents)):
+        if not self.validate_handshake(handshake_contents):
             raise MultiselectClientError("multiselect protocol ID mismatch")
 
         # Handshake succeeded if this point is reached
@@ -25,9 +34,9 @@ class MultiselectClient(IMultiselectClient):
     def validate_handshake(self, handshake_contents):
         # TODO: Modify this when format used by go repo for messages
         # is added
-        return handshake_contents == self.MULTISELECT_PROTOCOL_ID
+        return handshake_contents == MULTISELECT_PROTOCOL_ID
 
-    async def select_proto_or_fail(self, protocol, stream): 
+    async def select_proto_or_fail(self, protocol, stream):
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
@@ -52,7 +61,7 @@ class MultiselectClient(IMultiselectClient):
             try:
                 selected_protocol = await self.try_select(communicator, protocol)
                 return selected_protocol
-            except Exception:
+            except MultiselectClientError:
                 pass
 
         # No protocols were found, so return no protocols supported error
@@ -68,11 +77,10 @@ class MultiselectClient(IMultiselectClient):
         # Return protocol if response is equal to protocol or raise error
         if response == protocol:
             return protocol
-        elif response == self.PROTOCOL_NOT_FOUND_MSG:
+        if response == PROTOCOL_NOT_FOUND_MSG:
             raise MultiselectClientError("protocol not supported")
         else:
             raise MultiselectClientError("unrecognized response: " + response)
 
 class MultiselectClientError(ValueError):
     """Raised when an error occurs in protocol selection process"""
-    pass

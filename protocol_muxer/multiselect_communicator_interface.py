@@ -13,11 +13,9 @@ class IMultiselectCommunicator(ABC):
         Write message to stream
         :param msg_str: message to write
         """
-        pass
 
     @abstractmethod
     def read_stream_until_eof(self):
         """
         Reads message from stream until EOF
         """
-        pass

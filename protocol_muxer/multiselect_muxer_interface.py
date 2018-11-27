@@ -9,7 +9,6 @@ class IMultiselectMuxer(ABC):
         :param protocol: protocol name
         :param handler: handler function
         """
-        pass
 
     @abstractmethod
     def negotiate(self, stream):
@@ -19,4 +18,3 @@ class IMultiselectMuxer(ABC):
         :return: selected protocol name, handler function
         :raise Exception: negotiation failed exception
         """
-        pass

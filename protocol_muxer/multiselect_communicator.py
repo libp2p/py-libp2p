@@ -1,5 +1,4 @@
 from .multiselect_communicator_interface import IMultiselectCommunicator
-import asyncio
 
 class MultiselectCommunicator(IMultiselectCommunicator):
 
