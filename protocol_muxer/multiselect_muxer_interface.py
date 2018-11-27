@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import asyncio
 
 class IMultiselectMuxer(ABC):
 
@@ -13,7 +12,7 @@ class IMultiselectMuxer(ABC):
         pass
 
     @abstractmethod
-    async def negotiate(self, stream):
+    def negotiate(self, stream):
         """
         Negotiate performs protocol selection
         :param stream: stream to negotiate on

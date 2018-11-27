@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 """
 Communicator helper class that ensures both the client
-and multistream module will follow the same protocol,
+and multistream module will follow the same multistream protocol,
 which is necessary for them to work
 """
 class IMultiselectCommunicator(ABC):
@@ -18,6 +18,6 @@ class IMultiselectCommunicator(ABC):
     @abstractmethod
     def read_stream_until_eof(self):
         """
-        Reads message on stream until EOF
+        Reads message from stream until EOF
         """
         pass
