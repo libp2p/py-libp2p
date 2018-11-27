@@ -144,39 +144,30 @@ class Mplex(IMuxedConn):
             else:
                 print("stream_id " + str(stream_id) + " was already in buffers according to handle_incoming")
             await self.buffers[stream_id].put(message)
-            # async with self.buffers_lock:
-            #     if stream_id not in self.buffers:
-            #             self.buffers[stream_id] = asyncio.Queue()
-            #             print("creating queue!")
-            #             await self.stream_queue.put(stream_id)
-            #     else:
-            #         print("stream_id " + str(stream_id) + " was already in buffers according to handle_incoming")
-            #     await self.buffers[stream_id].put(message)
             print("put into buffer")
         except asyncio.TimeoutError:
             print('timeout! ' + str(self.initiator))
 
+    async def read_message(self):
+        data = bytearray()
+        try:
+            chunk = await asyncio.wait_for(self.raw_conn.reader.read(1024), timeout=5)
+            data += chunk
 
-        # data = bytearray()
-        # try:
-        #     chunk = await asyncio.wait_for(self.raw_conn.reader.read(-1), timeout=1)
-        #     # data += chunk
+            header, end_index = decode_uvarint(data, 0)
+            length, end_index = decode_uvarint(data, end_index)
 
-        #     # print("data read in!")
+            message = data[end_index:end_index + length + 1]
+        except asyncio.TimeoutError:
+            print('timeout!')
+            return None, None, None
 
-        #     # header, end_index = decode_uvarint(data, 0)
-        #     # length, end_index = decode_uvarint(data, end_index)
+        header, end_index = decode_uvarint(data, 0)
+        length, end_index = decode_uvarint(data, end_index)
 
-        #     # message = data[end_index:end_index + length + 1]
-        #     # message = "hello"
+        message = data[end_index:end_index + length + 1]
 
-        #     # Deal with other types of messages
-        #     flag = header & 0x07
-        #     stream_id = header >> 3
-        #     # stream_id = 7
-        #     if stream_id not in self.buffers:
-        #         self.buffers[stream_id] = asyncio.Queue()
-        #         await self.stream_queue.put(stream_id)
-        #     self.buffers[stream_id].put_nowait(message)
-        # except asyncio.TimeoutError:
-        #     print('timeout! ' + str(self.initiator))
+        flag = header & 0x07
+        stream_id = header >> 3
+        
+        return stream_id, flag, message
