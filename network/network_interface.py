@@ -18,11 +18,11 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def new_stream(self, peer_id, protocol_id):
+    def new_stream(self, peer_id, protocol_ids):
         """
         :param peer_id: peer_id of destination
-        :param protocol_id: protocol id
-        :return: stream instance
+        :param protocol_ids: available protocol ids to use for stream
+        :return: net stream instance
         """
 
     @abstractmethod

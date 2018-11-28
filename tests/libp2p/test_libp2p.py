@@ -20,8 +20,10 @@ async def test_simple_messages():
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addr("node_b", "/ip4/127.0.0.1/tcp/8000", 10)
+
     print("node_a about to open stream")
-    stream = await node_a.new_stream("node_b", "/echo/1.0.0")
+    stream = await node_a.new_stream("node_b", ["/echo/1.0.0"])
+
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
         await stream.write(message.encode())
@@ -57,7 +59,7 @@ async def test_double_response():
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addr("node_b", "/ip4/127.0.0.1/tcp/8003", 10)
     print("node_a about to open stream")
-    stream = await node_a.new_stream("node_b", "/echo/1.0.0")
+    stream = await node_a.new_stream("node_b", ["/echo/1.0.0"])
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
         await stream.write(message.encode())
