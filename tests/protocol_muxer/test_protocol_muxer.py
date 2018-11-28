@@ -55,13 +55,13 @@ async def perform_simple_test(expected_selected_protocol, \
 async def test_single_protocol_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
     await perform_simple_test(expected_selected_protocol, \
-        ["/echo/1.0.0"], ["/echo/1.0.0"], 8000, 8001)
+        ["/echo/1.0.0"], ["/echo/1.0.0"], 8050, 8051)
 
 @pytest.mark.asyncio
 async def test_single_protocol_fails():
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", ["/echo/1.0.0"], \
-            ["/potato/1.0.0"], 8002, 8003)
+            ["/potato/1.0.0"], 8052, 8053)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_first_is_valid_succeeds():
@@ -69,7 +69,7 @@ async def test_multiple_protocol_first_is_valid_succeeds():
     protocols_for_client = ["/echo/1.0.0", "/potato/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
     await perform_simple_test(expected_selected_protocol, protocols_for_client, \
-        protocols_for_listener, 8004, 8005)
+        protocols_for_listener, 8054, 8055)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_second_is_valid_succeeds():
@@ -77,7 +77,7 @@ async def test_multiple_protocol_second_is_valid_succeeds():
     protocols_for_client = ["/rock/1.0.0", "/foo/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
     await perform_simple_test(expected_selected_protocol, protocols_for_client, \
-        protocols_for_listener, 8006, 8007)
+        protocols_for_listener, 8056, 8057)
 
 @pytest.mark.asyncio
 async def test_multiple_protocol_fails():
@@ -85,4 +85,4 @@ async def test_multiple_protocol_fails():
     protocols_for_listener = ["/aspyn/1.0.0", "/rob/1.0.0", "/zx/1.0.0", "/alex/1.0.0"]
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", protocols_for_client, \
-            protocols_for_listener, 8008, 8009)
+            protocols_for_listener, 8058, 8059)
