@@ -32,6 +32,10 @@ class Mplex(IMuxedConn):
             asyncio.ensure_future(self.handle_incoming())
 
     def _next_stream_id(self):
+        """
+        Get next available stream id
+        :return: next available stream id for the connection
+        """
         next_id = self._next_id
         self._next_id += 1
         return next_id
@@ -49,6 +53,11 @@ class Mplex(IMuxedConn):
         """
 
     async def read_buffer(self, stream_id):
+        """
+        Read a message from stream_id's buffer, check raw connection for new messages
+        :param stream_id: stream id of stream to read from
+        :return: message read
+        """
         # Empty buffer or nonexistent stream
         # TODO: propagate up timeout exception and catch
         if stream_id not in self.buffers or self.buffers[stream_id].empty():
@@ -59,6 +68,11 @@ class Mplex(IMuxedConn):
         return None
 
     async def _read_buffer_exists(self, stream_id):
+        """
+        Reads from raw connection with the assumption that the message buffer for stream_id exsits
+        :param stream_id: stream id of stream to read from
+        :return: message read
+        """
         try:
             data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=5)
             return data
@@ -112,11 +126,19 @@ class Mplex(IMuxedConn):
         return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
+        """
+        writes a byte array to a raw connection
+        :param _bytes: byte array to write
+        :return: length written
+        """
         self.raw_conn.writer.write(_bytes)
         await self.raw_conn.writer.drain()
         return len(_bytes)
 
     async def handle_incoming(self):
+        """
+        Read a message off of the raw connection and add it to the corresponding message buffer
+        """
         # TODO Deal with other types of messages using flag (currently _)
         # TODO call read_message in loop to handle case message for other stream was in conn
 
@@ -129,6 +151,9 @@ class Mplex(IMuxedConn):
         await self.buffers[stream_id].put(message)
 
     async def read_chunk(self):
+        """
+        Read a chunk of bytes off of the raw connection into data_buffer
+        """
         # unused now but possibly useful in the future
         try:
             chunk = await asyncio.wait_for(self.raw_conn.reader.read(-1), timeout=5)
@@ -138,6 +163,10 @@ class Mplex(IMuxedConn):
             return
 
     async def read_message(self):
+        """
+        Read a single message off of the raw connection
+        :return: stream_id, flag, message contents
+        """
         try:
             header = await decode_uvarint_from_stream(self.raw_conn.reader)
             length = await decode_uvarint_from_stream(self.raw_conn.reader)
