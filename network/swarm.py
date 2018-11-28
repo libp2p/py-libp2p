@@ -1,12 +1,10 @@
 from peer.id import ID
+from protocol_muxer.multiselect_client import MultiselectClient
+from protocol_muxer.multiselect import Multiselect
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
 from .multiaddr import MultiAddr
 from .connection.raw_connection import RawConnection
-from protocol_muxer.multiselect_client import MultiselectClient
-from protocol_muxer.multiselect_client import MultiselectClientError
-from protocol_muxer.multiselect import Multiselect
-from protocol_muxer.multiselect import MultiselectError
 
 
 class Swarm(INetwork):
@@ -108,11 +106,12 @@ class Swarm(INetwork):
                     multiaddr_dict['port'], reader, writer)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, False)
 
-                # TODO: Remove protocol id from muxed_conn accept stream or move protocol muxing into accept_stream
-                muxed_stream, _, protocol_id = await muxed_conn.accept_stream()
-                
+                # TODO: Remove protocol id from muxed_conn accept stream or
+                # move protocol muxing into accept_stream
+                muxed_stream, _, _ = await muxed_conn.accept_stream()
+
                 # Perform protocol muxing to determine protocol to use
-                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)        
+                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
 
                 net_stream = NetStream(muxed_stream)
                 net_stream.set_protocol(selected_protocol)
