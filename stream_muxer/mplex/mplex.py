@@ -23,8 +23,6 @@ class Mplex(IMuxedConn):
         self.buffers = {}
 
         self.stream_queue = asyncio.Queue()
-        self.conn_lock = asyncio.Lock()
-        self.buffers_lock = asyncio.Lock()
         self._next_id = 0
         self.data_buffer = bytearray()
 
