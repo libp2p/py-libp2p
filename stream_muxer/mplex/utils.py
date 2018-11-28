@@ -34,8 +34,8 @@ async def decode_uvarint_from_stream(reader):
     shift = 0
     result = 0
     while True:
-        b = await asyncio.wait_for(reader.read(1), timeout=5)
-        i = struct.unpack('>H', b'\x00' + b)[0]
+        byte = await asyncio.wait_for(reader.read(1), timeout=5)
+        i = struct.unpack('>H', b'\x00' + byte)[0]
         result |= (i & 0x7f) << shift
         shift += 7
         if not i & 0x80:
