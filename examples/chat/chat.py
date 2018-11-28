@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import sys
 from os.path import dirname, abspath
 sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
@@ -23,7 +23,7 @@ async def read_data(stream):
         if read_string != "\n":
             # Green console colour: 	\x1b[32m
             # Reset console colour: 	\x1b[0m
-            print("\x1b[32m%s\x1b[0m" % read_string)
+            print("\x1b[32m%s\x1b[0m> " % read_string, end="")
 
 
 async def write_data(stream):
@@ -60,6 +60,7 @@ async def run(port, destination):
         print("You can replace 127.0.0.1 with public IP as well.")
         print("\nWaiting for incoming connection\n\n")
 
+
     else:
         host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s/p2p/hostB" % port])
 
@@ -78,6 +79,7 @@ async def run(port, destination):
 
         asyncio.ensure_future(read_data(stream))
         asyncio.ensure_future(write_data(stream))
+        print("Already connected to peer %s" % addr)
 
 
 @click.command()
