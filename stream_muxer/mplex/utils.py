@@ -1,3 +1,6 @@
+import asyncio
+import struct
+
 def encode_uvarint(number):
     """Pack `number` into varint bytes"""
     buf = b''
@@ -23,3 +26,16 @@ def decode_uvarint(buff, index):
         index += 1
 
     return result, index + 1
+
+async def decode_uvarint_from_stream(reader):
+    shift = 0
+    result = 0
+    while True:
+        byte = await asyncio.wait_for(reader.read(1), timeout=5)
+        i = struct.unpack('>H', b'\x00' + byte)[0]
+        result |= (i & 0x7f) << shift
+        shift += 7
+        if not i & 0x80:
+            break
+
+    return result
