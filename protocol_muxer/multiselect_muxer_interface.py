@@ -1,6 +1,11 @@
 from abc import ABC, abstractmethod
 
 class IMultiselectMuxer(ABC):
+    """
+    Multiselect module that is responsible for responding to
+    a multiselect client and deciding on
+    a specific protocol and handler pair to use for communication
+    """
 
     @abstractmethod
     def add_handler(self, protocol, handler):

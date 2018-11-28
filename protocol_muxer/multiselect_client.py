@@ -5,7 +5,11 @@ MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 
 class MultiselectClient(IMultiselectClient):
-
+    """
+    Client for communicating with receiver's multiselect
+    module in order to select a protocol id to communicate over
+    """
+    
     def __init__(self):
         pass
 
@@ -37,12 +41,12 @@ class MultiselectClient(IMultiselectClient):
         :param handshake_contents: contents of handshake message
         :return: true if handshake is complete, false otherwise
         """
-        
+
         # TODO: Modify this when format used by go repo for messages
         # is added
         return handshake_contents == MULTISELECT_PROTOCOL_ID
 
-    async def select_proto_or_fail(self, protocol, stream):
+    async def select_protocol_or_fail(self, protocol, stream):
         """
         Send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol

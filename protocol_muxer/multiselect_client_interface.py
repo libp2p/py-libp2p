@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
 
 class IMultiselectClient(ABC):
+    """
+    Client for communicating with receiver's multiselect
+    module in order to select a protocol id to communicate over
+    """
 
     @abstractmethod
-    def select_proto_or_fail(self, protocol, stream):
+    def select_protocol_or_fail(self, protocol, stream):
         """
         Send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol

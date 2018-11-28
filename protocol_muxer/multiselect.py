@@ -5,6 +5,11 @@ MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 
 class Multiselect(IMultiselectMuxer):
+    """
+    Multiselect module that is responsible for responding to
+    a multiselect client and deciding on
+    a specific protocol and handler pair to use for communication
+    """
 
     def __init__(self):
         self.handlers = {}
