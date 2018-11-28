@@ -10,9 +10,21 @@ class Multiselect(IMultiselectMuxer):
         self.handlers = {}
 
     def add_handler(self, protocol, handler):
+        """
+        Store the handler with the given protocol
+        :param protocol: protocol name
+        :param handler: handler function
+        """
         self.handlers[protocol] = handler
 
     async def negotiate(self, stream):
+        """
+        Negotiate performs protocol selection
+        :param stream: stream to negotiate on
+        :return: selected protocol name, handler function
+        :raise Exception: negotiation failed exception
+        """
+
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
@@ -40,6 +52,12 @@ class Multiselect(IMultiselectMuxer):
                 await communicator.write(PROTOCOL_NOT_FOUND_MSG)
 
     async def handshake(self, communicator):
+        """
+        Perform handshake to agree on multiselect protocol
+        :param communicator: communicator to use
+        :raise Exception: error in handshake
+        """
+
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to other party
@@ -55,6 +73,12 @@ class Multiselect(IMultiselectMuxer):
         # Handshake succeeded if this point is reached
 
     def validate_handshake(self, handshake_contents):
+        """
+        Determine if handshake is valid and should be confirmed
+        :param handshake_contents: contents of handshake message
+        :return: true if handshake is complete, false otherwise
+        """
+
         # TODO: Modify this when format used by go repo for messages
         # is added
         return handshake_contents == MULTISELECT_PROTOCOL_ID

@@ -32,11 +32,25 @@ class MultiselectClient(IMultiselectClient):
         # Handshake succeeded if this point is reached
 
     def validate_handshake(self, handshake_contents):
+        """
+        Determine if handshake is valid and should be confirmed
+        :param handshake_contents: contents of handshake message
+        :return: true if handshake is complete, false otherwise
+        """
+        
         # TODO: Modify this when format used by go repo for messages
         # is added
         return handshake_contents == MULTISELECT_PROTOCOL_ID
 
     async def select_proto_or_fail(self, protocol, stream):
+        """
+        Send message to multiselect selecting protocol
+        and fail if multiselect does not return same protocol
+        :param protocol: protocol to select
+        :param stream: stream to communicate with multiselect over
+        :return: selected protocol
+        """
+
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
@@ -49,6 +63,15 @@ class MultiselectClient(IMultiselectClient):
         return selected_protocol
 
     async def select_one_of(self, protocols, stream):
+        """
+        For each protocol, send message to multiselect selecting protocol
+        and fail if multiselect does not return same protocol. Returns first
+        protocol that multiselect agrees on (i.e. that multiselect selects)
+        :param protocol: protocol to select
+        :param stream: stream to communicate with multiselect over
+        :return: selected protocol
+        """
+
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
@@ -68,6 +91,14 @@ class MultiselectClient(IMultiselectClient):
         raise MultiselectClientError("protocols not supported")
 
     async def try_select(self, communicator, protocol):
+        """
+        Try to select the given protocol or raise exception if fails
+        :param communicator: communicator to use to communicate with counterparty
+        :param protocol: protocol to select
+        :raise Exception: error in protocol selection
+        :return: selected protocol
+        """
+
         # Tell counterparty we want to use protocol
         await communicator.write(protocol)
 
