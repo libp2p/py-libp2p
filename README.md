@@ -1,4 +1,4 @@
-# py-libp2p [![Build Status](https://travis-ci.com/zixuanzh/py-libp2p.svg?branch=master)](https://travis-ci.com/zixuanzh/py-libp2p) [![codecov](https://codecov.io/gh/zixuanzh/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/zixuanzh/py-libp2p)
+# py-libp2p [![Build Status](https://travis-ci.com/zixuanzh/py-libp2p.svg?branch=master)](https://travis-ci.com/zixuanzh/py-libp2p) [![codecov](https://codecov.io/gh/zixuanzh/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/zixuanzh/py-libp2p) [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby)
 
 
 
