@@ -56,7 +56,6 @@ class Mplex(IMuxedConn):
         if stream_id in self.buffers:
             return await self._read_buffer_exists(stream_id)
 
-        print("after handle incoming, buffer still wasnt created")
         return None
 
     async def _read_buffer_exists(self, stream_id):
@@ -110,13 +109,11 @@ class Mplex(IMuxedConn):
             data_length = encode_uvarint(len(data))
             _bytes = header + data_length + data
 
-        print(str(_bytes) + " was written")
         return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
         self.raw_conn.writer.write(_bytes)
         await self.raw_conn.writer.drain()
-        print("_bytes was written" + str(self.initiator))
         return len(_bytes)
 
     async def handle_incoming(self):
@@ -127,13 +124,12 @@ class Mplex(IMuxedConn):
 
         if stream_id not in self.buffers:
             self.buffers[stream_id] = asyncio.Queue()
-            print("creating queue!" + str(self.initiator))
             await self.stream_queue.put(stream_id)
 
         await self.buffers[stream_id].put(message)
-        print("put into buffer")
 
     async def read_chunk(self):
+        # unused now but possibly useful in the future
         try:
             chunk = await asyncio.wait_for(self.raw_conn.reader.read(-1), timeout=5)
             self.data_buffer += chunk

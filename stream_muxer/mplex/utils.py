@@ -19,9 +19,6 @@ def decode_uvarint(buff, index):
     result = 0
     while True:
         i = buff[index]
-        print("buff " + str(type(buff)))
-        print("i " + str(type(i)))
-        print('buff[index] ' + str(type(buff[index])))
         result |= (i & 0x7f) << shift
         shift += 7
         if not i & 0x80:
