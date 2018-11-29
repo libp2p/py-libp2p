@@ -10,6 +10,16 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    def dial_peer(self, peer_id):
+        """
+        dial_peer try to create a connection to peer_id
+
+        :param peer_id: peer if we want to dial
+        :raises SwarmException: raised when no address if found for peer_id
+        :return: muxed connection
+        """
+
+    @abstractmethod
     def set_stream_handler(self, protocol_id, stream_handler):
         """
         :param protocol_id: protocol id used on stream

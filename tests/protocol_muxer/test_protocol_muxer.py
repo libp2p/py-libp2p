@@ -14,8 +14,8 @@ from protocol_muxer.multiselect_client import MultiselectClientError
 async def perform_simple_test(expected_selected_protocol, \
     protocols_for_client, protocols_with_handlers, \
     node_a_port, node_b_port):
-    transport_opt_a = ["/ip4/127.0.0.1/tcp/" + str(node_a_port) + "/ipfs/node_a"]
-    transport_opt_b = ["/ip4/127.0.0.1/tcp/" + str(node_b_port) + "/ipfs/node_b"]
+    transport_opt_a = ["/ip4/127.0.0.1/tcp/" + str(node_a_port)]
+    transport_opt_b = ["/ip4/127.0.0.1/tcp/" + str(node_b_port)]
     node_a = await new_node(\
         transport_opt=transport_opt_a)
     node_b = await new_node(\
@@ -34,9 +34,9 @@ async def perform_simple_test(expected_selected_protocol, \
         node_b.set_stream_handler(protocol, stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addr("node_b", "/ip4/127.0.0.1/tcp/" + str(node_b_port), 10)
+    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
 
-    stream = await node_a.new_stream("node_b", protocols_for_client)
+    stream = await node_a.new_stream(node_b.get_id(), protocols_for_client)
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
         await stream.write(message.encode())

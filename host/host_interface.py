@@ -22,6 +22,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_addrs(self):
+        """
+        :return: all the multiaddr addresses this host is listening too
+        """
+
+    @abstractmethod
     def set_stream_handler(self, protocol_id, stream_handler):
         """
         set stream handler for host
@@ -38,4 +44,17 @@ class IHost(ABC):
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on
         :return: true if successful
+        """
+
+    @abstractmethod
+    def connect(self, peer_info):
+        """
+        connect ensures there is a connection between this host and the peer with
+        given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal
+        peerstore. If there is not an active connection, connect will issue a
+        dial, and block until a connection is open, or an error is
+        returned.
+
+        :param peer_info: peer_info of the host we want to connect to
+        :type peer_info: peer.peerinfo.PeerInfo
         """

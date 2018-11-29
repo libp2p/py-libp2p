@@ -23,15 +23,12 @@ class TCP(ITransport):
             """
             _multiaddr = multiaddr
 
-            # TODO check for exceptions
-            if "ipfs" in _multiaddr.get_protocols():
-                # ipfs_id = multiaddr.get_ipfs_id()
-                _multiaddr.remove_protocol("ipfs")
-
+            _multiaddr = _multiaddr.decapsulate('/ipfs')
             self.multiaddrs.append(_multiaddr)
-            multiaddr_dict = _multiaddr.to_options()
-            coroutine = asyncio.start_server(self.handler, multiaddr_dict['host'],\
-                multiaddr_dict['port'])
+
+            coroutine = asyncio.start_server(self.handler,
+                                            _multiaddr.value_for_protocol('ip4'),
+                                            _multiaddr.value_for_protocol('tcp'))
             self.server = await coroutine
             return True
 
@@ -67,9 +64,8 @@ class TCP(ITransport):
         :param options: optional object
         :return: True if successful
         """
-        _multiaddr_dict = multiaddr.to_options()
-        host = _multiaddr_dict['host']
-        port = _multiaddr_dict['port']
+        host = multiaddr.value_for_protocol('ip4')
+        port = int(multiaddr.value_for_protocol('tcp'))
 
         reader, writer = await asyncio.open_connection(host, port)
 
@@ -79,7 +75,7 @@ class TCP(ITransport):
         """
         create listener on transport
         :param options: optional object with properties the listener must have
-        :param handler_function: a function called when a new conntion is received
+        :param handler_function: a function called when a new connection is received
         that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
