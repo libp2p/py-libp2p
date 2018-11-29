@@ -23,7 +23,7 @@ class Mplex(IMuxedConn):
         self.buffers = {}
 
         self.stream_queue = asyncio.Queue()
-        self._next_id = 0
+        self._next_id = 0 if self.initiator else 1
         self.data_buffer = bytearray()
 
         # The initiator need not read upon construction time.
@@ -37,7 +37,7 @@ class Mplex(IMuxedConn):
         :return: next available stream id for the connection
         """
         next_id = self._next_id
-        self._next_id += 1
+        self._next_id += 2
         return next_id
 
     def close(self):
