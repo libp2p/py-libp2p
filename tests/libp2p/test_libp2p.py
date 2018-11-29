@@ -85,7 +85,7 @@ async def test_host_connect():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001/"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000/"])
 
-    assert len(node_a.get_peerstore().peers()) == 0
+    assert not node_a.get_peerstore().peers()
 
     addr = node_b.get_addrs()[0]
     info = info_from_p2p_addr(addr)

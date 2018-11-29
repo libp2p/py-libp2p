@@ -1,11 +1,11 @@
 from Crypto.PublicKey import RSA
+import multiaddr
 from peer.peerstore import PeerStore
 from peer.id import id_from_public_key
 from network.swarm import Swarm
 from host.basic_host import BasicHost
 from transport.upgrader import TransportUpgrader
 from transport.tcp.tcp import TCP
-import multiaddr
 
 
 async def new_node(id_opt=None, transport_opt=None, \

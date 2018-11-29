@@ -1,7 +1,8 @@
-from peer.id import id_b58_decode
-from peer.peerdata import PeerData
 import multiaddr
 import multiaddr.util
+from peer.id import id_b58_decode
+from peer.peerdata import PeerData
+
 
 class PeerInfo:
 	# pylint: disable=too-few-public-methods
@@ -10,12 +11,12 @@ class PeerInfo:
         self.addrs = peer_data.get_addrs()
 
 
-def info_from_p2p_addr(m):
-    if not m:
+def info_from_p2p_addr(addr):
+    if not addr:
         raise InvalidAddrError()
 
-    parts = multiaddr.util.split(m)
-    if len(parts) < 1:
+    parts = multiaddr.util.split(addr)
+    if not parts:
         raise InvalidAddrError()
 
     ipfspart = parts[-1]
@@ -23,9 +24,8 @@ def info_from_p2p_addr(m):
         raise InvalidAddrError()
 
     # make sure the /ipfs value parses as a peer.ID
-    peerIdParts = str(ipfspart).split('/')
-    peerIdStr = ipfspart.value_for_protocol(multiaddr.protocols.P_IPFS)
-    id = id_b58_decode(peerIdStr)
+    peer_id_str = ipfspart.value_for_protocol(multiaddr.protocols.P_IPFS)
+    peer_id = id_b58_decode(peer_id_str)
 
     # we might have received just an / ipfs part, which means there's no addr.
     if len(parts) > 1:
@@ -35,7 +35,7 @@ def info_from_p2p_addr(m):
     peer_data.addrs = [addr]
     peer_data.protocols = [p.code for p in addr.protocols()]
 
-    return PeerInfo(id, peer_data)
+    return PeerInfo(peer_id, peer_data)
 
 
 class InvalidAddrError(ValueError):

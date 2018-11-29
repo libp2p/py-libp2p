@@ -27,38 +27,39 @@ class ID:
     __repr__ = __str__
 
     def __eq__(self, other):
+        #pylint: disable=protected-access
         return self._id_str == other._id_str
 
     def __hash__(self):
         return hash(self._id_str)
 
 
-def id_b58_encode(id):
+def id_b58_encode(peer_id):
     """
     return a b58-encoded string
     """
-    return base58.b58encode(id._id_str).decode()
+    #pylint: disable=protected-access
+    return base58.b58encode(peer_id._id_str).decode()
 
 
-def id_b58_decode(s):
+def id_b58_decode(peer_id_str):
     """
     return a base58-decoded peer ID
     """
-    id_str = base58.b58decode(s)
-    return ID(id_str)
+    return ID(base58.b58decode(peer_id_str))
 
 
 def id_from_public_key(key):
     # export into binary format
-    b = key.exportKey("DER")
+    key_bin = key.exportKey("DER")
 
     algo = multihash.Func.sha2_256
     # TODO: seems identity is not yet supported in pymultihash
     # if len(b) <= MAX_INLINE_KEY_LENGTH:
     #     algo multihash.func.identity
 
-    mh = multihash.digest(b, algo)
-    return ID(mh.encode())
+    mh_digest = multihash.digest(key_bin, algo)
+    return ID(mh_digest.encode())
 
 
 def id_from_private_key(key):
