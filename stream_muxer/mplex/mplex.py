@@ -10,35 +10,25 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    def __init__(self, conn, initiator):
+    def __init__(self, conn):
         """
         create a new muxed connection
         :param conn: an instance of raw connection
         :param initiator: boolean to prevent multiplex with self
         """
         self.raw_conn = conn
-        self.initiator = initiator
+        self.initiator = conn.initiator
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.buffers = {}
 
         self.stream_queue = asyncio.Queue()
-        self._next_id = 0 if self.initiator else 1
         self.data_buffer = bytearray()
 
-        # The initiator need not read upon construction time.
+        # The initiator of the raw connection need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
-        if not initiator:
+        if not self.initiator:
             asyncio.ensure_future(self.handle_incoming())
-
-    def _next_stream_id(self):
-        """
-        Get next available stream id
-        :return: next available stream id for the connection
-        """
-        next_id = self._next_id
-        self._next_id += 2
-        return next_id
 
     def close(self):
         """
@@ -88,7 +78,7 @@ class Mplex(IMuxedConn):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
-        stream_id = self._next_stream_id()
+        stream_id = self.raw_conn.next_stream_id()
         stream = MplexStream(stream_id, multi_addr, self)
         self.buffers[stream_id] = asyncio.Queue()
         return stream
