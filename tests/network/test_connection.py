@@ -1,9 +1,6 @@
 import asyncio
 import pytest
 
-# from network.connection.raw_connection import RawConnection
-
-
 async def handle_echo(reader, writer):
     data = await reader.read(100)
     writer.write(data)
@@ -20,7 +17,6 @@ async def test_simple_echo():
     await asyncio.start_server(handle_echo, server_ip, server_port)
 
     reader, writer = await asyncio.open_connection(server_ip, server_port)
-    # raw_connection = RawConnection(server_ip, server_port, reader, writer)
 
     test_message = "hello world"
     writer.write(test_message.encode())

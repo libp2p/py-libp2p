@@ -69,7 +69,7 @@ class TCP(ITransport):
 
         reader, writer = await asyncio.open_connection(host, port)
 
-        return RawConnection(host, port, reader, writer)
+        return RawConnection(host, port, reader, writer, True)
 
     def create_listener(self, handler_function, options=None):
         """
