@@ -1,7 +1,11 @@
 import asyncio
-from transport.transport_interface import ITransport
-from transport.listener_interface import IListener
+
+import multiaddr
+
 from network.connection.raw_connection import RawConnection
+from transport.listener_interface import IListener
+from transport.transport_interface import ITransport
+
 
 class TCP(ITransport):
 
@@ -22,14 +26,15 @@ class TCP(ITransport):
             :return: return True if successful
             """
             _multiaddr = multiaddr
-
             _multiaddr = _multiaddr.decapsulate('/ipfs')
-            self.multiaddrs.append(_multiaddr)
 
             coroutine = asyncio.start_server(self.handler,
-                                            _multiaddr.value_for_protocol('ip4'),
-                                            _multiaddr.value_for_protocol('tcp'))
+                                             _multiaddr.value_for_protocol('ip4'),
+                                             _multiaddr.value_for_protocol('tcp'))
             self.server = await coroutine
+            socket = self.server.sockets[0]
+            self.multiaddrs.append(_multiaddr_from_socket(socket))
+
             return True
 
         def get_addrs(self):
@@ -80,3 +85,7 @@ class TCP(ITransport):
         :return: a listener object that implements listener_interface.py
         """
         return self.Listener(handler_function)
+
+
+def _multiaddr_from_socket(socket):
+    return multiaddr.Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())
