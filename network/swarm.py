@@ -152,6 +152,15 @@ class Swarm(INetwork):
     def add_transport(self, transport):
         # TODO: Support more than one transport
         self.transport = transport
+   
+    def __del__(self):
+        for key, valuable in self.listeners.items():
+            print("Trying to close ", key)
+            try:
+                valuable.close() # Call the Listener class close method
+            except RuntimeError as err:
+                print("Encountered error, ", err)
+
 
 
 class SwarmException(Exception):
