@@ -187,6 +187,13 @@ class Swarm(INetwork):
         # TODO: Support more than one transport
         self.transport = transport
 
+    def __del__(self):
+        for key, valuable in self.listeners.items():
+            print("Trying to close ", key)
+            try:
+                valuable.close() # Call the Listener class close method
+            except RuntimeError as err:
+                print("Encountered error, ", err)
 def create_generic_protocol_handler(swarm):
     """
     Create a generic protocol handler from the given swarm. We use swarm
@@ -211,6 +218,8 @@ def create_generic_protocol_handler(swarm):
         asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
+
+
 
 class SwarmException(Exception):
     pass
