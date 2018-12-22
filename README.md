@@ -45,16 +45,31 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Transport Protocols                          | Status        |
 | -------------------------------------------- | :-----------: |
-| **`TCP`**                                    | :green_apple: |
+| **`TCP`**                                    | :lemon: tests |
 | **`UDP`**                                    | :tomato:      |
 | **`WebSockets`**                             | :tomato:      |
 | **`UTP`**                                    | :tomato:      |
+| **`WebRTC`**                                 | :chestnut:    |
+| **`SCTP`**                                   | :chestnut:    |
+| **`Tor`**                                    | :chestnut:    |
+| **`i2p`**                                    | :chestnut:    |
+| **`cjdns`**                                  | :chestnut:    |
+| **`Bluetooth LE`**                           | :chestnut:    |
+| **`Audio TP`**                               | :chestnut:    |
+| **`Zerotier`**                               | :chestnut:    |
+| **`QUIC`**                                   | :chestnut:    |
 
 
 | Stream Muxers                                | Status        |
 | -------------------------------------------- | :-----------: |
-| **`multiplex`**                              | :green_apple: |
+| **`multiplex`**                              | :lemon: tests |
 | **`yamux`**                                  | :tomato:      |
+| **`benchmarks`**                             | :chestnut:    |
+| **`muxado`**                                 | :chestnut:    |
+| **`spdystream`**                             | :chestnut:    |
+| **`spdy`**                                   | :chestnut:    |
+| **`http2`**                                  | :chestnut:    |
+| **`QUIC`**                                   | :chestnut:    |
 
 
 | Protocol Muxers                              | Status        |
@@ -64,7 +79,8 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Switch (Swarm)                               | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Switch`**                                 | :green_apple: |
+| **`Switch`**                                 | :lemon: tests |
+| **`Dialer stack`**                           | :chestnut:    |
 
 
 | Peer Discovery                               | Status        |
@@ -72,6 +88,8 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | **`bootstrap list`**                         | :green_apple: |
 | **`Kademlia DHT`**                           | :tomato:      |
 | **`mDNS`**                                   | :tomato:      |
+| **`PEX`**                                    | :chestnut:    |
+| **`DNS`**                                    | :chestnut:    |
 
 
 | Content Routing                              | Status        |
@@ -79,11 +97,40 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | **`Kademlia DHT`**                           | :tomato:      |
 | **`floodsub`**                               | :tomato:      |
 | **`gossipsub`**                              | :tomato:      |
+| **`PHT`**                                    | :chestnut:    |
 
 
 | Peer Routing                                 | Status        |
 | -------------------------------------------- | :-----------: |
 | **`Kademlia DHT`**                           | :tomato:      |
+| **`floodsub`**                               | :tomato:      |
+| **`gossipsub`**                              | :tomato:      |
+| **`PHT`**                                    | :chestnut:    |
+
+
+| NAT Traversal                                | Status        |
+| -------------------------------------------- | :-----------: |
+| **`nat-pmp`**                                | :chestnut:    |
+| **`upnp`**                                   | :chestnut:    |
+| **`ext addr discovery`**                     | :chestnut:    |
+| **`STUN-like`**                              | :chestnut:    |
+| **`line-switch relay`**                      | :chestnut:    |
+| **`pkt-switch relay`**                       | :chestnut:    |
+
+
+| Exchange                                     | Status        |
+| -------------------------------------------- | :-----------: |
+| **`HTTP`**                                   | :chestnut:    |
+| **`Bitswap`**                                | :chestnut:    |
+| **`Bittorrent`**                             | :chestnut:    |
+
+
+| Consensus                                    | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Paxos`**                                  | :chestnut:    |
+| **`Raft`**                                   | :chestnut:    |
+| **`PBTF`**                                   | :chestnut:    |
+| **`Nakamoto`**                               | :chestnut:    |
 
 
 ## Explanation of Basic Two Node Communication
