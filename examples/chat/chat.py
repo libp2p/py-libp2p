@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-import sys
-from os.path import dirname, abspath
-sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
-
 import asyncio
+import sys
+from os.path import abspath, dirname
 
 import click
+
 from libp2p.libp2p import *
 from network.multiaddr import MultiAddr
 from peer.peerinfo import info_from_p2p_addr
 
+sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
 
-# TODO: change once muxed_connection supports extracting protocol id from messages
-PROTOCOL_ID = '/echo/1.0.0'
+
+PROTOCOL_ID = '/chat/1.0.0'
 
 
 async def read_data(stream):

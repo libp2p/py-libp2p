@@ -7,8 +7,8 @@ from peer.peerinfo import info_from_p2p_addr
 
 @pytest.mark.asyncio
 async def test_simple_messages():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
     async def stream_handler(stream):
         while True:
@@ -41,8 +41,8 @@ async def test_simple_messages():
 
 @pytest.mark.asyncio
 async def test_double_response():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8002"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8003"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
     async def stream_handler(stream):
         while True:
@@ -80,12 +80,13 @@ async def test_double_response():
     # Success, terminate pending tasks.
     return
 
+
 @pytest.mark.asyncio
 async def test_multiple_streams():
     # Node A should be able to open a stream with node B and then vice versa.
     # Stream IDs should be generated uniquely so that the stream state is not overwritten
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8004"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8005"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
     async def stream_handler_a(stream):
         while True:
@@ -128,10 +129,11 @@ async def test_multiple_streams():
     # Success, terminate pending tasks.
     return
 
+
 @pytest.mark.asyncio
 async def test_host_connect():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8001/"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8000/"])
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
     assert not node_a.get_peerstore().peers()
 
