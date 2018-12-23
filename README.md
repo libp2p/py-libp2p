@@ -28,9 +28,114 @@ pytest
 ```
 Note that tests/libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of concept.
 
-# Explanation of Basic Two Node Communication
+## Feature Breakdown
+py-libp2p aims for conformity with [the standard libp2p modules](https://github.com/libp2p/libp2p/blob/master/REQUIREMENTS.md#libp2p-modules-implementations). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
 
-## Core Concepts
+> Legend: :green_apple: Done &nbsp; :lemon: In Progress &nbsp; :tomato: Missing &nbsp; :chestnut: Not planned
+
+| libp2p Node                                  | Status        |
+| -------------------------------------------- | :-----------: |
+| **`libp2p`**                                 | :green_apple: |
+
+
+| Identify Protocol                            | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Identify`**                               | :tomato:      |
+
+
+| Transport Protocols                          | Status        |
+| -------------------------------------------- | :-----------: |
+| **`TCP`**                                    | :lemon: tests |
+| **`UDP`**                                    | :tomato:      |
+| **`WebSockets`**                             | :tomato:      |
+| **`UTP`**                                    | :tomato:      |
+| **`WebRTC`**                                 | :chestnut:    |
+| **`SCTP`**                                   | :chestnut:    |
+| **`Tor`**                                    | :chestnut:    |
+| **`i2p`**                                    | :chestnut:    |
+| **`cjdns`**                                  | :chestnut:    |
+| **`Bluetooth LE`**                           | :chestnut:    |
+| **`Audio TP`**                               | :chestnut:    |
+| **`Zerotier`**                               | :chestnut:    |
+| **`QUIC`**                                   | :chestnut:    |
+
+
+| Stream Muxers                                | Status        |
+| -------------------------------------------- | :-----------: |
+| **`multiplex`**                              | :lemon: tests |
+| **`yamux`**                                  | :tomato:      |
+| **`benchmarks`**                             | :chestnut:    |
+| **`muxado`**                                 | :chestnut:    |
+| **`spdystream`**                             | :chestnut:    |
+| **`spdy`**                                   | :chestnut:    |
+| **`http2`**                                  | :chestnut:    |
+| **`QUIC`**                                   | :chestnut:    |
+
+
+| Protocol Muxers                              | Status        |
+| -------------------------------------------- | :-----------: |
+| **`multiselect`**                            | :green_apple: |
+
+
+| Switch (Swarm)                               | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Switch`**                                 | :lemon: tests |
+| **`Dialer stack`**                           | :chestnut:    |
+
+
+| Peer Discovery                               | Status        |
+| -------------------------------------------- | :-----------: |
+| **`bootstrap list`**                         | :green_apple: |
+| **`Kademlia DHT`**                           | :tomato:      |
+| **`mDNS`**                                   | :tomato:      |
+| **`PEX`**                                    | :chestnut:    |
+| **`DNS`**                                    | :chestnut:    |
+
+
+| Content Routing                              | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Kademlia DHT`**                           | :tomato:      |
+| **`floodsub`**                               | :tomato:      |
+| **`gossipsub`**                              | :tomato:      |
+| **`PHT`**                                    | :chestnut:    |
+
+
+| Peer Routing                                 | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Kademlia DHT`**                           | :tomato:      |
+| **`floodsub`**                               | :tomato:      |
+| **`gossipsub`**                              | :tomato:      |
+| **`PHT`**                                    | :chestnut:    |
+
+
+| NAT Traversal                                | Status        |
+| -------------------------------------------- | :-----------: |
+| **`nat-pmp`**                                | :chestnut:    |
+| **`upnp`**                                   | :chestnut:    |
+| **`ext addr discovery`**                     | :chestnut:    |
+| **`STUN-like`**                              | :chestnut:    |
+| **`line-switch relay`**                      | :chestnut:    |
+| **`pkt-switch relay`**                       | :chestnut:    |
+
+
+| Exchange                                     | Status        |
+| -------------------------------------------- | :-----------: |
+| **`HTTP`**                                   | :chestnut:    |
+| **`Bitswap`**                                | :chestnut:    |
+| **`Bittorrent`**                             | :chestnut:    |
+
+
+| Consensus                                    | Status        |
+| -------------------------------------------- | :-----------: |
+| **`Paxos`**                                  | :chestnut:    |
+| **`Raft`**                                   | :chestnut:    |
+| **`PBTF`**                                   | :chestnut:    |
+| **`Nakamoto`**                               | :chestnut:    |
+
+
+## Explanation of Basic Two Node Communication
+
+### Core Concepts
 
 _(non-normative, useful for team notes, not a reference)_
 
@@ -44,12 +149,12 @@ Several components of the libp2p stack take part when establishing a connection 
 5. **Secure channel**: optionally establishes a secure, encrypted, and authenticated channel over the _Connection_.
 5. **Upgrader**: a component that takes a raw layer 3 connection returned by the _Transport_, and performs the security and multiplexing negotiation to set up a secure, multiplexed channel on top of which _Streams_ can be opened.
 
-## Communication between two hosts X and Y
+### Communication between two hosts X and Y
 
 _(non-normative, useful for team notes, not a reference)_
 
-**Initiate the connection**: A host is simply a node in the libp2p network that is able to communicate with other nodes in the network. In order for X and Y to communicate with one another, one of the hosts must initiate the connection.  Let's say that X is going to initiate the connection. X will first open a connection to Y. This connection is where all of the actual communication will take place. 
+**Initiate the connection**: A host is simply a node in the libp2p network that is able to communicate with other nodes in the network. In order for X and Y to communicate with one another, one of the hosts must initiate the connection.  Let's say that X is going to initiate the connection. X will first open a connection to Y. This connection is where all of the actual communication will take place.
 
-**Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y. 
+**Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y.
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
