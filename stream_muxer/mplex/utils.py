@@ -27,11 +27,11 @@ def decode_uvarint(buff, index):
 
     return result, index + 1
 
-async def decode_uvarint_from_stream(reader):
+async def decode_uvarint_from_stream(reader, timeout):
     shift = 0
     result = 0
     while True:
-        byte = await asyncio.wait_for(reader.read(1), timeout=5)
+        byte = await asyncio.wait_for(reader.read(1), timeout=timeout)
         i = struct.unpack('>H', b'\x00' + byte)[0]
         result |= (i & 0x7f) << shift
         shift += 7
