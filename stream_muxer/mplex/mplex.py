@@ -28,7 +28,7 @@ class Mplex(IMuxedConn):
         # The initiator of the raw connection need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
         if not self.initiator:
-            asyncio.ensure_future(self.handle_incoming())
+            asyncio.ensure_future(self.handle_incoming(None))
 
     def close(self):
         """
@@ -51,7 +51,7 @@ class Mplex(IMuxedConn):
         # Empty buffer or nonexistent stream
         # TODO: propagate up timeout exception and catch
         if stream_id not in self.buffers or self.buffers[stream_id].empty():
-            await self.handle_incoming()
+            await self.handle_incoming(stream_id)
         if stream_id in self.buffers:
             return await self._read_buffer_exists(stream_id)
 
@@ -125,20 +125,25 @@ class Mplex(IMuxedConn):
         await self.raw_conn.writer.drain()
         return len(_bytes)
 
-    async def handle_incoming(self):
+    async def handle_incoming(self, my_stream_id):
         """
         Read a message off of the raw connection and add it to the corresponding message buffer
         """
         # TODO Deal with other types of messages using flag (currently _)
         # TODO call read_message in loop to handle case message for other stream was in conn
 
-        stream_id, _, message = await self.read_message()
+        flag = True
+        i = 0
+        while flag:
+            i += 1
+            stream_id, _, message = await self.read_message()
+            flag = stream_id is not None and stream_id != my_stream_id and my_stream_id is not None
 
-        if stream_id not in self.buffers:
-            self.buffers[stream_id] = asyncio.Queue()
-            await self.stream_queue.put(stream_id)
+            if stream_id not in self.buffers:
+                self.buffers[stream_id] = asyncio.Queue()
+                await self.stream_queue.put(stream_id)
 
-        await self.buffers[stream_id].put(message)
+            await self.buffers[stream_id].put(message)
 
     async def read_chunk(self):
         """
@@ -157,12 +162,12 @@ class Mplex(IMuxedConn):
         Read a single message off of the raw connection
         :return: stream_id, flag, message contents
         """
+        timeout = .1
         try:
-            header = await decode_uvarint_from_stream(self.raw_conn.reader)
-            length = await decode_uvarint_from_stream(self.raw_conn.reader)
-            message = await asyncio.wait_for(self.raw_conn.reader.read(length), timeout=5)
+            header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
+            length = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
+            message = await asyncio.wait_for(self.raw_conn.reader.read(length), timeout=timeout)
         except asyncio.TimeoutError:
-            print("message malformed")
             return None, None, None
 
         flag = header & 0x07
