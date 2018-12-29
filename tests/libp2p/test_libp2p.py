@@ -149,6 +149,6 @@ async def test_host_connect():
     assert len(node_a.get_peerstore().peers()) == 1
 
     assert node_b.get_id() in node_a.get_peerstore().peers()
-    ma_node_b = multiaddr.Multiaddr('/ipfs/%s' % node_b.get_id().pretty())
+    ma_node_b = multiaddr.Multiaddr('/p2p/%s' % node_b.get_id().pretty())
     for addr in node_a.get_peerstore().addrs(node_b.get_id()):
         assert addr.encapsulate(ma_node_b) in node_b.get_addrs()

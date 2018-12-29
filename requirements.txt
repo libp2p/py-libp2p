@@ -6,4 +6,4 @@ pytest-asyncio
 click
 base58
 pymultihash
-py-multiaddr
+multiaddr
