@@ -1,5 +1,5 @@
-from protocol_muxer.multiselect_client import MultiselectClient
-from protocol_muxer.multiselect import Multiselect
+from multistream_select.multiselect_client import MultiselectClient
+from multistream_select.multiselect import Multiselect
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection

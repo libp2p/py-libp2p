@@ -1,7 +1,8 @@
 import pytest
 
+from multistream_select.multiselect_client import MultiselectClientError
 from libp2p.libp2p import new_node
-from protocol_muxer.multiselect_client import MultiselectClientError
+
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection

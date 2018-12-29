@@ -8,7 +8,7 @@ import pytest
 
 from libp2p.libp2p import *
 from peer.peerinfo import info_from_p2p_addr
-from protocol_muxer.multiselect_client import MultiselectClientError
+from multistream_select.multiselect_client import MultiselectClientError
 
 PROTOCOL_ID = '/chat/1.0.0'
 

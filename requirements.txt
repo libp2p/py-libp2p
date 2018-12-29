@@ -7,3 +7,4 @@ click
 base58
 pymultihash
 multiaddr
+multistream-select
