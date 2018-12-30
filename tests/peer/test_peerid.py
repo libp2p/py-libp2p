@@ -54,8 +54,6 @@ def test_eq_true():
 	assert actual == expected
 
 
-
-
 def test_eq_false():
 
 	other = ID("efgh")
@@ -73,6 +71,23 @@ def test_hash():
 
 	assert actual == expected
 
+
+def test_id_b58_encode():
+	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
+
+	expected = base58.b58encode(random_id_string).decode()
+	actual = id_b58_encode(ID(random_id_string))
+
+	assert actual == expected
+
+def test_id_b58_decode():
+	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
+
+	expected = ID(base58.b58decode(random_id_string ))
+	actual = id_b58_decode(random_id_string )
+
+	assert actual == expected	
+	
 def test_id_from_public_key():
 
 	bits_list = [1024, 1280, 1536, 1536, 2048]
