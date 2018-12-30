@@ -55,7 +55,6 @@ def test_eq_true():
 
 
 def test_eq_false():
-
 	other = ID("efgh")
 
 	expected = False
@@ -87,7 +86,7 @@ def test_id_b58_decode():
 	actual = id_b58_decode(random_id_string )
 
 	assert actual == expected	
-	
+
 def test_id_from_public_key():
 
 	bits_list = [1024, 1280, 1536, 1536, 2048]
