@@ -11,7 +11,8 @@ py-libp2p is an experimental and work-in-progress repo under heavy development. 
 
 ## Maintainers
 The py-libp2p team consists of:
-@zixuanzh @alexh @stuckinaboot @robzajac
+
+[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac)
 
 ## Development
 
