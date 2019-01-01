@@ -1,6 +1,6 @@
-import multihash
 import random
 import string
+import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
@@ -83,7 +83,7 @@ def test_id_b58_decode():
 	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
 
 	expected = ID(base58.b58decode(random_id_string))
-	actual = id_b58_decode(random_id_string )
+	actual = id_b58_decode(random_id_string)
 
 	assert actual == expected	
 

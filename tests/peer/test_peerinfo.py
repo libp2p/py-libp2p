@@ -1,6 +1,6 @@
-import multiaddr
 import random
 import string
+import multiaddr
 import pytest
 from peer.peerinfo import *
 from peer.peerdata import PeerData
