@@ -53,7 +53,6 @@ def test_eq_true():
 
 	assert actual == expected
 
-
 def test_eq_false():
 	other = ID("efgh")
 
@@ -63,16 +62,17 @@ def test_eq_false():
 	assert actual == expected
 
 def test_hash():
-	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
+	combine_letters_digits = string.ascii_letters + string.digits
+	random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
 
 	expected = hash(random_id_string)
 	actual = ID(random_id_string).__hash__()
 
 	assert actual == expected
 
-
 def test_id_b58_encode():
-	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
+	combine_letters_digits = string.ascii_letters + string.digits
+	random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
 
 	expected = base58.b58encode(random_id_string).decode()
 	actual = id_b58_encode(ID(random_id_string))
@@ -80,7 +80,8 @@ def test_id_b58_encode():
 	assert actual == expected
 
 def test_id_b58_decode():
-	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
+	combine_letters_digits = string.ascii_letters + string.digits
+	random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
 
 	expected = ID(base58.b58decode(random_id_string))
 	actual = id_b58_decode(random_id_string)
@@ -99,7 +100,6 @@ def test_id_from_public_key():
 	actual = id_from_public_key(key)
 
 	assert actual == expected
-
 
 def test_id_from_private_key():
     key = RSA.generate(2048, e=65537)
