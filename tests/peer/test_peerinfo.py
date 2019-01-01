@@ -1,21 +1,21 @@
 import multiaddr
-from peer.peerinfo import *
-from peer.peerdata import PeerData
-from peer.id import *
 import random
 import string
 import pytest
+from peer.peerinfo import *
+from peer.peerdata import PeerData
+from peer.id import *
 
 def test_init_():
 	peer_data = PeerData()
-	random_addrs =  [random.randint(0, 255) for r in range(4)]
+	random_addrs = [random.randint(0, 255) for r in range(4)]
 	peer_data.add_addrs(random_addrs)
 	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
 	peer_id = ID(random_id_string)
 
 	peer_info = PeerInfo(peer_id, peer_data)
 
-	assert peer_info.peer_id  == peer_id
+	assert peer_info.peer_id == peer_id
 	assert peer_info.addrs == random_addrs
 
 def test_init_no_value():
@@ -27,8 +27,7 @@ def test_invalid_addr_1():
 		actual = info_from_p2p_addr(None)
 
 def test_invalid_addr_2(monkeypatch):
-
-	random_addrs =  [random.randint(0, 255) for r in range(4)]
+	random_addrs = [random.randint(0, 255) for r in range(4)]
 	monkeypatch.setattr("multiaddr.util.split", lambda x: None)
 	with pytest.raises(InvalidAddrError):
 		actual = info_from_p2p_addr(random_addrs)

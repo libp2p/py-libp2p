@@ -1,10 +1,10 @@
-from Crypto.PublicKey import RSA
-from peer.id import *
 import multihash
 import random
 import string
 import pytest
 import base58
+from Crypto.PublicKey import RSA
+from peer.id import *
 
 def test_init_():
 	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
@@ -30,7 +30,7 @@ def test_str_less_than_10():
 	pid = base58.b58encode(random_id_string).decode() 
 
 	expected = "<peer.ID " + pid  + ">"
-	actual =  ID(random_id_string).__str__()
+	actual = ID(random_id_string).__str__()
 
 	assert actual == expected
 
@@ -40,7 +40,7 @@ def test_str_more_than_10():
 	part_1, part_2 = pid[:2], pid[len(pid)-6:]
 
 	expected = "<peer.ID " + part_1 + "*" + part_2 + ">"
-	actual =  ID(random_id_string).__str__()
+	actual = ID(random_id_string).__str__()
 
 	assert actual == expected
 
@@ -82,7 +82,7 @@ def test_id_b58_encode():
 def test_id_b58_decode():
 	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
 
-	expected = ID(base58.b58decode(random_id_string ))
+	expected = ID(base58.b58decode(random_id_string))
 	actual = id_b58_decode(random_id_string )
 
 	assert actual == expected	
