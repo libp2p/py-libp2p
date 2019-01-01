@@ -14,7 +14,7 @@ def test_init_():
 
 def test_no_init_value():
 	with pytest.raises(Exception) as e_info:
-		peer_if = ID()
+		peer_id = ID()
 
 def test_pretty():
 	random_id_string = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(10))
