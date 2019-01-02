@@ -4,11 +4,15 @@ import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
-from peer.id import *
+from peer.id import ID, id_b58_encode, id_b58_decode, id_from_public_key, id_from_private_key
+
+ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 def test_init_():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
+
     peer_id = ID(random_id_string)
 
     assert peer_id._id_str == random_id_string
@@ -18,8 +22,9 @@ def test_no_init_value():
         peer_id = ID()
 
 def test_pretty():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
 
     actual = peer_id.pretty()
@@ -28,8 +33,9 @@ def test_pretty():
     assert actual == expected
 
 def test_str_less_than_10():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(5))
+    random_id_string = ''
+    for i in range(5):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode() 
 
     expected = "<peer.ID " + pid  + ">"
@@ -38,8 +44,9 @@ def test_str_less_than_10():
     assert actual == expected
 
 def test_str_more_than_10():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
     part_1, part_2 = pid[:2], pid[len(pid)-6:]
 
@@ -49,8 +56,9 @@ def test_str_more_than_10():
     assert actual == expected
 
 def test_eq_true():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10)) 
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
     other = ID(random_id_string)
 
     expected = True
@@ -67,8 +75,9 @@ def test_eq_false():
     assert actual == expected
 
 def test_hash():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = hash(random_id_string)
     actual = ID(random_id_string).__hash__()
@@ -76,8 +85,9 @@ def test_hash():
     assert actual == expected
 
 def test_id_b58_encode():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = base58.b58encode(random_id_string).decode()
     actual = id_b58_encode(ID(random_id_string))
@@ -85,8 +95,9 @@ def test_id_b58_encode():
     assert actual == expected
 
 def test_id_b58_decode():
-    combine_letters_digits = string.ascii_letters + string.digits
-    random_id_string = ''.join(random.SystemRandom().choice(combine_letters_digits) for _ in range(10))
+    random_id_string = ''
+    for i in range(10):
+     random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = ID(base58.b58decode(random_id_string))
     actual = id_b58_decode(random_id_string)
