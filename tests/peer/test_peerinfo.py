@@ -15,8 +15,7 @@ def test_init_():
     random_id_string = ''
     for _ in range(10):
          random_id_string += random.SystemRandom().choice(ALPHABETS)
-
-			 peer_id = ID(random_id_string)
+    peer_id = ID(random_id_string)
 			 peer_info = PeerInfo(peer_id, peer_data)
 
     assert peer_info.peer_id == peer_id
