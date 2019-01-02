@@ -11,20 +11,19 @@ ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 def test_init_():
     peer_data = PeerData()
     random_addrs = [random.randint(0, 255) for r in range(4)]
-			 peer_data.add_addrs(random_addrs)
+    peer_data.add_addrs(random_addrs)
     random_id_string = ''
     for _ in range(10):
          random_id_string += random.SystemRandom().choice(ALPHABETS)
 
 			 peer_id = ID(random_id_string)
-
 			 peer_info = PeerInfo(peer_id, peer_data)
 
     assert peer_info.peer_id == peer_id
 			 assert peer_info.addrs == random_addrs
 
 def test_init_no_value():
-			 with pytest.raises(Exception) as e_info:
+			 with pytest.raises(Exception) as _:
 				     PeerInfo()	
 
 def test_invalid_addr_1():
