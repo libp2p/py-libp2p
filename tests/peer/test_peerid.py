@@ -10,11 +10,9 @@ ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 def test_init_():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
-
+    for _ in range(10):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
-
     assert peer_id._id_str == random_id_string
 
 def test_no_init_value():
@@ -23,8 +21,8 @@ def test_no_init_value():
 
 def test_pretty():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
 
     actual = peer_id.pretty()
@@ -34,8 +32,8 @@ def test_pretty():
 
 def test_str_less_than_10():
     random_id_string = ''
-    for i in range(5):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(5):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode() 
 
     expected = "<peer.ID " + pid  + ">"
@@ -45,8 +43,8 @@ def test_str_less_than_10():
 
 def test_str_more_than_10():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+         random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
     part_1, part_2 = pid[:2], pid[len(pid)-6:]
 
@@ -57,8 +55,8 @@ def test_str_more_than_10():
 
 def test_eq_true():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     other = ID(random_id_string)
 
     expected = True
@@ -67,17 +65,17 @@ def test_eq_true():
     assert actual == expected
 
 def test_eq_false():
-    other = ID("efgh")
+   other = ID("efgh")
 
-    expected = False
-    actual = ID("abcd").__eq__(other)
+   expected = False
+   actual = ID("abcd").__eq__(other)
 
-    assert actual == expected
+   assert actual == expected
 
 def test_hash():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = hash(random_id_string)
     actual = ID(random_id_string).__hash__()
@@ -86,8 +84,8 @@ def test_hash():
 
 def test_id_b58_encode():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = base58.b58encode(random_id_string).decode()
     actual = id_b58_encode(ID(random_id_string))
@@ -96,8 +94,8 @@ def test_id_b58_encode():
 
 def test_id_b58_decode():
     random_id_string = ''
-    for i in range(10):
-     random_id_string += random.SystemRandom().choice(ALPHABETS)
+    for _ in range(10):
+         random_id_string += random.SystemRandom().choice(ALPHABETS)
 
     expected = ID(base58.b58decode(random_id_string))
     actual = id_b58_decode(random_id_string)
