@@ -32,7 +32,7 @@ def test_pretty():
 def test_str_less_than_10():
     random_id_string = ''
     for _ in range(5):
-        random_id_string += random.SystemRandom().choice(ALPHABETS)   
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
     expected = "<peer.ID " + pid  + ">"
     actual = ID(random_id_string).__str__()
@@ -96,7 +96,7 @@ def test_id_b58_decode():
     expected = ID(base58.b58decode(random_id_string))
     actual = id_b58_decode(random_id_string)
 
-    assert actual == expected   
+    assert actual == expected
 
 def test_id_from_public_key():
     bits_list = [1024, 1280, 1536, 1536, 2048]
@@ -113,6 +113,4 @@ def test_id_from_private_key():
     key = RSA.generate(2048, e=65537)
     id_from_pub = id_from_public_key(key.publickey())
     id_from_priv = id_from_private_key(key)
-    
     assert id_from_pub == id_from_priv
-
