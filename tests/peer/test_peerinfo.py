@@ -1,10 +1,9 @@
 import random
-import string
 import multiaddr
 import pytest
 from peer.peerinfo import PeerInfo, info_from_p2p_addr, InvalidAddrError
 from peer.peerdata import PeerData
-
+from peer.id import ID
 
 ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
@@ -14,7 +13,7 @@ def test_init_():
     peer_data.add_addrs(random_addrs)
     random_id_string = ''
     for _ in range(10):
-         random_id_string += random.SystemRandom().choice(ALPHABETS)
+        random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
     peer_info = PeerInfo(peer_id, peer_data)
 
@@ -23,7 +22,7 @@ def test_init_():
 
 def test_init_no_value():
     with pytest.raises(Exception) as _:
-        PeerInfo()	
+        PeerInfo()
 
 def test_invalid_addr_1():
     with pytest.raises(InvalidAddrError):
