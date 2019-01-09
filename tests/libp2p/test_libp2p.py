@@ -1,8 +1,8 @@
 import multiaddr
 import pytest
 
-from libp2p.libp2p import new_node
-from peer.peerinfo import info_from_p2p_addr
+from libp2p import new_node
+from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
 @pytest.mark.asyncio

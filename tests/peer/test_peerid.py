@@ -1,5 +1,6 @@
 from Crypto.PublicKey import RSA
-from peer.id import id_from_private_key, id_from_public_key
+
+from libp2p.peer.id import id_from_private_key, id_from_public_key
 
 
 def test_id_from_private_key():
