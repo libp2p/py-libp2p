@@ -1,0 +1,31 @@
+import setuptools
+
+
+classifiers = [
+    (
+        "Programming Language :: Python :: %s" % x
+    )
+    for x in "3.5 3.6".split()
+]
+
+
+setuptools.setup(
+    name="libp2p",
+    description="libp2p implementation written in python",
+    version="0.0.1",
+    license="MIT",
+    platforms=["unix", "linux", "osx"],
+    classifiers=classifiers,
+    install_requires=[
+        "pylint",
+        "pytest",
+        "pycryptodome",
+        "pytest-asyncio",
+        "click",
+        "base58",
+        "pymultihash",
+    ],
+    packages="libp2p",
+    zip_safe=False,
+)
+
