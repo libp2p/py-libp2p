@@ -4,11 +4,11 @@ python:
   - "3.6"
 
 install:
-  - pip install codecov pytest pytest-cov
+  - pip install codecov pytest pytest-cov pytest-asyncio pylint
   - python setup.py develop
 
 script:
-  - py.test --cov=./libp2p tests/
+  - pytest --cov=./libp2p tests/
   - pylint --rcfile=.pylintrc libp2p tests
 
 after_success:

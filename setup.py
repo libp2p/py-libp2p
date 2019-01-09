@@ -17,10 +17,7 @@ setuptools.setup(
     platforms=["unix", "linux", "osx"],
     classifiers=classifiers,
     install_requires=[
-        "pylint",
-        "pytest",
         "pycryptodome",
-        "pytest-asyncio",
         "click",
         "base58",
         "pymultihash",
