@@ -11,7 +11,7 @@ install:
 
 script:
   - pytest --cov=./libp2p tests/
-  - pylint --rcfile=.pylintrc libp2p tests
+  - pylint --rcfile=.pylintrc libp2p tests --ignore libp2p/{kademlia,protocol_muxer}
 
 after_success:
   - codecov

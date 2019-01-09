@@ -45,4 +45,3 @@ class IAddrBook(ABC):
         """
         :return: all of the peer IDs stored with addresses
         """
-        
