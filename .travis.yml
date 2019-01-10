@@ -4,8 +4,10 @@ python:
   - "3.6"
 
 install:
-  - pip install -r requirements.txt
-  - pip install codecov pytest pytest-cov
+  - pip install --upgrade pip
+  - pip install "pytest>=3.6"
+  - pip install codecov pytest-cov pytest-asyncio pylint
+  - python setup.py develop
 
 script:
   - pytest --cov=./ -v
