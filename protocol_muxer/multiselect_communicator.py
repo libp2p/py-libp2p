@@ -6,7 +6,7 @@ class MultiselectCommunicator(IMultiselectCommunicator):
     and multistream module will follow the same multistream protocol,
     which is necessary for them to work
     """
-    
+
     def __init__(self, stream):
         self.stream = stream
 
