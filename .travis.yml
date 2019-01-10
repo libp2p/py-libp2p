@@ -9,7 +9,7 @@ install:
 
 script:
   - pytest --cov=./ -v
-  - pylint --rcfile=.pylintrc encryption host libp2p network peer stream_muxer transport tests
+  - pylint --rcfile=.pylintrc encryption host libp2p network peer protocol_muxer stream_muxer transport tests
 
 after_success:
   - codecov
