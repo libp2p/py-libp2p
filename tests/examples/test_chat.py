@@ -1,14 +1,9 @@
-#!/bin/env python3
-import asyncio
-import sys
-
-import click
-import multiaddr
 import pytest
 
-from libp2p.libp2p import *
-from peer.peerinfo import info_from_p2p_addr
-from protocol_muxer.multiselect_client import MultiselectClientError
+from libp2p import new_node
+from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
+
 
 PROTOCOL_ID = '/chat/1.0.0'
 
