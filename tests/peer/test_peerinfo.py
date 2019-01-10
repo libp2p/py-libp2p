@@ -1,5 +1,6 @@
 import multiaddr
-from peer.peerinfo import info_from_p2p_addr
+
+from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
 def test_info_from_p2p_addr():

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from transport.tcp.tcp import _multiaddr_from_socket
+from libp2p.transport.tcp.tcp import _multiaddr_from_socket
 
 
 @pytest.mark.asyncio
