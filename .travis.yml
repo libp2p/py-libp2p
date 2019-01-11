@@ -5,8 +5,7 @@ python:
 
 install:
   - pip install --upgrade pip
-  - pip install "pytest>=3.6"
-  - pip install codecov pytest-cov pytest-asyncio pylint
+  - pip install -r requirements_dev.txt
   - python setup.py develop
 
 script:

@@ -1,0 +1,5 @@
+pytest>=3.6
+codecov
+pytest-cov
+pytest-asyncio
+pylint
