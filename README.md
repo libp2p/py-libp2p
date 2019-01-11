@@ -21,7 +21,8 @@ py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 e
 ```sh
 virtualenv -p python3.6 venv
 . venv/bin/activate
-pip3 install -r requirements.txt
+pip3 install -r requirements_dev.txt
+python setup.py develop
 ```
 
 ## Testing
