@@ -9,6 +9,11 @@
 ## WARNING
 py-libp2p is an experimental and work-in-progress repo under heavy development. We do not yet recommend using py-libp2p in production environments.
 
+## Maintainers
+The py-libp2p team consists of:
+
+[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac)
+
 ## Development
 
 py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
@@ -16,7 +21,8 @@ py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 e
 ```sh
 virtualenv -p python3.6 venv
 . venv/bin/activate
-pip3 install -r requirements.txt
+pip3 install -r requirements_dev.txt
+python setup.py develop
 ```
 
 ## Testing
