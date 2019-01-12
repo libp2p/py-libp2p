@@ -22,6 +22,7 @@ def test_init_():
 
 def test_init_no_value():
     with pytest.raises(Exception) as _:
+        #pylint: disable=no-value-for-parameter
         PeerInfo()
 
 def test_invalid_addr_1():

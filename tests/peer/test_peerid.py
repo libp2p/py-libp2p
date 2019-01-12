@@ -13,11 +13,12 @@ def test_init_():
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
-
+    #pylint: disable=protected-access
     assert peer_id._id_str == random_id_string
 
 def test_no_init_value():
     with pytest.raises(Exception) as _:
+        #pylint: disable=no-value-for-parameter
         ID()
 
 def test_pretty():
