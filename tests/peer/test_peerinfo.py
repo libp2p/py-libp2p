@@ -1,9 +1,9 @@
 import random
 import multiaddr
 import pytest
-from peer.peerinfo import PeerInfo, info_from_p2p_addr, InvalidAddrError
-from peer.peerdata import PeerData
-from peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr, InvalidAddrError
+from libp2p.peer.peerdata import PeerData
+from libp2p.peer.id import ID
 
 ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 

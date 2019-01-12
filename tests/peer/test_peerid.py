@@ -3,7 +3,7 @@ import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
-from peer.id import ID, id_b58_encode, id_b58_decode, id_from_public_key, id_from_private_key
+from libp2p.peer.id import ID, id_b58_encode, id_b58_decode, id_from_public_key, id_from_private_key
 
 
 ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
