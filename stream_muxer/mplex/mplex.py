@@ -130,14 +130,15 @@ class Mplex(IMuxedConn):
         Read a message off of the raw connection and add it to the corresponding message buffer
         """
         # TODO Deal with other types of messages using flag (currently _)
-        # TODO call read_message in loop to handle case message for other stream was in conn
 
-        flag = True
+        continue_reading = True
         i = 0
-        while flag:
+        while continue_reading:
             i += 1
             stream_id, _, message = await self.read_message()
-            flag = stream_id is not None and stream_id != my_stream_id and my_stream_id is not None
+            continue_reading = (stream_id is not None and
+                                stream_id != my_stream_id and
+                                my_stream_id is not None)
 
             if stream_id not in self.buffers:
                 self.buffers[stream_id] = asyncio.Queue()
@@ -162,6 +163,8 @@ class Mplex(IMuxedConn):
         Read a single message off of the raw connection
         :return: stream_id, flag, message contents
         """
+
+        # Timeout is set to a relatively small value to alleviate wait time to exit loop in handle_incoming
         timeout = .1
         try:
             header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
