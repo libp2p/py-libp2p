@@ -1,5 +1,4 @@
 import asyncio
-
 from .utils import encode_uvarint, decode_uvarint_from_stream
 from .mplex_stream import MplexStream
 from ..muxed_connection_interface import IMuxedConn
