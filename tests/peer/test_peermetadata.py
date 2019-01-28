@@ -1,9 +1,11 @@
 import pytest
 
-from peer.peerstore import PeerStoreError
-from peer.peerstore import PeerStore
+
+from libp2p.peer.peerstore import PeerStoreError
+from libp2p.peer.peerstore import PeerStore
 
 # Testing methods from IPeerMetadata base class.
+
 
 def test_get_empty():
     with pytest.raises(PeerStoreError):

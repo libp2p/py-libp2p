@@ -4,15 +4,17 @@ python:
   - "3.6"
 
 install:
-  - pip install -r requirements.txt
-  - pip install codecov pytest pytest-cov
+  - pip install --upgrade pip
+  - pip install -r requirements_dev.txt
+  - python setup.py develop
 
 script:
-  - pytest --cov=./ -v
-  - pylint --rcfile=.pylintrc encryption host libp2p network peer stream_muxer transport tests
+  - pytest --cov=./libp2p tests/
+  - pylint --rcfile=.pylintrc libp2p/!(kademlia) tests
 
 after_success:
   - codecov
 
 notifications:
     slack: py-libp2p:RK0WVoQZhQXLgIKfHNPL1TR2
+

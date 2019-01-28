@@ -1,9 +1,0 @@
-asyncio
-pylint
-pytest
-pycryptodome
-pytest-asyncio
-click
-base58
-pymultihash
-multiaddr

@@ -1,15 +1,10 @@
-#!/usr/bin/env python3
 import asyncio
 import sys
-from os.path import abspath, dirname
 
 import click
 
-from libp2p.libp2p import *
-from network.multiaddr import MultiAddr
-from peer.peerinfo import info_from_p2p_addr
-
-sys.path.append(dirname(dirname(dirname(abspath(__file__)))))
+from libp2p import new_node
+from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
 PROTOCOL_ID = '/chat/1.0.0'

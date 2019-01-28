@@ -1,12 +1,13 @@
 import asyncio
 import pytest
 
+
 async def handle_echo(reader, writer):
     data = await reader.read(100)
     writer.write(data)
     await writer.drain()
-
     writer.close()
+
 
 @pytest.mark.asyncio
 # TODO: this test should develop out into a fuller test between MPlex

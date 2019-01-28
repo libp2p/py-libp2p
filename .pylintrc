@@ -127,7 +127,7 @@ disable=print-statement,
         dict-items-not-iterating,
         dict-keys-not-iterating,
         dict-values-not-iterating,
-        missing-docstring
+        missing-docstring,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
@@ -292,7 +292,7 @@ indent-after-paren=4
 
 # String used as indentation unit. This is usually "    " (4 spaces) or "\t" (1
 # tab).
-indent-string='    '
+indent-string="    "
 
 # Maximum number of characters on a single line.
 max-line-length=100
