@@ -164,7 +164,8 @@ class Mplex(IMuxedConn):
         :return: stream_id, flag, message contents
         """
 
-        # Timeout is set to a relatively small value to alleviate wait time to exit loop in handle_incoming
+        # Timeout is set to a relatively small value to alleviate wait time to exit
+        #  loop in handle_incoming
         timeout = .1
         try:
             header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
