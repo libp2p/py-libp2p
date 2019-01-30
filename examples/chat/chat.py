@@ -33,8 +33,8 @@ async def write_data(stream):
 
 async def run(port, destination):
 
+    host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s" % port])
     if not destination:
-        host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s" % port])
 
         async def stream_handler(stream):
             asyncio.ensure_future(read_data(stream))
@@ -56,7 +56,6 @@ async def run(port, destination):
         print("\nWaiting for incoming connection\n\n")
 
     else:
-        host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s" % port])
 
         m = multiaddr.Multiaddr(destination)
         info = info_from_p2p_addr(m)
