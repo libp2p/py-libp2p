@@ -2,7 +2,7 @@ import random
 import multiaddr
 import pytest
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr, InvalidAddrError
-from libp2p.peer.peerdata import PeerData
+from libp2p.peer.peerdata import PeerDataError, PeerData
 from libp2p.peer.id import ID
 
 ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -34,6 +34,15 @@ def test_invalid_addr_2(monkeypatch):
     monkeypatch.setattr("multiaddr.util.split", lambda x: None)
     with pytest.raises(InvalidAddrError):
         info_from_p2p_addr(random_addrs)
+
+def test_invalid_addr_3():
+    with pytest.raises(InvalidAddrError):
+        info_from_p2p_addr(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/4001/http/"))
+
+def test_invalid_metadata():
+    peer_data = PeerData()
+    with pytest.raises(PeerDataError):
+        peer_data.get_metadata("That shouldn't exists.")
 
 def test_info_from_p2p_addr():
     # pylint: disable=line-too-long
