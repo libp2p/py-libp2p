@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 class IListener(ABC):
 
     @abstractmethod
-    def listen(self, multiaddr):
+    async def listen(self, multiaddr):
         """
         put listener in listening mode and wait for incoming connections
         :param multiaddr: multiaddr of peer
@@ -19,7 +19,7 @@ class IListener(ABC):
         """
 
     @abstractmethod
-    def close(self, options=None):
+    async def close(self, options=None):
         """
         close the listener such that no more connections
         can be open on this transport instance
