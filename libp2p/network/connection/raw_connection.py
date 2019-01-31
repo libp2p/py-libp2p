@@ -12,8 +12,21 @@ class RawConnection(IRawConnection):
         self._next_id = 0 if initiator else 1
         self.initiator = initiator
 
-    def close(self):
+    async def close(self):
         self.writer.close()
+        # Not disponible in current version, please untag when passing python 3.7
+        #await self.writer.wait_closed()
+
+    def is_closed(self):
+        # pylint: disable=no-self-use
+        """
+        retrieve the status of the connection
+        :return: True if down, True if up
+        """
+        # Not disponible in current version, please untag when passing python 3.7
+        #return not self.server.is_serving()
+        # Temporary solution, remove when passing python 3.7
+        return False
 
     def next_stream_id(self):
         """

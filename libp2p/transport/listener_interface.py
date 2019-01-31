@@ -19,6 +19,13 @@ class IListener(ABC):
         """
 
     @abstractmethod
+    def is_closed(self):
+        """
+        retrieve the status of the connection
+        :return: True if down, True if up
+        """
+
+    @abstractmethod
     async def close(self, options=None):
         """
         close the listener such that no more connections

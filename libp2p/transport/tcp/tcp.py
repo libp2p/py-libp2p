@@ -46,6 +46,19 @@ class TCP(ITransport):
             # TODO check if server is listening
             return self.multiaddrs
 
+        def is_closed(self):
+            """
+            retrieve the status of the connection
+            :return: True if down, True if up
+            """
+            if self.server is None:
+                return True
+            else:
+                # Not disponible in current version, please untag when passing python 3.7
+                #return not self.server.is_serving()
+                # Temporary solution, remove when passing python 3.7
+                return False
+
         async def close(self, options=None):
             """
             close the listener such that no more connections
