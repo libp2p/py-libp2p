@@ -55,7 +55,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | **`UDP`**                                    | :tomato:      |
 | **`WebSockets`**                             | :tomato:      |
 | **`UTP`**                                    | :tomato:      |
-| **`WebRTC`**                                 | :chestnut:    |
+| **`WebRTC`**                                 | :tomato:      |
 | **`SCTP`**                                   | :chestnut:    |
 | **`Tor`**                                    | :chestnut:    |
 | **`i2p`**                                    | :chestnut:    |
