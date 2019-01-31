@@ -29,8 +29,6 @@ async def test_tcp_connection_close():
     conn = tcp.create_listener(handler)
     await conn.listen(Multiaddr("/ip4/127.0.0.1/tcp/8002"))
     # Closing a connection should work and return True.
-    close_result = conn.close()
-    assert close_result
+    assert await conn.close()
     # Closing an already closed connection should not work and return False.
-    close_result = conn.close()
-    assert not close_result
+    assert not await conn.close()

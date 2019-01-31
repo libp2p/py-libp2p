@@ -46,7 +46,7 @@ class TCP(ITransport):
             # TODO check if server is listening
             return self.multiaddrs
 
-        def close(self, options=None):
+        async def close(self, options=None):
             """
             close the listener such that no more connections
             can be open on this transport instance
@@ -57,9 +57,7 @@ class TCP(ITransport):
             if self.server is None:
                 return False
             self.server.close()
-            _loop = asyncio.get_event_loop()
-            _loop.run_until_complete(self.server.wait_closed())
-            _loop.close()
+            await self.server.wait_closed()
             self.server = None
             return True
 
