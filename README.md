@@ -116,8 +116,8 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | NAT Traversal                                | Status        |
 | -------------------------------------------- | :-----------: |
-| **`nat-pmp`**                                | :chestnut:    |
-| **`upnp`**                                   | :chestnut:    |
+| **`nat-pmp`**                                | :tomato:      |
+| **`upnp`**                                   | :tomato:      |
 | **`ext addr discovery`**                     | :chestnut:    |
 | **`STUN-like`**                              | :chestnut:    |
 | **`line-switch relay`**                      | :chestnut:    |
