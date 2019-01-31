@@ -31,11 +31,11 @@ class Mplex(IMuxedConn):
         if not self.initiator:
             asyncio.ensure_future(self.handle_incoming(None))
 
-    def close(self):
+    async def close(self):
         """
         close the stream muxer and underlying raw connection
         """
-        self.raw_conn.close()
+        await self.raw_conn.close()
 
     def is_closed(self):
         """
