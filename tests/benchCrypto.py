@@ -1,3 +1,6 @@
+#!/usr/bin/env python3.6
+# pylint: skip-file
+
 from Crypto.PublicKey import RSA
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -6,6 +9,11 @@ from cryptography.hazmat.primitives.hashes import SHA256, Hash
 from time import time
 import multihash
 
+SAMPLES = 10
+
+def formatDuration(t):
+    return str(round(t, 2)) + "s"
+
 def makeItTime(func, count):
     i = 0
     time1 = time()
@@ -13,6 +21,9 @@ def makeItTime(func, count):
         func()
         i += 1
     return (time() - time1) / count
+
+def makeItTimeFormated(func, count):
+    return formatDuration(makeItTime(func, count))
 
 def genPyCrypto__hashMultihash():
     k = RSA.generate(2048, e=65537)
@@ -35,11 +46,21 @@ def genPython_Cryptography__hashPython_Cryptography():
     h.update(priv.public_key().public_bytes(Encoding.DER, PublicFormat.PKCS1))
     h.finalize()
 
-print("Py-Crypto - MultiHash :")
-print(str(round(makeItTime(genPyCrypto__hashMultihash, 10), 2)) + "s")
-print("Python Cryptography - MultiHash :")
-print(str(round(makeItTime(genPython_Cryptography__hashMultihash, 10), 2)) + "s")
-print("Py-Crypto - Python Cryptography :")
-print(str(round(makeItTime(genPyCrypto__hashPython_Cryptography, 10), 2)) + "s")
-print("Python Cryptography - Python Cryptography :")
-print(str(round(makeItTime(genPython_Cryptography__hashPython_Cryptography, 10), 2)) + "s")
+print("Running some test with " + str(SAMPLES) + " samples per algo.")
+print("I will print result in a markdown compatible table.")
+
+print("test 0/4")
+CM = makeItTimeFormated(genPyCrypto__hashMultihash, SAMPLES)
+print("test 1/4")
+CgM = makeItTimeFormated(genPython_Cryptography__hashMultihash, SAMPLES)
+print("test 2/4")
+CCg = makeItTimeFormated(genPyCrypto__hashPython_Cryptography, SAMPLES)
+print("test 3/4")
+CgCg = makeItTimeFormated(genPython_Cryptography__hashPython_Cryptography, SAMPLES)
+print("test 4/4\n")
+print(
+    "|                     | Crypto | Python Cryptography |\n" +
+    "| :-----------------: | ------ | ------------------- |\n" +
+    "| MultiHash           | " + CM + " " * (7 - len(CM)) + "| " + CgM + " " * (20 - len(CgM)) + "|\n" +
+    "| Python Cryptography | " + CCg + " " * (7 - len(CCg)) + "| " + CgCg + " " * (20 - len(CgCg)) +"|"
+)
