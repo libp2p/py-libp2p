@@ -155,6 +155,23 @@ class Swarm(INetwork):
         # TODO: Support more than one transport
         self.transport = transport
 
+    async def shutdown(self):
+        for i in self.listeners.values():
+            await i.close()
+        for i in self.connections.values():
+            await i.close()
+        self.self_id = None
+        self.peerstore = None
+        self.upgrader = None
+        self.connections = None
+        self.listeners = None
+        self.stream_handlers = None
+        self.transport = None
+
+        # Protocol muxing
+        self.multiselect = None
+        self.multiselect_client = None
+
 
 class SwarmException(Exception):
     pass

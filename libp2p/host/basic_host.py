@@ -88,3 +88,8 @@ class BasicHost(IHost):
             return
 
         await self.network.dial_peer(peer_info.peer_id)
+
+    async def shutdown(self):
+        await self.network.shutdown()
+        self.network = None
+        self.peerstore = None

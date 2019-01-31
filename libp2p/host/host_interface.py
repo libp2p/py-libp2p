@@ -58,3 +58,10 @@ class IHost(ABC):
         :param peer_info: peer_info of the host we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
+
+    @abstractmethod
+    async def shutdown(self):
+        """
+        disconect all connections, listen and stop discoveringself.
+        after that you can safly to your host a None value.
+        """

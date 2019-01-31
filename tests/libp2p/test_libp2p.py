@@ -152,3 +152,9 @@ async def test_host_connect():
     ma_node_b = multiaddr.Multiaddr('/p2p/%s' % node_b.get_id().pretty())
     for addr in node_a.get_peerstore().addrs(node_b.get_id()):
         assert addr.encapsulate(ma_node_b) in node_b.get_addrs()
+
+
+@pytest.mark.asyncio
+async def test_host_shutdown():
+    node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8009"])
+    await node.shutdown()

@@ -41,3 +41,10 @@ class INetwork(ABC):
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success
         """
+
+    @abstractmethod
+    async def shutdown(self):
+        """
+        disconect all connections, listen and stop discoveringself.
+        after that you can safly to your host a None value.
+        """
