@@ -156,5 +156,59 @@ async def test_host_connect():
 
 @pytest.mark.asyncio
 async def test_host_shutdown():
-    node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/8009"])
-    await node.shutdown()
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+
+    async def stream_handler_a(stream):
+        while True:
+            read_string = (await stream.read()).decode()
+
+            response = "ack_a:" + read_string
+            await stream.write(response.encode())
+
+    # Interconnect node and create a stream to verify if the stream
+    # get stoped after on the other node a shutdown.
+    node_a.set_stream_handler("/echo_a/1.0.0", stream_handler_a)
+    addr = node_a.get_addrs()[0]
+    info = info_from_p2p_addr(addr)
+    await node_b.connect(info)
+    # Checking if the node has been added
+    assert len(node_b.get_peerstore().peers()) == 1
+
+    # Creating the stream
+    stream = await node_b.new_stream(node_a.get_id(), ["/echo_a/1.0.0"])
+
+    # Check if the stream is up
+    # Not disponible in current version, please untag when passing python 3.7
+    #assert not stream.is_closed()
+    # Shutdown the A node
+    await node_a.shutdown()
+    # Now the stream on the B node is suposed to be closed.
+    # Not disponible in current version, please untag when passing python 3.7
+    #assert stream.is_closed()
+    # Also remove the following next lines (the `with` block and his content)
+    with pytest.raises(NotImplementedError):
+        stream.is_closed()
+
+    # Try the same but inverted (shutdown the connect node)
+
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+
+    # Interconnect node and create a stream to verify if the stream
+    # get stoped after on the other node a shutdown.
+    node_a.set_stream_handler("/echo_a/1.0.0", stream_handler_a)
+    addr = node_a.get_addrs()[0]
+    info = info_from_p2p_addr(addr)
+    await node_b.connect(info)
+    # Checking if the node has been added
+    assert len(node_b.get_peerstore().peers()) == 1
+
+    # Creating the stream
+    stream = await node_b.new_stream(node_a.get_id(), ["/echo_a/1.0.0"])
+
+    # Check if the stream is up
+    # Not disponible in current version, please untag when passing python 3.7
+    #assert not stream.is_closed()
+    # Shutdown the B node
+    await node_b.shutdown()

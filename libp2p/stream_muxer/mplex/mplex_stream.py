@@ -74,6 +74,9 @@ class MplexStream(IMuxedStream):
 
         return True
 
+    def is_closed(self):
+        return self.local_closed or self.remote_closed or self.mplex_conn.is_closed()
+
     async def reset(self):
         """
         closes both ends of the stream

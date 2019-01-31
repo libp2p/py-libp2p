@@ -36,3 +36,9 @@ class INetStream(ABC):
         close the underlying muxed stream
         :return: true if successful
         """
+
+    def is_closed(self):
+        """
+        check connection is fully closed
+        :return: true if successful
+        """

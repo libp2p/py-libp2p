@@ -21,12 +21,12 @@ class RawConnection(IRawConnection):
         # pylint: disable=no-self-use
         """
         retrieve the status of the connection
-        :return: True if down, True if up
+        :return: True if down, False if up
         """
         # Not disponible in current version, please untag when passing python 3.7
         #return not self.server.is_serving()
         # Temporary solution, remove when passing python 3.7
-        return False
+        raise NotImplementedError
 
     def next_stream_id(self):
         """

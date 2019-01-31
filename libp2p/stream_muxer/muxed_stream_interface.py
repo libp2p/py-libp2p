@@ -25,6 +25,13 @@ class IMuxedStream(ABC):
         """
 
     @abstractmethod
+    def is_closed(self):
+        """
+        retrieve the status of the connection
+        :return: True if down, False if up
+        """
+
+    @abstractmethod
     def reset(self):
         """
         closes both ends of the stream

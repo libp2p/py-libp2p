@@ -42,6 +42,7 @@ class Mplex(IMuxedConn):
         check connection is fully closed
         :return: true if successful
         """
+        return self.raw_conn.is_closed()
 
     async def read_buffer(self, stream_id):
         """
@@ -55,8 +56,6 @@ class Mplex(IMuxedConn):
             await self.handle_incoming(stream_id)
         if stream_id in self.buffers:
             return await self._read_buffer_exists(stream_id)
-
-        return None
 
     async def _read_buffer_exists(self, stream_id):
         """

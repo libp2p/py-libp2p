@@ -41,3 +41,10 @@ class NetStream(INetStream):
         """
         await self.muxed_stream.close()
         return True
+
+    def is_closed(self):
+        """
+        check connection is fully closed
+        :return: true if successful
+        """
+        return self.muxed_stream.is_closed()
