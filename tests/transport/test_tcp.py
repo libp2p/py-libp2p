@@ -46,5 +46,6 @@ async def test_tcp_connection_close():
     assert not conn.is_closed()
     conn2 = await tcp2.dial(conn.get_addrs()[0])
     assert not conn2.is_closed()
-    conn2.close()
+    await conn2.close()
+    # Closing a remote connection shouldn't close the listener
     assert not conn.is_closed()
