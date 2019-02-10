@@ -19,7 +19,7 @@ async def read_data(stream):
             if read_string != "\n":
                 # Green console colour: 	\x1b[32m
                 # Reset console colour: 	\x1b[0m
-                print("\x1b[32m %s\x1b[0m > " % read_string, end="")
+                print("\x1b[32m %s\x1b[0m " % read_string, end="")
 
 
 async def write_data(stream):
