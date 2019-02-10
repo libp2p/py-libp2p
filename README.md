@@ -16,10 +16,10 @@ The py-libp2p team consists of:
 
 ## Development
 
-py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
+py-libp2p requires Python 3.7 and the best way to guarantee a clean Python 3.7 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
 
 ```sh
-virtualenv -p python3.6 venv
+virtualenv -p python3.7 venv
 . venv/bin/activate
 pip3 install -r requirements_dev.txt
 python setup.py develop
