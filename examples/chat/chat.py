@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import urllib.request
 
 import click
 import multiaddr
@@ -30,7 +31,10 @@ async def write_data(stream):
 
 
 async def run(port, destination):
-    host = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/%s" % port])
+    external_ip = urllib.request.urlopen(
+        'https://v4.ident.me/').read().decode('utf8')
+    host = await new_node(
+        transport_opt=["/ip4/%s/tcp/%s" % (external_ip, port)])
     if not destination:  # its the server
         async def stream_handler(stream):
             asyncio.ensure_future(read_data(stream))
@@ -38,16 +42,17 @@ async def run(port, destination):
         host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
         port = None
+        ip = None
         for listener in host.network.listeners.values():
             for addr in listener.get_addrs():
+                ip = addr.value_for_protocol('ip4')
                 port = int(addr.value_for_protocol('tcp'))
 
         if not port:
             raise RuntimeError("was not able to find the actual local port")
 
-        print("Run './examples/chat/chat.py -p %s -d /ip4/127.0.0.1/tcp/%s/p2p/%s' on another console.\n" %
-              (int(port) + 1, port, host.get_id().pretty()))
-        print("You can replace 127.0.0.1 with public IP as well.")
+        print("Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n" %
+              (int(port) + 1, ip, port, host.get_id().pretty()))
         print("\nWaiting for incoming connection\n\n")
 
     else: # its the client
