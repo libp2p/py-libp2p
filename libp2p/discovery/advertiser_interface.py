@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+# pylint: disable=too-few-public-methods
 
 class IDiscoverer(ABC):
 
@@ -12,3 +13,4 @@ class IDiscoverer(ABC):
         :param service: service that you provide
         :raise Exception: network error
         """
+        

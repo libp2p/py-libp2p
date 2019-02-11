@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+# pylint: disable=too-few-public-methods
 
 
 class IDiscoverer(ABC):
