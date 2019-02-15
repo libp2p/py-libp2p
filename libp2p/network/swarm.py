@@ -155,6 +155,13 @@ class Swarm(INetwork):
         # TODO: Support more than one transport
         self.transport = transport
 
+    def generic_protocol_handler(self, muxed_stream):
+        # Perform protocol muxing to determine protocol to use
+        selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
+
+        # Give to stream handler
+        await handler(muxed_stream)
+
 
 class SwarmException(Exception):
     pass
