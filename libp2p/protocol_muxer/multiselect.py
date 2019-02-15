@@ -31,12 +31,14 @@ class Multiselect(IMultiselectMuxer):
         :return: selected protocol name, handler function
         :raise Exception: negotiation failed exception
         """
-
+        print("negotiate")
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
+
+        print("negotiate handshake succeeded")
 
         # Read and respond to commands until a valid protocol ID is sent
         while True:

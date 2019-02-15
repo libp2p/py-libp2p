@@ -94,9 +94,10 @@ class Mplex(IMuxedConn):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
+        print("accept_stream")
         stream_id = await self.stream_queue.get()
         stream = MplexStream(stream_id, False, self)
-        self.generic_protocol_handler(stream)
+        await self.generic_protocol_handler(stream)
 
     async def send_message(self, flag, data, stream_id):
         """
@@ -150,7 +151,8 @@ class Mplex(IMuxedConn):
 
             if flag is get_flag(True, "NEW_STREAM"):
                 # new stream detected on connection
-                self.accept_stream()
+                print("handle_incoming new_stream")
+                await self.accept_stream()
 
             if not message:
                 await self.buffers[stream_id].put(message)
