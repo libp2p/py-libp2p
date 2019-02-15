@@ -6,7 +6,6 @@ from .network_interface import INetwork
 from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection
 
-
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
@@ -22,6 +21,9 @@ class Swarm(INetwork):
         # Protocol muxing
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
+
+        # Create generic protocol handler
+        self.generic_protocol_handler = create_generic_protocol_handler(self)
 
     def get_peer_id(self):
         return self.self_id
@@ -121,7 +123,8 @@ class Swarm(INetwork):
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
-                muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
+                muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
+                    self.generic_protocol_handler)
 
                 # Store muxed_conn with peer id
                 self.connections[multiaddr.value_for_protocol('p2p')] = muxed_conn
@@ -143,13 +146,23 @@ class Swarm(INetwork):
         # TODO: Support more than one transport
         self.transport = transport
 
-    def generic_protocol_handler(self, muxed_stream):
+def create_generic_protocol_handler(swarm):
+    """
+    Create a generic protocol handler from the given swarm. We use swarm
+    to extract the multiselect module so that generic_protocol_handler
+    can use multiselect when generic_protocol_handler is called
+    from a different class
+    """
+    multiselect = swarm.multiselect
+
+    async def generic_protocol_handler(muxed_stream):
         # Perform protocol muxing to determine protocol to use
-        selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
+        _, handler = await multiselect.negotiate(muxed_stream)
 
         # Give to stream handler
         await handler(muxed_stream)
 
+    return generic_protocol_handler
 
 class SwarmException(Exception):
     pass
