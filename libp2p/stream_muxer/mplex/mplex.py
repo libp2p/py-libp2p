@@ -1,6 +1,6 @@
 import asyncio
 
-from .utils import encode_uvarint, decode_uvarint_from_stream
+from .utils import encode_uvarint, decode_uvarint_from_stream, get_flag
 from .mplex_stream import MplexStream
 from ..muxed_connection_interface import IMuxedConn
 
@@ -86,6 +86,7 @@ class Mplex(IMuxedConn):
         stream_id = self.raw_conn.next_stream_id()
         stream = MplexStream(stream_id, multi_addr, self)
         self.buffers[stream_id] = asyncio.Queue()
+        await self.send_message(get_flag(self.initiator, "NEW_STREAM"), None, stream_id)
         return stream
 
     async def accept_stream(self):
@@ -93,11 +94,9 @@ class Mplex(IMuxedConn):
         accepts a muxed stream opened by the other end
         :return: the accepted stream
         """
-        # TODO update to pull out protocol_id from message
-        protocol_id = "/echo/1.0.0"
         stream_id = await self.stream_queue.get()
         stream = MplexStream(stream_id, False, self)
-        return stream, stream_id, protocol_id
+        self.generic_protocol_handler(stream)
 
     async def send_message(self, flag, data, stream_id):
         """
@@ -140,7 +139,7 @@ class Mplex(IMuxedConn):
         i = 0
         while continue_reading:
             i += 1
-            stream_id, _, message = await self.read_message()
+            stream_id, flag, message = await self.read_message()
             continue_reading = (stream_id is not None and
                                 stream_id != my_stream_id and
                                 my_stream_id is not None)
@@ -149,7 +148,12 @@ class Mplex(IMuxedConn):
                 self.buffers[stream_id] = asyncio.Queue()
                 await self.stream_queue.put(stream_id)
 
-            await self.buffers[stream_id].put(message)
+            if flag is get_flag(True, "NEW_STREAM"):
+                # new stream detected on connection
+                self.accept_stream()
+
+            if not message:
+                await self.buffers[stream_id].put(message)
 
     async def read_chunk(self):
         """
