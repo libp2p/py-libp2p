@@ -11,14 +11,18 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    def __init__(self, conn):
+    def __init__(self, conn, generic_protocol_handler):
         """
         create a new muxed connection
         :param conn: an instance of raw connection
-        :param initiator: boolean to prevent multiplex with self
+        :param generic_protocol_handler: generic protocol handler
+        for new muxed streams
         """
         self.raw_conn = conn
         self.initiator = conn.initiator
+
+        # Store generic protocol handler
+        self.generic_protocol_handler = generic_protocol_handler
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.buffers = {}

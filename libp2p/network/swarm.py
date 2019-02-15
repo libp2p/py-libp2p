@@ -61,7 +61,7 @@ class Swarm(INetwork):
             raw_conn = await self.transport.dial(multiaddr)
 
             # Use upgrader to upgrade raw conn to muxed conn
-            muxed_conn = self.upgrader.upgrade_connection(raw_conn)
+            muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -121,7 +121,7 @@ class Swarm(INetwork):
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
-                muxed_conn = self.upgrader.upgrade_connection(raw_conn)
+                muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
 
                 # TODO: Remove protocol id from muxed_conn accept stream or
                 # move protocol muxing into accept_stream
@@ -130,13 +130,9 @@ class Swarm(INetwork):
                 # Perform protocol muxing to determine protocol to use
                 selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
 
-                net_stream = NetStream(muxed_stream)
-                net_stream.set_protocol(selected_protocol)
-
                 # Give to stream handler
-                # TODO: handle case when stream handler is set
                 # TODO: handle case of multiple protocols over same raw connection
-                await handler(net_stream)
+                await handler(muxed_stream)
 
             try:
                 # Success

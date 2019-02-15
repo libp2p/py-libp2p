@@ -7,6 +7,15 @@ class IMuxedConn(ABC):
     """
 
     @abstractmethod
+    def __init__(self, conn, generic_protocol_handler):
+        """
+        create a new muxed connection
+        :param conn: an instance of raw connection
+        :param generic_protocol_handler: generic protocol handler
+        for new muxed streams
+        """
+
+    @abstractmethod
     def close(self):
         """
         close connection
