@@ -123,16 +123,8 @@ class Swarm(INetwork):
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
 
-                # TODO: Remove protocol id from muxed_conn accept stream or
-                # move protocol muxing into accept_stream
-                muxed_stream, _, _ = await muxed_conn.accept_stream()
-
-                # Perform protocol muxing to determine protocol to use
-                selected_protocol, handler = await self.multiselect.negotiate(muxed_stream)
-
-                # Give to stream handler
-                # TODO: handle case of multiple protocols over same raw connection
-                await handler(muxed_stream)
+                # Store muxed_conn with peer id
+                self.connections[multiaddr.value_for_protocol('p2p')] = muxed_conn
 
             try:
                 # Success
