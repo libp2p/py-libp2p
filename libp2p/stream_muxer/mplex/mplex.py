@@ -154,7 +154,7 @@ class Mplex(IMuxedConn):
                 print("handle_incoming new_stream")
                 await self.accept_stream()
 
-            if not message:
+            if message:
                 await self.buffers[stream_id].put(message)
 
     async def read_chunk(self):
