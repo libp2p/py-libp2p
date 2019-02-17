@@ -129,6 +129,61 @@ async def test_multiple_streams():
     # Success, terminate pending tasks.
     return
 
+@pytest.mark.asyncio
+async def test_multiple_streams_same_initiator_different_protocols():
+    # Node A should be able to open a stream with node B and then vice versa.
+    # Stream IDs should be generated uniquely so that the stream state is not overwritten
+    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+
+    async def stream_handler_a1(stream):
+        print("stream_handler_a1 hit")
+        while True:
+            print("stream_handler_a1 entered while")
+            read_string = (await stream.read()).decode()
+            print("stream_handler_a1 read " + read_string)
+
+            response = "ack_a1:" + read_string
+            await stream.write(response.encode())
+            print("stream_handler_a1 sent response")
+
+    async def stream_handler_a2(stream):
+        print("stream_handler_a2 hit")
+        while True:
+            read_string = (await stream.read()).decode()
+            print("stream_handler_a2 read " + read_string)
+
+            response = "ack_a2:" + read_string
+            await stream.write(response.encode())
+            print("stream_handler_a2 sent response")
+
+    node_b.set_stream_handler("/echo_a1/1.0.0", stream_handler_a1)
+    node_b.set_stream_handler("/echo_a2/1.0.0", stream_handler_a2)
+
+    # Associate the peer with local ip address (see default parameters of Libp2p())
+    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
+    node_b.get_peerstore().add_addrs(node_a.get_id(), node_a.get_addrs(), 10)
+
+    # Open streams to node_b over echo_a1 protocol and echo_a2 protocol
+    stream_a1 = await node_a.new_stream(node_b.get_id(), ["/echo_a1/1.0.0"])
+    stream_a2 = await node_a.new_stream(node_b.get_id(), ["/echo_a2/1.0.0"])
+
+    # A writes to /echo_b via stream_a, and B writes to /echo_a via stream_b
+    messages = ["hello" + str(x) for x in range(10)]
+    for message in messages:
+        a1_message = message + "_a1"
+        a2_message = message + "_a2"
+
+        await stream_a1.write(a1_message.encode())
+        await stream_a2.write(a2_message.encode())
+
+        response_a1 = (await stream_a1.read()).decode()
+        response_a2 = (await stream_a2.read()).decode()
+
+        assert response_a1 == ("ack_a1:" + a1_message) # and response_a2 == ("ack_a2:" + a2_message)
+
+    # Success, terminate pending tasks.
+    return
 
 @pytest.mark.asyncio
 async def test_host_connect():
