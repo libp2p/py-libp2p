@@ -18,7 +18,7 @@ class Mplex(IMuxedConn):
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
         """
-        super(Mplex, self).__init__()
+        super(Mplex, self).__init__(conn, generic_protocol_handler)
 
         self.raw_conn = conn
         self.initiator = conn.initiator
