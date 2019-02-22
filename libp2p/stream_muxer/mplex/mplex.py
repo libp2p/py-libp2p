@@ -32,8 +32,8 @@ class Mplex(IMuxedConn):
 
         # The initiator of the raw connection need not read upon construction time.
         # It should read when the user decides that it wants to read from the constructed stream.
-        if not self.initiator:
-            asyncio.ensure_future(self.handle_incoming(None))
+        #if not self.initiator:
+        asyncio.ensure_future(self.handle_incoming(None))
 
     def close(self):
         """
@@ -55,12 +55,14 @@ class Mplex(IMuxedConn):
         """
         # Empty buffer or nonexistent stream
         # TODO: propagate up timeout exception and catch
-        if stream_id not in self.buffers or self.buffers[stream_id].empty():
-            await self.handle_incoming(stream_id)
+        # TODO: pass down timeout from user and use that
+        if stream_id not in self.buffers:
+            await asyncio.sleep(0.5)
+
         if stream_id in self.buffers:
             return await self._read_buffer_exists(stream_id)
-
-        return None
+        else:
+            return None
 
     async def _read_buffer_exists(self, stream_id):
         """
@@ -69,9 +71,29 @@ class Mplex(IMuxedConn):
         :return: message read
         """
         try:
-            data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=5)
+            print('waiting in exists')
+            print(str(self.buffers))
+            print(str(self.buffers[0].qsize()))
+            data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=3)
+            self.buffers[stream_id].task_done()
+            print(str(data))
             return data
         except asyncio.TimeoutError:
+            print(str(self.buffers))
+            await asyncio.sleep(0.5)
+
+            try:
+                print('waiting in exists pt. 2')
+                print(str(self.buffers))
+                print(str(self.buffers[0].qsize()))
+                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=3)
+                self.buffers[stream_id].task_done()
+                print(str(data))
+                return data
+            except asyncio.TimeoutError:
+                print(str(self.buffers))
+                return None
+
             return None
 
     async def open_stream(self, protocol_id, peer_id, multi_addr):
@@ -118,6 +140,7 @@ class Mplex(IMuxedConn):
             data_length = encode_uvarint(len(data))
             _bytes = header + data_length + data
 
+        print('writing data; ' + str(data) + ", and am I initiator: " + str(self.initiator))
         return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes):
@@ -136,26 +159,26 @@ class Mplex(IMuxedConn):
         """
         # TODO Deal with other types of messages using flag (currently _)
 
-        continue_reading = True
-        i = 0
-        while continue_reading:
-            i += 1
+        while True:
+            print('looping as: ' + ("initiator" if self.initiator else "receiver"))
             stream_id, flag, message = await self.read_message()
-            continue_reading = (stream_id is not None and
-                                stream_id != my_stream_id and
-                                my_stream_id is not None)
 
-            if stream_id not in self.buffers:
-                self.buffers[stream_id] = asyncio.Queue()
-                await self.stream_queue.put(stream_id)
+            if stream_id is not None and flag is not None and message is not None:
+                print('handle incoming received msg: ' + str(message) + " and am I initiator: " + str(self.initiator))
+                if stream_id not in self.buffers:
+                    self.buffers[stream_id] = asyncio.Queue()
+                    await self.stream_queue.put(stream_id)
 
-            if flag is get_flag(True, "NEW_STREAM"):
-                # new stream detected on connection
-                print("handle_incoming new_stream")
-                await self.accept_stream()
+                if flag is get_flag(True, "NEW_STREAM"):
+                    # new stream detected on connection
+                    print("handle_incoming new_stream")
+                    asyncio.ensure_future(self.accept_stream())
 
-            if message:
-                await self.buffers[stream_id].put(message)
+                if message:
+                    await self.buffers[stream_id].put(message)
+
+            print("handle incoming sleeping: " + ("initiator" if self.initiator else "receiver"))
+            await asyncio.sleep(.1)
 
     async def read_chunk(self):
         """
@@ -177,12 +200,13 @@ class Mplex(IMuxedConn):
 
         # Timeout is set to a relatively small value to alleviate wait time to exit
         #  loop in handle_incoming
-        timeout = .1
+        timeout = 0.1
         try:
             header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
             length = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
             message = await asyncio.wait_for(self.raw_conn.reader.read(length), timeout=timeout)
         except asyncio.TimeoutError:
+            print('handle_incoming timing out')
             return None, None, None
 
         flag = header & 0x07

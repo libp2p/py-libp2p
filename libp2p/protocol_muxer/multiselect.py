@@ -43,7 +43,9 @@ class Multiselect(IMultiselectMuxer):
         # Read and respond to commands until a valid protocol ID is sent
         while True:
             # Read message
+            print("receiver reading during protocol negotation")
             command = await communicator.read_stream_until_eof()
+            print("receiver read success protocol negotation")
 
             # Command is ls or a protocol
             if command == "ls":
@@ -73,7 +75,9 @@ class Multiselect(IMultiselectMuxer):
         await communicator.write(MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
+        print("receiever waiting on handshake")
         handshake_contents = await communicator.read_stream_until_eof()
+        print("reciever done with handshake")
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
