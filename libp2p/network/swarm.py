@@ -25,9 +25,6 @@ class Swarm(INetwork):
         # Create generic protocol handler
         self.generic_protocol_handler = create_generic_protocol_handler(self)
 
-    def close(self):
-        asyncio.get_event_loop.close()
-
     def get_peer_id(self):
         return self.self_id
 
