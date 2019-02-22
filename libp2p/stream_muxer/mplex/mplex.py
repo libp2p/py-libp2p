@@ -18,6 +18,8 @@ class Mplex(IMuxedConn):
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
         """
+        super()
+
         self.raw_conn = conn
         self.initiator = conn.initiator
 
@@ -30,10 +32,8 @@ class Mplex(IMuxedConn):
         self.stream_queue = asyncio.Queue()
         self.data_buffer = bytearray()
 
-        # The initiator of the raw connection need not read upon construction time.
-        # It should read when the user decides that it wants to read from the constructed stream.
-        #if not self.initiator:
-        asyncio.ensure_future(self.handle_incoming(None))
+        # Kick off reading
+        asyncio.ensure_future(self.handle_incoming())
 
     def close(self):
         """
@@ -61,8 +61,9 @@ class Mplex(IMuxedConn):
 
         if stream_id in self.buffers:
             return await self._read_buffer_exists(stream_id)
-        else:
-            return None
+
+        # Read waited too long for data
+        return None
 
     async def _read_buffer_exists(self, stream_id):
         """
@@ -153,7 +154,7 @@ class Mplex(IMuxedConn):
         await self.raw_conn.writer.drain()
         return len(_bytes)
 
-    async def handle_incoming(self, my_stream_id):
+    async def handle_incoming(self):
         """
         Read a message off of the raw connection and add it to the corresponding message buffer
         """
@@ -164,7 +165,6 @@ class Mplex(IMuxedConn):
             stream_id, flag, message = await self.read_message()
 
             if stream_id is not None and flag is not None and message is not None:
-                print('handle incoming received msg: ' + str(message) + " and am I initiator: " + str(self.initiator))
                 if stream_id not in self.buffers:
                     self.buffers[stream_id] = asyncio.Queue()
                     await self.stream_queue.put(stream_id)

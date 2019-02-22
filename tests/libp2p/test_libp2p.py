@@ -180,7 +180,7 @@ async def test_multiple_streams_same_initiator_different_protocols():
         response_a1 = (await stream_a1.read()).decode()
         response_a2 = (await stream_a2.read()).decode()
 
-        assert response_a1 == ("ack_a1:" + a1_message) # and response_a2 == ("ack_a2:" + a2_message)
+        assert response_a1 == ("ack_a1:" + a1_message) and response_a2 == ("ack_a2:" + a2_message)
 
     # Success, terminate pending tasks.
     return
