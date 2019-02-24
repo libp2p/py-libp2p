@@ -3,6 +3,7 @@ import asyncio
 import multiaddr
 
 from libp2p.network.connection.raw_connection import RawConnection
+from libp2p.peer.id import id_b58_encode
 
 from ..listener_interface import IListener
 from ..transport_interface import ITransport
@@ -63,10 +64,11 @@ class TCP(ITransport):
             self.server = None
             return True
 
-    async def dial(self, multiaddr, options=None):
+    async def dial(self, multiaddr, self_id, options=None):
         """
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer
+        :param self_id: peer_id of the dialer (to send to receier)
         :param options: optional object
         :return: True if successful
         """
@@ -74,6 +76,17 @@ class TCP(ITransport):
         port = int(multiaddr.value_for_protocol('tcp'))
 
         reader, writer = await asyncio.open_connection(host, port)
+
+        # First: send our peer ID so receiver knows it
+        #writer.write(str(self_id).encode())
+        writer.write(id_b58_encode(self_id).encode())
+        await writer.drain()
+
+        # Await ack for peer id
+        ack = (await reader.read(1024)).decode()
+
+        if ack != "received peer id":
+            raise Exception("Receiver did not receive peer id")
 
         return RawConnection(host, port, reader, writer, True)
 

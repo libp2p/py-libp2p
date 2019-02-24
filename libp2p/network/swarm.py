@@ -2,7 +2,7 @@ import asyncio
 
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect import Multiselect
-
+from libp2p.peer.id import id_b58_decode
 
 from .network_interface import INetwork
 from .stream.net_stream import NetStream
@@ -62,7 +62,7 @@ class Swarm(INetwork):
             muxed_conn = self.connections[peer_id]
         else:
             # Transport dials peer (gets back a raw conn)
-            raw_conn = await self.transport.dial(multiaddr)
+            raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
             # Use upgrader to upgrade raw conn to muxed conn
             muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
@@ -121,6 +121,12 @@ class Swarm(INetwork):
                 return True
 
             async def conn_handler(reader, writer):
+                # Read in first message (should be peer_id of initiator) and ack
+                peer_id = id_b58_decode((await reader.read(1024)).decode())
+
+                writer.write("received peer id".encode())
+                await writer.drain()
+
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
@@ -129,8 +135,7 @@ class Swarm(INetwork):
                     self.generic_protocol_handler)
 
                 # Store muxed_conn with peer id
-                # TODO: FIX
-                self.connections['foo'] = muxed_conn
+                self.connections[peer_id] = muxed_conn
 
             try:
                 # Success
