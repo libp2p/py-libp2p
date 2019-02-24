@@ -91,7 +91,7 @@ class Swarm(INetwork):
         # Use muxed conn to open stream, which returns
         # a muxed stream
         # TODO: Remove protocol id from being passed into muxed_conn
-        muxed_stream = await muxed_conn.open_stream(protocol_ids[0], peer_id, multiaddr)
+        muxed_stream = await muxed_conn.open_stream(protocol_ids[0], multiaddr)
 
         # Perform protocol muxing to determine protocol to use
         selected_protocol = await self.multiselect_client.select_one_of(protocol_ids, muxed_stream)
