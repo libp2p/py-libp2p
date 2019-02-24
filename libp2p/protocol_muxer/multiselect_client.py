@@ -51,7 +51,6 @@ class MultiselectClient(IMultiselectClient):
 
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
-        print("client handshake done")
 
         # Try to select the given protocol
         selected_protocol = await self.try_select(communicator, protocol)
@@ -96,7 +95,6 @@ class MultiselectClient(IMultiselectClient):
         """
 
         # Tell counterparty we want to use protocol
-        print("client choosing protocol")
         await communicator.write(protocol)
 
         # Get what counterparty says in response

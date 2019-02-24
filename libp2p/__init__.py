@@ -1,8 +1,7 @@
-from Crypto.PublicKey import RSA
-
-import multiaddr
 import asyncio
+import multiaddr
 
+from Crypto.PublicKey import RSA
 from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm

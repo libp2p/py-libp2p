@@ -16,8 +16,7 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         Write message to stream
         :param msg_str: message to write
         """
-        result = await self.stream.write(msg_str.encode())
-        print("multiselect comm got this write response: " + str(result))
+        await self.stream.write(msg_str.encode())
 
     async def read_stream_until_eof(self):
         """

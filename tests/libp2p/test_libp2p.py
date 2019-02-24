@@ -5,6 +5,8 @@ from tests.utils import cleanup
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
+# pylint: disable=too-many-locals
+
 
 @pytest.mark.asyncio
 async def test_simple_messages():
