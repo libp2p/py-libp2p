@@ -1,3 +1,5 @@
+import asyncio
+
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect import Multiselect
 
@@ -157,13 +159,11 @@ def create_generic_protocol_handler(swarm):
     multiselect = swarm.multiselect
 
     async def generic_protocol_handler(muxed_stream):
-        print("generic_protocol_handler")
         # Perform protocol muxing to determine protocol to use
         _, handler = await multiselect.negotiate(muxed_stream)
 
         # Give to stream handler
-        print("call stream handler")
-        await handler(muxed_stream)
+        asyncio.ensure_future(handler(muxed_stream))
 
     return generic_protocol_handler
 
