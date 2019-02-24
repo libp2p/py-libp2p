@@ -12,6 +12,6 @@ class IDiscoverer(ABC):
         """
         Find peers on the networking providing a particular service
         :param service: service that peers must provide
-        :return: peerstore containing found peers on the network
+        :return: PeerInfo generator that yields PeerInfo objects for discovered peers
         :raise Exception: network error
         """
