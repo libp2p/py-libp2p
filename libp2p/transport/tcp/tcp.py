@@ -78,7 +78,6 @@ class TCP(ITransport):
         reader, writer = await asyncio.open_connection(host, port)
 
         # First: send our peer ID so receiver knows it
-        #writer.write(str(self_id).encode())
         writer.write(id_b58_encode(self_id).encode())
         await writer.drain()
 
