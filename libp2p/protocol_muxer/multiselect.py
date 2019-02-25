@@ -31,7 +31,6 @@ class Multiselect(IMultiselectMuxer):
         :return: selected protocol name, handler function
         :raise Exception: negotiation failed exception
         """
-
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 

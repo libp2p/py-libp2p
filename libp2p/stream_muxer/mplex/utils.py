@@ -1,5 +1,6 @@
 import asyncio
 import struct
+from .constants import HEADER_TAGS
 
 
 def encode_uvarint(number):
@@ -41,3 +42,14 @@ async def decode_uvarint_from_stream(reader, timeout):
             break
 
     return result
+
+def get_flag(initiator, action):
+    """
+    get header flag based on action for mplex
+    :param action: action type in str
+    :return: int flag
+    """
+    if initiator or HEADER_TAGS[action] == 0:
+        return HEADER_TAGS[action]
+
+    return HEADER_TAGS[action] - 1

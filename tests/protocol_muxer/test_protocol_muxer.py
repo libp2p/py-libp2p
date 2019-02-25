@@ -1,5 +1,6 @@
 import pytest
 
+from tests.utils import cleanup
 from libp2p import new_node
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 
@@ -49,7 +50,7 @@ async def perform_simple_test(expected_selected_protocol,
     assert expected_selected_protocol == stream.get_protocol()
 
     # Success, terminate pending tasks.
-    return
+    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -64,6 +65,9 @@ async def test_single_protocol_fails():
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", ["/echo/1.0.0"],
                                   ["/potato/1.0.0"])
+
+    # Cleanup not reached on error
+    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -91,3 +95,6 @@ async def test_multiple_protocol_fails():
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", protocols_for_client,
                                   protocols_for_listener)
+
+    # Cleanup not reached on error
+    await cleanup()

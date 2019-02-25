@@ -1,7 +1,7 @@
-from Crypto.PublicKey import RSA
-
+import asyncio
 import multiaddr
 
+from Crypto.PublicKey import RSA
 from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm
@@ -9,6 +9,16 @@ from .host.basic_host import BasicHost
 from .transport.upgrader import TransportUpgrader
 from .transport.tcp.tcp import TCP
 
+
+async def cleanup_done_tasks():
+    while True:
+        for task in asyncio.all_tasks():
+            if task.done():
+                await task
+
+        # Need not run often
+        # Some sleep necessary to context switch
+        await asyncio.sleep(3)
 
 async def new_node(
         id_opt=None, transport_opt=None,
@@ -34,5 +44,8 @@ async def new_node(
     # TODO enable support for other host type
     # TODO routing unimplemented
     host = BasicHost(swarm)
+
+    # Kick off cleanup job
+    asyncio.ensure_future(cleanup_done_tasks())
 
     return host
