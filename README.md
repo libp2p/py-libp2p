@@ -10,7 +10,7 @@
 py-libp2p is an experimental and work-in-progress repo under heavy development. We do not yet recommend using py-libp2p in production environments.
 
 ## Sponsorship
-This project is graciously sponspored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
+This project is graciously sponsored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
 
 ## Maintainers
 The py-libp2p team consists of:
