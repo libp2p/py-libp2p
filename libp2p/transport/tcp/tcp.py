@@ -68,7 +68,7 @@ class TCP(ITransport):
         """
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer
-        :param self_id: peer_id of the dialer (to send to receier)
+        :param self_id: peer_id of the dialer (to send to receiver)
         :param options: optional object
         :return: True if successful
         """
