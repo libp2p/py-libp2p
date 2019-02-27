@@ -69,6 +69,46 @@ class SpiderCrawl:
         raise NotImplementedError
 
 
+class ValueMultipleSpiderCrawl(SpiderCrawl):
+    # TODO: move this out of this module
+    def __init__(self, protocol, node, peers, ksize, alpha):
+        SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)
+        # keep track of the single nearest node without value - per
+        # section 2.3 so we can set the key there if found
+        self.nearest_without_value = NodeHeap(self.node, 1)
+
+    async def find(self):
+        """
+        Find either the closest nodes or the value requested.
+        """
+        return await self._find(self.protocol.call_find_value)
+
+    async def _nodes_found(self, responses):
+        """
+        Handle the result of an iteration in _find.
+        """
+        toremove = []
+        found_values = []
+        for peerid, response in responses.items():
+            response = RPCFindResponse(response)
+            if not response.happened():
+                toremove.append(peerid)
+            elif response.has_value():
+                found_values.append(response.get_value())
+            else:
+                peer = self.nearest.get_node(peerid)
+                self.nearest_without_value.push(peer)
+                self.nearest.push(response.get_node_list())
+        self.nearest.remove(toremove)
+
+        if found_values:
+            return found_values
+        if self.nearest.have_contacted_all():
+            # not found!
+            return None
+        return await self.find()
+
+
 class ValueSpiderCrawl(SpiderCrawl):
     def __init__(self, protocol, node, peers, ksize, alpha):
         SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)

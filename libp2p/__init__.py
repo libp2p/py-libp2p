@@ -23,6 +23,7 @@ async def cleanup_done_tasks():
         # Some sleep necessary to context switch
         await asyncio.sleep(3)
 
+
 def initialize_default_swarm(
         id_opt=None, transport_opt=None,
         muxer_opt=None, sec_opt=None, peerstore_opt=None):
@@ -53,6 +54,7 @@ def initialize_default_swarm(
     swarm_opt.add_transport(tcp)
 
     return swarm_opt
+
 
 async def new_node(
         swarm_opt=None, id_opt=None, transport_opt=None,
