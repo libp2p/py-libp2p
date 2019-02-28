@@ -41,3 +41,9 @@ class INetwork(ABC):
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success
         """
+
+    @abstractmethod
+    def notify(self, notifee):
+        """
+        :param notifee: object implementing Notifee interface
+        """
