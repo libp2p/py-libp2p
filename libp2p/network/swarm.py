@@ -24,6 +24,9 @@ class Swarm(INetwork):
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
 
+        # Create Notifee array
+        self.notifees = []
+
         # Create generic protocol handler
         self.generic_protocol_handler = create_generic_protocol_handler(self)
 
@@ -61,6 +64,7 @@ class Swarm(INetwork):
             # set muxed connection equal to existing muxed connection
             muxed_conn = self.connections[peer_id]
         else:
+            # Dial peer (connection to peer does not yet exist)
             # Transport dials peer (gets back a raw conn)
             raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
@@ -69,6 +73,10 @@ class Swarm(INetwork):
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
+
+            # Call notifiers since event occurred
+            for notifee in self.notifees:
+                notifee.connected(self, muxed_conn)
 
         return muxed_conn
 
@@ -99,6 +107,10 @@ class Swarm(INetwork):
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
         net_stream.set_protocol(selected_protocol)
+
+        # Call notifiers since event occurred
+        for notifee in self.notifees:
+            notifee.opened_stream(self, net_stream)
 
         return net_stream
 
@@ -137,11 +149,20 @@ class Swarm(INetwork):
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
 
+                # Call notifiers since event occurred
+                for notifee in self.notifees:
+                    notifee.connected(self, muxed_conn)
+
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
                 self.listeners[str(multiaddr)] = listener
                 await listener.listen(multiaddr)
+
+                # Call notifiers since event occurred
+                for notifee in self.notifees:
+                    notifee.listen(self, multiaddr)
+
                 return True
             except IOError:
                 # Failed. Continue looping.
@@ -149,6 +170,13 @@ class Swarm(INetwork):
 
         # No multiaddr succeeded
         return False
+
+    def notify(self, notifee):
+        """
+        :param notifee: object implementing Notifee interface
+        """
+        # TODO: Add check to ensure notifee conforms to Notifee interface
+        self.notifees.append(notifee)
 
     def add_transport(self, transport):
         # TODO: Support more than one transport
