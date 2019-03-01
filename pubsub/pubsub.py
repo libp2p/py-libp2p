@@ -25,12 +25,14 @@ unsub:fav_topic
 talk format:
 talk
 'from'
+'origin'
 [topic_ids comma-delimited]
 'data'
 
 Ex.
 talk
-my_peer_id
+msg_sender_peer_id
+origin_peer_id
 topic1,topics_are_cool,foo
 I like tacos
 """
@@ -47,6 +49,9 @@ class Pubsub():
         """
         self.host = host
         self.router = router
+
+        # Attach this new Pubsub object to the router
+        self.router.attach(self)
 
         # Register a notifee
         self.handle_peer_queue = asyncio.Queue()
@@ -103,19 +108,28 @@ class Pubsub():
             if incoming not in self.seen_messages
                 msg_comps = incoming.split('\n')
                 msg_type = msg_comps[0]
-                msg_origin = msg_comps[1]
+                msg_sender = msg_comps[1]
+                msg_origin = msg_comps[2]
+
+                # Do stuff with incoming unseen message
+                should_publish = true
                 if msg_type == "subscription":
                     handle_subscription(incoming)
+
+                    # We don't need to relay the subscription to our
+                    # peers because a given node only needs its peers
+                    # to know that it is subscribed to the topic (doesn't
+                    # need everyone to know)
+                    should_publish = False
                 elif msg_type == "talk":
                     handle_talk(incoming)
-
-                # TODO: Do stuff with incoming unseen message
 
                 # Add message to seen
                 self.seen_messages.append(incoming)
 
                 # Publish message using router's publish
-                self.router.publish(msg_origin, incoming)
+                if should_publish:
+                    await self.router.publish(msg_sender, incoming)
             # Force context switch
             asyncio.sleep(0)
 
@@ -159,11 +173,11 @@ class Pubsub():
 
     # This is for a subscription message incoming from a peer
     def handle_subscription(self, subscription):
-        # Determine want to subscribe or unsubscribe
         msg_comps = subscription.split('\n')
-        msg_origin = msg_comps[1]
+        msg_origin = msg_comps[2]
 
         for i in range(2, len(msg_comps)):
+            # Look at each subscription in the msg individually
             sub_comps = msg_comps[i].split(":")
             sub_option = sub_comps[0]
             topic_id = sub_comps[1]
@@ -175,8 +189,8 @@ class Pubsub():
 
     def handle_talk(self, talk):
         msg_comps = talk.split('\n')
-        msg_origin = msg_comps[1]
-        topics = msg_comps[2].split(',')
+        msg_origin = msg_comps[2]
+        topics = self.get_topics_in_talk_msg(talk)
 
         # Check if this message has any topics that we are subscribed to
         for topic in topics:
@@ -213,14 +227,17 @@ class Pubsub():
         self.router.leave(topic_id)
 
     async def message_all_peers(self, msg):
-        # Broadcast a message to all peers
-
         # Encode message for sending
         encoded_msg = msg.encode()
 
+        # Broadcast message
         for peer in self.peers:
             stream = self.peers[peer]
 
-            # Send message
+            # Write message to stream
             await stream.write(encoded_msg)
 
+    def get_topics_in_talk_msg(self, msg):
+        msg_comps = msg.split('\n')
+        topics = msg_comps[3].split(',')
+        return topics
