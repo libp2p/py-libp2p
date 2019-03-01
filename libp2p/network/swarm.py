@@ -76,7 +76,7 @@ class Swarm(INetwork):
 
             # Call notifiers since event occurred
             for notifee in self.notifees:
-                notifee.connected(self, muxed_conn)
+                await notifee.connected(self, muxed_conn)
 
         return muxed_conn
 
@@ -110,7 +110,7 @@ class Swarm(INetwork):
 
         # Call notifiers since event occurred
         for notifee in self.notifees:
-            notifee.opened_stream(self, net_stream)
+            await notifee.opened_stream(self, net_stream)
 
         return net_stream
 
@@ -151,7 +151,7 @@ class Swarm(INetwork):
 
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
-                    notifee.connected(self, muxed_conn)
+                    await notifee.connected(self, muxed_conn)
 
             try:
                 # Success
@@ -161,7 +161,7 @@ class Swarm(INetwork):
 
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
-                    notifee.listen(self, multiaddr)
+                    await notifee.listen(self, multiaddr)
 
                 return True
             except IOError:
