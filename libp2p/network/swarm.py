@@ -194,10 +194,13 @@ def create_generic_protocol_handler(swarm):
 
     async def generic_protocol_handler(muxed_stream):
         # Perform protocol muxing to determine protocol to use
-        _, handler = await multiselect.negotiate(muxed_stream)
+        protocol, handler = await multiselect.negotiate(muxed_stream)
+
+        net_stream = NetStream(muxed_stream)
+        net_stream.set_protocol(protocol)
 
         # Give to stream handler
-        asyncio.ensure_future(handler(muxed_stream))
+        asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
 
