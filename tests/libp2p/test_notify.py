@@ -1,26 +1,23 @@
-import multiaddr
-import pytest, asyncio
+import pytest
 
 from tests.utils import cleanup
 from libp2p import new_node
-from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.network.notifee_interface import INotifee
 
 # pylint: disable=too-many-locals
 
 """
 Test Notify and Notifee by ensuring that the proper events get
-called at the proper time, and that the stream passed into
-opened_stream is correct
+called, and that the stream passed into opened_stream is correct
 
 Note: Listen event does not get hit because MyNotifee is passed
 into network after network has already started listening
 
 TODO: Add tests to ensure conn is the correct connection
-TODO: Add tests for closed_stream disconnected, listen_close as those 
-features are implemented in network
-passed into connected
+TODO: Add tests for closed_stream disconnected, listen_close when those
+features are implemented in swarm
 """
+
 class MyNotifee(INotifee):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
