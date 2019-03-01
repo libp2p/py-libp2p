@@ -39,7 +39,7 @@ I like tacos
 
 class Pubsub():
 
-    def __init__(self, host, router):
+    def __init__(self, host, router, my_id):
         """
         Construct a new Pubsub object, which is responsible for handling all
         Pubsub-related messages and relaying messages as appropriate to the
@@ -49,18 +49,19 @@ class Pubsub():
         """
         self.host = host
         self.router = router
+        self.my_id = my_id
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
 
         # Register a notifee
-        self.handle_peer_queue = asyncio.Queue()
-        self.host.get_network().notify(PubsubNotifee(self.handle_peer_queue))
+        self.peer_queue = asyncio.Queue()
+        self.host.get_network().notify(PubsubNotifee(self.peer_queue))
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols
         self.protocols = self.router.get_protocols()
-        for protocol in protocols:
+        for protocol in self.protocols:
             self.host.set_stream_handler(protocol, self.stream_handler)
 
         # TODO: determine if these need to be asyncio queues, or if could possibly
@@ -78,22 +79,26 @@ class Pubsub():
         # Map of topic to peers to keep track of what peers are subscribed to
         self.peer_topics = {}
 
-        # Create peers map
-        # Note: this is the list of all peers who we have a pubsub stream to
+        # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
         # Call handle peer to keep waiting for updates to peer queue
-        asyncio.ensure_future(handle_peer_queue)
+        asyncio.ensure_future(self.handle_peer_queue())
 
     def get_hello_packet(self):
         # Generate subscription message with all topics we are subscribed to
-        msg = self.host.get_id()
-        l = len(self.my_topics)
+        msg = "subscription\n" + str(self.host.get_id()) + '\n'\
+            + str(self.host.get_id())
+
+        topic_ids = list(self.my_topics)
+        l = len(topic_ids)
+
         if l > 0:
             msg += '\n'
         for i in range(l):
+            topic = topic_ids[i]
             msg += "sub:" + topic
-            if i < len(self.my_topics) - 1:
+            if i < len(topic_ids) - 1:
                 msg += '\n'
         return msg
 
@@ -103,18 +108,23 @@ class Pubsub():
 
     async def continously_read_stream(self, stream):
         while True:
+            print(self.my_id + " " + \
+                "continously_read_stream waiting")
             incoming = (await stream.read()).decode()
-
-            if incoming not in self.seen_messages
+            print(self.my_id + " " + \
+                "continously_read_stream entered")
+            if incoming not in self.seen_messages:
                 msg_comps = incoming.split('\n')
                 msg_type = msg_comps[0]
+                print(self.my_id + " " + \
+                "continously_read_stream msg_type " + msg_type)
                 msg_sender = msg_comps[1]
                 msg_origin = msg_comps[2]
 
                 # Do stuff with incoming unseen message
-                should_publish = true
+                should_publish = True
                 if msg_type == "subscription":
-                    handle_subscription(incoming)
+                    self.handle_subscription(incoming)
 
                     # We don't need to relay the subscription to our
                     # peers because a given node only needs its peers
@@ -122,43 +132,70 @@ class Pubsub():
                     # need everyone to know)
                     should_publish = False
                 elif msg_type == "talk":
-                    handle_talk(incoming)
+                    await self.handle_talk(incoming)
 
                 # Add message to seen
                 self.seen_messages.append(incoming)
 
                 # Publish message using router's publish
                 if should_publish:
-                    await self.router.publish(msg_sender, incoming)
+                    raw_msg = incoming
+
+                    # Adjust raw_msg to that the message sender
+                    # is now our peer_id
+                    raw_msg_comps = raw_msg.split('\n')
+                    raw_msg = raw_msg_comps[0] + '\n'\
+                        + str(self.host.get_id()) + '\n'\
+                        + raw_msg_comps[2] + '\n'\
+                        + raw_msg_comps[3] + '\n'\
+                        + raw_msg_comps[4]
+
+                    await self.router.publish(msg_sender, raw_msg)
+            
             # Force context switch
-            asyncio.sleep(0)
+            await asyncio.sleep(0)
 
     async def stream_handler(self, stream):
         # Add peer
         # Map peer to stream
+        print(self.my_id + " " + \
+                "stream_handler entered")
         peer_id = stream.mplex_conn.peer_id
-        self.peers[peer_id] = stream
+        self.peers[str(peer_id)] = stream
         self.router.add_peer(peer_id, stream.get_protocol())
 
         # Send hello packet
         hello = self.get_hello_packet()
         await stream.write(hello.encode())
 
+        print(self.my_id + " " + \
+                "stream_handler end")
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continously_read_stream(stream))
 
     async def handle_peer_queue(self):
+        print(self.my_id + " " + \
+                "handle_peer_queue start")
         while True:
-            peer_id = handle_peer_queue.get()
+            print(self.my_id + " " + \
+                "handle_peer_queue waiting")
+            peer_id = await self.peer_queue.get()
+            print(self.my_id + " " + \
+                "handle_peer_queue peer_id got")
 
             # Open a stream to peer on existing connection
             # (we know connection exists since that's the only way
-            # an element gets added to handle_peer_queue)
+            # an element gets added to peer_queue)
+
+            print(self.my_id + " " + \
+                "handle_peer_queue new stream about to be created")
             stream = await self.host.new_stream(peer_id, self.protocols)
 
+            print(self.my_id + " " + \
+                "handle_peer_queue stream opened, protocol: " + stream.get_protocol())
             # Add Peer
             # Map peer to stream
-            self.peers[peer_id] = stream
+            self.peers[str(peer_id)] = stream
             self.router.add_peer(peer_id, stream.get_protocol())
 
             # Send hello packet
@@ -169,25 +206,36 @@ class Pubsub():
             asyncio.ensure_future(self.continously_read_stream(stream))
 
             # Force context switch
-            asyncio.sleep(0)
+            await asyncio.sleep(0)
 
     # This is for a subscription message incoming from a peer
     def handle_subscription(self, subscription):
+        print(self.my_id + " " + \
+                "handle_subscription entered")
         msg_comps = subscription.split('\n')
         msg_origin = msg_comps[2]
 
-        for i in range(2, len(msg_comps)):
+        for i in range(3, len(msg_comps)):
             # Look at each subscription in the msg individually
             sub_comps = msg_comps[i].split(":")
             sub_option = sub_comps[0]
             topic_id = sub_comps[1]
 
+            print(self.my_id + " " + \
+                "handle_subscription " + str(sub_comps))
             if sub_option == "sub":
-                # Add peer to topic 
-                if msg_origin not in self.peer_topics[topic_id]:
+                if topic_id not in self.peer_topics:
+                    # Create topic list if it did not yet exist
+                    self.peer_topics[topic_id] = [msg_origin]
+                elif msg_origin not in self.peer_topics[topic_id]:
+                    # Add peer to topic 
                     self.peer_topics[topic_id].append(msg_origin)
+            print(self.my_id + " " + \
+                "handle_subscription peer_topics: " + str(self.peer_topics))
 
-    def handle_talk(self, talk):
+    async def handle_talk(self, talk):
+        print(self.my_id + " " + \
+                "Entered talk")
         msg_comps = talk.split('\n')
         msg_origin = msg_comps[2]
         topics = self.get_topics_in_talk_msg(talk)
@@ -196,39 +244,60 @@ class Pubsub():
         for topic in topics:
             if topic in self.my_topics:
                 # we are subscribed to a topic this message was sent for
-                self.my_topics[topic](talk)
+                print(self.my_id + " " + \
+                    "Talk did handle " + talk)
+                await self.my_topics[topic].put(talk)
                 break
 
-    def subscribe(self, topic_id, on_msg_received):
-        # Map topic_id to handler
-        self.my_topics[topic_id] = on_msg_received
+    async def subscribe(self, topic_id):
+        print(self.my_id + " " + \
+                "subscribe hit")
+        # Map topic_id to blocking queue
+        self.my_topics[topic_id] = asyncio.Queue()
 
         # Create subscribe message
-        sub_msg = self.host.get_id() + "\nsub:" + topic_id
+        sub_msg = "subscription\n" + \
+            str(self.host.get_id()) + '\n' +\
+            str(self.host.get_id()) + '\n' +\
+            "sub:" + topic_id
 
+        print(self.my_id + " " + \
+                "subscribe messaging all peers")
         # Send out subscribe message to all peers
-        await message_all_peers(sub_msg)
+
+        await self.message_all_peers(sub_msg)
+
+        print(self.my_id + " " + \
+                "subscribe all peers messaged")
 
         # Tell router we are joining this topic
         self.router.join(topic_id)
 
-    def unsubscribe(self, topic_id):
+        # Return the asyncio queue for messages on this topic
+        return self.my_topics[topic_id]
+
+    async def unsubscribe(self, topic_id):
         # Remove topic_id from map if present
         if topic_id in self.my_topics:
             del self.my_topics[topic_id]
 
         # Create unsubscribe message
-        unsub_msg = self.host.get_id() + "\nunsub:" + topic_id
+        unsub_msg = "subscription\n" + \
+            str(self.host.get_id()) + '\n' +\
+            str(self.host.get_id()) + '\n' +\
+            "sub:" + topic_id
         
         # Send out unsubscribe message to all peers
-        await message_all_peers(unsub_msg)
+        await self.message_all_peers(unsub_msg)
 
         # Tell router we are leaving this topic
         self.router.leave(topic_id)
 
-    async def message_all_peers(self, msg):
+        await asyncio.sleep(0)
+
+    async def message_all_peers(self, raw_msg):
         # Encode message for sending
-        encoded_msg = msg.encode()
+        encoded_msg = raw_msg.encode()
 
         # Broadcast message
         for peer in self.peers:

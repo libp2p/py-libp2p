@@ -2,13 +2,13 @@ from .pubsub_router_interface import IPubsubRouter
 
 class FloodSub(IPubsubRouter):
 
-	def __init__(self, protocols):
-		self.protocols = protocols
+    def __init__(self, protocols):
+        self.protocols = protocols
 
-	def get_protocols(self):
+    def get_protocols(self):
         """
         :return: the list of protocols supported by the router
-		"""
+        """
         return self.protocols
 
     def attach(self, pubsub):
@@ -51,23 +51,37 @@ class FloodSub(IPubsubRouter):
         or the peer that forwarded the message.
         """
 
-		# Encode message
-		encoded_msg = message.encode()
+        print("publish started")
+
+        # Encode message
+        encoded_msg = message.encode()
         
-		# Get message sender, origin, and topics
-        msg_sender = peer_id
+        # Get message sender, origin, and topics
+        msg_sender = str(peer_id)
         msg_origin = message.split("\n")[1]
         topics = self.pubsub.get_topics_in_talk_msg(message)
+        print("publish topics are " + str(topics))
+        print("publish peer topics are " + str(self.pubsub.peer_topics))
 
         for topic in topics:
-        	if topic in self.peer_topics:
-        		for peer_id in self.peer_topics[topic]
-	        		# Forward to all known peers in the topic that are not the
-	        		# message sender and are not the message origin
-	        		if peer_id != msg_sender and peer_id != msg_origin:
-	        			stream = self.peers[peer_id]
-
-	        			await stream.write(encoded_msg)
+            if topic in self.pubsub.peer_topics:
+                for peer_id_in_topic in self.pubsub.peer_topics[topic]:
+                    print("publish peer_id is" + str(peer_id_in_topic) + " | msg_sender is " + msg_sender + " | msg_origin is " + msg_origin)
+                    # print("publish msg_sender is " + msg_sender)
+                    # print("publish msg_origin is " + msg_origin)
+                    # print("FOOBAR")
+                    print("DONE")
+                    # Forward to all known peers in the topic that are not the
+                    # message sender and are not the message origin
+                    if peer_id_in_topic != msg_sender and peer_id_in_topic != msg_origin:
+                        print("REACHED1")
+                        print(peer_id_in_topic in self.pubsub.peers)
+                        stream = self.pubsub.peers[peer_id_in_topic]
+                        print("publish should write")
+                        await stream.write(encoded_msg)
+                        print("publish wrote")
+                    else:
+                        print("REACHED2")
 
 
     def join(self, topic):
