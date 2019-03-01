@@ -7,6 +7,7 @@ from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from pubsub.pubsub import Pubsub
 from pubsub.floodsub import FloodSub
+from pubsub.message import MessageTalk
 
 # pylint: disable=too-many-locals
 
@@ -34,11 +35,9 @@ async def test_simple_two_nodes():
 
     node_a_id = str(node_a.get_id())
 
-    msg = "talk\n"
-    msg += node_a_id + '\n' + node_a_id + '\n'
-    msg += "my_topic" + '\n' + "some message data"
+    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data")
 
-    asyncio.ensure_future(floodsub_a.publish(node_a.get_id(), msg))
+    asyncio.ensure_future(floodsub_a.publish(node_a.get_id(), msg.to_str()))
 
     await asyncio.sleep(0.25)
 
@@ -46,7 +45,7 @@ async def test_simple_two_nodes():
 
     # Check that the msg received by node_b is the same
     # as the message sent by node_a
-    assert res_b == msg
+    assert res_b == msg.to_str()
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -84,30 +83,23 @@ async def test_simple_three_nodes():
 
     node_a_id = str(node_a.get_id())
 
-    msg = "talk\n"
-    msg += node_a_id + '\n' + node_a_id + '\n'
-    msg += "my_topic" + '\n' + "some message data"
+    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data")
 
-    asyncio.ensure_future(floodsub_a.publish(node_a.get_id(), msg))
+    asyncio.ensure_future(floodsub_a.publish(node_a.get_id(), msg.to_str()))
     await asyncio.sleep(0.25)
+
     res_b = await qb.get()
     res_c = await qc.get()
 
     # Check that the msg received by node_b is the same
     # as the message sent by node_a
-    print("\n\n\n")
-    print(res_b)
-    print(msg)
-    print(res_b == msg)
-    assert res_b == msg
+    assert res_b == msg.to_str()
 
     # res_c should match original msg but with b as sender
     node_b_id = str(node_b.get_id())
-    msg_b_sender = "talk\n"
-    msg_b_sender += node_b_id + '\n' + node_a_id + '\n'
-    msg_b_sender += "my_topic" + '\n' + "some message data"
+    msg.from_id = node_b_id
 
-    assert res_c == msg_b_sender
+    assert res_c == msg.to_str()
 
     # Success, terminate pending tasks.
     await cleanup()

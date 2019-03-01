@@ -1,5 +1,7 @@
 import asyncio
 from .PubsubNotifee import PubsubNotifee
+from .message import MessageTalk, MessageSub
+from .message import create_message_talk, create_message_sub
 
 """
 For now, because I'm on a plane and don't have access to the go repo/protobuf stuff,
@@ -17,7 +19,8 @@ subscription
 
 Ex.
 subscription
-my_peer_id
+msg_sender_peer_id
+origin_peer_id
 sub:topic1
 sub:topic2
 unsub:fav_topic
@@ -87,20 +90,11 @@ class Pubsub():
 
     def get_hello_packet(self):
         # Generate subscription message with all topics we are subscribed to
-        msg = "subscription\n" + str(self.host.get_id()) + '\n'\
-            + str(self.host.get_id())
-
-        topic_ids = list(self.my_topics)
-        l = len(topic_ids)
-
-        if l > 0:
-            msg += '\n'
-        for i in range(l):
-            topic = topic_ids[i]
-            msg += "sub:" + topic
-            if i < len(topic_ids) - 1:
-                msg += '\n'
-        return msg
+        subs_map = {}
+        for topic in self.my_topics:
+            subs_map[topic] = True
+        sub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), subs_map)
+        return sub_msg.to_str()
 
     def get_message_type(self, message):
         comps = message.split('\n')
@@ -139,18 +133,13 @@ class Pubsub():
 
                 # Publish message using router's publish
                 if should_publish:
-                    raw_msg = incoming
+                    msg = create_message_talk(incoming)
 
                     # Adjust raw_msg to that the message sender
                     # is now our peer_id
-                    raw_msg_comps = raw_msg.split('\n')
-                    raw_msg = raw_msg_comps[0] + '\n'\
-                        + str(self.host.get_id()) + '\n'\
-                        + raw_msg_comps[2] + '\n'\
-                        + raw_msg_comps[3] + '\n'\
-                        + raw_msg_comps[4]
+                    msg.from_id = str(self.host.get_id())
 
-                    await self.router.publish(msg_sender, raw_msg)
+                    await self.router.publish(msg_sender, msg.to_str())
             
             # Force context switch
             await asyncio.sleep(0)
@@ -212,36 +201,33 @@ class Pubsub():
     def handle_subscription(self, subscription):
         print(self.my_id + " " + \
                 "handle_subscription entered")
-        msg_comps = subscription.split('\n')
-        msg_origin = msg_comps[2]
-
-        for i in range(3, len(msg_comps)):
+        # msg_comps = subscription.split('\n')
+        # msg_origin = msg_comps[2]
+        sub_msg = create_message_sub(subscription)
+        # for i in range(3, len(msg_comps)):
+        for topic_id in sub_msg.subs_map:
             # Look at each subscription in the msg individually
-            sub_comps = msg_comps[i].split(":")
-            sub_option = sub_comps[0]
-            topic_id = sub_comps[1]
 
-            print(self.my_id + " " + \
-                "handle_subscription " + str(sub_comps))
-            if sub_option == "sub":
+            if sub_msg.subs_map[topic_id]:
                 if topic_id not in self.peer_topics:
                     # Create topic list if it did not yet exist
-                    self.peer_topics[topic_id] = [msg_origin]
+                    self.peer_topics[topic_id] = [sub_msg.origin_id]
                 elif msg_origin not in self.peer_topics[topic_id]:
                     # Add peer to topic 
-                    self.peer_topics[topic_id].append(msg_origin)
+                    self.peer_topics[topic_id].append(sub_msg.origin_id)
+            else:
+                # TODO: Remove peer from topic
+                pass
             print(self.my_id + " " + \
                 "handle_subscription peer_topics: " + str(self.peer_topics))
 
     async def handle_talk(self, talk):
         print(self.my_id + " " + \
                 "Entered talk")
-        msg_comps = talk.split('\n')
-        msg_origin = msg_comps[2]
-        topics = self.get_topics_in_talk_msg(talk)
+        msg = create_message_talk(talk)
 
         # Check if this message has any topics that we are subscribed to
-        for topic in topics:
+        for topic in msg.topics:
             if topic in self.my_topics:
                 # we are subscribed to a topic this message was sent for
                 print(self.my_id + " " + \
@@ -256,16 +242,14 @@ class Pubsub():
         self.my_topics[topic_id] = asyncio.Queue()
 
         # Create subscribe message
-        sub_msg = "subscription\n" + \
-            str(self.host.get_id()) + '\n' +\
-            str(self.host.get_id()) + '\n' +\
-            "sub:" + topic_id
+        sub_msg = MessageSub(str(self.host.get_id()),  
+            str(self.host.get_id()), {topic_id: True})
 
         print(self.my_id + " " + \
                 "subscribe messaging all peers")
         # Send out subscribe message to all peers
-
-        await self.message_all_peers(sub_msg)
+        print(sub_msg.to_str())
+        await self.message_all_peers(sub_msg.to_str())
 
         print(self.my_id + " " + \
                 "subscribe all peers messaged")
@@ -282,18 +266,13 @@ class Pubsub():
             del self.my_topics[topic_id]
 
         # Create unsubscribe message
-        unsub_msg = "subscription\n" + \
-            str(self.host.get_id()) + '\n' +\
-            str(self.host.get_id()) + '\n' +\
-            "sub:" + topic_id
+        unsub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), {topic_id: False})
         
         # Send out unsubscribe message to all peers
-        await self.message_all_peers(unsub_msg)
+        await self.message_all_peers(unsub_msg.to_str())
 
         # Tell router we are leaving this topic
         self.router.leave(topic_id)
-
-        await asyncio.sleep(0)
 
     async def message_all_peers(self, raw_msg):
         # Encode message for sending

@@ -66,21 +66,15 @@ class FloodSub(IPubsubRouter):
         for topic in topics:
             if topic in self.pubsub.peer_topics:
                 for peer_id_in_topic in self.pubsub.peer_topics[topic]:
-                    print("publish peer_id is" + str(peer_id_in_topic) + " | msg_sender is " + msg_sender + " | msg_origin is " + msg_origin)
-                    # print("publish msg_sender is " + msg_sender)
-                    # print("publish msg_origin is " + msg_origin)
-                    # print("FOOBAR")
-                    print("DONE")
                     # Forward to all known peers in the topic that are not the
                     # message sender and are not the message origin
                     if peer_id_in_topic != msg_sender and peer_id_in_topic != msg_origin:
-                        print("REACHED1")
-                        print(peer_id_in_topic in self.pubsub.peers)
                         stream = self.pubsub.peers[peer_id_in_topic]
                         print("publish should write")
                         await stream.write(encoded_msg)
                         print("publish wrote")
                     else:
+                        # Implies publish did not write
                         print("REACHED2")
 
 
