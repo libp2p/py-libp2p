@@ -28,23 +28,23 @@ class MyNotifee(INotifee):
         self.events = events
         self.val_to_append_to_event = val_to_append_to_event
 
-    def opened_stream(self, network, stream):
+    async def opened_stream(self, network, stream):
         self.events.append(["opened_stream" + \
             self.val_to_append_to_event, stream])
 
-    def closed_stream(self, network, stream):
+    async def closed_stream(self, network, stream):
         pass
 
-    def connected(self, network, conn):
+    async def connected(self, network, conn):
         self.events.append("connected" + self.val_to_append_to_event)
 
-    def disconnected(self, network, conn):
+    async def disconnected(self, network, conn):
         pass
 
-    def listen(self, network, multiaddr):
+    async def listen(self, network, multiaddr):
         pass
 
-    def listen_close(self, network, multiaddr):
+    async def listen_close(self, network, multiaddr):
         pass
 
 @pytest.mark.asyncio
