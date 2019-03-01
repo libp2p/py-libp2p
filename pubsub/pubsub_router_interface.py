@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-
 class IPubsubRouter(ABC):
 
     @abstractmethod
