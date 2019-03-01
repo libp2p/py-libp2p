@@ -27,16 +27,10 @@ async def test_simple_two_nodes():
     info = info_from_p2p_addr(addr)
     await node_a.connect(info)
 
-    def callback_a(msg):
-        print("a: " + msg)
-
-    def callback_b(msg):
-        assert msg == "fuck"
-
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.25)
     qb = await pubsub_b.subscribe("my_topic")
 
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.25)
 
     node_a_id = str(node_a.get_id())
 
@@ -46,7 +40,7 @@ async def test_simple_two_nodes():
 
     asyncio.ensure_future(floodsub_a.publish(node_a.get_id(), msg))
 
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.25)
 
     f = await qb.get()
 
