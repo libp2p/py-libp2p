@@ -69,7 +69,8 @@ class Swarm(INetwork):
             raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
             # Use upgrader to upgrade raw conn to muxed conn
-            muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
+            muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
+                self.generic_protocol_handler, peer_id)
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -144,7 +145,7 @@ class Swarm(INetwork):
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
-                    self.generic_protocol_handler)
+                    self.generic_protocol_handler, peer_id)
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
