@@ -104,9 +104,8 @@ class MultiselectClient(IMultiselectClient):
         if response == protocol:
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
-            raise MultiselectClientError("protocol not supported")
-        else:
-            raise MultiselectClientError("unrecognized response: " + response)
+            raise MultiselectClientError("protocol not supported")    
+        raise MultiselectClientError("unrecognized response: " + response)
 
 
 def validate_handshake(handshake_contents):
