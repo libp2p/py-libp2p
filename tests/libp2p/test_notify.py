@@ -49,14 +49,14 @@ async def perform_two_host_simple_set_up():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
-    async def stream_handler(stream):
+    async def my_stream_handler(stream):
         while True:
             read_string = (await stream.read()).decode()
 
-            response = "ack:" + read_string
-            await stream.write(response.encode())
+            resp = "ack:" + read_string
+            await stream.write(resp.encode())
 
-    node_b.set_stream_handler("/echo/1.0.0", stream_handler)
+    node_b.set_stream_handler("/echo/1.0.0", my_stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
