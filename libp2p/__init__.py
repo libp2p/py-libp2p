@@ -8,6 +8,7 @@ from .network.swarm import Swarm
 from .host.basic_host import BasicHost
 from .transport.upgrader import TransportUpgrader
 from .transport.tcp.tcp import TCP
+from .logger import getLogger, log_func
 
 
 async def cleanup_done_tasks():
