@@ -72,7 +72,7 @@ class Pubsub():
         self.incoming_msgs_from_peers = asyncio.Queue()
         self.outgoing_messages = asyncio.Queue()
 
-        # TODO: Make a cache (LRU cache?)
+        # TODO: Make seen_messages a cache (LRU cache?)
         self.seen_messages = []
 
         # Map of topics we are subscribed to to handler functions
@@ -102,16 +102,11 @@ class Pubsub():
 
     async def continously_read_stream(self, stream):
         while True:
-            print(self.my_id + " " + \
-                "continously_read_stream waiting")
             incoming = (await stream.read()).decode()
-            print(self.my_id + " " + \
-                "continously_read_stream entered")
             if incoming not in self.seen_messages:
                 msg_comps = incoming.split('\n')
                 msg_type = msg_comps[0]
-                print(self.my_id + " " + \
-                "continously_read_stream msg_type " + msg_type)
+
                 msg_sender = msg_comps[1]
                 msg_origin = msg_comps[2]
 
