@@ -149,7 +149,6 @@ class Pubsub():
         # Send hello packet
         hello = self.get_hello_packet()
         await stream.write(hello.encode())
-
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continously_read_stream(stream))
 
@@ -180,6 +179,8 @@ class Pubsub():
     # This is for a subscription message incoming from a peer
     def handle_subscription(self, subscription):
         sub_msg = create_message_sub(subscription)
+        if len(sub_msg.subs_map) > 0:
+            print("handle_subscription my_id: " + self.my_id + ", subber: " + sub_msg.origin_id)
         for topic_id in sub_msg.subs_map:
             # Look at each subscription in the msg individually
             if sub_msg.subs_map[topic_id]:
@@ -189,6 +190,7 @@ class Pubsub():
                 elif msg_origin not in self.peer_topics[topic_id]:
                     # Add peer to topic 
                     self.peer_topics[topic_id].append(sub_msg.origin_id)
+                print("Peer topics " + self.my_id + ": " + str(self.peer_topics) + "| the main issue right now is likely related to async and is that this line does NOT always print when the above print prints")
             else:
                 # TODO: Remove peer from topic
                 pass
