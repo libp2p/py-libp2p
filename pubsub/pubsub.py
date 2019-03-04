@@ -244,8 +244,3 @@ class Pubsub():
 
             # Write message to stream
             await stream.write(encoded_msg)
-
-    def get_topics_in_talk_msg(self, msg):
-        msg_comps = msg.split('\n')
-        topics = msg_comps[3].split(',')
-        return topics
