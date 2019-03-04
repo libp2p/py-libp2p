@@ -51,8 +51,6 @@ class FloodSub(IPubsubRouter):
         or the peer that forwarded the message.
         """
 
-        print("publish started")
-
         # Encode message
         encoded_msg = message.encode()
         
@@ -60,8 +58,6 @@ class FloodSub(IPubsubRouter):
         msg_sender = str(peer_id)
         msg_origin = message.split("\n")[1]
         topics = self.pubsub.get_topics_in_talk_msg(message)
-        print("publish topics are " + str(topics))
-        print("publish peer topics are " + str(self.pubsub.peer_topics))
 
         for topic in topics:
             if topic in self.pubsub.peer_topics:
@@ -70,12 +66,10 @@ class FloodSub(IPubsubRouter):
                     # message sender and are not the message origin
                     if peer_id_in_topic != msg_sender and peer_id_in_topic != msg_origin:
                         stream = self.pubsub.peers[peer_id_in_topic]
-                        print("publish should write")
                         await stream.write(encoded_msg)
-                        print("publish wrote")
                     else:
                         # Implies publish did not write
-                        print("REACHED2")
+                        print("publish did not write")
 
 
     def join(self, topic):
