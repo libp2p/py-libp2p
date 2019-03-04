@@ -1,4 +1,5 @@
 from .pubsub_router_interface import IPubsubRouter
+from .message import create_message_talk
 
 class FloodSub(IPubsubRouter):
 
@@ -55,9 +56,10 @@ class FloodSub(IPubsubRouter):
         encoded_msg = message.encode()
         
         # Get message sender, origin, and topics
+        msg_talk = create_message_talk(message)
         msg_sender = str(peer_id)
-        msg_origin = message.split("\n")[1]
-        topics = self.pubsub.get_topics_in_talk_msg(message)
+        msg_origin = msg_talk.origin_id
+        topics = msg_talk.topics
 
         for topic in topics:
             if topic in self.pubsub.peer_topics:
