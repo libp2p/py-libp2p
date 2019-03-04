@@ -147,8 +147,6 @@ class Pubsub():
     async def stream_handler(self, stream):
         # Add peer
         # Map peer to stream
-        print(self.my_id + " " + \
-                "stream_handler entered")
         peer_id = stream.mplex_conn.peer_id
         self.peers[str(peer_id)] = stream
         self.router.add_peer(peer_id, stream.get_protocol())
@@ -157,31 +155,18 @@ class Pubsub():
         hello = self.get_hello_packet()
         await stream.write(hello.encode())
 
-        print(self.my_id + " " + \
-                "stream_handler end")
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continously_read_stream(stream))
 
     async def handle_peer_queue(self):
-        print(self.my_id + " " + \
-                "handle_peer_queue start")
         while True:
-            print(self.my_id + " " + \
-                "handle_peer_queue waiting")
             peer_id = await self.peer_queue.get()
-            print(self.my_id + " " + \
-                "handle_peer_queue peer_id got")
 
             # Open a stream to peer on existing connection
             # (we know connection exists since that's the only way
             # an element gets added to peer_queue)
-
-            print(self.my_id + " " + \
-                "handle_peer_queue new stream about to be created")
             stream = await self.host.new_stream(peer_id, self.protocols)
 
-            print(self.my_id + " " + \
-                "handle_peer_queue stream opened, protocol: " + stream.get_protocol())
             # Add Peer
             # Map peer to stream
             self.peers[str(peer_id)] = stream
@@ -199,15 +184,9 @@ class Pubsub():
 
     # This is for a subscription message incoming from a peer
     def handle_subscription(self, subscription):
-        print(self.my_id + " " + \
-                "handle_subscription entered")
-        # msg_comps = subscription.split('\n')
-        # msg_origin = msg_comps[2]
         sub_msg = create_message_sub(subscription)
-        # for i in range(3, len(msg_comps)):
         for topic_id in sub_msg.subs_map:
             # Look at each subscription in the msg individually
-
             if sub_msg.subs_map[topic_id]:
                 if topic_id not in self.peer_topics:
                     # Create topic list if it did not yet exist
@@ -218,26 +197,18 @@ class Pubsub():
             else:
                 # TODO: Remove peer from topic
                 pass
-            print(self.my_id + " " + \
-                "handle_subscription peer_topics: " + str(self.peer_topics))
 
     async def handle_talk(self, talk):
-        print(self.my_id + " " + \
-                "Entered talk")
         msg = create_message_talk(talk)
 
         # Check if this message has any topics that we are subscribed to
         for topic in msg.topics:
             if topic in self.my_topics:
                 # we are subscribed to a topic this message was sent for
-                print(self.my_id + " " + \
-                    "Talk did handle " + talk)
                 await self.my_topics[topic].put(talk)
                 break
 
     async def subscribe(self, topic_id):
-        print(self.my_id + " " + \
-                "subscribe hit")
         # Map topic_id to blocking queue
         self.my_topics[topic_id] = asyncio.Queue()
 
@@ -245,14 +216,8 @@ class Pubsub():
         sub_msg = MessageSub(str(self.host.get_id()),  
             str(self.host.get_id()), {topic_id: True})
 
-        print(self.my_id + " " + \
-                "subscribe messaging all peers")
         # Send out subscribe message to all peers
-        print(sub_msg.to_str())
         await self.message_all_peers(sub_msg.to_str())
-
-        print(self.my_id + " " + \
-                "subscribe all peers messaged")
 
         # Tell router we are joining this topic
         self.router.join(topic_id)
