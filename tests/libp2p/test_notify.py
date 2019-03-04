@@ -1,11 +1,3 @@
-import pytest
-
-from tests.utils import cleanup
-from libp2p import new_node
-from libp2p.network.notifee_interface import INotifee
-
-# pylint: disable=too-many-locals
-
 """
 Test Notify and Notifee by ensuring that the proper events get
 called, and that the stream passed into opened_stream is correct
@@ -13,10 +5,17 @@ called, and that the stream passed into opened_stream is correct
 Note: Listen event does not get hit because MyNotifee is passed
 into network after network has already started listening
 
-TODO: Add tests to ensure conn is the correct connection
 TODO: Add tests for closed_stream disconnected, listen_close when those
 features are implemented in swarm
 """
+
+import pytest
+
+from tests.utils import cleanup
+from libp2p import new_node
+from libp2p.network.notifee_interface import INotifee
+
+# pylint: disable=too-many-locals
 
 class MyNotifee(INotifee):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
@@ -45,22 +44,26 @@ class MyNotifee(INotifee):
     async def listen_close(self, network, multiaddr):
         pass
 
-@pytest.mark.asyncio
-async def test_one_notifier():
+async def perform_two_host_simple_set_up():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
-    async def stream_handler(stream):
+    async def my_stream_handler(stream):
         while True:
             read_string = (await stream.read()).decode()
 
-            response = "ack:" + read_string
-            await stream.write(response.encode())
+            resp = "ack:" + read_string
+            await stream.write(resp.encode())
 
-    node_b.set_stream_handler("/echo/1.0.0", stream_handler)
+    node_b.set_stream_handler("/echo/1.0.0", my_stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
+    return node_a, node_b
+
+@pytest.mark.asyncio
+async def test_one_notifier():
+    node_a, node_b = await perform_two_host_simple_set_up()
 
     # Add notifee for node_a
     events = []
@@ -87,20 +90,7 @@ async def test_one_notifier():
 
 @pytest.mark.asyncio
 async def test_two_notifiers():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-    async def stream_handler(stream):
-        while True:
-            read_string = (await stream.read()).decode()
-
-            response = "ack:" + read_string
-            await stream.write(response.encode())
-
-    node_b.set_stream_handler("/echo/1.0.0", stream_handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
+    node_a, node_b = await perform_two_host_simple_set_up()
 
     # Add notifee for node_a
     events0 = []
@@ -133,20 +123,7 @@ async def test_two_notifiers():
 async def test_ten_notifiers():
     num_notifiers = 10
 
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-    async def stream_handler(stream):
-        while True:
-            read_string = (await stream.read()).decode()
-
-            response = "ack:" + read_string
-            await stream.write(response.encode())
-
-    node_b.set_stream_handler("/echo/1.0.0", stream_handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
+    node_a, node_b = await perform_two_host_simple_set_up()
 
     # Add notifee for node_a
     events_lst = []
