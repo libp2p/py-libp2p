@@ -199,9 +199,10 @@ class Pubsub():
         # Check if this message has any topics that we are subscribed to
         for topic in msg.topics:
             if topic in self.my_topics:
-                # we are subscribed to a topic this message was sent for
+                # we are subscribed to a topic this message was sent for,
+                # so add message to the subscription output queue 
+                # for each topic
                 await self.my_topics[topic].put(talk)
-                break
 
     async def subscribe(self, topic_id):
         # Map topic_id to blocking queue
