@@ -1,4 +1,4 @@
-from peer.peerstore import PeerStore
+from libp2p.peer.peerstore import PeerStore
 
 # Testing methods from IPeerStore base class.
 

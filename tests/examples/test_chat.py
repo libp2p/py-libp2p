@@ -1,14 +1,11 @@
-#!/bin/env python3
-import asyncio
-import sys
-
-import click
-import multiaddr
 import pytest
+import asyncio
 
-from libp2p.libp2p import *
-from peer.peerinfo import info_from_p2p_addr
+from tests.utils import cleanup
+from libp2p import new_node
+from libp2p.peer.peerinfo import info_from_p2p_addr
 from multistream_select.multiselect_client import MultiselectClientError
+
 
 PROTOCOL_ID = '/chat/1.0.0'
 
@@ -32,25 +29,28 @@ async def hello_world(host_a, host_b):
 
 
 async def connect_write(host_a, host_b):
-    messages = [b'data %d' % i for i in range(5)]
+    messages = ['data %d' % i for i in range(5)]
+    received = []
 
     async def stream_handler(stream):
-        received = []
         while True:
             try:
                 received.append((await stream.read()).decode())
             except Exception:  # exception is raised when other side close the stream ?
                 break
-        await stream.close()
-        assert received == messages
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
 
     # Start a stream with the destination.
     # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
     stream = await host_b.new_stream(host_a.get_id(), [PROTOCOL_ID])
     for message in messages:
-        await stream.write(message)
+        await stream.write(message.encode())
+
+    # Reader needs time due to async reads
+    await asyncio.sleep(2)
+
     await stream.close()
+    assert received == messages
 
 
 async def connect_read(host_a, host_b):
@@ -108,3 +108,5 @@ async def test_chat(test):
     await host_b.connect(info)
 
     await test(host_a, host_b)
+
+    await cleanup()
