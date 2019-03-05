@@ -1,8 +1,8 @@
 import pytest
 
+from tests.utils import cleanup
+from libp2p import new_node
 from multistream_select.multiselect_client import MultiselectClientError
-from libp2p.libp2p import new_node
-
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -50,7 +50,7 @@ async def perform_simple_test(expected_selected_protocol,
     assert expected_selected_protocol == stream.get_protocol()
 
     # Success, terminate pending tasks.
-    return
+    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -65,6 +65,9 @@ async def test_single_protocol_fails():
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", ["/echo/1.0.0"],
                                   ["/potato/1.0.0"])
+
+    # Cleanup not reached on error
+    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -92,3 +95,6 @@ async def test_multiple_protocol_fails():
     with pytest.raises(MultiselectClientError):
         await perform_simple_test("", protocols_for_client,
                                   protocols_for_listener)
+
+    # Cleanup not reached on error
+    await cleanup()

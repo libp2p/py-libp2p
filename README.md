@@ -1,22 +1,31 @@
-# py-libp2p [![Build Status](https://travis-ci.com/zixuanzh/py-libp2p.svg?branch=master)](https://travis-ci.com/zixuanzh/py-libp2p) [![codecov](https://codecov.io/gh/zixuanzh/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/zixuanzh/py-libp2p) [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby)[![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23libp2p)
+# py-libp2p [![Build Status](https://travis-ci.com/libp2p/py-libp2p.svg?branch=master)](https://travis-ci.com/libp2p/py-libp2p) [![codecov](https://codecov.io/gh/libp2p/py-libp2p/branch/master/graph/badge.svg)](https://codecov.io/gh/libp2p/py-libp2p) [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby)[![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23libp2p)
 
 
 
 <h1 align="center">
-  <img width="250" align="center" src="https://github.com/zixuanzh/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
+  <img width="250" align="center" src="https://github.com/libp2p/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
 </h1>
 
 ## WARNING
 py-libp2p is an experimental and work-in-progress repo under heavy development. We do not yet recommend using py-libp2p in production environments.
 
+## Sponsorship
+This project is graciously sponsored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
+
+## Maintainers
+The py-libp2p team consists of:
+
+[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac)
+
 ## Development
 
-py-libp2p requires Python 3.6 and the best way to guarantee a clean Python 3.6 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
+py-libp2p requires Python 3.7 and the best way to guarantee a clean Python 3.7 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
 
 ```sh
-virtualenv -p python3.6 venv
+virtualenv -p python3.7 venv
 . venv/bin/activate
-pip3 install -r requirements.txt
+pip3 install -r requirements_dev.txt
+python setup.py develop
 ```
 
 ## Testing
@@ -49,7 +58,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | **`UDP`**                                    | :tomato:      |
 | **`WebSockets`**                             | :tomato:      |
 | **`UTP`**                                    | :tomato:      |
-| **`WebRTC`**                                 | :chestnut:    |
+| **`WebRTC`**                                 | :tomato:      |
 | **`SCTP`**                                   | :chestnut:    |
 | **`Tor`**                                    | :chestnut:    |
 | **`i2p`**                                    | :chestnut:    |
@@ -110,8 +119,8 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | NAT Traversal                                | Status        |
 | -------------------------------------------- | :-----------: |
-| **`nat-pmp`**                                | :chestnut:    |
-| **`upnp`**                                   | :chestnut:    |
+| **`nat-pmp`**                                | :tomato:      |
+| **`upnp`**                                   | :tomato:      |
 | **`ext addr discovery`**                     | :chestnut:    |
 | **`STUN-like`**                              | :chestnut:    |
 | **`line-switch relay`**                      | :chestnut:    |
