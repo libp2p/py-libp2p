@@ -60,7 +60,7 @@ class Mplex(IMuxedConn):
         # TODO: pass down timeout from user and use that
         if stream_id in self.buffers:
             try:
-                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=3)
+                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=5)
                 return data
             except asyncio.TimeoutError:
                 return None
