@@ -187,7 +187,7 @@ class Pubsub():
                 if topic_id not in self.peer_topics:
                     # Create topic list if it did not yet exist
                     self.peer_topics[topic_id] = [sub_msg.origin_id]
-                elif msg_origin not in self.peer_topics[topic_id]:
+                elif sub_msg.origin_id not in self.peer_topics[topic_id]:
                     # Add peer to topic 
                     self.peer_topics[topic_id].append(sub_msg.origin_id)
                 print("Peer topics " + self.my_id + ": " + str(self.peer_topics) + "| the main issue right now is likely related to async and is that this line does NOT always print when the above print prints")

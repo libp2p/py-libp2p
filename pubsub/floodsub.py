@@ -61,6 +61,12 @@ class FloodSub(IPubsubRouter):
         msg_origin = msg_talk.origin_id
         topics = msg_talk.topics
 
+        # Deliver to self if self was origin
+        # Note: handle_talk checks if self is subscribed to topics in message
+        if msg_sender == msg_origin and msg_sender == str(self.pubsub.host.get_id()):
+           await self.pubsub.handle_talk(message)
+
+        # Deliver to self and peers
         print("----------")
         print(self.pubsub.my_id + ": " + str(self.pubsub.peer_topics))
         print(self.pubsub.peers)
@@ -75,7 +81,6 @@ class FloodSub(IPubsubRouter):
                     else:
                         # Implies publish did not write
                         print("publish did not write")
-
 
     def join(self, topic):
         """
