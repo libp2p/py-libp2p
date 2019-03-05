@@ -1,8 +1,8 @@
 import pytest
-
+from multistream_select.multiselect_client import MultiselectClientError
 from tests.utils import cleanup
 from libp2p import new_node
-from multistream_select.multiselect_client import MultiselectClientError
+
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
