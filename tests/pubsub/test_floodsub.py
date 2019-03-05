@@ -468,3 +468,35 @@ async def test_seven_nodes_tree_three_topics_diff_origin_test_obj():
         ]
     }
     await perform_test_from_obj(test_obj)
+
+@pytest.mark.asyncio
+async def test_three_nodes_clique_two_topic_diff_origin_test_obj():
+    test_obj = {
+        "supported_protocols": ["/floodsub/1.0.0"],
+        "adj_list": {
+            "1": ["2", "3"],
+            "2": ["3"]
+        },
+        "topic_map": {
+            "astrophysics": ["1", "2", "3"],
+            "school": ["1", "2", "3"]
+        },
+        "messages": [
+            {
+                "topics": ["astrophysics"],
+                "data": "e=mc^2",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic",
+                "node_id": "1"
+            }
+        ]
+    }
+    await perform_test_from_obj(test_obj)
