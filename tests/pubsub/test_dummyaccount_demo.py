@@ -9,7 +9,7 @@ from pubsub.pubsub import Pubsub
 from pubsub.floodsub import FloodSub
 from pubsub.message import MessageTalk
 from pubsub.message import create_message_talk
-from .dummy_account_node import DummyAccountNode
+from tests.pubsub.dummy_account_node import DummyAccountNode
 
 # pylint: disable=too-many-locals
 
@@ -21,8 +21,8 @@ async def connect(node1, node2):
 
 @pytest.mark.asyncio
 async def test_simple_two_nodes():
-    dummy1 = DummyAccountNode.create()
-    dummy2 = DummyAccountNode.create()
+    dummy1 = await DummyAccountNode.create()
+    dummy2 = await DummyAccountNode.create()
 
     await connect(dummy1.libp2p_node, dummy2.libp2p_node)
 
