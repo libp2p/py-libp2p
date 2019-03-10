@@ -89,16 +89,14 @@ class Pubsub():
         asyncio.ensure_future(self.handle_peer_queue())
 
     def get_hello_packet(self):
-        # Generate subscription message with all topics we are subscribed to
+        """
+        Generate subscription message with all topics we are subscribed to
+        """
         subs_map = {}
         for topic in self.my_topics:
             subs_map[topic] = True
         sub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), subs_map)
         return sub_msg.to_str()
-
-    def get_message_type(self, message):
-        comps = message.split('\n')
-        return comps[0]
 
     async def continously_read_stream(self, stream):
         while True:
