@@ -79,3 +79,29 @@ async def test_simple_three_nodes_line_topography():
         assert dummy_node.get_balance("aspyn") == 10
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
+@pytest.mark.asyncio
+async def test_simple_three_nodes_triangle_topography():
+    num_nodes = 3
+    adj_map = {0: [1, 2], 1: [2]}
+
+    async def action_func(dummy_nodes):
+        await dummy_nodes[0].publish_set_crypto("aspyn", 20)
+
+    def assertion_func(dummy_node):
+        assert dummy_node.get_balance("aspyn") == 20
+
+    await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
+@pytest.mark.asyncio
+async def test_simple_seven_nodes_tree_topography():
+    num_nodes = 7
+    adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
+
+    async def action_func(dummy_nodes):
+        await dummy_nodes[0].publish_set_crypto("aspyn", 20)
+
+    def assertion_func(dummy_node):
+        assert dummy_node.get_balance("aspyn") == 20
+
+    await perform_test(num_nodes, adj_map, action_func, assertion_func)
