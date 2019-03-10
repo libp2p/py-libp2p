@@ -32,26 +32,29 @@ class DummyAccountNode():
     async def listen_to_stuff(self):
         while True:
             # Force context switch
-            await asyncio.sleep(0)
+            # await asyncio.sleep(0)
             message_raw = await self.q.get()
             message = create_message_talk(message_raw)
             contents = message.data
 
             msg_comps = contents.split(",")
+
             if msg_comps[0] == "send":
-                handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
-            elif msg_comps[1] == "set":
-                handle_set_crypto_for_user(msg_comps[1], int(msg_comps[2]))
+                self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
+            elif msg_comps[0] == "set":
+                self.handle_set_crypto_for_user(msg_comps[1], int(msg_comps[2]))
 
     async def setup_crypto_networking(self):
         self.q = await self.pubsub.subscribe(CRYPTO_TOPIC)
 
         # This does not work but it's meant to setup another thread to loop on
         # and yes I do mean thread (look in docs)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self.listen_to_stuff())
-        loop.close()
+        # loop = asyncio.get_event_loop()
+        # asyncio.set_event_loop(loop)
+        # loop.run_until_complete(self.listen_to_stuff())
+        # loop.close()
+        asyncio.ensure_future(self.listen_to_stuff())
+        # await self.listen_to_stuff()
 
     async def publish_send_crypto(self, source_user, dest_user, amount):
         """
