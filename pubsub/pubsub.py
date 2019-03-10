@@ -2,6 +2,7 @@ import asyncio
 from .PubsubNotifee import PubsubNotifee
 from .message import MessageTalk, MessageSub
 from .message import create_message_talk, create_message_sub
+from. message import generate_message_id
 
 """
 For now, because I'm on a plane and don't have access to the go repo/protobuf stuff,
@@ -95,7 +96,7 @@ class Pubsub():
         subs_map = {}
         for topic in self.my_topics:
             subs_map[topic] = True
-        sub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), subs_map)
+        sub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), subs_map, generate_message_id())
         return sub_msg.to_str()
 
     async def continously_read_stream(self, stream):
@@ -108,13 +109,15 @@ class Pubsub():
         """
         while True:
             incoming = (await stream.read()).decode()
-            if incoming not in self.seen_messages:
-                msg_comps = incoming.split('\n')
-                msg_type = msg_comps[0]
+            msg_comps = incoming.split('\n')
+            msg_type = msg_comps[0]
 
-                msg_sender = msg_comps[1]
-                msg_origin = msg_comps[2]
-
+            msg_sender = msg_comps[1]
+            msg_origin = msg_comps[2]
+            msg_id = msg_comps[3]
+            print("HIT ME1")
+            if msg_id not in self.seen_messages:
+                print("HIT ME")
                 # Do stuff with incoming unseen message
                 should_publish = True
                 if msg_type == "subscription":
@@ -128,8 +131,8 @@ class Pubsub():
                 elif msg_type == "talk":
                     await self.handle_talk(incoming)
 
-                # Add message to seen
-                self.seen_messages.append(incoming)
+                # Add message id to seen
+                self.seen_messages.append(msg_id)
 
                 # Publish message using router's publish
                 if should_publish:
@@ -211,7 +214,6 @@ class Pubsub():
                 elif sub_msg.origin_id not in self.peer_topics[topic_id]:
                     # Add peer to topic 
                     self.peer_topics[topic_id].append(sub_msg.origin_id)
-                print("Peer topics " + self.my_id + ": " + str(self.peer_topics) + "| the main issue right now is likely related to async and is that this line does NOT always print when the above print prints")
             else:
                 # TODO: Remove peer from topic
                 pass
@@ -242,7 +244,7 @@ class Pubsub():
 
         # Create subscribe message
         sub_msg = MessageSub(str(self.host.get_id()),  
-            str(self.host.get_id()), {topic_id: True})
+            str(self.host.get_id()), {topic_id: True}, generate_message_id())
 
         # Send out subscribe message to all peers
         await self.message_all_peers(sub_msg.to_str())
@@ -264,7 +266,8 @@ class Pubsub():
             del self.my_topics[topic_id]
 
         # Create unsubscribe message
-        unsub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), {topic_id: False})
+        unsub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), \
+            {topic_id: False}, generate_message_id())
         
         # Send out unsubscribe message to all peers
         await self.message_all_peers(unsub_msg.to_str())

@@ -9,6 +9,7 @@ from pubsub.pubsub import Pubsub
 from pubsub.floodsub import FloodSub
 from pubsub.message import MessageTalk
 from pubsub.message import create_message_talk
+from pubsub.message import generate_message_id
 
 # pylint: disable=too-many-locals
 
@@ -39,7 +40,7 @@ async def test_simple_two_nodes():
 
     node_a_id = str(node_a.get_id())
 
-    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data")
+    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data", generate_message_id())
 
     await floodsub_a.publish(node_a.get_id(), msg.to_str())
 
@@ -80,12 +81,11 @@ async def test_simple_three_nodes():
 
     node_a_id = str(node_a.get_id())
 
-    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data")
+    msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data", generate_message_id())
 
     await floodsub_a.publish(node_a.get_id(), msg.to_str())
 
     await asyncio.sleep(0.25)
-
     res_b = await qb.get()
     res_c = await qc.get()
 
@@ -253,7 +253,7 @@ async def perform_test_from_obj(obj):
         actual_node_id = str(node_map[node_id].get_id())
 
         # Create correctly formatted message
-        msg_talk = MessageTalk(actual_node_id, actual_node_id, topics, data)
+        msg_talk = MessageTalk(actual_node_id, actual_node_id, topics, data, generate_message_id())
         
         # Publish message
         # await floodsub_map[node_id].publish(actual_node_id, msg_talk.to_str())

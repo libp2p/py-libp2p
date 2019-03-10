@@ -4,6 +4,7 @@ from pubsub.message import create_message_talk
 from pubsub.pubsub import Pubsub
 from pubsub.floodsub import FloodSub
 from pubsub.message import MessageTalk
+from pubsub.message import generate_message_id
 
 SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
 CRYPTO_TOPIC = "ethereum"
@@ -76,7 +77,7 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
-        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents)
+        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
         await self.floodsub.publish(my_id, msg.to_str())
 
     async def publish_set_crypto(self, user, amount):
@@ -87,7 +88,7 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
-        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents)
+        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
         await self.floodsub.publish(my_id, msg.to_str())
 
     def handle_send_crypto(self, source_user, dest_user, amount):
@@ -97,7 +98,6 @@ class DummyAccountNode():
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send 
         """
-        print("HIT ME")
         if source_user in self.balances:
             self.balances[source_user] -= amount
         else:
@@ -107,7 +107,6 @@ class DummyAccountNode():
             self.balances[dest_user] += amount
         else:
             self.balances[dest_user] = amount
-        print("HIT ME2")
 
     def handle_set_crypto_for_user(self, dest_user, amount):
         """
@@ -115,9 +114,7 @@ class DummyAccountNode():
         :param dest_user: user to set crypto for
         :param amount: amount of crypto
         """
-        print("HIT ME3")
         self.balances[dest_user] = amount
-        print("HIT ME4")
 
     def get_balance(self, user):
         """

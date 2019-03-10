@@ -72,9 +72,6 @@ class FloodSub(IPubsubRouter):
            await self.pubsub.handle_talk(message)
 
         # Deliver to self and peers
-        print("----------")
-        print(self.pubsub.my_id + ": " + str(self.pubsub.peer_topics))
-        print(self.pubsub.peers)
         for topic in topics:
             if topic in self.pubsub.peer_topics:
                 for peer_id_in_topic in self.pubsub.peer_topics[topic]:
