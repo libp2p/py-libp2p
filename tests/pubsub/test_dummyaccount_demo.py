@@ -35,28 +35,40 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     such as send crypto and set crypto
     :param assertion_func: assertions for testing the results of the actions are correct
     """
+
+    # Create nodes
     dummy_nodes = []
     for i in range(num_nodes):
         dummy_nodes.append(await DummyAccountNode.create())
 
+    # Create network
     for source_num in adjacency_map:
         target_nums = adjacency_map[source_num]
         for target_num in target_nums:
             await connect(dummy_nodes[source_num].libp2p_node, \
                 dummy_nodes[target_num].libp2p_node)
 
+    # Allow time for network creation to take place
     await asyncio.sleep(0.25)
 
+    # Start a thread for each node so that each node can listen and respond
+    # to messages on its own thread, which will avoid waiting indefinitely
+    # on the main thread. On this thread, call the setup func for the node,
+    # which subscribes the node to the CRYPTO_TOPIC topic
     for dummy_node in dummy_nodes:
         thread = Thread(target=create_setup_in_new_thread_func(dummy_node))
         thread.run()
 
+    # Allow time for nodes to subscribe to CRYPTO_TOPIC topic
     await asyncio.sleep(0.25)
 
+    # Perform action function
     await action_func(dummy_nodes)
 
+    # Allow time for action function to be performed (i.e. messages to propogate)
     await asyncio.sleep(0.25)
 
+    # Perform assertion function
     for dummy_node in dummy_nodes:
         assertion_func(dummy_node)
 
