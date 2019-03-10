@@ -14,7 +14,9 @@ from pubsub.message import generate_message_id
 # pylint: disable=too-many-locals
 
 async def connect(node1, node2):
-    # node1 connects to node2
+    """
+    Connect node1 to node2
+    """
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
@@ -102,64 +104,35 @@ async def test_simple_three_nodes():
     # Success, terminate pending tasks.
     await cleanup()
 
-# @pytest.mark.asyncio
-# async def test_three_nodes_two_topics():
-#     # Want to pass two messages from A -> B -> C on two topics
-#     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-#     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-#     node_c = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-#     supported_protocols = ["/floodsub/1.0.0"]
-
-#     floodsub_a = FloodSub(supported_protocols)
-#     pubsub_a = Pubsub(node_a, floodsub_a, "a")
-#     floodsub_b = FloodSub(supported_protocols)
-#     pubsub_b = Pubsub(node_b, floodsub_b, "b")
-#     floodsub_c = FloodSub(supported_protocols)
-#     pubsub_c = Pubsub(node_c, floodsub_c, "c")
-
-#     await connect(node_a, node_b)
-#     await connect(node_b, node_c)
-
-#     await asyncio.sleep(0.25)
-#     qb_t1 = await pubsub_b.subscribe("t1")
-#     qc_t1 = await pubsub_c.subscribe("t1")
-#     qb_t2 = await pubsub_b.subscribe("t2")
-#     qc_t2 = await pubsub_c.subscribe("t2")
-#     await asyncio.sleep(0.25)
-
-#     node_a_id = str(node_a.get_id())
-
-#     msg_t1 = MessageTalk(node_a_id, node_a_id, ["t1"], "some data")
-#     await floodsub_a.publish(node_a.get_id(), msg_t1.to_str())
-
-#     msg_t2 = MessageTalk(node_a_id, node_a_id, ["t2"], "some data")
-#     await floodsub_a.publish(node_a.get_id(), msg_t2.to_str())
-
-#     await asyncio.sleep(0.25)
-
-#     res_b_t1 = await qb_t1.get()
-#     res_c_t1 = await qc_t1.get()
-#     res_b_t2 = await qb_t2.get()
-#     res_c_t2 = await qc_t2.get()
-
-#     # Check that the msg received by node_b is the same
-#     # as the message sent by node_a
-#     assert res_b_t1 == msg_t1.to_str()
-#     assert res_b_t2 == msg_t2.to_str()
-
-#     # res_c should match original msg but with b as sender
-#     node_b_id = str(node_b.get_id())
-#     msg_t1.from_id = node_b_id
-#     msg_t2.from_id = node_b_id
-
-#     assert res_c_t1 == msg_t1.to_str()
-#     assert res_c_t2 == msg_t2.to_str()
-
-#     # Success, terminate pending tasks.
-#     await cleanup()
-
 async def perform_test_from_obj(obj):
+    """
+    Perform a floodsub test from a test obj.
+    test obj are composed as follows:
+    
+    {
+        "supported_protocols": ["supported/protocol/1.0.0",...],
+        "adj_list": {
+            "node1": ["neighbor1_of_node1", "neighbor2_of_node1", ...],
+            "node2": ["neighbor1_of_node2", "neighbor2_of_node2", ...],
+            ...
+        },
+        "topic_map": {
+            "topic1": ["node1_subscribed_to_topic1", "node2_subscribed_to_topic1", ...]
+        },
+        "messages": [
+            {
+                "topics": ["topic1_for_message", "topic2_for_message", ...],
+                "data": "some contents of the message (newlines are not supported)",
+                "node_id": "message sender node id"
+            },
+            ...
+        ]
+    }
+    NOTE: In adj_list, for any neighbors A and B, only list B as a neighbor of A
+    or B as a neighbor of A once. Do NOT list both A: ["B"] and B:["A"] as the behavior
+    is undefined (even if it may work)
+    """
+
     # Step 1) Create graph
     adj_list = obj["adj_list"]
     node_map = {}
