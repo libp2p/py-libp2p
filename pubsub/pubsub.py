@@ -99,6 +99,13 @@ class Pubsub():
         return sub_msg.to_str()
 
     async def continously_read_stream(self, stream):
+        """
+        Read from input stream in an infinite loop. Process
+        messages from other nodes, which for now are considered MessageTalk
+        and MessageSub messages.
+        TODO: Handle RPC messages instead of my Aspyn's own custom message format
+        :param stream: stream to continously read from
+        """
         while True:
             incoming = (await stream.read()).decode()
             if incoming not in self.seen_messages:
@@ -138,6 +145,11 @@ class Pubsub():
             await asyncio.sleep(0)
 
     async def stream_handler(self, stream):
+        """
+        Stream handler for pubsub. Gets invoked whenever a new stream is created
+        on one of the supported pubsub protocols.
+        :param stream: newly created stream
+        """
         # Add peer
         # Map peer to stream
         peer_id = stream.mplex_conn.peer_id
@@ -151,6 +163,12 @@ class Pubsub():
         asyncio.ensure_future(self.continously_read_stream(stream))
 
     async def handle_peer_queue(self):
+        """
+        Continuously read from peer queue and each time a new peer is found,
+        open a stream to the peer using a supported pubsub protocol
+        TODO: Handle failure for when the peer does not support any of the
+        pubsub protocols we support
+        """
         while True:
             peer_id = await self.peer_queue.get()
 
@@ -174,8 +192,13 @@ class Pubsub():
             # Force context switch
             await asyncio.sleep(0)
 
-    # This is for a subscription message incoming from a peer
     def handle_subscription(self, subscription):
+        """
+        Handle an incoming subscription message from a peer. Update internal
+        mapping to mark the peer as subscribed or unsubscribed to topics as
+        defined in the subscription message
+        :param subscription: raw data constituting a subscription message
+        """
         sub_msg = create_message_sub(subscription)
         if len(sub_msg.subs_map) > 0:
             print("handle_subscription my_id: " + self.my_id + ", subber: " + sub_msg.origin_id)
@@ -194,6 +217,11 @@ class Pubsub():
                 pass
 
     async def handle_talk(self, talk):
+        """
+        Handle incoming Talk message from a peer. A Talk message contains some 
+        custom message that is published on a given topic(s)
+        :param talk: raw data constituting a talk message
+        """
         msg = create_message_talk(talk)
 
         # Check if this message has any topics that we are subscribed to
@@ -205,6 +233,10 @@ class Pubsub():
                 await self.my_topics[topic].put(talk)
 
     async def subscribe(self, topic_id):
+        """
+        Subscribe ourself to a topic
+        :param topic_id: topic_id to subscribe to
+        """
         # Map topic_id to blocking queue
         self.my_topics[topic_id] = asyncio.Queue()
 
@@ -222,6 +254,11 @@ class Pubsub():
         return self.my_topics[topic_id]
 
     async def unsubscribe(self, topic_id):
+        """
+        Unsubscribe ourself from a topic
+        :param topic_id: topic_id to unsubscribe from
+        """
+
         # Remove topic_id from map if present
         if topic_id in self.my_topics:
             del self.my_topics[topic_id]
@@ -236,6 +273,11 @@ class Pubsub():
         self.router.leave(topic_id)
 
     async def message_all_peers(self, raw_msg):
+        """
+        Broadcast a message to peers
+        :param raw_msg: raw contents of the message to broadcast
+        """
+
         # Encode message for sending
         encoded_msg = raw_msg.encode()
 

@@ -18,10 +18,15 @@ class PubsubNotifee(INotifee):
         pass
 
     async def connected(self, network, conn):
-        # Add peer_id to initiator, since
-        # this peer_id will be used to create a stream and we 
-        # only want to have one pubsub stream with each peer
+        """
+        Add peer_id to initiator_peers_queue, so that this peer_id can be used to 
+        create a stream and we only want to have one pubsub stream with each peer.
+        :param network: network the connection was opened on
+        :param conn: connection that was opened
+        """
 
+        # Only add peer_id if we are initiator (otherwise we would end up
+        # with two pubsub streams between us and the peer)
         if conn.initiator:
             await self.initiator_peers_queue.put(conn.peer_id)
 

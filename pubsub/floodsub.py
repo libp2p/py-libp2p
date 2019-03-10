@@ -23,12 +23,14 @@ class FloodSub(IPubsubRouter):
     def add_peer(self, peer_id, protocol_id):
         """
         Notifies the router that a new peer has been connected
+        :param peer_id: id of peer to add
         """
         pass
 
     def remove_peer(self, peer_id):
         """
         Notifies the router that a peer has been disconnected
+        :param peer_id: id of peer to remove
         """
         pass
 
@@ -36,10 +38,11 @@ class FloodSub(IPubsubRouter):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
+        :param rpc: rpc message
         """
         pass
 
-    async def publish(self, peer_id, message):
+    async def publish(self, sender_peer_id, message):
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
@@ -50,6 +53,8 @@ class FloodSub(IPubsubRouter):
         so that seen messages are not further forwarded. 
         It also never forwards a message back to the source 
         or the peer that forwarded the message.
+        :param sender_peer_id: peer_id of message sender
+        :param message: message to forward  
         """
 
         # Encode message
@@ -57,7 +62,7 @@ class FloodSub(IPubsubRouter):
         
         # Get message sender, origin, and topics
         msg_talk = create_message_talk(message)
-        msg_sender = str(peer_id)
+        msg_sender = str(sender_peer_id)
         msg_origin = msg_talk.origin_id
         topics = msg_talk.topics
 
@@ -87,6 +92,7 @@ class FloodSub(IPubsubRouter):
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
         subscription announcement
+        :param topic: topic to join
         """
         pass
 
@@ -94,6 +100,7 @@ class FloodSub(IPubsubRouter):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
+        :param topic: topic to leave
         """
         pass
 

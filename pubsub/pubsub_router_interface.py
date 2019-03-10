@@ -20,12 +20,14 @@ class IPubsubRouter(ABC):
     def add_peer(self, peer_id, protocol_id):
         """
         Notifies the router that a new peer has been connected
+        :param peer_id: id of peer to add
         """
 
     @abstractmethod
     def remove_peer(self, peer_id):
         """
         Notifies the router that a peer has been disconnected
+        :param peer_id: id of peer to remove
         """
 
     @abstractmethod
@@ -33,12 +35,15 @@ class IPubsubRouter(ABC):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
+        :param rpc: rpc message
         """
 
     @abstractmethod
-    def publish(self, peer_id, message):
+    def publish(self, sender_peer_id, message):
         """
         Invoked to forward a new message that has been validated
+        :param sender_peer_id: peer_id of message sender
+        :param message: message to forward  
         """
 
     @abstractmethod
@@ -47,6 +52,7 @@ class IPubsubRouter(ABC):
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
         subscription announcement
+        :param topic: topic to join
         """
 
     @abstractmethod
@@ -54,5 +60,5 @@ class IPubsubRouter(ABC):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
+        :param topic: topic to leave
         """
-        

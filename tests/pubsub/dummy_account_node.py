@@ -16,11 +16,24 @@ CRYPTO_TOPIC = "ethereum"
 # Determine message type by looking at first item before first comma
 
 class DummyAccountNode():
+    """
+    Node which has an internal balance mapping, meant to serve as 
+    a dummy crypto blockchain. There is no actual blockchain, just a simple
+    map indicating how much crypto each user in the mappings holds
+    """
+
     def __init__(self):
         self.balances = {}
 
     @classmethod
     async def create(cls):
+        """
+        Create a new DummyAccountNode and attach a libp2p node, a floodsub, and a pubsub
+        instance to this new node
+
+        We use create as this serves as a factory function and allows us
+        to use async await, unlike the init function
+        """
         self = DummyAccountNode()
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
         self.libp2p_node = libp2p_node
@@ -29,10 +42,11 @@ class DummyAccountNode():
         self.pubsub = Pubsub(self.libp2p_node, self.floodsub, "a")
         return self
 
-    async def listen_to_stuff(self):
+    async def handle_incoming_msgs(self):
+        """
+        Handle all incoming messages on the CRYPTO_TOPIC from peers
+        """
         while True:
-            # Force context switch
-            # await asyncio.sleep(0)
             message_raw = await self.q.get()
             message = create_message_talk(message_raw)
             contents = message.data
@@ -45,20 +59,20 @@ class DummyAccountNode():
                 self.handle_set_crypto_for_user(msg_comps[1], int(msg_comps[2]))
 
     async def setup_crypto_networking(self):
+        """
+        Subscribe to CRYPTO_TOPIC and perform call to function that handles
+        all incoming messages on said topic
+        """
         self.q = await self.pubsub.subscribe(CRYPTO_TOPIC)
 
-        # This does not work but it's meant to setup another thread to loop on
-        # and yes I do mean thread (look in docs)
-        # loop = asyncio.get_event_loop()
-        # asyncio.set_event_loop(loop)
-        # loop.run_until_complete(self.listen_to_stuff())
-        # loop.close()
-        asyncio.ensure_future(self.listen_to_stuff())
-        # await self.listen_to_stuff()
+        asyncio.ensure_future(self.handle_incoming_msgs())
 
     async def publish_send_crypto(self, source_user, dest_user, amount):
         """
         Create a send crypto message and publish that message to all other nodes
+        :param source_user: user to send crypto from
+        :param dest_user: user to send crypto to
+        :param amount: amount of crypto to send
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
@@ -68,6 +82,8 @@ class DummyAccountNode():
     async def publish_set_crypto(self, user, amount):
         """
         Create a set crypto message and publish that message to all other nodes
+        :param user: user to set crypto for
+        :param amount: amount of crypto
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
@@ -77,6 +93,9 @@ class DummyAccountNode():
     def handle_send_crypto(self, source_user, dest_user, amount):
         """
         Handle incoming send_crypto message
+        :param source_user: user to send crypto from
+        :param dest_user: user to send crypto to
+        :param amount: amount of crypto to send 
         """
         print("HIT ME")
         if source_user in self.balances:
@@ -93,6 +112,8 @@ class DummyAccountNode():
     def handle_set_crypto_for_user(self, dest_user, amount):
         """
         Handle incoming set_crypto message
+        :param dest_user: user to set crypto for
+        :param amount: amount of crypto
         """
         print("HIT ME3")
         self.balances[dest_user] = amount
@@ -101,6 +122,8 @@ class DummyAccountNode():
     def get_balance(self, user):
         """
         Get balance in crypto for a particular user
+        :param user: user to get balance for
+        :return: balance of user
         """
         if user in self.balances:
             return self.balances[user]
