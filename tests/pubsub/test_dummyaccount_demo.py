@@ -25,71 +25,57 @@ def create_setup_in_new_thread_func(dummy_node):
         asyncio.ensure_future(dummy_node.setup_crypto_networking())
     return setup_in_new_thread
 
-@pytest.mark.asyncio
-async def test_simple_two_nodes():
-    dummy1 = await DummyAccountNode.create()
-    dummy2 = await DummyAccountNode.create()
+async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
+    dummy_nodes = []
+    for i in range(num_nodes):
+        dummy_nodes.append(await DummyAccountNode.create())
 
-    await connect(dummy1.libp2p_node, dummy2.libp2p_node)
-
-    await asyncio.sleep(0.25)
-
-    thread1 = Thread(target=create_setup_in_new_thread_func(dummy1))
-    thread1.run()
-    thread2 = Thread(target=create_setup_in_new_thread_func(dummy2))
-    thread2.run()
-    # Thread.start_new_thread(setup_in_new_thread, (dummy1))
-    # Thread.start_new_thread(setup_in_new_thread, (dummy2))
-    # await dummy1.setup_crypto_networking()
-    # await dummy2.setup_crypto_networking()
+    for source_num in adjacency_map:
+        target_nums = adjacency_map[source_num]
+        for target_num in target_nums:
+            await connect(dummy_nodes[source_num].libp2p_node, \
+                dummy_nodes[target_num].libp2p_node)
 
     await asyncio.sleep(0.25)
 
-    await dummy1.publish_set_crypto("aspyn", 10)
+    for dummy_node in dummy_nodes:
+        thread = Thread(target=create_setup_in_new_thread_func(dummy_node))
+        thread.run()
 
     await asyncio.sleep(0.25)
 
-    # Check that all nodes have balances set properly (implying floodsub 
-    # hit all nodes subscribed to the crypto topic)
-    assert dummy1.get_balance("aspyn") == 10
-    assert dummy2.get_balance("aspyn") == 10
+    await action_func(dummy_nodes)
+
+    await asyncio.sleep(0.25)
+
+    for dummy_node in dummy_nodes:
+        assertion_func(dummy_node)
 
     # Success, terminate pending tasks.
     await cleanup()
+
+@pytest.mark.asyncio
+async def test_simple_two_nodes():
+    num_nodes = 2
+    adj_map = {0: [1]}
+
+    async def action_func(dummy_nodes):
+        await dummy_nodes[0].publish_set_crypto("aspyn", 10)
+
+    def assertion_func(dummy_node):
+        assert dummy_node.get_balance("aspyn") == 10
+
+    await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 @pytest.mark.asyncio
 async def test_simple_three_nodes_line_topography():
-    dummy1 = await DummyAccountNode.create()
-    dummy2 = await DummyAccountNode.create()
-    dummy3 = await DummyAccountNode.create()
+    num_nodes = 3
+    adj_map = {0: [1], 1: [2]}
 
-    await connect(dummy1.libp2p_node, dummy2.libp2p_node)
-    await connect(dummy2.libp2p_node, dummy3.libp2p_node)
+    async def action_func(dummy_nodes):
+        await dummy_nodes[0].publish_set_crypto("aspyn", 10)
 
-    await asyncio.sleep(0.25)
+    def assertion_func(dummy_node):
+        assert dummy_node.get_balance("aspyn") == 10
 
-    thread1 = Thread(target=create_setup_in_new_thread_func(dummy1))
-    thread1.run()
-    thread2 = Thread(target=create_setup_in_new_thread_func(dummy2))
-    thread2.run()
-    thread3 = Thread(target=create_setup_in_new_thread_func(dummy3))
-    thread3.run()
-    # Thread.start_new_thread(setup_in_new_thread, (dummy1))
-    # Thread.start_new_thread(setup_in_new_thread, (dummy2))
-    # await dummy1.setup_crypto_networking()
-    # await dummy2.setup_crypto_networking()
-
-    await asyncio.sleep(0.25)
-
-    await dummy1.publish_set_crypto("aspyn", 10)
-
-    await asyncio.sleep(0.25)
-
-    # Check that all nodes have balances set properly (implying floodsub 
-    # hit all nodes subscribed to the crypto topic)
-    assert dummy1.get_balance("aspyn") == 10
-    assert dummy2.get_balance("aspyn") == 10
-    assert dummy3.get_balance("aspyn") == 10
-
-    # Success, terminate pending tasks.
-    await cleanup()
+    await perform_test(num_nodes, adj_map, action_func, assertion_func)
