@@ -5,6 +5,7 @@ from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.peer.id import id_b58_decode
 
 from .network_interface import INetwork
+from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection
 
@@ -175,8 +176,8 @@ class Swarm(INetwork):
         """
         :param notifee: object implementing Notifee interface
         """
-        # TODO: Add check to ensure notifee conforms to Notifee interface
-        self.notifees.append(notifee)
+        if isinstance(notifee, INotifee):
+            self.notifees.append(notifee)
 
     def add_transport(self, transport):
         # TODO: Support more than one transport
@@ -194,6 +195,10 @@ def create_generic_protocol_handler(swarm):
     async def generic_protocol_handler(muxed_stream):
         # Perform protocol muxing to determine protocol to use
         _, handler = await multiselect.negotiate(muxed_stream)
+
+        # Call notifiers since event occurred
+        for notifee in swarm.notifees:
+            await notifee.opened_stream(swarm, muxed_stream)
 
         # Give to stream handler
         asyncio.ensure_future(handler(muxed_stream))
