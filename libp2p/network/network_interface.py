@@ -46,4 +46,5 @@ class INetwork(ABC):
     def notify(self, notifee):
         """
         :param notifee: object implementing Notifee interface
+        :return: true if notifee registered successfully, false otherwise
         """
