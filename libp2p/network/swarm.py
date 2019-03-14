@@ -175,9 +175,12 @@ class Swarm(INetwork):
     def notify(self, notifee):
         """
         :param notifee: object implementing Notifee interface
+        :return: true if notifee registered successfully, false otherwise
         """
         if isinstance(notifee, INotifee):
             self.notifees.append(notifee)
+            return True
+        return False
 
     def add_transport(self, transport):
         # TODO: Support more than one transport
