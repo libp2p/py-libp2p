@@ -11,7 +11,7 @@ features are implemented in swarm
 
 import pytest
 
-from tests.utils import cleanup
+from tests.utils import *
 from libp2p import new_node
 from libp2p.network.notifee_interface import INotifee
 
@@ -65,26 +65,9 @@ class InvalidNotifee():
     async def listen(self):
         assert False
 
-async def perform_two_host_simple_set_up():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-    async def my_stream_handler(stream):
-        while True:
-            read_string = (await stream.read()).decode()
-
-            resp = "ack:" + read_string
-            await stream.write(resp.encode())
-
-    node_b.set_stream_handler("/echo/1.0.0", my_stream_handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
-    return node_a, node_b
-
-async def perform_two_host_simple_set_up_custom_handler(handler):
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+async def perform_two_host_set_up_custom_handler(handler):
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list) 
 
     node_b.set_stream_handler("/echo/1.0.0", handler)
 
@@ -94,7 +77,7 @@ async def perform_two_host_simple_set_up_custom_handler(handler):
 
 @pytest.mark.asyncio
 async def test_one_notifier():
-    node_a, node_b = await perform_two_host_simple_set_up()
+    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
 
     # Add notifee for node_a
     events = []
@@ -135,7 +118,7 @@ async def test_one_notifier_on_two_nodes():
             resp = "ack:" + read_string
             await stream.write(resp.encode())
 
-    node_a, node_b = await perform_two_host_simple_set_up_custom_handler(my_stream_handler)
+    node_a, node_b = await perform_two_host_set_up_custom_handler(my_stream_handler)
 
     # Add notifee for node_a
     events_a = []
@@ -165,7 +148,7 @@ async def test_one_notifier_on_two_nodes():
 
 @pytest.mark.asyncio
 async def test_two_notifiers():
-    node_a, node_b = await perform_two_host_simple_set_up()
+    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
 
     # Add notifee for node_a
     events0 = []
@@ -198,7 +181,7 @@ async def test_two_notifiers():
 async def test_ten_notifiers():
     num_notifiers = 10
 
-    node_a, node_b = await perform_two_host_simple_set_up()
+    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
 
     # Add notifee for node_a
     events_lst = []
@@ -244,7 +227,7 @@ async def test_ten_notifiers_on_two_nodes():
             resp = "ack:" + read_string
             await stream.write(resp.encode())
 
-    node_a, node_b = await perform_two_host_simple_set_up_custom_handler(my_stream_handler)
+    node_a, node_b = await perform_two_host_set_up_custom_handler(my_stream_handler)
 
     # Add notifee for node_a and node_b
     events_lst_a = []
@@ -278,7 +261,7 @@ async def test_ten_notifiers_on_two_nodes():
 async def test_invalid_notifee():
     num_notifiers = 10
 
-    node_a, node_b = await perform_two_host_simple_set_up()
+    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
 
     # Add notifee for node_a
     events_lst = []
