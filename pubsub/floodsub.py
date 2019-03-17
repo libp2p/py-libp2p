@@ -5,6 +5,7 @@ class FloodSub(IPubsubRouter):
 
     def __init__(self, protocols):
         self.protocols = protocols
+        self.pubsub = None
 
     def get_protocols(self):
         """
@@ -47,19 +48,19 @@ class FloodSub(IPubsubRouter):
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
 
-        With flooding, routing is almost trivial: for each incoming message, 
-        forward to all known peers in the topic. There is a bit of logic, 
-        as the router maintains a timed cache of previous messages, 
-        so that seen messages are not further forwarded. 
-        It also never forwards a message back to the source 
+        With flooding, routing is almost trivial: for each incoming message,
+        forward to all known peers in the topic. There is a bit of logic,
+        as the router maintains a timed cache of previous messages,
+        so that seen messages are not further forwarded.
+        It also never forwards a message back to the source
         or the peer that forwarded the message.
         :param sender_peer_id: peer_id of message sender
-        :param message: message to forward  
+        :param message: message to forward
         """
 
         # Encode message
         encoded_msg = message.encode()
-        
+
         # Get message sender, origin, and topics
         msg_talk = create_message_talk(message)
         msg_sender = str(sender_peer_id)
@@ -69,7 +70,7 @@ class FloodSub(IPubsubRouter):
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         if msg_sender == msg_origin and msg_sender == str(self.pubsub.host.get_id()):
-           await self.pubsub.handle_talk(message)
+            await self.pubsub.handle_talk(message)
 
         # Deliver to self and peers
         for topic in topics:
@@ -77,7 +78,7 @@ class FloodSub(IPubsubRouter):
                 for peer_id_in_topic in self.pubsub.peer_topics[topic]:
                     # Forward to all known peers in the topic that are not the
                     # message sender and are not the message origin
-                    if peer_id_in_topic != msg_sender and peer_id_in_topic != msg_origin:
+                    if peer_id_in_topic not in (msg_sender, msg_origin):
                         stream = self.pubsub.peers[peer_id_in_topic]
                         await stream.write(encoded_msg)
                     else:
@@ -100,4 +101,3 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to leave
         """
         pass
-
