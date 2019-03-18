@@ -32,7 +32,7 @@ async def echo_stream_handler(stream):
 
 async def perform_two_host_set_up_custom_handler(handler):
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
-    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list) 
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     node_b.set_stream_handler("/echo/1.0.0", handler)
 

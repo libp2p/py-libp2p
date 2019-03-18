@@ -10,8 +10,11 @@ features are implemented in swarm
 """
 
 import pytest
+import multiaddr
 
-from tests.utils import *
+
+from tests.utils import cleanup, echo_stream_handler, \
+                        perform_two_host_set_up_custom_handler
 from libp2p import new_node, initialize_default_swarm
 from libp2p.network.notifee_interface import INotifee
 from libp2p.host.basic_host import BasicHost
@@ -39,11 +42,11 @@ class MyNotifee(INotifee):
     async def disconnected(self, network, conn):
         pass
 
-    async def listen(self, network, multiaddr):
+    async def listen(self, network, _multiaddr):
         self.events.append(["listened" + self.val_to_append_to_event,\
-            multiaddr])
+            _multiaddr])
 
-    async def listen_close(self, network, multiaddr):
+    async def listen_close(self, network, _multiaddr):
         pass
 
 class InvalidNotifee():
