@@ -35,7 +35,7 @@ def initialize_default_swarm(
     :param peerstore_opt: optional peerstore
     :return: return a default swarm instance
     """
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments, unused-argument
     if not id_opt:
         new_key = RSA.generate(2048, e=65537)
         id_opt = id_from_public_key(new_key.publickey())
