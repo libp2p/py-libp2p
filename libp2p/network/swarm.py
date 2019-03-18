@@ -70,7 +70,8 @@ class Swarm(INetwork):
             raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
             # Use upgrader to upgrade raw conn to muxed conn
-            muxed_conn = self.upgrader.upgrade_connection(raw_conn, self.generic_protocol_handler)
+            muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
+                self.generic_protocol_handler, peer_id)
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -145,7 +146,7 @@ class Swarm(INetwork):
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
                 muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
-                    self.generic_protocol_handler)
+                    self.generic_protocol_handler, peer_id)
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
@@ -197,14 +198,18 @@ def create_generic_protocol_handler(swarm):
 
     async def generic_protocol_handler(muxed_stream):
         # Perform protocol muxing to determine protocol to use
-        _, handler = await multiselect.negotiate(muxed_stream)
+        protocol, handler = await multiselect.negotiate(muxed_stream)
+
+        net_stream = NetStream(muxed_stream)
+        net_stream.set_protocol(protocol)
 
         # Call notifiers since event occurred
         for notifee in swarm.notifees:
             await notifee.opened_stream(swarm, muxed_stream)
 
         # Give to stream handler
-        asyncio.ensure_future(handler(muxed_stream))
+        # TODO: usage of net_stream causes failure
+        asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
 
