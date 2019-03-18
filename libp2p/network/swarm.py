@@ -205,10 +205,9 @@ def create_generic_protocol_handler(swarm):
 
         # Call notifiers since event occurred
         for notifee in swarm.notifees:
-            await notifee.opened_stream(swarm, muxed_stream)
+            await notifee.opened_stream(swarm, net_stream)
 
         # Give to stream handler
-        # TODO: usage of net_stream causes failure
         asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
