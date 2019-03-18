@@ -1,7 +1,6 @@
 import pytest
 
 from tests.utils import cleanup, set_up_nodes_by_transport_opt
-from libp2p import new_node
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 
 # TODO: Add tests for multiple streams being opened on different
@@ -16,7 +15,7 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 async def perform_simple_test(expected_selected_protocol,
                               protocols_for_client, protocols_with_handlers):
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
-    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)  
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler(stream):
         while True:
