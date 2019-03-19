@@ -1,17 +1,15 @@
 import multiaddr
 import pytest
 
-from tests.utils import cleanup
-from libp2p import new_node
+from tests.utils import cleanup, set_up_nodes_by_transport_opt
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
+
 # pylint: disable=too-many-locals
-
-
 @pytest.mark.asyncio
 async def test_simple_messages():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler(stream):
         while True:
@@ -41,8 +39,8 @@ async def test_simple_messages():
 
 @pytest.mark.asyncio
 async def test_double_response():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler(stream):
         while True:
@@ -78,8 +76,8 @@ async def test_double_response():
 async def test_multiple_streams():
     # Node A should be able to open a stream with node B and then vice versa.
     # Stream IDs should be generated uniquely so that the stream state is not overwritten
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler_a(stream):
         while True:
@@ -124,8 +122,8 @@ async def test_multiple_streams():
 
 @pytest.mark.asyncio
 async def test_multiple_streams_same_initiator_different_protocols():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler_a1(stream):
         while True:
@@ -184,8 +182,8 @@ async def test_multiple_streams_same_initiator_different_protocols():
 
 @pytest.mark.asyncio
 async def test_multiple_streams_two_initiators():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler_a1(stream):
         while True:
@@ -262,9 +260,9 @@ async def test_multiple_streams_two_initiators():
 
 @pytest.mark.asyncio
 async def test_triangle_nodes_connection():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_c = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"],\
+                          ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b, node_c) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler(stream):
         while True:
@@ -315,8 +313,8 @@ async def test_triangle_nodes_connection():
 
 @pytest.mark.asyncio
 async def test_host_connect():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     assert not node_a.get_peerstore().peers()
 
