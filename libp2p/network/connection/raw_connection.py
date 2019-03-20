@@ -1,3 +1,5 @@
+from asyncio import get_event_loop
+
 from .raw_connection_interface import IRawConnection
 
 
@@ -12,8 +14,30 @@ class RawConnection(IRawConnection):
         self._next_id = 0 if initiator else 1
         self.initiator = initiator
 
-    def close(self):
+    def shutdown(self):
+        """
+        Lunch the closing of the connection, usefull for closing multiple
+        connection at once.
+        :return: return True if successful
+        """
         self.writer.close()
+
+    async def wait_closed(self):
+        """
+        Wait until the connection is closed. Usefull for closing multiple
+        connection at once. Must be used after shutdown.
+        For an all in one close use close.
+        """
+        await self.writer.wait_close()
+
+    def close(self):
+        """
+        Close and wait for the connection to be closed.
+        """
+        self.shutdown()
+        loop = get_event_loop()
+        loop.run_until_complete(self.wait_closed())
+        loop.close()
 
     def next_stream_id(self):
         """

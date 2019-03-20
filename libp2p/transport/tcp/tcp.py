@@ -47,19 +47,39 @@ class TCP(ITransport):
             # TODO check if server is listening
             return self.multiaddrs
 
-        def close(self, options=None):
+        def shutdown(self, options=None):
             """
-            close the listener such that no more connections
-            can be open on this transport instance
-            :param options: optional object potential with timeout
-            a timeout value in ms that fires and destroy all connections
+            start the closing of the listener usefull for closing multiple
+            connection at once.
+            :param options: optional object potential with a timeout value
+            in ms that fires and destroy all connections
             :return: return True if successful
             """
             if self.server is None:
                 return False
             self.server.close()
+            return True
+
+        async def wait_closed(self):
+            """
+            Wait until the connection is closed. Usefull for closing multiple
+            connection at once. Must be used after shutdown.
+            For an all in one close use close.
+            """
+            await self.server.wait_close()
+
+        def close(self, options=None):
+            """
+            close the listener such that no more connections
+            can be open on this transport instance
+            :param options: optional object potential with a timeout value
+            in ms that fires and destroy all connections
+            :return: return True if successful
+            """
+            if self.shutdown(options) is False:
+                return False
             _loop = asyncio.get_event_loop()
-            _loop.run_until_complete(self.server.wait_closed())
+            _loop.run_until_complete(self.wait_closed())
             _loop.close()
             self.server = None
             return True
