@@ -7,17 +7,14 @@ from. message import generate_message_id
 """
 For now, because I'm on a plane and don't have access to the go repo/protobuf stuff,
 this is going to be the message format for the two types: subscription and talk
-
 subscription indicates subscribing or unsubscribing from a topic
 talk is sending a message on topic(s)
-
 subscription format:
 subscription
 'from'
 <one of 'sub', 'unsub'>:'topicid'
 <one of 'sub', 'unsub'>:'topicid'
 ...
-
 Ex.
 subscription
 msg_sender_peer_id
@@ -25,14 +22,12 @@ origin_peer_id
 sub:topic1
 sub:topic2
 unsub:fav_topic
-
 talk format:
 talk
 'from'
 'origin'
 [topic_ids comma-delimited]
 'data'
-
 Ex.
 talk
 msg_sender_peer_id

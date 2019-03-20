@@ -5,11 +5,11 @@ import pytest
 from tests.utils import cleanup
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from pubsub.pubsub import Pubsub
-from pubsub.floodsub import FloodSub
-from pubsub.message import MessageTalk
-from pubsub.message import create_message_talk
-from pubsub.message import generate_message_id
+from libp2p.pubsub.pubsub import Pubsub
+from libp2p.pubsub.floodsub import FloodSub
+from libp2p.pubsub.message import MessageTalk
+from libp2p.pubsub.message import create_message_talk
+from libp2p.pubsub.message import generate_message_id
 
 # pylint: disable=too-many-locals
 

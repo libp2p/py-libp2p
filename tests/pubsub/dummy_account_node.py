@@ -1,10 +1,10 @@
 import asyncio
 from libp2p import new_node
-from pubsub.message import create_message_talk
-from pubsub.pubsub import Pubsub
-from pubsub.floodsub import FloodSub
-from pubsub.message import MessageTalk
-from pubsub.message import generate_message_id
+from libp2p.pubsub.message import create_message_talk
+from libp2p.pubsub.pubsub import Pubsub
+from libp2p.pubsub.floodsub import FloodSub
+from libp2p.pubsub.message import MessageTalk
+from libp2p.pubsub.message import generate_message_id
 
 SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
 CRYPTO_TOPIC = "ethereum"
