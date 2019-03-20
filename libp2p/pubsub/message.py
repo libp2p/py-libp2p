@@ -1,12 +1,15 @@
 import uuid
 
+
 class MessageTalk():
+
     """
     Object to make parsing talk messages easier, where talk messages are
     defined as custom messages published to a set of topics
     """
-
+    # pylint: disable=too-few-public-methods
     def __init__(self, from_id, origin_id, topics, data, message_id):
+        # pylint: disable=too-many-arguments
         self.msg_type = "talk"
         self.from_id = from_id
         self.origin_id = origin_id
@@ -30,13 +33,14 @@ class MessageTalk():
         out += '\n' + self.data
         return out
 
+
 class MessageSub():
     """
     Object to make parsing subscription messages easier, where subscription
     messages are defined as indicating the topics a node wishes to subscribe to
     or unsubscribe from
     """
-
+    # pylint: disable=too-few-public-methods
     def __init__(self, from_id, origin_id, subs_map, message_id):
         self.msg_type = "subscription"
         self.from_id = from_id
@@ -44,11 +48,11 @@ class MessageSub():
         self.subs_map = subs_map
         self.message_id = message_id
 
-    """
-    Convert to string
-    :return: MessageSub object in string representation
-    """
     def to_str(self):
+        """
+        Convert to string
+        :return: MessageSub object in string representation
+        """
         out = self.msg_type + '\n'
         out += self.from_id + '\n'
         out += self.origin_id + '\n'
@@ -58,9 +62,9 @@ class MessageSub():
             out += '\n'
 
         keys = list(self.subs_map)
-        for i in range(len(keys)):
-            topic = keys[i]
-            sub = self.subs_map[keys[i]]
+
+        for i, topic in enumerate(keys):
+            sub = self.subs_map[topic]
             if sub:
                 out += "sub:"
             else:

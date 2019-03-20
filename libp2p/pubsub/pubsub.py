@@ -1,42 +1,44 @@
 import asyncio
-from .PubsubNotifee import PubsubNotifee
-from .message import MessageTalk, MessageSub
+
+from .pubsub_notifee import PubsubNotifee
+from .message import MessageSub
 from .message import create_message_talk, create_message_sub
 from. message import generate_message_id
 
-"""
-For now, because I'm on a plane and don't have access to the go repo/protobuf stuff,
-this is going to be the message format for the two types: subscription and talk
-subscription indicates subscribing or unsubscribing from a topic
-talk is sending a message on topic(s)
-subscription format:
-subscription
-'from'
-<one of 'sub', 'unsub'>:'topicid'
-<one of 'sub', 'unsub'>:'topicid'
-...
-Ex.
-subscription
-msg_sender_peer_id
-origin_peer_id
-sub:topic1
-sub:topic2
-unsub:fav_topic
-talk format:
-talk
-'from'
-'origin'
-[topic_ids comma-delimited]
-'data'
-Ex.
-talk
-msg_sender_peer_id
-origin_peer_id
-topic1,topics_are_cool,foo
-I like tacos
-"""
 
 class Pubsub():
+    """
+    For now, because I'm on a plane and don't have access to the go repo/protobuf stuff,
+    this is going to be the message format for the two types: subscription and talk
+    subscription indicates subscribing or unsubscribing from a topic
+    talk is sending a message on topic(s)
+    subscription format:
+    subscription
+    'from'
+    <one of 'sub', 'unsub'>:'topicid'
+    <one of 'sub', 'unsub'>:'topicid'
+    ...
+    Ex.
+    subscription
+    msg_sender_peer_id
+    origin_peer_id
+    sub:topic1
+    sub:topic2
+    unsub:fav_topic
+    talk format:
+    talk
+    'from'
+    'origin'
+    [topic_ids comma-delimited]
+    'data'
+    Ex.
+    talk
+    msg_sender_peer_id
+    origin_peer_id
+    topic1,topics_are_cool,foo
+    I like tacos
+    """
+    # pylint: disable=too-many-instance-attributes
 
     def __init__(self, host, router, my_id):
         """
@@ -91,7 +93,10 @@ class Pubsub():
         subs_map = {}
         for topic in self.my_topics:
             subs_map[topic] = True
-        sub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), subs_map, generate_message_id())
+        sub_msg = MessageSub(
+            str(self.host.get_id()),\
+            str(self.host.get_id()), subs_map, generate_message_id()\
+        )
         return sub_msg.to_str()
 
     async def continously_read_stream(self, stream):
@@ -108,7 +113,7 @@ class Pubsub():
             msg_type = msg_comps[0]
 
             msg_sender = msg_comps[1]
-            msg_origin = msg_comps[2]
+            # msg_origin = msg_comps[2]
             msg_id = msg_comps[3]
             print("HIT ME1")
             if msg_id not in self.seen_messages:
@@ -138,7 +143,7 @@ class Pubsub():
                     msg.from_id = str(self.host.get_id())
 
                     await self.router.publish(msg_sender, msg.to_str())
-            
+
             # Force context switch
             await asyncio.sleep(0)
 
@@ -198,7 +203,7 @@ class Pubsub():
         :param subscription: raw data constituting a subscription message
         """
         sub_msg = create_message_sub(subscription)
-        if len(sub_msg.subs_map) > 0:
+        if sub_msg.subs_map:
             print("handle_subscription my_id: " + self.my_id + ", subber: " + sub_msg.origin_id)
         for topic_id in sub_msg.subs_map:
             # Look at each subscription in the msg individually
@@ -207,7 +212,7 @@ class Pubsub():
                     # Create topic list if it did not yet exist
                     self.peer_topics[topic_id] = [sub_msg.origin_id]
                 elif sub_msg.origin_id not in self.peer_topics[topic_id]:
-                    # Add peer to topic 
+                    # Add peer to topic
                     self.peer_topics[topic_id].append(sub_msg.origin_id)
             else:
                 # TODO: Remove peer from topic
@@ -215,7 +220,7 @@ class Pubsub():
 
     async def handle_talk(self, talk):
         """
-        Handle incoming Talk message from a peer. A Talk message contains some 
+        Handle incoming Talk message from a peer. A Talk message contains some
         custom message that is published on a given topic(s)
         :param talk: raw data constituting a talk message
         """
@@ -225,7 +230,7 @@ class Pubsub():
         for topic in msg.topics:
             if topic in self.my_topics:
                 # we are subscribed to a topic this message was sent for,
-                # so add message to the subscription output queue 
+                # so add message to the subscription output queue
                 # for each topic
                 await self.my_topics[topic].put(talk)
 
@@ -238,8 +243,10 @@ class Pubsub():
         self.my_topics[topic_id] = asyncio.Queue()
 
         # Create subscribe message
-        sub_msg = MessageSub(str(self.host.get_id()),  
-            str(self.host.get_id()), {topic_id: True}, generate_message_id())
+        sub_msg = MessageSub(
+            str(self.host.get_id()),\
+            str(self.host.get_id()), {topic_id: True}, generate_message_id()\
+        )
 
         # Send out subscribe message to all peers
         await self.message_all_peers(sub_msg.to_str())
@@ -261,9 +268,9 @@ class Pubsub():
             del self.my_topics[topic_id]
 
         # Create unsubscribe message
-        unsub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()), \
+        unsub_msg = MessageSub(str(self.host.get_id()), str(self.host.get_id()),\
             {topic_id: False}, generate_message_id())
-        
+
         # Send out unsubscribe message to all peers
         await self.message_all_peers(unsub_msg.to_str())
 

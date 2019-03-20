@@ -26,14 +26,12 @@ class FloodSub(IPubsubRouter):
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
-        pass
 
     def remove_peer(self, peer_id):
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
-        pass
 
     def handle_rpc(self, rpc):
         """
@@ -41,7 +39,6 @@ class FloodSub(IPubsubRouter):
         It is invoked after subscriptions and payload messages have been processed
         :param rpc: rpc message
         """
-        pass
 
     async def publish(self, sender_peer_id, message):
         """
@@ -92,7 +89,6 @@ class FloodSub(IPubsubRouter):
         subscription announcement
         :param topic: topic to join
         """
-        pass
 
     def leave(self, topic):
         """
@@ -100,4 +96,3 @@ class FloodSub(IPubsubRouter):
         It is invoked after the unsubscription announcement.
         :param topic: topic to leave
         """
-        pass

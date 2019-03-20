@@ -43,7 +43,7 @@ class IPubsubRouter(ABC):
         """
         Invoked to forward a new message that has been validated
         :param sender_peer_id: peer_id of message sender
-        :param message: message to forward  
+        :param message: message to forward
         """
 
     @abstractmethod
