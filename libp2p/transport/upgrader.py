@@ -17,11 +17,11 @@ class TransportUpgrader:
     def upgrade_security(self):
         pass
 
-    def upgrade_connection(self, conn, generic_protocol_handler):
+    def upgrade_connection(self, conn, generic_protocol_handler, peer_id):
         """
         upgrade raw connection to muxed connection
         """
 
         # For PoC, no security, default to mplex
         # TODO do exchange to determine multiplexer
-        return Mplex(conn, generic_protocol_handler)
+        return Mplex(conn, generic_protocol_handler, peer_id)
