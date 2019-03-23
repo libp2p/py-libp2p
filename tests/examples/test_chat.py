@@ -1,14 +1,14 @@
 import pytest
 import asyncio
+import multiaddr
 
-from tests.utils import cleanup
+from tests.utils import cleanup, set_up_nodes_by_transport_opt
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 
 
 PROTOCOL_ID = '/chat/1.0.0'
-
 
 async def hello_world(host_a, host_b):
     async def stream_handler(stream):
@@ -100,8 +100,8 @@ async def no_common_protocol(host_a, host_b):
     (no_common_protocol),
 ])
 async def test_chat(test):
-    host_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    host_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
+    (host_a, host_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     addr = host_a.get_addrs()[0]
     info = info_from_p2p_addr(addr)
