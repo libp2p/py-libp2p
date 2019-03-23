@@ -11,20 +11,24 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    def __init__(self, conn, generic_protocol_handler):
+    def __init__(self, conn, generic_protocol_handler, peer_id):
         """
         create a new muxed connection
         :param conn: an instance of raw connection
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
+        :param peer_id: peer_id of peer the connection is to
         """
-        super(Mplex, self).__init__(conn, generic_protocol_handler)
+        super(Mplex, self).__init__(conn, generic_protocol_handler, peer_id)
 
         self.raw_conn = conn
         self.initiator = conn.initiator
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
+
+        # Set peer_id
+        self.peer_id = peer_id
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.buffers = {}
@@ -56,7 +60,7 @@ class Mplex(IMuxedConn):
         # TODO: pass down timeout from user and use that
         if stream_id in self.buffers:
             try:
-                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=3)
+                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=8)
                 return data
             except asyncio.TimeoutError:
                 return None
