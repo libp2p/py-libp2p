@@ -1,4 +1,6 @@
 import asyncio
+import multiaddr
+
 from libp2p import new_node
 from libp2p.pubsub.message import create_message_talk
 from libp2p.pubsub.pubsub import Pubsub
@@ -36,7 +38,10 @@ class DummyAccountNode():
         to use async await, unlike the init function
         """
         self = DummyAccountNode()
+
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+        await libp2p_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+
         self.libp2p_node = libp2p_node
 
         self.floodsub = FloodSub(SUPPORTED_PUBSUB_PROTOCOLS)

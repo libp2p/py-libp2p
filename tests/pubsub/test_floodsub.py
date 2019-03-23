@@ -26,6 +26,9 @@ async def test_simple_two_nodes():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
 
+    await node_a.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    await node_b.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+
     supported_protocols = ["/floodsub/1.0.0"]
 
     floodsub_a = FloodSub(supported_protocols)
@@ -63,6 +66,10 @@ async def test_simple_three_nodes():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
     node_c = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+
+    await node_a.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    await node_b.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    await node_c.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
     supported_protocols = ["/floodsub/1.0.0"]
 
@@ -146,6 +153,8 @@ async def perform_test_from_obj(obj):
         # Create node if node does not yet exist
         if start_node_id not in node_map:
             node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+            await node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+
             node_map[start_node_id] = node
 
             floodsub = FloodSub(supported_protocols)
@@ -159,6 +168,8 @@ async def perform_test_from_obj(obj):
             # Create neighbor if neighbor does not yet exist
             if neighbor_id not in node_map:
                 neighbor_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+                await neighbor_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+                
                 node_map[neighbor_id] = neighbor_node
 
                 floodsub = FloodSub(supported_protocols)
