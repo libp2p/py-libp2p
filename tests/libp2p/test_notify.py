@@ -100,7 +100,7 @@ async def perform_two_host_simple_set_up_custom_handler(handler):
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
     return node_a, node_b
 
-  
+
 @pytest.mark.asyncio
 async def test_one_notifier():
     node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
