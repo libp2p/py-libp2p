@@ -16,7 +16,7 @@ class RawConnection(IRawConnection):
 
     def shutdown(self):
         """
-        Lunch the closing of the connection, usefull for closing multiple
+        Launch the closing of the connection, usefull for closing multiple
         connection at once.
         :return: return True if successful
         """
