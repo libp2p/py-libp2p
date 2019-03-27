@@ -189,20 +189,11 @@ class Swarm(INetwork):
    
     def __del__(self):
         for key, valuable in self.listeners.items():
-            print("Trying to close ", key)
             try:
-                valuable.close() # Call the Listener class close method
+                valuable.close() 
             except RuntimeError as err:
                 print("Encountered error, ", err)
 
-
-    def __del__(self):
-        for key, valuable in self.listeners.items():
-            print("Trying to close ", key)
-            try:
-                valuable.close() # Call the Listener class close method
-            except RuntimeError as err:
-                print("Encountered error, ", err)
 def create_generic_protocol_handler(swarm):
     """
     Create a generic protocol handler from the given swarm. We use swarm
