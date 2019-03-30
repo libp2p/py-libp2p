@@ -141,17 +141,21 @@ def generate_message_id():
 
 def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     packet = rpc_pb2.RPC()
-    packet.publish.extend([rpc_pb2.Message(
+    message = rpc_pb2.Message(
         from_id=origin_id.encode('utf-8'),
         seqno=msg_id.encode('utf-8'),
-        data=msg_content.encode('utf-8'),
-        topicIDs=topics.encode('utf-8'))
-        ])
+        data=msg_content.encode('utf-8')
+        )
 
     for topic in topics:
+        message.topicIDs.extend([topic.encode('utf-8')])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
             subscribe=True,
             topicid = topic.encode('utf-8')
             )])
+
+    packet.publish.extend([message])
+    print ("HEYHO")
+    print (packet)
 
     return packet
