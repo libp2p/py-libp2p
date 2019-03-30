@@ -1,7 +1,6 @@
 from .pubsub_router_interface import IPubsubRouter
 from .pb import rpc_pb2
-from .message import MessageSub, MessageTalk
-from .message import create_message_talk
+
 
 class FloodSub(IPubsubRouter):
 
@@ -57,40 +56,14 @@ class FloodSub(IPubsubRouter):
         :param message: message to forward
         """
 
-        # Encode message
-        # encoded_msg = message.encode()
-
-        if isinstance(message, str):
-            msg_talk = create_message_talk(message)
-            message = rpc_pb2.Message(
-            from_id=str(msg_talk.origin_id).encode('utf-8'),
-            seqno=str(msg_talk.message_id).encode('utf-8'),
-            topicIDs=msg_talk.topics,
-            data=msg_talk.data.encode()
-
-            )
         packet = rpc_pb2.RPC()
-        print("YEET")
-        print(type(message))
         packet.publish.extend([message])
-
-
-
-        # Get message sender, origin, and topics
-        # msg_talk = create_message_talk(message)
         msg_sender = str(sender_peer_id)
-        # msg_origin = msg_talk.origin_id
-        # topics = msg_talk.topics
 
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         if msg_sender == message.from_id and msg_sender == str(self.pubsub.host.get_id()):
-            old_format = MessageTalk(sender_peer_id,
-                                     message.from_id,
-                                     message.topicIDs,
-                                     message.data,
-                                     message.seqno)
-            await self.pubsub.handle_talk(old_format)
+            await self.pubsub.handle_talk(sender_peer_id, message)
 
         # Deliver to self and peers
         for topic in message.topicIDs:
