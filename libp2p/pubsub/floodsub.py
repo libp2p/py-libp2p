@@ -57,6 +57,9 @@ class FloodSub(IPubsubRouter):
         """
 
         packet = rpc_pb2.RPC()
+        print ("IN FLOOODSUB PUBLISH")
+        print (message)
+        print ("++++++++++++++++")
         packet.publish.extend([message])
         msg_sender = str(sender_peer_id)
 
