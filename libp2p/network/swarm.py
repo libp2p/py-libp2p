@@ -186,13 +186,12 @@ class Swarm(INetwork):
     def add_transport(self, transport):
         # TODO: Support more than one transport
         self.transport = transport
-   
     def __del__(self):
         for key, valuable in self.listeners.items():
             try:
                 valuable.close() 
-            except RuntimeError as err:
-                print("Encountered error, ", err)
+            except RuntimeError:
+                pass
 
 def create_generic_protocol_handler(swarm):
     """
