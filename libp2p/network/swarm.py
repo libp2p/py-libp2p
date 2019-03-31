@@ -187,9 +187,9 @@ class Swarm(INetwork):
         # TODO: Support more than one transport
         self.transport = transport
     def __del__(self):
-        for key, valuable in self.listeners.items():
+        for _, valuable in self.listeners.items():
             try:
-                valuable.close() 
+                valuable.close()
             except RuntimeError:
                 pass
 
