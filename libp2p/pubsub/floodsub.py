@@ -65,7 +65,16 @@ class FloodSub(IPubsubRouter):
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
-            if msg_sender == message.from_id and msg_sender == str(self.pubsub.host.get_id()):
+            decoded_from_id = message.from_id.decode('utf-8')
+
+            print ("MESSAGE SENDER")
+            print (msg_sender)
+            print ("FROM ID")
+            print (message.from_id)
+            print (str(self.pubsub.host.get_id()))
+
+
+            if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
                 await self.pubsub.handle_talk(sender_peer_id, message)
 
 
@@ -82,9 +91,12 @@ class FloodSub(IPubsubRouter):
                         # message sender and are not the message origin
                         print ("PEERID")
                         print (peer_id_in_topic)
-                        if peer_id_in_topic not in (msg_sender, message.from_id):
+                        if peer_id_in_topic not in (msg_sender, decoded_from_id):
                             stream = self.pubsub.peers[peer_id_in_topic]
-                            await stream.write(packet.SerializeToString())
+                            # create new packet with just publish message
+                            new_packet = rpc_pb2.RPC()
+                            new_packet.publish.extend([message])
+                            await stream.write(new_packet.SerializeToString())
                         else:
                             # Implies publish did not write
                             print("publish did not write")
