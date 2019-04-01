@@ -125,7 +125,7 @@ class DummyAccountNode():
         :param amount: amount of crypto
         """
         print ("**DUMMY** IN HANDLE SET CRYPTO")
-        print (type (dest_user))
+        print (dest_user)
         print (amount)
         self.balances[dest_user] = amount
 
