@@ -1,5 +1,4 @@
 import asyncio
-import uuid
 import multiaddr
 import pytest
 
@@ -9,6 +8,7 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
+from utils import generate_message_id, generate_RPC_packet
 
 # pylint: disable=too-many-locals
 
@@ -46,16 +46,10 @@ async def test_simple_two_nodes_RPC():
 
     msg = generate_RPC_packet(node_a_id, ["my_topic"], "some data", generate_message_id())
     await floodsub_a.publish(node_a_id, msg.SerializeToString())
-    print ("MESSAGE B")
-    print (msg.SerializeToString())
-    print ("=========")
     await asyncio.sleep(0.25)
 
     res_b = await qb.get()
 
-    print ("RES B")
-    print (res_b)
-    print ("-----")
     # Check that the msg received by node_b is the same
     # as the message sent by node_a
     assert res_b.SerializeToString() == msg.publish[0].SerializeToString()
@@ -64,57 +58,6 @@ async def test_simple_two_nodes_RPC():
 
     # Success, terminate pending tasks.
     await cleanup()
-
-# @pytest.mark.asyncio
-# async def test_simple_three_nodes():
-#     # Want to pass message from A -> B -> C
-#     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-#     node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-#     node_c = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-#     await node_a.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-#     await node_b.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-#     await node_c.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-
-#     supported_protocols = ["/floodsub/1.0.0"]
-
-#     floodsub_a = FloodSub(supported_protocols)
-#     pubsub_a = Pubsub(node_a, floodsub_a, "a")
-#     floodsub_b = FloodSub(supported_protocols)
-#     pubsub_b = Pubsub(node_b, floodsub_b, "b")
-#     floodsub_c = FloodSub(supported_protocols)
-#     pubsub_c = Pubsub(node_c, floodsub_c, "c")
-
-#     await connect(node_a, node_b)
-#     await connect(node_b, node_c)
-
-#     await asyncio.sleep(0.25)
-#     qb = await pubsub_b.subscribe("my_topic")
-#     qc = await pubsub_c.subscribe("my_topic")
-#     await asyncio.sleep(0.25)
-
-#     node_a_id = str(node_a.get_id())
-
-#     msg = MessageTalk(node_a_id, node_a_id, ["my_topic"], "some data", generate_message_id())
-
-#     await floodsub_a.publish(node_a.get_id(), msg.to_str())
-
-#     await asyncio.sleep(0.25)
-#     res_b = await qb.get()
-#     res_c = await qc.get()
-
-#     # Check that the msg received by node_b is the same
-#     # as the message sent by node_a
-#     assert res_b == msg.to_str()
-
-#     # res_c should match original msg but with b as sender
-#     node_b_id = str(node_b.get_id())
-#     msg.from_id = node_b_id
-
-#     assert res_c == msg.to_str()
-
-#     # Success, terminate pending tasks.
-#     await cleanup()
 
 async def perform_test_from_obj(obj):
     """
@@ -243,9 +186,7 @@ async def perform_test_from_obj(obj):
 
         # Create correctly formatted message
         msg_talk = generate_RPC_packet(actual_node_id, topics, data, generate_message_id())
-        
-        print ("**TEST FLOODSUB** MESSAGE TALK")
-        print (msg_talk)
+
         # Publish message
         # await floodsub_map[node_id].publish(actual_node_id, msg_talk.to_str())
         tasks_publish.append(asyncio.ensure_future(floodsub_map[node_id].publish(\
@@ -269,20 +210,7 @@ async def perform_test_from_obj(obj):
         for node_id in topic_map[topic]:
             # Get message from subscription queue
             msg_on_node_str = await queues_map[node_id][topic].get()
-
-            print ("MESSAGE ON NODE STR")
-            print (msg_on_node_str)
-
-            print ("ACTUAL MESSSSAGE")
-            print (actual_msg)
-
             assert actual_msg.publish[0].SerializeToString() == msg_on_node_str.SerializeToString()
-            # msg_on_node = create_message_talk(msg_on_node_str)
-
-            # Perform checks
-            # assert actual_msg.origin_id == msg_on_node.origin_id
-            # assert actual_msg.topics == msg_on_node.topics
-            # assert actual_msg.data == msg_on_node.data
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -500,30 +428,3 @@ async def test_three_nodes_clique_two_topic_diff_origin_test_obj():
         ]
     }
     await perform_test_from_obj(test_obj)
-
-def generate_message_id():
-    """
-    Generate a unique message id
-    :return: messgae id
-    """
-    return str(uuid.uuid1())
-
-def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
-    packet = rpc_pb2.RPC()
-    message = rpc_pb2.Message(
-        from_id=origin_id.encode('utf-8'),
-        seqno=msg_id.encode('utf-8'),
-        data=msg_content.encode('utf-8'),
-        )
-    for topic in topics:
-        message.topicIDs.extend([topic.encode('utf-8')])
-
-    # for topic in topics:
-    #     message.topicIDs.extend([topic.encode('utf-8')])
-    #     packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-    #         subscribe=True,
-    #         topicid = topic.encode('utf-8')
-    #         )])
-
-    packet.publish.extend([message])
-    return packet

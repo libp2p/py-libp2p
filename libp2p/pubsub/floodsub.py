@@ -1,8 +1,9 @@
-from .pubsub_router_interface import IPubsubRouter
 from .pb import rpc_pb2
+from .pubsub_router_interface import IPubsubRouter
 
 
 class FloodSub(IPubsubRouter):
+    # pylint: disable=no-member
 
     def __init__(self, protocols):
         self.protocols = protocols
@@ -55,42 +56,22 @@ class FloodSub(IPubsubRouter):
         :param sender_peer_id: peer_id of message sender
         :param rpc_message: pubsub message in RPC string format
         """
-
         packet = rpc_pb2.RPC()
         packet.ParseFromString(rpc_message)
-        print ("IN FLOOODSUB PUBLISH")
-        print (packet)
-        print ("++++++++++++++++")
         msg_sender = str(sender_peer_id)
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
             decoded_from_id = message.from_id.decode('utf-8')
-
-            print ("MESSAGE SENDER")
-            print (msg_sender)
-            print ("FROM ID")
-            print (message.from_id)
-            print (str(self.pubsub.host.get_id()))
-
-
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
-                await self.pubsub.handle_talk(sender_peer_id, message)
+                await self.pubsub.handle_talk(message)
 
-
-            print ("OHOHOHOH")
-            print (self.pubsub.peer_topics)
-            print ("UUUJUJUJ")
-            print (self.pubsub.peers)
-            print ("********")
             # Deliver to self and peers
             for topic in message.topicIDs:
                 if topic in self.pubsub.peer_topics:
                     for peer_id_in_topic in self.pubsub.peer_topics[topic]:
                         # Forward to all known peers in the topic that are not the
                         # message sender and are not the message origin
-                        print ("PEERID")
-                        print (peer_id_in_topic)
                         if peer_id_in_topic not in (msg_sender, decoded_from_id):
                             stream = self.pubsub.peers[peer_id_in_topic]
                             # create new packet with just publish message
