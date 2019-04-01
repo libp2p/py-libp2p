@@ -80,31 +80,43 @@ class Pubsub():
         """
 
         # TODO check on types here
-        peer_id = stream.mplex_conn.peer_id
+        peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
             incoming = (await stream.read())
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
-            print ("CONTINUOUSLY")
+
+            print ("IN PUBSUB CONTINUOUSLY READ")
             print (rpc_incoming)
+            print ("###########################")
+
+            should_publish = True
+
             if rpc_incoming.publish:
-                # deal with "talk messages"
-                for msg in rpc_incoming.publish:
-                    self.seen_messages.append(msg.seqno)
-                    await self.handle_talk(peer_id, msg)
-                    await self.router.publish(peer_id, msg)
+                # deal with RPC.publish
+                for message in rpc_incoming.publish:
+                    self.seen_messages.append(message.seqno)
+                    await self.handle_talk(peer_id, message)
+                    
 
             if rpc_incoming.subscriptions:
-                # deal with "subscription messages"
-                subs_map = {}
-                for msg in rpc_incoming.subscriptions:
-                    if msg.subscribe:
-                        subs_map[msg.topicid] = "sub"
-                    else:
-                        subs_map[msg.topicid] = "unsub"
+                # deal with RPC.subscriptions
+                # We don't need to relay the subscription to our
+                # peers because a given node only needs its peers
+                # to know that it is subscribed to the topic (doesn't
+                # need everyone to know)
+                should_publish = False
 
-                self.handle_subscription(rpc_incoming)
+                # TODO check that peer_id is the same as origin_id
+                from_id = str(rpc_incoming.publish[0].from_id.decode('utf-8'))
+                for message in rpc_incoming.subscriptions:
+                    if message.subscribe:
+                        self.handle_subscription(from_id, message)
+
+            if should_publish:
+                # relay message to peers with router
+                await self.router.publish(peer_id, incoming)
 
             # Force context switch
             await asyncio.sleep(0)
@@ -136,7 +148,10 @@ class Pubsub():
         pubsub protocols we support
         """
         while True:
+            print ("PUBSUB HANDLE PEER QUEUE")
             peer_id = await self.peer_queue.get()
+            print (peer_id)
+            print ("++++++++++++++++++++++++")
 
             # Open a stream to peer on existing connection
             # (we know connection exists since that's the only way
@@ -158,34 +173,30 @@ class Pubsub():
             # Force context switch
             await asyncio.sleep(0)
 
-    def handle_subscription(self, rpc_message):
+    def handle_subscription(self, peer_id, sub_message):
         """
         Handle an incoming subscription message from a peer. Update internal
         mapping to mark the peer as subscribed or unsubscribed to topics as
         defined in the subscription message
-        :param subscription: raw data constituting a subscription message
+        :param origin_id: id of the peer who subscribe to the message
+        :param sub_message: RPC.SubOpts
         """
-        for sub_msg in rpc_message.subscriptions:
-
-            # Look at each subscription in the msg individually
-            if sub_msg.subscribe:
-                origin_id = rpc_message.publish[0].from_id
-
-                if sub_msg.topicid not in self.peer_topics:
-                    # Create topic list if it did not yet exist
-                    self.peer_topics[sub_msg.topicid] = origin_id
-                elif orgin_id not in self.peer_topics[sub_msg.topicid]:
-                    # Add peer to topic
-                    self.peer_topics[sub_msg.topicid].append(origin_id)
-            else:
-                # TODO: Remove peer from topic
-                pass
+        # TODO verify logic here
+        if sub_message.subscribe:
+            if sub_message.topicid not in self.peer_topics:
+                self.peer_topics[sub_message.topicid] = [peer_id]
+            elif peer_id not in self.peer_topics[sub_message.topicid]:
+                # Add peer to topic
+                self.peer_topics[sub_message.topicid].append(peer_id)
+        else:
+            # TODO: Remove peer from topic
+            pass
 
     async def handle_talk(self, peer_id, publish_message):
         """
-        Handle incoming Talk message from a peer. A Talk message contains some
-        custom message that is published on a given topic(s)
-        :param talk: raw data constituting a talk message
+        Put incoming message from a peer onto my blocking queue
+        :param peer_id: peer id whom forwarded this message
+        :param talk: RPC.Message format
         """
 
         # Check if this message has any topics that we are subscribed to
