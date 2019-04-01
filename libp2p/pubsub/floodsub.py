@@ -41,7 +41,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
 
-    async def publish(self, sender_peer_id, message):
+    async def publish(self, sender_peer_id, rpc_message):
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
@@ -53,33 +53,41 @@ class FloodSub(IPubsubRouter):
         It also never forwards a message back to the source
         or the peer that forwarded the message.
         :param sender_peer_id: peer_id of message sender
-        :param message: message to forward
+        :param rpc_message: pubsub message in RPC string format
         """
 
         packet = rpc_pb2.RPC()
+        packet.ParseFromString(rpc_message)
         print ("IN FLOOODSUB PUBLISH")
-        print (message)
+        print (packet)
         print ("++++++++++++++++")
-        packet.publish.extend([message])
         msg_sender = str(sender_peer_id)
-
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
-        if msg_sender == message.from_id and msg_sender == str(self.pubsub.host.get_id()):
-            await self.pubsub.handle_talk(sender_peer_id, message)
+        for message in packet.publish:
+            if msg_sender == message.from_id and msg_sender == str(self.pubsub.host.get_id()):
+                await self.pubsub.handle_talk(sender_peer_id, message)
 
-        # Deliver to self and peers
-        for topic in message.topicIDs:
-            if topic in self.pubsub.peer_topics:
-                for peer_id_in_topic in self.pubsub.peer_topics[topic]:
-                    # Forward to all known peers in the topic that are not the
-                    # message sender and are not the message origin
-                    if peer_id_in_topic not in (msg_sender, message.from_id):
-                        stream = self.pubsub.peers[peer_id_in_topic]
-                        await stream.write(packet.SerializeToString())
-                    else:
-                        # Implies publish did not write
-                        print("publish did not write")
+
+            print ("OHOHOHOH")
+            print (self.pubsub.peer_topics)
+            print ("UUUJUJUJ")
+            print (self.pubsub.peers)
+            print ("********")
+            # Deliver to self and peers
+            for topic in message.topicIDs:
+                if topic in self.pubsub.peer_topics:
+                    for peer_id_in_topic in self.pubsub.peer_topics[topic]:
+                        # Forward to all known peers in the topic that are not the
+                        # message sender and are not the message origin
+                        print ("PEERID")
+                        print (peer_id_in_topic)
+                        if peer_id_in_topic not in (msg_sender, message.from_id):
+                            stream = self.pubsub.peers[peer_id_in_topic]
+                            await stream.write(packet.SerializeToString())
+                        else:
+                            # Implies publish did not write
+                            print("publish did not write")
 
     def join(self, topic):
         """
