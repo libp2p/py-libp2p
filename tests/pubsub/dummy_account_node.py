@@ -86,7 +86,7 @@ class DummyAccountNode():
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
         packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
-        await self.floodsub.publish(my_id, msg.SerializeToString())
+        await self.floodsub.publish(my_id, packet.SerializeToString())
 
     async def publish_set_crypto(self, user, amount):
         """
@@ -128,6 +128,8 @@ class DummyAccountNode():
         print (dest_user)
         print (amount)
         self.balances[dest_user] = amount
+        print (self.balances)
+        print ("^^ balance")
 
     def get_balance(self, user):
         """

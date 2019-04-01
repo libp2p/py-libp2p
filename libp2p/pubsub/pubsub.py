@@ -58,17 +58,19 @@ class Pubsub():
     def get_hello_packet(self):
         """
         Generate subscription message with all topics we are subscribed to
+        only send hello packet if we have subscribed topics
         """
-
         packet = rpc_pb2.RPC()
-        message = rpc_pb2.Message(
-            from_id=str(self.host.get_id()).encode('utf-8'),
-            seqno=str(generate_message_id()).encode('utf-8')
-            )
-        packet.publish.extend([message])
-        for topic_id in self.my_topics:
-            packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-                subscribe=True, topicid=topic_id)])
+        if self.my_topics:
+            for topic_id in self.my_topics:
+                packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
+                    subscribe=True, topicid=topic_id)])
+        
+        # message = rpc_pb2.Message(
+        #     from_id=str(self.host.get_id()).encode('utf-8'),
+        #     seqno=str(generate_message_id()).encode('utf-8')
+        #     )
+        # packet.publish.extend([message])
 
         return packet.SerializeToString()
 
@@ -80,9 +82,11 @@ class Pubsub():
         """
 
         # TODO check on types here
+        print ("++++++++++ASPYN+++++++++++++++++")
         peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
+            print ("HIT ME")
             incoming = (await stream.read())
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
@@ -91,13 +95,15 @@ class Pubsub():
             print (rpc_incoming)
             print ("###########################")
 
-            should_publish = True
+            should_publish = False
 
             if rpc_incoming.publish:
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
-                    self.seen_messages.append(message.seqno)
-                    await self.handle_talk(peer_id, message)
+                    if message.seqno not in self.seen_messages:
+                        should_publish = True
+                        self.seen_messages.append(message.seqno)
+                        await self.handle_talk(peer_id, message)
                     
 
             if rpc_incoming.subscriptions:
@@ -106,13 +112,9 @@ class Pubsub():
                 # peers because a given node only needs its peers
                 # to know that it is subscribed to the topic (doesn't
                 # need everyone to know)
-                should_publish = False
-
-                # TODO check that peer_id is the same as origin_id
-                from_id = str(rpc_incoming.publish[0].from_id.decode('utf-8'))
                 for message in rpc_incoming.subscriptions:
                     if message.subscribe:
-                        self.handle_subscription(from_id, message)
+                        self.handle_subscription(peer_id, message)
 
             if should_publish:
                 # relay message to peers with router
@@ -182,6 +184,8 @@ class Pubsub():
         :param sub_message: RPC.SubOpts
         """
         # TODO verify logic here
+
+
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = [peer_id]
@@ -213,19 +217,23 @@ class Pubsub():
         :param topic_id: topic_id to subscribe to
         """
         # Map topic_id to blocking queue
+
+        print ("**PUBSUB** in SUBSCRIBE")
         self.my_topics[topic_id] = asyncio.Queue()
 
         # Create subscribe message
         packet = rpc_pb2.RPC()
-        packet.publish.extend([rpc_pb2.Message(
-            from_id=str(self.host.get_id()).encode('utf-8'),
-            seqno=str(generate_message_id()).encode('utf-8')
-            )])
+        # packet.publish.extend([rpc_pb2.Message(
+        #     from_id=str(self.host.get_id()).encode('utf-8'),
+        #     seqno=str(generate_message_id()).encode('utf-8')
+        #     )])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
             subscribe = True,
             topicid = topic_id.encode('utf-8')
             )])
-
+        print (packet)
+        print ("**PUBSUB** PEEERS")
+        print (self.peers)
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
 
@@ -247,10 +255,10 @@ class Pubsub():
 
         # Create unsubscribe message
         packet = rpc_pb2.RPC()
-        packet.publish.extend([rpc_pb2.Message(
-            from_id=str(self.host.get_id()).encode('utf-8'),
-            seqno=str(generate_message_id()).encode('utf-8')
-            )])
+        # packet.publish.extend([rpc_pb2.Message(
+        #     from_id=str(self.host.get_id()).encode('utf-8'),
+        #     seqno=str(generate_message_id()).encode('utf-8')
+        #     )])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
             subscribe = False,
             topicid = topic_id.encode('utf-8')
@@ -267,6 +275,8 @@ class Pubsub():
         Broadcast a message to peers
         :param raw_msg: raw contents of the message to broadcast
         """
+        print ("**PUBSU** IN MESSAGE ALL PEERS")
+        print (rpc_msg)
 
         # Broadcast message
         for peer in self.peers:
