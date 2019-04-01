@@ -1,13 +1,12 @@
 import asyncio
 import uuid
 
-from .pb import rpc_pb2_grpc
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
 
 
 class Pubsub():
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, no-member
 
     def __init__(self, host, router, my_id):
         """
@@ -65,12 +64,6 @@ class Pubsub():
             for topic_id in self.my_topics:
                 packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
                     subscribe=True, topicid=topic_id)])
-        
-        # message = rpc_pb2.Message(
-        #     from_id=str(self.host.get_id()).encode('utf-8'),
-        #     seqno=str(generate_message_id()).encode('utf-8')
-        #     )
-        # packet.publish.extend([message])
 
         return packet.SerializeToString()
 
@@ -82,18 +75,12 @@ class Pubsub():
         """
 
         # TODO check on types here
-        print ("++++++++++ASPYN+++++++++++++++++")
         peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
-            print ("HIT ME")
             incoming = (await stream.read())
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
-
-            print ("IN PUBSUB CONTINUOUSLY READ")
-            print (rpc_incoming)
-            print ("###########################")
 
             should_publish = False
 
@@ -103,8 +90,7 @@ class Pubsub():
                     if message.seqno not in self.seen_messages:
                         should_publish = True
                         self.seen_messages.append(message.seqno)
-                        await self.handle_talk(peer_id, message)
-                    
+                        await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -150,10 +136,8 @@ class Pubsub():
         pubsub protocols we support
         """
         while True:
-            print ("PUBSUB HANDLE PEER QUEUE")
+
             peer_id = await self.peer_queue.get()
-            print (peer_id)
-            print ("++++++++++++++++++++++++")
 
             # Open a stream to peer on existing connection
             # (we know connection exists since that's the only way
@@ -175,7 +159,7 @@ class Pubsub():
             # Force context switch
             await asyncio.sleep(0)
 
-    def handle_subscription(self, peer_id, sub_message):
+    def handle_subscription(self, origin_id, sub_message):
         """
         Handle an incoming subscription message from a peer. Update internal
         mapping to mark the peer as subscribed or unsubscribed to topics as
@@ -183,23 +167,19 @@ class Pubsub():
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
-        # TODO verify logic here
-
-
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = [peer_id]
-            elif peer_id not in self.peer_topics[sub_message.topicid]:
+                self.peer_topics[sub_message.topicid] = [origin_id]
+            elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
-                self.peer_topics[sub_message.topicid].append(peer_id)
+                self.peer_topics[sub_message.topicid].append(origin_id)
         else:
             # TODO: Remove peer from topic
             pass
 
-    async def handle_talk(self, peer_id, publish_message):
+    async def handle_talk(self, publish_message):
         """
         Put incoming message from a peer onto my blocking queue
-        :param peer_id: peer id whom forwarded this message
         :param talk: RPC.Message format
         """
 
@@ -216,9 +196,8 @@ class Pubsub():
         Subscribe ourself to a topic
         :param topic_id: topic_id to subscribe to
         """
-        # Map topic_id to blocking queue
 
-        print ("**PUBSUB** in SUBSCRIBE")
+        # Map topic_id to blocking queue
         self.my_topics[topic_id] = asyncio.Queue()
 
         # Create subscribe message
@@ -228,12 +207,10 @@ class Pubsub():
         #     seqno=str(generate_message_id()).encode('utf-8')
         #     )])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe = True,
-            topicid = topic_id.encode('utf-8')
+            subscribe=True,
+            topicid=topic_id.encode('utf-8')
             )])
-        print (packet)
-        print ("**PUBSUB** PEEERS")
-        print (self.peers)
+
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
 
@@ -255,13 +232,9 @@ class Pubsub():
 
         # Create unsubscribe message
         packet = rpc_pb2.RPC()
-        # packet.publish.extend([rpc_pb2.Message(
-        #     from_id=str(self.host.get_id()).encode('utf-8'),
-        #     seqno=str(generate_message_id()).encode('utf-8')
-        #     )])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe = False,
-            topicid = topic_id.encode('utf-8')
+            subscribe=False,
+            topicid=topic_id.encode('utf-8')
             )])
 
         # Send out unsubscribe message to all peers
@@ -275,8 +248,6 @@ class Pubsub():
         Broadcast a message to peers
         :param raw_msg: raw contents of the message to broadcast
         """
-        print ("**PUBSU** IN MESSAGE ALL PEERS")
-        print (rpc_msg)
 
         # Broadcast message
         for peer in self.peers:

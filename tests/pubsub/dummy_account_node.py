@@ -1,10 +1,8 @@
 import asyncio
-import uuid
 import multiaddr
 
+from utils import generate_message_id, generate_RPC_packet
 from libp2p import new_node
-from libp2p.pubsub.pb import rpc_pb2_grpc
-from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
 
@@ -37,7 +35,6 @@ class DummyAccountNode():
         We use create as this serves as a factory function and allows us
         to use async await, unlike the init function
         """
-        print ("**DUMMY** CREATE ACCOUNT NODE")
         self = DummyAccountNode()
 
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
@@ -54,14 +51,9 @@ class DummyAccountNode():
         Handle all incoming messages on the CRYPTO_TOPIC from peers
         """
         while True:
-            incoming = await self.q.get()
-            print ("**DUMMY** HANDLE INCOMING")
-            print (incoming)
-            print ("========================")
-            
+            incoming = await self.q.get()  
             msg_comps = incoming.data.decode('utf-8').split(",")
-            print (msg_comps)
-            print ("--------")
+
             if msg_comps[0] == "send":
                 self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
             elif msg_comps[0] == "set":
@@ -107,7 +99,6 @@ class DummyAccountNode():
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send 
         """
-        print ("**DUMMY** IN HANDLE SEND CRYPTO")
         if source_user in self.balances:
             self.balances[source_user] -= amount
         else:
@@ -124,12 +115,7 @@ class DummyAccountNode():
         :param dest_user: user to set crypto for
         :param amount: amount of crypto
         """
-        print ("**DUMMY** IN HANDLE SET CRYPTO")
-        print (dest_user)
-        print (amount)
         self.balances[dest_user] = amount
-        print (self.balances)
-        print ("^^ balance")
 
     def get_balance(self, user):
         """
@@ -137,35 +123,8 @@ class DummyAccountNode():
         :param user: user to get balance for
         :return: balance of user
         """
-        print ("GET BALACNCE")
-        print (user)
-        print (self.balances)
         if user in self.balances:
             return self.balances[user]
         else:
             return -1
 
-def generate_message_id():
-    """
-    Generate a unique message id
-    :return: messgae id
-    """
-    return str(uuid.uuid1())
-
-def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
-    packet = rpc_pb2.RPC()
-    message = rpc_pb2.Message(
-        from_id=origin_id.encode('utf-8'),
-        seqno=msg_id.encode('utf-8'),
-        data=msg_content.encode('utf-8')
-        )
-
-    for topic in topics:
-        message.topicIDs.extend([topic.encode('utf-8')])
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe=True,
-            topicid = topic.encode('utf-8')
-            )])
-
-    packet.publish.extend([message])
-    return packet
