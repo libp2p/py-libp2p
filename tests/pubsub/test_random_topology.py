@@ -198,76 +198,92 @@ async def perform_test_from_obj(obj):
 #     }
 #     await perform_test_from_obj(test_obj)
 
-def generate_random_topology(num_nodes, topic_density, num_topics, max_nodes_per_topic, max_msgs_per_topic):
-    nodes = range(num_nodes)
+def generate_random_topology(num_nodes, density, num_topics, max_nodes_per_topic, max_msgs_per_topic):
+    nodes = [str(i).zfill(2) for i in range(0,num_nodes)]
     
-    # Create a separate graph for each topic
-    topic_graphs = {}
-    for topic in range(num_topics):
-        # TODO: Pick random num of nodes to be in topic (at least 1)
-        num_nodes_in_topic = max_nodes_per_topic
-        nodes_in_topic = random.sample(nodes, num_nodes_in_topic)
-        print("***Nodes in topic***")
-        print(num_nodes_in_topic)
-        print(nodes_in_topic)
+    # 1) Generate random graph structure
 
-        # Create initial graph by connecting each node to its previous node
-        # This ensures the graph is connected
-        graph = {}
+    # Create initial graph by connecting each node to its previous node
+    # This ensures the graph is connected
+    graph = {}
 
-        graph[nodes_in_topic[0]] = []
+    graph[nodes[0]] = []
 
-        max_num_edges = num_nodes_in_topic * (num_nodes_in_topic - 1) / 2
-        num_edges = 1
+    max_num_edges = num_nodes * (num_nodes - 1) / 2
+    num_edges = 0
 
-        for i in range(1, len(nodes_in_topic)):
-            prev = nodes_in_topic[i - 1]
-            curr = nodes_in_topic[i]
+    for i in range(1, len(nodes)):
+        prev = nodes[i - 1]
+        curr = nodes[i]
 
-            graph[curr] = [prev]
-            graph[prev].append(curr)
+        graph[curr] = [prev]
+        graph[prev].append(curr)
+        num_edges += 1
+
+    # Add random edges until density is hit
+    while num_edges / max_num_edges < density:
+        selected_nodes = random.sample(nodes, 2)
+
+        # Only add the nodes as neighbors if they are not already neighbors
+        if selected_nodes[0] not in graph[selected_nodes[1]]:
+            graph[selected_nodes[0]].append(selected_nodes[1])
+            graph[selected_nodes[1]].append(selected_nodes[0])
             num_edges += 1
 
-        # Add random edges until topic density is hit
-        while num_edges / max_num_edges < topic_density:
-            selected_nodes = random.sample(nodes_in_topic, 2)
+    # 2) Pick num_topics random nodes to perform random walks at 
+    nodes_to_start_topics_from = random.sample(nodes, num_topics)
 
-            # Only add the nodes as neighbors if they are not already neighbors
-            if selected_nodes[0] not in graph[selected_nodes[1]]:
-                graph[selected_nodes[0]].append(selected_nodes[1])
-                graph[selected_nodes[1]].append(selected_nodes[0])
-                num_edges += 1
+    nodes_in_topic_list = []
+    for node in nodes_to_start_topics_from:
+        nodes_walked = []
+        curr = node
+        nodes_walked.append(curr)
 
-        topic_graphs[topic] = graph
-        print(graph)
+        # TODO: Pick random num of nodes per topic
+        while len(nodes_walked) < max_nodes_per_topic:
+            # Pick a random neighbor of curr to walk to
+            neighbors = graph[curr]
+            rand_num = random.randint(0, len(neighbors) - 1)
+            neighbor = neighbors[rand_num]
+            curr = neighbor
+            if curr not in nodes_walked:
+                nodes_walked.append(curr)
 
-    # Generate network graph from union of topic graphs
-    network_graph = {}
+        nodes_in_topic_list.append(nodes_walked)
 
-    for topic in topic_graphs:
-        graph = topic_graphs[topic]
-        for node in graph:
-            # Add node if not in network graph
-            if node not in network_graph:
-                network_graph[node] = []
-            for neighbor in graph[node]:
-                # Add neighbor if not in network graph
-                if neighbor not in network_graph:
-                    network_graph[neighbor] = []
+    # 3) Start creating test_obj
+    test_obj = {"supported_protocols": ["/floodsub/1.0.0"]}
+    test_obj["adj_list"] = graph
+    test_obj["topic_map"] = {}
+    for i in range(len(nodes_in_topic_list)):
+        test_obj["topic_map"][str(i)] = nodes_in_topic_list[i]
 
-                # Add edge if not in network graph
-                if neighbor not in network_graph[node]:
-                    network_graph[node].append(neighbor)
-                    network_graph[neighbor].append(node)
+    # 4) Finish creating test_obj by adding messages at random start nodes in each topic
+    test_obj["messages"] = []
+    for i in range(len(nodes_in_topic_list)):
+        nodes_in_topic = nodes_in_topic_list[i]
+        rand_num = random.randint(0, len(nodes_in_topic) - 1)
+        start_node = nodes_in_topic[rand_num]
+        test_obj["messages"].append({
+                "topics": [str(i)],
+                "data": str(random.randint(0, 1000)),
+                "node_id": str(start_node)
+            })
 
-def test_simple_random():
+    # 5) Return completed test_obj
+    return test_obj
+
+@pytest.mark.asyncio
+async def test_simple_random():
     num_nodes = 4
-    topic_density = 0.5
+    topic_density = 1
     num_topics = 2
     max_nodes_per_topic = 4
     max_msgs_per_topic = 1
-    topology = generate_random_topology(num_nodes, topic_density, num_topics,\
+    topology_test_obj = generate_random_topology(num_nodes, topic_density, num_topics,\
         max_nodes_per_topic, max_msgs_per_topic)
-    print("TOPOLOGY")
-    print(topology)
+    print(topology_test_obj)
+    await perform_test_from_obj(topology_test_obj)
+    # print("TOPOLOGY")
+    # print(topology)
 
