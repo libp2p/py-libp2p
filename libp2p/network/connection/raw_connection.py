@@ -34,10 +34,20 @@ class RawConnection(IRawConnection):
         """
         Close and wait for the connection to be closed.
         """
-        self.shutdown()
+        if not self.shutdown(): return False
         loop = get_event_loop()
         loop.run_until_complete(self.wait_closed())
         loop.close()
+        self.writer = None
+        self.reader = None
+        return True
+
+    def is_closed(self):
+        """
+        :return: return True if the connection is closed.
+        """
+        if self.writer is None: return True
+        return self.writer.is_closing()
 
     def next_stream_id(self):
         """

@@ -76,7 +76,7 @@ class TCP(ITransport):
             in ms that fires and destroy all connections
             :return: return True if successful
             """
-            if self.shutdown(options) is False:
+            if not self.shutdown(options):
                 return False
             _loop = asyncio.get_event_loop()
             _loop.run_until_complete(self.wait_closed())

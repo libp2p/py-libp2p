@@ -42,13 +42,39 @@ class Mplex(IMuxedConn):
         """
         close the stream muxer and underlying raw connection
         """
-        self.raw_conn.close()
+        if self.raw_conn is None: return False
+        if not self.raw_conn.close(): return False
+        raw_conn = None
+        return True
+
+    def shutdown(self, options=None):
+        """
+        Launch the start of the mplex and the underlying connection,
+        usefull for closing multiple conns at once.
+        :param options: optional object potential with a timeout value
+        in ms that fires and destroy all connections
+        :return: return True if successful
+        """
+        if self.raw_conn is None:
+            return False
+        self.raw_conn.shutdown()
+        return True
+
+    async def wait_closed(self):
+        """
+        Wait until the connection is closed. Usefull for closing multiple
+        connection at once. Must be used after shutdown.
+        For an all in one close use close.
+        """
+        await self.raw_conn.wait_close()
 
     def is_closed(self):
         """
         check connection is fully closed
         :return: true if successful
         """
+        if self.raw_conn is None: return True
+        return self.raw_conn.is_closed()
 
     async def read_buffer(self, stream_id):
         """
