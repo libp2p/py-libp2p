@@ -27,8 +27,11 @@ class RawConnection(IRawConnection):
         Wait until the connection is closed. Usefull for closing multiple
         connection at once. Must be used after shutdown.
         For an all in one close use close.
+        :return: return True if successful
         """
+        if self.writer is None: return False
         await self.writer.wait_close()
+        return True
 
     def close(self):
         """

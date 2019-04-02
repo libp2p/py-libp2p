@@ -65,8 +65,10 @@ class Mplex(IMuxedConn):
         Wait until the connection is closed. Usefull for closing multiple
         connection at once. Must be used after shutdown.
         For an all in one close use close.
+        :return: return True if successful
         """
-        await self.raw_conn.wait_close()
+        if self.raw_conn is None: return False
+        return await self.raw_conn.wait_close()
 
     def is_closed(self):
         """

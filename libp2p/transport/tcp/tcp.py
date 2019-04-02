@@ -66,7 +66,9 @@ class TCP(ITransport):
             connection at once. Must be used after shutdown.
             For an all in one close use close.
             """
+            if self.server is None: return False
             await self.server.wait_close()
+            return True
 
         def close(self, options=None):
             """
