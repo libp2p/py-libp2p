@@ -39,11 +39,11 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def publish(self, sender_peer_id, message):
+    def publish(self, sender_peer_id, rpc_message):
         """
         Invoked to forward a new message that has been validated
         :param sender_peer_id: peer_id of message sender
-        :param message: message to forward
+        :param rpc_message: message to forward
         """
 
     @abstractmethod

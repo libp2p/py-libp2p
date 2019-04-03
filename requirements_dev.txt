@@ -3,3 +3,5 @@ codecov
 pytest-cov
 pytest-asyncio
 pylint
+grpcio
+grpcio-tools

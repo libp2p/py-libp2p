@@ -8,8 +8,6 @@ from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.message import MessageTalk
-from libp2p.pubsub.message import create_message_talk
 from dummy_account_node import DummyAccountNode
 
 # pylint: disable=too-many-locals
@@ -66,7 +64,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     await action_func(dummy_nodes)
 
     # Allow time for action function to be performed (i.e. messages to propogate)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(1)
 
     # Perform assertion function
     for dummy_node in dummy_nodes:
