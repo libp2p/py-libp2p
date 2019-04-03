@@ -78,9 +78,6 @@ class FloodSub(IPubsubRouter):
                             new_packet = rpc_pb2.RPC()
                             new_packet.publish.extend([message])
                             await stream.write(new_packet.SerializeToString())
-                        else:
-                            # Implies publish did not write
-                            print("publish did not write")
 
     def join(self, topic):
         """
