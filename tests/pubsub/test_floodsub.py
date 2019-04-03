@@ -54,8 +54,6 @@ async def test_simple_two_nodes_RPC():
     # as the message sent by node_a
     assert res_b.SerializeToString() == msg.publish[0].SerializeToString()
 
-
-
     # Success, terminate pending tasks.
     await cleanup()
 
