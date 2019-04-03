@@ -185,3 +185,28 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
         assert dummy_node.get_balance("rob") == 12
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
+@pytest.mark.asyncio
+async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
+    num_nodes = 5
+    adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
+
+    async def action_func(dummy_nodes):
+        await dummy_nodes[0].publish_set_crypto("alex", 20)
+        await asyncio.sleep(1)
+        await dummy_nodes[1].publish_send_crypto("alex", "rob", 3)
+        await asyncio.sleep(1)
+        await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
+        await asyncio.sleep(1)
+        await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
+        await asyncio.sleep(1)
+        await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
+
+    def assertion_func(dummy_node):
+        assert dummy_node.get_balance("alex") == 17
+        assert dummy_node.get_balance("rob") == 1
+        assert dummy_node.get_balance("aspyn") == 1
+        assert dummy_node.get_balance("zx") == 0
+        assert dummy_node.get_balance("raul") == 1
+
+    await perform_test(num_nodes, adj_map, action_func, assertion_func)
