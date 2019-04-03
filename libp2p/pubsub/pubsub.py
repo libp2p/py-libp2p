@@ -86,9 +86,10 @@ class Pubsub():
             if rpc_incoming.publish:
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
-                    if message.seqno not in self.seen_messages:
+                    id_in_seen_msgs = (message.seqno, message.from_id)
+                    if id_in_seen_msgs not in self.seen_messages:
                         should_publish = True
-                        self.seen_messages.append((message.seqno, message.from_id))
+                        self.seen_messages.append(id_in_seen_msgs)
                         await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
