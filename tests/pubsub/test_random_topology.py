@@ -2,6 +2,7 @@ import asyncio
 import multiaddr
 import pytest
 import random
+import pprint
 
 from pyvis.network import Network
 from tests.utils import cleanup
@@ -189,13 +190,22 @@ async def perform_test_from_obj(obj,timeout_len=2):
             # Ensure same number of messages received as sent
             assert len(all_received_msgs_in_topic) == len(all_actual_msgs[topic])
 
-    # Success, terminate pending tasks.
-    await cleanup()
+def generate_test_obj_with_random_params(params):
+    return {
+        "num_nodes": random.randint(params["min_num_nodes"], params["max_num_nodes"]),
+        "density": random.uniform(0.01, params["max_density"]),
+        "num_topics": random.randint(1, params["max_num_topics"]),
+        "max_nodes_per_topic": random.randint(params["min_max_nodes_per_topic"], params["max_max_nodes_per_topic"]),
+        "max_msgs_per_topic": random.randint(params["min_max_msgs_per_topic"], params["max_max_msgs_per_topic"])
+    }
 
 def generate_random_topology(num_nodes, density, num_topics, max_nodes_per_topic, max_msgs_per_topic):
     # Give nodes string labels so that perform_test_with_obj works correctly
     # Note: "n" is appended so that visualizations work properly ('00' caused issues)
     nodes = ["n" + str(i).zfill(2) for i in range(0,num_nodes)]
+
+    # Adjust max_nodes_per_topic if it exceeds number of nodes
+    max_nodes_per_topic = min(max_nodes_per_topic, num_nodes)
 
     # 1) Generate random graph structure
 
@@ -270,6 +280,21 @@ def generate_random_topology(num_nodes, density, num_topics, max_nodes_per_topic
     # 5) Return completed test_obj
     return test_obj
 
+def create_graph(test_obj):
+    net = Network()
+    net.barnes_hut()
+
+    adj_list = test_obj["adj_list"]
+    # print(list(adj_list.keys()))
+    nodes_to_add = list(adj_list.keys())
+    net.add_nodes(nodes_to_add)
+    for node in adj_list:
+        neighbors = adj_list[node]
+        for neighbor in neighbors:
+            net.add_edge(node, neighbor)
+
+    net.show("random_topology.html")
+
 @pytest.mark.asyncio
 async def test_simple_random():
     num_nodes = 5
@@ -277,27 +302,82 @@ async def test_simple_random():
     num_topics = 2
     max_nodes_per_topic = 5
     max_msgs_per_topic = 5
+    print("Generating random topology")
     topology_test_obj = generate_random_topology(num_nodes, density, num_topics,\
         max_nodes_per_topic, max_msgs_per_topic)
-    print(topology_test_obj)
+
+    print("*****Topology Summary*****")
+    print("# nodes: " + str(num_nodes))
+    print("Density: " + str(density))
+    print("# topics: " + str(num_topics))
+    print("Nodes per topic: " + str(max_nodes_per_topic))
+    print("Msgs per topic: " + str(max_msgs_per_topic))
+    print("**************************")
+
+    print("Performing Test")
     await perform_test_from_obj(topology_test_obj, timeout_len=20)
+    print("Test Completed")
+    print("Generating Graph")
+    create_graph(topology_test_obj)
+    print("Graph Generated")
 
-    # Save graph
-    save_graph = True
-    if save_graph:
-        net = Network()
-        net.barnes_hut()
+    # Success, terminate pending tasks.
+    await cleanup()
 
-        adj_list = topology_test_obj["adj_list"]
-        # print(list(adj_list.keys()))
-        nodes_to_add = list(adj_list.keys())
-        net.add_nodes(nodes_to_add)
-        print(nodes_to_add)
-        print(net.nodes)
-        for node in adj_list:
-            neighbors = adj_list[node]
-            for neighbor in neighbors:
-                net.add_edge(node, neighbor)
-    
-        net.show("random_topology.html")
+@pytest.mark.asyncio
+async def test_random_10():
+    min_num_nodes = 8
+    max_num_nodes = 10
+    max_density = 0.4
+    max_num_topics = 5
+    min_max_nodes_per_topic = 10
+    max_max_nodes_per_topic = 20
+    min_max_msgs_per_topic = 10
+    max_max_msgs_per_topic = 20
+
+    num_random_tests = 10
+
+    summaries = []
+
+    params_to_generate_random_params = {
+                "min_num_nodes": min_num_nodes,
+                "max_num_nodes": max_num_nodes,
+                "max_density": max_density,
+                "max_num_topics": max_num_topics,
+                "min_max_nodes_per_topic": min_max_nodes_per_topic,
+                "max_max_nodes_per_topic": max_max_nodes_per_topic,
+                "min_max_msgs_per_topic": min_max_msgs_per_topic,
+                "max_max_msgs_per_topic": max_max_msgs_per_topic
+            }
+
+    for i in range(0, num_random_tests):
+        random_params = generate_test_obj_with_random_params(params_to_generate_random_params)
+
+        print("Generating random topology")
+        topology_test_obj = generate_random_topology(random_params["num_nodes"], random_params["density"],\
+            random_params["num_topics"], random_params["max_nodes_per_topic"], \
+            random_params["max_msgs_per_topic"])
+
+        summary = {
+            "num_nodes": random_params["num_nodes"],
+            "density": random_params["density"],
+            "num_topics": random_params["num_topics"],
+            "nodes_per_topics": random_params["max_nodes_per_topic"],
+            "msgs_per_topics": random_params["max_msgs_per_topic"]
+        }
+        summaries.append(pprint.pformat(summary, indent=4))
+
+        print("Performing Test")
+        await perform_test_from_obj(topology_test_obj, timeout_len=30)
+        print("Test Completed")
+        # print("Generating Graph")
+        # create_graph(topology_test_obj)
+        # print("Graph Generated")
+        print("***Test " + str(i + 1) + "/" + str(num_random_tests) + " Completed***")
+
+    with open('summaries.rand_test', 'a') as out_file:
+        out_file.write(pprint.pformat(summaries, indent=4))
+
+    # Success, terminate pending tasks.
+    await cleanup()
 
