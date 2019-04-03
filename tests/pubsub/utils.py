@@ -1,12 +1,26 @@
 import uuid
+import struct
 from libp2p.pubsub.pb import rpc_pb2
 
-def generate_message_id():
+
+def message_id_generator(start_val):
     """
     Generate a unique message id
-    :return: messgae id
+    :param start_val: value to start generating messages at
+    :return: message id
     """
-    return str(uuid.uuid1())
+    val = start_val
+    def generator():
+        # Allow manipulation of val within closure
+        nonlocal val
+
+        # Increment id
+        val += 1
+
+        # Convert val to big endian
+        return struct.pack('>I', val)
+
+    return generator
 
 def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     """
@@ -19,7 +33,7 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     packet = rpc_pb2.RPC()
     message = rpc_pb2.Message(
         from_id=origin_id.encode('utf-8'),
-        seqno=msg_id.encode('utf-8'),
+        seqno=msg_id,
         data=msg_content.encode('utf-8'),
         )
 
