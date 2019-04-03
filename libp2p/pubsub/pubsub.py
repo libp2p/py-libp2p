@@ -3,6 +3,7 @@ import uuid
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
+from .read_only_queue import ReadOnlyQueue
 
 
 class Pubsub():
@@ -188,8 +189,9 @@ class Pubsub():
             if topic in self.my_topics:
                 # we are subscribed to a topic this message was sent for,
                 # so add message to the subscription output queue
-                # for each topic
-                await self.my_topics[topic].put(publish_message)
+                # for each topic with priority being the message's seqno.
+                # Note: asyncio.PriorityQueue item format is (priority, data)
+                await self.my_topics[topic].put((publish_message.seqno, publish_message))
 
     async def subscribe(self, topic_id):
         """
@@ -197,8 +199,8 @@ class Pubsub():
         :param topic_id: topic_id to subscribe to
         """
 
-        # Map topic_id to blocking queue
-        self.my_topics[topic_id] = asyncio.Queue()
+        # Map topic_id to a priority blocking queue
+        self.my_topics[topic_id] = asyncio.PriorityQueue()
 
         # Create subscribe message
         packet = rpc_pb2.RPC()
@@ -217,8 +219,8 @@ class Pubsub():
         # Tell router we are joining this topic
         self.router.join(topic_id)
 
-        # Return the asyncio queue for messages on this topic
-        return self.my_topics[topic_id]
+        # Return the readonly queue for messages on this topic
+        return ReadOnlyQueue(self.my_topics[topic_id])
 
     async def unsubscribe(self, topic_id):
         """
