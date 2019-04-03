@@ -1,7 +1,8 @@
 import asyncio
 import multiaddr
+import uuid
 
-from utils import generate_message_id, generate_RPC_packet
+from utils import message_id_generator, generate_RPC_packet
 from libp2p import new_node
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
@@ -25,6 +26,8 @@ class DummyAccountNode():
 
     def __init__(self):
         self.balances = {}
+        self.next_msg_id_func = message_id_generator(0)
+        self.node_id = str(uuid.uuid1())
 
     @classmethod
     async def create(cls):
@@ -51,7 +54,7 @@ class DummyAccountNode():
         Handle all incoming messages on the CRYPTO_TOPIC from peers
         """
         while True:
-            incoming = await self.q.get()  
+            incoming = await self.q.get()
             msg_comps = incoming.data.decode('utf-8').split(",")
 
             if msg_comps[0] == "send":
@@ -77,7 +80,7 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
+        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
         await self.floodsub.publish(my_id, packet.SerializeToString())
 
     async def publish_set_crypto(self, user, amount):
@@ -88,7 +91,7 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
+        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
 
         await self.floodsub.publish(my_id, packet.SerializeToString())
 
@@ -99,6 +102,7 @@ class DummyAccountNode():
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send 
         """
+        print("handle send " + self.node_id)
         if source_user in self.balances:
             self.balances[source_user] -= amount
         else:
@@ -115,6 +119,7 @@ class DummyAccountNode():
         :param dest_user: user to set crypto for
         :param amount: amount of crypto
         """
+        print("handle set " + self.node_id)
         self.balances[dest_user] = amount
 
     def get_balance(self, user):
