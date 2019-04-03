@@ -22,7 +22,7 @@ async def connect(node1, node2):
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
 
-async def perform_test_from_obj(obj, timeout_len=3):
+async def perform_test_from_obj(obj,timeout_len=2):
     """
     Perform a floodsub test from a test obj.
     test obj are composed as follows:
@@ -91,7 +91,7 @@ async def perform_test_from_obj(obj, timeout_len=3):
             # Connect node and neighbor
             # await connect(node_map[start_node_id], node_map[neighbor_id])
             tasks_connect.append(asyncio.ensure_future(connect(node_map[start_node_id], node_map[neighbor_id])))
-    tasks_connect.append(asyncio.sleep(timeout_len))
+    tasks_connect.append(asyncio.sleep(2))
     await asyncio.gather(*tasks_connect)
 
     # Allow time for graph creation before continuing
@@ -118,7 +118,7 @@ async def perform_test_from_obj(obj, timeout_len=3):
             """
             tasks_topic.append(asyncio.ensure_future(pubsub_map[node_id].subscribe(topic)))
             tasks_topic_data.append((node_id, topic))
-    tasks_topic.append(asyncio.sleep(timeout_len))
+    tasks_topic.append(asyncio.sleep(2))
 
     # Gather is like Promise.all
     responses = await asyncio.gather(*tasks_topic, return_exceptions=True)
@@ -138,6 +138,8 @@ async def perform_test_from_obj(obj, timeout_len=3):
     topics_in_msgs_ordered = []
     messages = obj["messages"]
     tasks_publish = []
+
+    all_actual_msgs = {}
     for msg in messages:
         topics = msg["topics"]
 
@@ -159,7 +161,10 @@ async def perform_test_from_obj(obj, timeout_len=3):
         # TODO: Update message sender to be correct message sender before
         # adding msg_talk to this list
         for topic in topics:
-            topics_in_msgs_ordered.append((topic, msg_talk))
+            if topic in all_actual_msgs:
+                all_actual_msgs[topic].append(msg_talk.publish[0].SerializeToString())
+            else:
+                all_actual_msgs[topic] = [msg_talk.publish[0].SerializeToString()]
 
     # Allow time for publishing before continuing
     # await asyncio.sleep(0.4)
@@ -167,37 +172,25 @@ async def perform_test_from_obj(obj, timeout_len=3):
     await asyncio.gather(*tasks_publish)
 
     # Step 4) Check that all messages were received correctly.
-    # TODO: Check message sender too
-    for i in range(len(topics_in_msgs_ordered)):
-        topic, actual_msg = topics_in_msgs_ordered[i]
+    for topic in all_actual_msgs:
         for node_id in topic_map[topic]:
-            # Get message from subscription queue
-            msg_on_node_str = await queues_map[node_id][topic].get()
-            assert actual_msg.publish[0].SerializeToString() == msg_on_node_str.SerializeToString()
+            all_received_msgs_in_topic = []
+
+            # Add all messages to message received list for given node in given topic
+            while (queues_map[node_id][topic].qsize() > 0):
+                # Get message from subscription queue
+                msg_on_node = (await queues_map[node_id][topic].get()).SerializeToString() 
+                all_received_msgs_in_topic.append(msg_on_node)
+
+            # Ensure each message received was the same as one sent
+            for msg_on_node in all_received_msgs_in_topic:
+                assert msg_on_node in all_actual_msgs[topic]
+
+            # Ensure same number of messages received as sent
+            assert len(all_received_msgs_in_topic) == len(all_actual_msgs[topic])
 
     # Success, terminate pending tasks.
     await cleanup()
-
-# @pytest.mark.asyncio
-# async def test_simple_two_nodes_test_obj():
-#     test_obj = {
-#         "supported_protocols": ["/floodsub/1.0.0"],
-#         "adj_list": {
-#             "A": ["B"],
-#             "B": ["A"]
-#         },
-#         "topic_map": {
-#             "topic1": ["B"]
-#         },
-#         "messages": [
-#             {
-#                 "topics": ["topic1"],
-#                 "data": "foo",
-#                 "node_id": "A"
-#             }
-#         ]
-#     }
-#     await perform_test_from_obj(test_obj)
 
 def generate_random_topology(num_nodes, density, num_topics, max_nodes_per_topic, max_msgs_per_topic):
     # Give nodes string labels so that perform_test_with_obj works correctly
@@ -267,22 +260,23 @@ def generate_random_topology(num_nodes, density, num_topics, max_nodes_per_topic
         nodes_in_topic = nodes_in_topic_list[i]
         rand_num = random.randint(0, len(nodes_in_topic) - 1)
         start_node = nodes_in_topic[rand_num]
-        test_obj["messages"].append({
-                "topics": [str(i)],
-                "data": str(random.randint(0, 1000)),
-                "node_id": str(start_node)
-            })
+        for j in range(max_msgs_per_topic):
+            test_obj["messages"].append({
+                    "topics": [str(i)],
+                    "data": str(random.randint(0, 100000)),
+                    "node_id": str(start_node)
+                })
 
     # 5) Return completed test_obj
     return test_obj
 
 @pytest.mark.asyncio
 async def test_simple_random():
-    num_nodes = 100
-    density = 0.1
-    num_topics = 20
-    max_nodes_per_topic = 69
-    max_msgs_per_topic = 1
+    num_nodes = 5
+    density = 1
+    num_topics = 2
+    max_nodes_per_topic = 5
+    max_msgs_per_topic = 5
     topology_test_obj = generate_random_topology(num_nodes, density, num_topics,\
         max_nodes_per_topic, max_msgs_per_topic)
     print(topology_test_obj)

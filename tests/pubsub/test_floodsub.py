@@ -220,8 +220,6 @@ async def perform_test_from_obj(obj):
                 all_received_msgs_in_topic.append(msg_on_node)
 
             # Ensure each message received was the same as one sent
-            print(all_received_msgs_in_topic)
-            print(all_actual_msgs)
             for msg_on_node in all_received_msgs_in_topic:
                 assert msg_on_node in all_actual_msgs[topic]
 
