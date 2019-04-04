@@ -102,7 +102,6 @@ class DummyAccountNode():
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send 
         """
-        print("handle send " + self.node_id)
         if source_user in self.balances:
             self.balances[source_user] -= amount
         else:
@@ -119,7 +118,6 @@ class DummyAccountNode():
         :param dest_user: user to set crypto for
         :param amount: amount of crypto
         """
-        print("handle set " + self.node_id)
         self.balances[dest_user] = amount
 
     def get_balance(self, user):
