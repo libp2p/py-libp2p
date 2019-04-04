@@ -1,5 +1,4 @@
 import asyncio
-import uuid
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
@@ -203,10 +202,6 @@ class Pubsub():
 
         # Create subscribe message
         packet = rpc_pb2.RPC()
-        # packet.publish.extend([rpc_pb2.Message(
-        #     from_id=str(self.host.get_id()).encode('utf-8'),
-        #     seqno=str(generate_message_id()).encode('utf-8')
-        #     )])
         packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
             subscribe=True,
             topicid=topic_id.encode('utf-8')
@@ -256,10 +251,3 @@ class Pubsub():
 
             # Write message to stream
             await stream.write(rpc_msg)
-
-def generate_message_id():
-    """
-    Generate a unique message id
-    :return: messgae id
-    """
-    return str(uuid.uuid1())
