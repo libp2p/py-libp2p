@@ -18,7 +18,7 @@ def message_id_generator(start_val):
         val += 1
 
         # Convert val to big endian
-        return struct.pack('>I', val)
+        return struct.pack('>Q', val)
 
     return generator
 
