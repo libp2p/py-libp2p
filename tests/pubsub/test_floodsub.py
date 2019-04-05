@@ -8,7 +8,7 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
-from utils import generate_message_id, generate_RPC_packet
+from utils import message_id_generator, generate_RPC_packet
 
 # pylint: disable=too-many-locals
 
@@ -44,7 +44,8 @@ async def test_simple_two_nodes_RPC():
 
     node_a_id = str(node_a.get_id())
 
-    msg = generate_RPC_packet(node_a_id, ["my_topic"], "some data", generate_message_id())
+    next_msg_id_func = message_id_generator(0)
+    msg = generate_RPC_packet(node_a_id, ["my_topic"], "some data", next_msg_id_func())
     await floodsub_a.publish(node_a_id, msg.SerializeToString())
     await asyncio.sleep(0.25)
 
@@ -173,6 +174,8 @@ async def perform_test_from_obj(obj):
     topics_in_msgs_ordered = []
     messages = obj["messages"]
     tasks_publish = []
+    next_msg_id_func = message_id_generator(0)
+
     for msg in messages:
         topics = msg["topics"]
 
@@ -183,7 +186,7 @@ async def perform_test_from_obj(obj):
         actual_node_id = str(node_map[node_id].get_id())
 
         # Create correctly formatted message
-        msg_talk = generate_RPC_packet(actual_node_id, topics, data, generate_message_id())
+        msg_talk = generate_RPC_packet(actual_node_id, topics, data, next_msg_id_func())
 
         # Publish message
         # await floodsub_map[node_id].publish(actual_node_id, msg_talk.to_str())
@@ -205,6 +208,8 @@ async def perform_test_from_obj(obj):
     # TODO: Check message sender too
     for i in range(len(topics_in_msgs_ordered)):
         topic, actual_msg = topics_in_msgs_ordered[i]
+
+        # Look at each node in each topic
         for node_id in topic_map[topic]:
             # Get message from subscription queue
             msg_on_node_str = await queues_map[node_id][topic].get()
@@ -421,6 +426,115 @@ async def test_three_nodes_clique_two_topic_diff_origin_test_obj():
             {
                 "topics": ["astrophysics"],
                 "data": "I am allergic",
+                "node_id": "1"
+            }
+        ]
+    }
+    await perform_test_from_obj(test_obj)
+
+@pytest.mark.asyncio
+async def test_four_nodes_clique_two_topic_diff_origin_many_msgs_test_obj():
+    test_obj = {
+        "supported_protocols": ["/floodsub/1.0.0"],
+        "adj_list": {
+            "1": ["2", "3", "4"],
+            "2": ["1", "3", "4"],
+            "3": ["1", "2", "4"],
+            "4": ["1", "2", "3"]
+        },
+        "topic_map": {
+            "astrophysics": ["1", "2", "3", "4"],
+            "school": ["1", "2", "3", "4"]
+        },
+        "messages": [
+            {
+                "topics": ["astrophysics"],
+                "data": "e=mc^2",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar2",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic2",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar3",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic3",
+                "node_id": "1"
+            }
+        ]
+    }
+    await perform_test_from_obj(test_obj)
+
+@pytest.mark.asyncio
+async def test_five_nodes_ring_two_topic_diff_origin_many_msgs_test_obj():
+    test_obj = {
+        "supported_protocols": ["/floodsub/1.0.0"],
+        "adj_list": {
+            "1": ["2"],
+            "2": ["3"],
+            "3": ["4"],
+            "4": ["5"],
+            "5": ["1"]
+        },
+        "topic_map": {
+            "astrophysics": ["1", "2", "3", "4", "5"],
+            "school": ["1", "2", "3", "4", "5"]
+        },
+        "messages": [
+            {
+                "topics": ["astrophysics"],
+                "data": "e=mc^2",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar2",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic2",
+                "node_id": "1"
+            },
+            {
+                "topics": ["school"],
+                "data": "foobar3",
+                "node_id": "2"
+            },
+            {
+                "topics": ["astrophysics"],
+                "data": "I am allergic3",
                 "node_id": "1"
             }
         ]

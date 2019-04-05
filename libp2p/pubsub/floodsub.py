@@ -74,13 +74,12 @@ class FloodSub(IPubsubRouter):
                         # message sender and are not the message origin
                         if peer_id_in_topic not in (msg_sender, decoded_from_id):
                             stream = self.pubsub.peers[peer_id_in_topic]
-                            # create new packet with just publish message
+                            # Create new packet with just publish message
                             new_packet = rpc_pb2.RPC()
                             new_packet.publish.extend([message])
+
+                            # Publish the packet
                             await stream.write(new_packet.SerializeToString())
-                        else:
-                            # Implies publish did not write
-                            print("publish did not write")
 
     def join(self, topic):
         """
