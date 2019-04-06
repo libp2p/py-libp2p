@@ -23,7 +23,8 @@ setuptools.setup(
         "pymultihash",
         "multiaddr",
         "grpcio",
-        "grpcio-tools"
+        "grpcio-tools",
+        "lru-dict>=1.1.6"
     ],
     packages=["libp2p"],
     zip_safe=False,
