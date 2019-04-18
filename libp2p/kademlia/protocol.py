@@ -4,7 +4,7 @@ import logging
 
 from rpcudp.protocol import RPCProtocol
 
-from .node import Node
+from .kad_peerinfo import KadPeerInfo
 from .routing import RoutingTable
 from .utils import digest
 
@@ -47,12 +47,28 @@ class KademliaProtocol(RPCProtocol):
         return sender
 
     def rpc_ping(self, sender, nodeid):
-        source = Node(nodeid, sender[0], sender[1])
+        print ("RPC PING")
+        print (sender)
+
+        node_id = ID(nodeid)
+        peer_data = PeerData() #pylint: disable=no-value-for-parameter
+        addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
+        peer_data.add_addrs(addr)
+        source = KadPeerInfo(node_id, peer_data)
+
         self.welcome_if_new(source)
-        return self.source_node.id
+        return self.source_node.peer_id
 
     def rpc_store(self, sender, nodeid, key, value):
-        source = Node(nodeid, sender[0], sender[1])
+        print ("RPC STORE")
+        print (sender)
+
+        node_id = ID(nodeid)
+        peer_data = PeerData() #pylint: disable=no-value-for-parameter
+        addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
+        peer_data.add_addrs(addr)
+        source = KadPeerInfo(node_id, peer_data)
+
         self.welcome_if_new(source)
         log.debug("got a store request from %s, storing '%s'='%s'",
                   sender, key.hex(), value)
@@ -62,14 +78,29 @@ class KademliaProtocol(RPCProtocol):
     def rpc_find_node(self, sender, nodeid, key):
         log.info("finding neighbors of %i in local table",
                  int(nodeid.hex(), 16))
-        source = Node(nodeid, sender[0], sender[1])
+
+        node_id = ID(nodeid)
+        peer_data = PeerData() #pylint: disable=no-value-for-parameter
+        addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
+        peer_data.add_addrs(addr)
+        source = KadPeerInfo(node_id, peer_data)
+
+        # source = Node(nodeid, sender[0], sender[1])
         self.welcome_if_new(source)
-        node = Node(key)
+        node = KadPeerInfo(ID(key))
         neighbors = self.router.find_neighbors(node, exclude=source)
         return list(map(tuple, neighbors))
 
     def rpc_find_value(self, sender, nodeid, key):
-        source = Node(nodeid, sender[0], sender[1])
+        print ("RPC_FIND_VALUE")
+        print (sender)
+
+        node_id = ID(nodeid)
+        peer_data = PeerData() #pylint: disable=no-value-for-parameter
+        addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
+        peer_data.add_addrs(addr)
+        source = KadPeerInfo(node_id, peer_data)
+
         self.welcome_if_new(source)
         value = self.storage.get(key, None)
         if value is None:
@@ -78,24 +109,24 @@ class KademliaProtocol(RPCProtocol):
 
     async def call_find_node(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.find_node(address, self.source_node.id,
-                                      node_to_find.id)
+        result = await self.find_node(address, self.source_node.peer_id,
+                                      node_to_find.peer_id)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_find_value(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.find_value(address, self.source_node.id,
-                                       node_to_find.id)
+        result = await self.find_value(address, self.source_node.peer_id,
+                                       node_to_find.peer_id)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_ping(self, node_to_ask):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.ping(address, self.source_node.id)
+        result = await self.ping(address, self.source_node.peer_id)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_store(self, node_to_ask, key, value):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.store(address, self.source_node.id, key, value)
+        result = await self.store(address, self.source_node.peer_id, key, value)
         return self.handle_call_response(result, node_to_ask)
 
     def welcome_if_new(self, node):
@@ -117,7 +148,7 @@ class KademliaProtocol(RPCProtocol):
 
         log.info("never seen %s before, adding to router", node)
         for key, value in self.storage:
-            keynode = Node(digest(key))
+            keynode = KadPeerInfo(ID(digest(key)))
             neighbors = self.router.find_neighbors(keynode)
             if neighbors:
                 last = neighbors[-1].distance_to(keynode)
