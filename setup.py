@@ -22,6 +22,8 @@ setuptools.setup(
         "base58",
         "pymultihash",
         "multiaddr",
+        "rpcudp",
+        "umsgpack",
         "grpcio",
         "grpcio-tools",
         "lru-dict>=1.1.6"
