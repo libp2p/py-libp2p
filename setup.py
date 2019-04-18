@@ -22,6 +22,8 @@ setuptools.setup(
         "base58",
         "pymultihash",
         "multiaddr",
+        "rpcudp",
+        "umsgpack"
     ],
     packages=["libp2p"],
     zip_safe=False,

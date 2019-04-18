@@ -31,13 +31,13 @@ async def test_example():
 async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 
     node_bootstrap = Server()
-    await node_bootstrap.listen(1000 + nodes_nr * 2)
+    await node_bootstrap.listen(3000 + nodes_nr * 2)
 
     nodes = []
     for i in range(nodes_nr):
         node = Server()
-        addrs = [("127.0.0.1", 1000 + nodes_nr * 2)]
-        await node.listen(1001 + i + nodes_nr * 2)
+        addrs = [("127.0.0.1", 3000 + nodes_nr * 2)]
+        await node.listen(3001 + i + nodes_nr * 2)
         await node.bootstrap(addrs)
         nodes.append(node)
 
