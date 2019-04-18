@@ -58,7 +58,7 @@ async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 async def test_multiple_nodes_set_bootstrap_get(nodes_nr):
     node_bootstrap = Server()
     await node_bootstrap.listen(2000 + nodes_nr * 2)
-    
+
     nodes = []
     for i in range(nodes_nr):
         node = Server()
