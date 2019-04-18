@@ -1,6 +1,5 @@
 import pytest
 from libp2p.kademlia.network import Server
-import math
 
 
 @pytest.mark.asyncio
