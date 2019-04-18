@@ -5,6 +5,7 @@ from libp2p.peer.peerdata import PeerData
 
 
 class KadmeliaPeerRouter(IPeerRouting):
+    # pylint: disable=too-few-public-methods
 
     def __init__(self, dht_server):
         self.server = dht_server

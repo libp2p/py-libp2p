@@ -15,6 +15,7 @@ class SpiderCrawl:
     """
 
     def __init__(self, protocol, node, peers, ksize, alpha):
+        # pylint: disable=too-many-arguments
         """
         Create a new C{SpiderCrawl}er.
 
@@ -71,6 +72,7 @@ class SpiderCrawl:
 
 class ValueSpiderCrawl(SpiderCrawl):
     def __init__(self, protocol, node, peers, ksize, alpha):
+        # pylint: disable=too-many-arguments
         SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)
         # keep track of the single nearest node without value - per
         # section 2.3 so we can set the key there if found

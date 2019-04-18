@@ -33,7 +33,7 @@ class IStorage(ABC):
     def iter_older_than(self, seconds_old):
         """
         Return the an iterator over (key, value) tuples for items older
-        than the given secondsOld.
+        than the given seconds_old.
         """
 
     @abstractmethod

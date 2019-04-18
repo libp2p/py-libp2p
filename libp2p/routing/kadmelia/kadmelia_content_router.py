@@ -9,6 +9,8 @@ class KadmeliaContentRouter(IContentRouting):
         it also announces it, otherwise it is just kept in the local
         accounting of which objects are being provided.
         """
+        # the DHT finds the closest peers to `key` using the `FIND_NODE` RPC
+        # then sends a `ADD_PROVIDER` RPC with its own `PeerInfo` to each of these peers.
         pass
 
     def find_provider_iter(self, cid, count):

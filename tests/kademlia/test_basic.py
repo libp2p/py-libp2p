@@ -1,5 +1,6 @@
 import pytest
 from libp2p.kademlia.network import Server
+import math
 
 
 @pytest.mark.asyncio
@@ -28,16 +29,15 @@ async def test_example():
 @pytest.mark.parametrize("nodes_nr", [(2**i) for i in range(2, 5)])
 @pytest.mark.asyncio
 async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
-    nodes_nr = 25
 
     node_bootstrap = Server()
-    await node_bootstrap.listen(5678)
+    await node_bootstrap.listen(1000 + nodes_nr * 2)
 
     nodes = []
     for i in range(nodes_nr):
         node = Server()
-        addrs = [("127.0.0.1", 5678)]
-        await node.listen(5679 + i)
+        addrs = [("127.0.0.1", 1000 + nodes_nr * 2)]
+        await node.listen(1001 + i + nodes_nr * 2)
         await node.bootstrap(addrs)
         nodes.append(node)
 
@@ -57,16 +57,14 @@ async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 @pytest.mark.parametrize("nodes_nr", [(2**i) for i in range(2, 5)])
 @pytest.mark.asyncio
 async def test_multiple_nodes_set_bootstrap_get(nodes_nr):
-    nodes_nr = 25
-
     node_bootstrap = Server()
-    await node_bootstrap.listen(5678)
-
+    await node_bootstrap.listen(2000 + nodes_nr * 2)
+    
     nodes = []
     for i in range(nodes_nr):
         node = Server()
-        addrs = [("127.0.0.1", 5678)]
-        await node.listen(5679 + i)
+        addrs = [("127.0.0.1", 2000 + nodes_nr * 2)]
+        await node.listen(2001 + i + nodes_nr * 2)
         await node.bootstrap(addrs)
 
         value = "my awesome value %d" % i

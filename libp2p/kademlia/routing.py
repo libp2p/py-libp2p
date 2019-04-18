@@ -8,6 +8,13 @@ from .utils import OrderedSet, shared_prefix, bytes_to_bit_string
 
 
 class KBucket:
+    """
+    each node keeps a list of (ip, udp_port, node_id)
+    for nodes of distance between 2^i and 2^(i+1)
+    this list that every node keeps is a k-bucket
+    each k-bucket implements a last seen eviction
+    policy except that live nodes are never removed
+    """
     def __init__(self, rangeLower, rangeUpper, ksize):
         self.range = (rangeLower, rangeUpper)
         self.nodes = OrderedDict()
