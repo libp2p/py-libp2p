@@ -1,12 +1,11 @@
 import asyncio
 import multiaddr
+import uuid
 
+from utils import message_id_generator, generate_RPC_packet
 from libp2p import new_node
-from libp2p.pubsub.message import create_message_talk
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.message import MessageTalk
-from libp2p.pubsub.message import generate_message_id
 
 SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
 CRYPTO_TOPIC = "ethereum"
@@ -27,6 +26,8 @@ class DummyAccountNode():
 
     def __init__(self):
         self.balances = {}
+        self.next_msg_id_func = message_id_generator(0)
+        self.node_id = str(uuid.uuid1())
 
     @classmethod
     async def create(cls):
@@ -53,16 +54,13 @@ class DummyAccountNode():
         Handle all incoming messages on the CRYPTO_TOPIC from peers
         """
         while True:
-            message_raw = await self.q.get()
-            message = create_message_talk(message_raw)
-            contents = message.data
-
-            msg_comps = contents.split(",")
+            incoming = await self.q.get()
+            msg_comps = incoming.data.decode('utf-8').split(",")
 
             if msg_comps[0] == "send":
                 self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
             elif msg_comps[0] == "set":
-                self.handle_set_crypto_for_user(msg_comps[1], int(msg_comps[2]))
+                self.handle_set_crypto(msg_comps[1], int(msg_comps[2]))
 
     async def setup_crypto_networking(self):
         """
@@ -82,8 +80,8 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
-        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
-        await self.floodsub.publish(my_id, msg.to_str())
+        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
+        await self.floodsub.publish(my_id, packet.SerializeToString())
 
     async def publish_set_crypto(self, user, amount):
         """
@@ -93,8 +91,9 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
-        msg = MessageTalk(my_id, my_id, [CRYPTO_TOPIC], msg_contents, generate_message_id())
-        await self.floodsub.publish(my_id, msg.to_str())
+        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
+
+        await self.floodsub.publish(my_id, packet.SerializeToString())
 
     def handle_send_crypto(self, source_user, dest_user, amount):
         """
@@ -113,7 +112,7 @@ class DummyAccountNode():
         else:
             self.balances[dest_user] = amount
 
-    def handle_set_crypto_for_user(self, dest_user, amount):
+    def handle_set_crypto(self, dest_user, amount):
         """
         Handle incoming set_crypto message
         :param dest_user: user to set crypto for
