@@ -151,7 +151,11 @@ class RoutingTable:
         self.buckets[index].remove_node(node)
 
     def is_new_node(self, node):
+        print ("IN IS NEW NODE")
+        print (node)
+        print (self.buckets)
         index = self.get_bucket_for(node)
+        print (index)
         return self.buckets[index].is_new_node(node)
 
     def add_contact(self, node):
@@ -174,7 +178,15 @@ class RoutingTable:
         """
         Get the index of the bucket that the given node would fall into.
         """
+        print ("IN GET BUKCKET FOR")
+        print (node)
+        print (node.long_id)
+        print (self.buckets)
         for index, bucket in enumerate(self.buckets):
+            print ("IN ENUMERATE")
+            print (index)
+            print (bucket)
+            print (bucket.range)
             if node.long_id < bucket.range[1]:
                 return index
         # we should never be here, but make linter happy

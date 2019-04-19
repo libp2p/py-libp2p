@@ -2,8 +2,10 @@ import random
 import asyncio
 import logging
 
+from multiaddr import Multiaddr
 from rpcudp.protocol import RPCProtocol
-
+from libp2p.peer.id import ID
+from libp2p.peer.peerdata import PeerData
 from .kad_peerinfo import KadPeerInfo
 from .routing import RoutingTable
 from .utils import digest
@@ -143,6 +145,10 @@ class KademliaProtocol(RPCProtocol):
         is closer than the closest in that list, then store the key/value
         on the new node (per section 2.5 of the paper)
         """
+
+        print ("Welcome if new")
+        print (node)
+
         if not self.router.is_new_node(node):
             return
 

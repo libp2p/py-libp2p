@@ -1,12 +1,19 @@
 import heapq
+import multihash
 from operator import itemgetter
 from libp2p.peer.peerinfo import PeerInfo
 
 
 class KadPeerInfo(PeerInfo):
-    def __init__(self, peer_id, peer_data):
+    def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
-        self.long_id = int(peer_id.hex(), 16)
+        print ("Kad Peer Info")
+        print (peer_id)
+        print (peer_data)
+        sha1 = multihash.Func.sha1
+        mh_digest = multihash.digest(peer_id.pretty().encode('utf-8'), sha1)
+        self.peer_id = peer_id.pretty()
+        self.long_id = int.from_bytes(mh_digest.encode(), byteorder='big')
 
     def same_home_as(self, node):
         #TODO: handle more than one addr
