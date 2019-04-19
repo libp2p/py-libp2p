@@ -112,6 +112,9 @@ class Pubsub():
                 # relay message to peers with router
                 await self.router.publish(peer_id, incoming)
 
+            # Pass rpc to router so router could perform custom logic
+            await self.router.handle_rpc(rpc_incoming)
+
             # Force context switch
             await asyncio.sleep(0)
 
