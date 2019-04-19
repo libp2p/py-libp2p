@@ -1,3 +1,4 @@
+from aio_timers import Timer
 from lru import LRU
 from .pb import rpc_pb2
 from .pubsub_router_interface import IPubsubRouter
@@ -6,7 +7,7 @@ from .pubsub_router_interface import IPubsubRouter
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, mcache_size=128):
+    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120):
         self.protocols = protocols
         self.pubsub = None
 
@@ -16,6 +17,9 @@ class GossipSub(IPubsubRouter):
 
         # Create message cache
         self.mcache = LRU(mcache_size)
+
+        # Create heartbeat timer
+        self.heartbeat_timer = Timer(heartbeat_interval, self.heartbeat)
 
     # Interface functions
 
@@ -32,6 +36,10 @@ class GossipSub(IPubsubRouter):
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
+
+        # Start heartbeat now that we have a pubsub instance
+        # TODO: Start after delay
+        asyncio.ensure_future(self.heartbeat())
 
     def add_peer(self, peer_id, protocol_id):
         """
@@ -96,6 +104,12 @@ class GossipSub(IPubsubRouter):
         await self.mesh_heartbeat()
         await self.fanout_heartbeat()
         await self.gossip_heartbeat()
+
+        # Restart timer
+        self.heartbeat_timer = Timer(heartbeat_interval, self.heartbeat)
+
+        # TODO: Check if this is right way to use timer
+        asyncio.ensure_future(self.heartbeat_timer.wait())
 
     async def mesh_heartbeat(self):
         pass
