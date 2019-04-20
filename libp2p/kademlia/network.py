@@ -1,18 +1,14 @@
 """
 Package for interacting on the network at a high level.
 """
-import random
 import pickle
 import asyncio
 import logging
-from multiaddr import Multiaddr
 
-from libp2p.peer.id import ID
-from libp2p.peer.peerdata import PeerData
 from .protocol import KademliaProtocol
 from .utils import digest
 from .storage import ForgetfulStorage
-from .kad_peerinfo import KadPeerInfo
+from .kad_peerinfo import create_kad_peerinfo
 from .crawling import ValueSpiderCrawl
 from .crawling import NodeSpiderCrawl
 
@@ -42,8 +38,7 @@ class Server:
         self.ksize = ksize
         self.alpha = alpha
         self.storage = storage or ForgetfulStorage()
-        new_node_id = ID(node_id) if node_id else ID(digest(random.getrandbits(255)))
-        self.node = KadPeerInfo(new_node_id, None)
+        self.node = create_kad_peerinfo(node_id)
         self.transport = None
         self.protocol = None
         self.refresh_loop = None
@@ -90,7 +85,7 @@ class Server:
         """
         results = []
         for node_id in self.protocol.get_refresh_ids():
-            node = KadPeerInfo(node_id, None)
+            node = create_kad_peerinfo(node_id)
             nearest = self.protocol.router.find_neighbors(node, self.alpha)
             spider = NodeSpiderCrawl(self.protocol, node, nearest,
                                      self.ksize, self.alpha)
@@ -135,11 +130,7 @@ class Server:
 
     async def bootstrap_node(self, addr):
         result = await self.protocol.ping(addr, self.node.peer_id)
-        node_id = ID(result[1])
-        peer_data = PeerData() #pylint: disable=no-value-for-parameter
-        addr = [Multiaddr("/ip4/" + str(addr[0]) + "/udp/" + str(addr[1]))]
-        peer_data.add_addrs(addr)
-        return KadPeerInfo(node_id, peer_data) if result[0] else None
+        return create_kad_peerinfo(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):
         """
@@ -154,7 +145,7 @@ class Server:
         if self.storage.get(dkey) is not None:
             return self.storage.get(dkey)
 
-        node = KadPeerInfo(ID(dkey))
+        node = create_kad_peerinfo(dkey)
         nearest = self.protocol.router.find_neighbors(node)
         if not nearest:
             log.warning("There are no known neighbors to get key %s", key)
@@ -180,7 +171,7 @@ class Server:
         Set the given SHA1 digest key (bytes) to the given value in the
         network.
         """
-        node = KadPeerInfo(ID(dkey))
+        node = create_kad_peerinfo(dkey)
 
         nearest = self.protocol.router.find_neighbors(node)
         if not nearest:

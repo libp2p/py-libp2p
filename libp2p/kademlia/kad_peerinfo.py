@@ -1,7 +1,11 @@
 import heapq
+import random
 
 from operator import itemgetter
+from multiaddr import Multiaddr
 from libp2p.peer.peerinfo import PeerInfo
+from libp2p.peer.id import ID
+from libp2p.peer.peerdata import PeerData
 from .utils import digest
 
 P_IP = "ip4"
@@ -126,3 +130,14 @@ class KadPeerHeap:
 
     def get_uncontacted(self):
         return [n for n in self if n.peer_id not in self.contacted]
+
+def create_kad_peerinfo(raw_node_id=None, sender_ip=None, sender_port=None):
+    node_id = ID(raw_node_id) if raw_node_id else ID(digest(random.getrandbits(255)))
+    peer_data = None
+    if sender_ip and sender_port:
+        peer_data = PeerData() #pylint: disable=no-value-for-parameter
+        addr = [Multiaddr("/"+ P_IP +"/" + str(sender_ip) + "/"\
+                + P_UDP + "/" + str(sender_port))]
+        peer_data.add_addrs(addr)
+
+    return KadPeerInfo(node_id, peer_data)
