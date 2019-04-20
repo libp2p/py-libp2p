@@ -65,7 +65,6 @@ class KademliaProtocol(RPCProtocol):
                  int(nodeid.hex(), 16))
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
-        # source = Node(nodeid, sender[0], sender[1])
         self.welcome_if_new(source)
         node = create_kad_peerinfo(key)
         neighbors = self.router.find_neighbors(node, exclude=source)
