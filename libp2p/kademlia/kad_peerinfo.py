@@ -29,8 +29,7 @@ class KadPeerInfo(PeerInfo):
 
 
     def same_home_as(self, node):
-        #TODO: handle more than one addr
-        return self.addrs[0] == node.addrs[0]
+        return sorted(self.addrs) == sorted(node.addrs)
 
     def distance_to(self, node):
         """
