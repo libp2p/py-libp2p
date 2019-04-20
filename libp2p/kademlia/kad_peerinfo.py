@@ -1,19 +1,28 @@
 import heapq
-import multihash
+
 from operator import itemgetter
 from libp2p.peer.peerinfo import PeerInfo
+from .utils import digest
 
+P_IP = "ip4"
+P_UDP = "udp"
 
 class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
-        print ("Kad Peer Info")
-        print (peer_id)
-        print (peer_data)
-        sha1 = multihash.Func.sha1
-        mh_digest = multihash.digest(peer_id.pretty().encode('utf-8'), sha1)
-        self.peer_id = peer_id.pretty()
-        self.long_id = int.from_bytes(mh_digest.encode(), byteorder='big')
+
+        # pylint: disable=protected-access
+        self.peer_id = peer_id._id_str
+        self.long_id = int(digest(peer_id._id_str).hex(), 16)
+
+        self.addrs = peer_data.get_addrs() if peer_data else None
+
+        # pylint: disable=invalid-name
+        self.ip = self.addrs[0].value_for_protocol(P_IP)\
+                  if peer_data else None
+        self.port = int(self.addrs[0].value_for_protocol(P_UDP))\
+                    if peer_data else None
+
 
     def same_home_as(self, node):
         #TODO: handle more than one addr
@@ -29,13 +38,13 @@ class KadPeerInfo(PeerInfo):
         """
         Enables use of Node as a tuple - i.e., tuple(node) works.
         """
-        return iter([self.peer_id.pretty(), str(self.addrs[0])])
+        return iter([self.peer_id, self.ip, self.port])
 
     def __repr__(self):
-        return repr([self.long_id, str(self.addrs[0])])
+        return repr([self.long_id, self.ip, self.port])
 
     def __str__(self):
-        return str(self.addrs[0])
+        return "%s:%s" % (self.ip, str(self.port))
 
 class KadPeerHeap:
     """

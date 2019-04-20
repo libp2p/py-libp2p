@@ -1,8 +1,10 @@
 from collections import Counter
 import logging
 
-from .kad_peerinfo import KadPeerInfo, KadPeerHeap
+from multiaddr import Multiaddr
 from libp2p.peer.id import ID
+from libp2p.peer.peerdata import PeerData
+from .kad_peerinfo import KadPeerInfo, KadPeerHeap
 from .utils import gather_dict
 
 
@@ -184,4 +186,14 @@ class RPCFindResponse:
         be set.
         """
         nodelist = self.response[1] or []
-        return [KadPeerInfo(ID(*nodeple)) for nodeple in nodelist]
+        output = []
+        for nodeple in nodelist:
+            #TODO check if nodeple is of the right format
+            # node_id, ip, port
+            node_id = ID(nodeple[0])
+            peer_data = PeerData() #pylint: disable=no-value-for-parameter
+            addr = [Multiaddr("/ip4/" + str(nodeple[1]) + "/udp/" + str(nodeple[2]))]
+            peer_data.add_addrs(addr)
+            output.append(KadPeerInfo(node_id, peer_data))
+
+        return output

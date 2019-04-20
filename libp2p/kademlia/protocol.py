@@ -49,9 +49,6 @@ class KademliaProtocol(RPCProtocol):
         return sender
 
     def rpc_ping(self, sender, nodeid):
-        print ("RPC PING")
-        print (sender)
-
         node_id = ID(nodeid)
         peer_data = PeerData() #pylint: disable=no-value-for-parameter
         addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
@@ -62,9 +59,6 @@ class KademliaProtocol(RPCProtocol):
         return self.source_node.peer_id
 
     def rpc_store(self, sender, nodeid, key, value):
-        print ("RPC STORE")
-        print (sender)
-
         node_id = ID(nodeid)
         peer_data = PeerData() #pylint: disable=no-value-for-parameter
         addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
@@ -94,9 +88,6 @@ class KademliaProtocol(RPCProtocol):
         return list(map(tuple, neighbors))
 
     def rpc_find_value(self, sender, nodeid, key):
-        print ("RPC_FIND_VALUE")
-        print (sender)
-
         node_id = ID(nodeid)
         peer_data = PeerData() #pylint: disable=no-value-for-parameter
         addr = [Multiaddr("/ip4/" + str(sender[0]) + "/udp/" + str(sender[1]))]
@@ -145,10 +136,6 @@ class KademliaProtocol(RPCProtocol):
         is closer than the closest in that list, then store the key/value
         on the new node (per section 2.5 of the paper)
         """
-
-        print ("Welcome if new")
-        print (node)
-
         if not self.router.is_new_node(node):
             return
 
