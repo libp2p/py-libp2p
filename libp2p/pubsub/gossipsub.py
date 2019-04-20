@@ -2,18 +2,27 @@ from aio_timers import Timer
 from lru import LRU
 from .pb import rpc_pb2
 from .pubsub_router_interface import IPubsubRouter
+import random
 
 
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120):
+    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120, degree, degree_low, degree_high):
         self.protocols = protocols
         self.pubsub = None
+
+        # Store target degree, upper degree bound, and lower degree bound
+        self.degree = degree
+        self.degree_high = degree_high
+        self.degree_low = degree_low
 
         # Create topic --> list of peers mappings
         self.mesh = {}
         self.fanout = {}
+
+        # Create peers map (peer --> protocol)
+        self.peers_to_protocol = {}
 
         # Create message cache
         self.mcache = LRU(mcache_size)
@@ -46,12 +55,14 @@ class GossipSub(IPubsubRouter):
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
+        self.peers_to_protocol[peer_id] = protocol_id
 
     def remove_peer(self, peer_id):
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
+        self.peers_to_protocol.remove(peer_id)
 
     def handle_rpc(self, rpc):
         """
@@ -112,7 +123,58 @@ class GossipSub(IPubsubRouter):
         asyncio.ensure_future(self.heartbeat_timer.wait())
 
     async def mesh_heartbeat(self):
+        for topic in mesh:
+            mesh_peers_in_topic = len(mesh[topic])
+            if mesh_peers_in_topic < degree_low:
+                gossipsub_peers = self.get_gossipsub_peers()
+
+                # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
+                # ; i.e. not including those peers that are already in the topic mesh.
+                selected_peers = self.select_from_minus(self.degree - mesh_peers_in_topic, \
+                    gossipsub_peers, mesh[topic])
+                for peer in selected_peers:
+                    # Add peer to mesh[topic]
+                    mesh[topic].append(peer)
+
+                    # Emit GRAFT(topic) control message to peer
+                    # TODO: emit message
+            if mesh_peers_in_topic > degree_high:
+                # Select |mesh[topic]| - D peers from mesh[topic]
+                selected_peers = self.select_from_minus(mesh_peers_in_topic - self.degree, mesh[topic], [])
+                for peer in selected_peers:
+                    # Remove peer from mesh[topic]
+                    mesh[topic].remove(peer)
+
+                    # Emit PRUNE(topic) control message to peer
+                    # TODO: emit message
+
+    def get_gossipsub_peers(self):
+        # TODO: implement
         pass
+
+    def select_from_minus(self, num_to_select, pool, minus):
+        """
+        Select subset of elements randomly 
+        :param num_to_select: number of elements to randomly select
+        :param pool: list of items to select from (excluding elements in minus)
+        :param minus: elements to be excluded from selection pool
+        :return: list of selected elements
+        """
+        # Create selection pool, which is selection_pool = pool - minus
+        selection_pool = None
+        if len(minus) > 0:
+            # Create a new selection pool by removing elements of minus
+            selection_pool = [x for x in pool if x not in minus]
+        else:
+            # Don't create a new selection_pool if we are not subbing anything
+            selection_pool = pool
+
+        # Random selection
+        selection = random.sample(selection_pool, num_to_select)
+
+        return selection
+
+
 
     async def fanout_heartbeat(self):
         pass
