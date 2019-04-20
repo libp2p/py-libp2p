@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 # pylint: disable=too-many-instance-attributes
-class Server:
+class KademliaServer:
     """
     High level view of a node instance.  This is the object that should be
     created to start listening as an active node on the network.

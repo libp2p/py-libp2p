@@ -15,6 +15,9 @@ class ID:
     def __init__(self, id_str):
         self._id_str = id_str
 
+    def get_raw_id(self):
+        return self._id_str
+
     def pretty(self):
         return base58.b58encode(self._id_str).decode()
 
