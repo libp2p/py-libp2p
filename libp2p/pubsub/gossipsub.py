@@ -21,8 +21,8 @@ class GossipSub(IPubsubRouter):
         self.mesh = {}
         self.fanout = {}
 
-        # Create peers map (peer --> protocol)
-        self.peers_to_protocol = {}
+        self.peers_gossipsub = []
+        self.peers_floodsub = []
 
         # Create message cache
         self.mcache = LRU(mcache_size)
@@ -55,7 +55,12 @@ class GossipSub(IPubsubRouter):
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
-        self.peers_to_protocol[peer_id] = protocol_id
+        # Add peer to the correct peer list
+        peer_type = self.get_peer_type(protocol_id)
+        if peer_type == "gossip":
+            self.peers_gossipsub.append(peer_id)
+        else if peer_type == "flood":
+            self.peers_floodsub.append(peer_id)
 
     def remove_peer(self, peer_id):
         """
@@ -107,6 +112,17 @@ class GossipSub(IPubsubRouter):
         :param topic: topic to leave
         """
 
+    # Interface Helper Functions
+
+    def get_peer_type(self, protocol_id):
+        # TODO: Do this in a better, more efficient way
+        if "gossipsub" in protocol_id:
+            return "gossip"
+        else if "floodsub" in protocol_id:
+            return "flood"
+        else:
+            return "unknown"
+
     # Heartbeat
     async def heartbeat(self):
         # Call individual heartbeats
@@ -126,18 +142,16 @@ class GossipSub(IPubsubRouter):
         for topic in mesh:
             mesh_peers_in_topic = len(mesh[topic])
             if mesh_peers_in_topic < degree_low:
-                gossipsub_peers = self.get_gossipsub_peers()
-
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
-                # ; i.e. not including those peers that are already in the topic mesh.
                 selected_peers = self.select_from_minus(self.degree - mesh_peers_in_topic, \
-                    gossipsub_peers, mesh[topic])
+                    self.peers_gossipsub, mesh[topic])
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
                     mesh[topic].append(peer)
 
                     # Emit GRAFT(topic) control message to peer
-                    # TODO: emit message
+                    await self.emit_graft(topic)
+
             if mesh_peers_in_topic > degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 selected_peers = self.select_from_minus(mesh_peers_in_topic - self.degree, mesh[topic], [])
@@ -146,11 +160,7 @@ class GossipSub(IPubsubRouter):
                     mesh[topic].remove(peer)
 
                     # Emit PRUNE(topic) control message to peer
-                    # TODO: emit message
-
-    def get_gossipsub_peers(self):
-        # TODO: implement
-        pass
+                    await self.emit_prune(topic)
 
     def select_from_minus(self, num_to_select, pool, minus):
         """
@@ -174,8 +184,6 @@ class GossipSub(IPubsubRouter):
 
         return selection
 
-
-
     async def fanout_heartbeat(self):
         pass
 
@@ -187,11 +195,99 @@ class GossipSub(IPubsubRouter):
     async def handle_ihave(self, ihave_msg):
         pass
 
-    async def handle_iwant(self, ihave_msg):
+    async def handle_iwant(self, iwant_msg):
         pass
 
-    async def handle_graft(self, ihave_msg):
+    async def handle_graft(self, graft_msg):
+        topic = graft_msg.topicID
+
+        # TODO: I think from_id needs to be gotten some other way because ControlMessage
+        # does not have from_id attribute
+        from_id_bytes = graft_msg.from_id
+
+        # TODO: convert bytes to string properly, is this proper?
+        from_id_str = from_id_bytes.decode()
+
+        # Add peer to mesh for topic
+        if topic in mesh:
+            mesh[topic].append(from_id_str)
+        else:
+            mesh[topic] = [from_id_str]
+
+    async def handle_prune(self, prune_msg):
+        topic = prune_msg.topicID
+
+        # TODO: I think from_id needs to be gotten some other way because ControlMessage
+        # does not have from_id attribute
+        from_id_bytes = prune_msg.from_id
+
+        # TODO: convert bytes to string properly, is this proper?
+        from_id_str = from_id_bytes.decode()
+
+        # Remove peer from mesh for topic, if peer is in topic
+        if topic in mesh and from_id_str in mesh[topic]:
+            mesh[topic].remove(from_id_str)
+
+    # RPC emitters
+
+    async def emit_ihave(self, topic, msg_ids, to_peer):
+        """
+        Emit ihave message, sent to to_peer, for topic and msg_ids
+        """
         pass
 
-    async def handle_prune(self, ihave_msg):
+    async def emit_iwant(self, msg_ids, to_peer):
+        """
+        Emit iwant message, sent to to_peer, for msg_ids
+        """
         pass
+
+    async def emit_graft(self, topic, to_peer):
+        """
+        Emit graft message, sent to to_peer, for topic
+        """
+        packet = rpc_pb2.RPC()
+        graft_msg = rpc_pb2.ControlGraft(
+            topicID=topic,
+            )
+        control_msg = rpc_pb2.ControlMessage(
+            ihave=[],
+            iwant=[],
+            graft=[graft_msg],
+            prune=[]
+            )
+
+        # Add control message to packet
+        packet.control.extend([control_msg])
+        rpc_msg = packet.SerializeToString()
+
+        # Get stream for peer from pubsub
+        peer_stream = self.pubsub.peers[to_peer]
+
+        # Write rpc to stream
+        await peer_stream.write(rpc_msg)
+
+    async def emit_prune(self, topic, to_peer):
+        """
+        Emit graft message, sent to to_peer, for topic
+        """
+        packet = rpc_pb2.RPC()
+        prune_msg = rpc_pb2.ControlPrune(
+            topicID=topic,
+            )
+        control_msg = rpc_pb2.ControlMessage(
+            ihave=[],
+            iwant=[],
+            graft=[],
+            prune=[prune_msg]
+            )
+
+        # Add control message to packet
+        packet.control.extend([control_msg])
+        rpc_msg = packet.SerializeToString()
+
+        # Get stream for peer from pubsub
+        peer_stream = self.pubsub.peers[to_peer]
+
+        # Write rpc to stream
+        await peer_stream.write(rpc_msg)
