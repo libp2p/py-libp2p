@@ -1,7 +1,7 @@
 from collections import Counter
 import logging
 
-from .node import Node, NodeHeap
+from .kad_peerinfo import KadPeerHeap, create_kad_peerinfo
 from .utils import gather_dict
 
 
@@ -32,7 +32,7 @@ class SpiderCrawl:
         self.ksize = ksize
         self.alpha = alpha
         self.node = node
-        self.nearest = NodeHeap(self.node, self.ksize)
+        self.nearest = KadPeerHeap(self.node, self.ksize)
         self.last_ids_crawled = []
         log.info("creating spider with peers: %s", peers)
         self.nearest.push(peers)
@@ -61,7 +61,7 @@ class SpiderCrawl:
 
         dicts = {}
         for peer in self.nearest.get_uncontacted()[:count]:
-            dicts[peer.id] = rpcmethod(peer, self.node)
+            dicts[peer.peer_id] = rpcmethod(peer, self.node)
             self.nearest.mark_contacted(peer)
         found = await gather_dict(dicts)
         return await self._nodes_found(found)
@@ -76,7 +76,7 @@ class ValueSpiderCrawl(SpiderCrawl):
         SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)
         # keep track of the single nearest node without value - per
         # section 2.3 so we can set the key there if found
-        self.nearest_without_value = NodeHeap(self.node, 1)
+        self.nearest_without_value = KadPeerHeap(self.node, 1)
 
     async def find(self):
         """
@@ -124,7 +124,7 @@ class ValueSpiderCrawl(SpiderCrawl):
 
         peer = self.nearest_without_value.popleft()
         if peer:
-            await self.protocol.call_store(peer, self.node.id, value)
+            await self.protocol.call_store(peer, self.node.peer_id, value)
         return value
 
 
@@ -183,4 +183,4 @@ class RPCFindResponse:
         be set.
         """
         nodelist = self.response[1] or []
-        return [Node(*nodeple) for nodeple in nodelist]
+        return [create_kad_peerinfo(*nodeple) for nodeple in nodelist]

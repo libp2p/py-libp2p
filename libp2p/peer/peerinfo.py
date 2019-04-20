@@ -7,9 +7,9 @@ from .peerdata import PeerData
 
 class PeerInfo:
     # pylint: disable=too-few-public-methods
-    def __init__(self, peer_id, peer_data):
+    def __init__(self, peer_id, peer_data=None):
         self.peer_id = peer_id
-        self.addrs = peer_data.get_addrs()
+        self.addrs = peer_data.get_addrs() if peer_data else None
 
 
 def info_from_p2p_addr(addr):
