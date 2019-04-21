@@ -46,7 +46,7 @@ class Pubsub():
             self.cache_size = cache_size
         self.seen_messages = LRU(self.cache_size)
 
-        # Map of topics we are subscribed to to handler functions
+        # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
         self.my_topics = {}
 
