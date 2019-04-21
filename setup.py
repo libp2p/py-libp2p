@@ -23,7 +23,6 @@ setuptools.setup(
         "pymultihash",
         "multiaddr",
         "rpcudp",
-        "umsgpack",
         "grpcio",
         "grpcio-tools",
         "lru-dict>=1.1.6"
