@@ -1,14 +1,16 @@
+import random
+import asyncio
+
 from aio_timers import Timer
 from lru import LRU
 from .pb import rpc_pb2
 from .pubsub_router_interface import IPubsubRouter
-import random
 
 
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120, degree, degree_low, degree_high, time_to_live):
+    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, mcache_size=128, heartbeat_interval=120):
         self.protocols = protocols
         self.pubsub = None
 
@@ -34,6 +36,7 @@ class GossipSub(IPubsubRouter):
         self.mcache = LRU(mcache_size)
 
         # Create heartbeat timer
+        self.heartbeat_interval = heartbeat_interval
         self.heartbeat_timer = Timer(heartbeat_interval, self.heartbeat)
 
     # Interface functions
@@ -65,7 +68,7 @@ class GossipSub(IPubsubRouter):
         peer_type = self.get_peer_type(protocol_id)
         if peer_type == "gossip":
             self.peers_gossipsub.append(peer_id)
-        else if peer_type == "flood":
+        elif peer_type == "flood":
             self.peers_floodsub.append(peer_id)
 
     def remove_peer(self, peer_id):
@@ -75,7 +78,7 @@ class GossipSub(IPubsubRouter):
         """
         self.peers_to_protocol.remove(peer_id)
 
-    def handle_rpc(self, rpc):
+    async def handle_rpc(self, rpc):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -124,7 +127,7 @@ class GossipSub(IPubsubRouter):
         # TODO: Do this in a better, more efficient way
         if "gossipsub" in protocol_id:
             return "gossip"
-        else if "floodsub" in protocol_id:
+        elif "floodsub" in protocol_id:
             return "flood"
         else:
             return "unknown"
@@ -141,32 +144,33 @@ class GossipSub(IPubsubRouter):
         await self.gossip_heartbeat()
 
         # Restart timer
-        self.heartbeat_timer = Timer(heartbeat_interval, self.heartbeat)
+        self.heartbeat_timer = Timer(self.heartbeat_interval, self.heartbeat)
 
         # TODO: Check if this is right way to use timer
         asyncio.ensure_future(self.heartbeat_timer.wait())
 
     async def mesh_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
-        for topic in mesh:
-            num_mesh_peers_in_topic = len(mesh[topic])
-            if num_mesh_peers_in_topic < degree_low:
+        for topic in self.mesh:
+            num_mesh_peers_in_topic = len(self.mesh[topic])
+            if num_mesh_peers_in_topic < self.degree_low:
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
                 selected_peers = self.select_from_minus(self.degree - num_mesh_peers_in_topic, \
-                    self.peers_gossipsub, mesh[topic])
+                    self.peers_gossipsub, self.mesh[topic])
+
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
-                    mesh[topic].append(peer)
+                    self.mesh[topic].append(peer)
 
                     # Emit GRAFT(topic) control message to peer
                     await self.emit_graft(topic)
 
-            if num_mesh_peers_in_topic > degree_high:
+            if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = self.select_from_minus(num_mesh_peers_in_topic - self.degree, mesh[topic], [])
+                selected_peers = self.select_from_minus(num_mesh_peers_in_topic - self.degree, self.mesh[topic], [])
                 for peer in selected_peers:
                     # Remove peer from mesh[topic]
-                    mesh[topic].remove(peer)
+                    self.mesh[topic].remove(peer)
 
                     # Emit PRUNE(topic) control message to peer
                     await self.emit_prune(topic)
@@ -246,10 +250,10 @@ class GossipSub(IPubsubRouter):
         from_id_str = from_id_bytes.decode()
 
         # Add peer to mesh for topic
-        if topic in mesh:
-            mesh[topic].append(from_id_str)
+        if topic in self.mesh:
+            self.mesh[topic].append(from_id_str)
         else:
-            mesh[topic] = [from_id_str]
+            self.mesh[topic] = [from_id_str]
 
     async def handle_prune(self, prune_msg):
         topic = prune_msg.topicID
@@ -264,8 +268,8 @@ class GossipSub(IPubsubRouter):
         from_id_str = from_id_bytes.decode()
 
         # Remove peer from mesh for topic, if peer is in topic
-        if topic in mesh and from_id_str in mesh[topic]:
-            mesh[topic].remove(from_id_str)
+        if topic in self.mesh and from_id_str in self.mesh[topic]:
+            self.mesh[topic].remove(from_id_str)
 
     # RPC emitters
 

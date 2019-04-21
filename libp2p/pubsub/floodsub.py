@@ -35,7 +35,7 @@ class FloodSub(IPubsubRouter):
         :param peer_id: id of peer to remove
         """
 
-    def handle_rpc(self, rpc):
+    async def handle_rpc(self, rpc):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
