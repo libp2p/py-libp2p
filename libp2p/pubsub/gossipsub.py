@@ -131,9 +131,11 @@ class GossipSub(IPubsubRouter):
 
     # Heartbeat
     async def heartbeat(self):
-        # Call individual heartbeats
-        # Note: the heartbeats are called with awaits because each heartbeat depends on the 
-        # state changes in the preceding heartbeat
+        """
+        Call individual heartbeats.
+        Note: the heartbeats are called with awaits because each heartbeat depends on the 
+        state changes in the preceding heartbeat
+        """
         await self.mesh_heartbeat()
         await self.fanout_heartbeat()
         await self.gossip_heartbeat()
@@ -203,7 +205,7 @@ class GossipSub(IPubsubRouter):
 
     def select_from_minus(self, num_to_select, pool, minus):
         """
-        Select subset of elements randomly 
+        Select subset of elements from the set (pool - minus) randomly 
         :param num_to_select: number of elements to randomly select
         :param pool: list of items to select from (excluding elements in minus)
         :param minus: elements to be excluded from selection pool
@@ -271,19 +273,39 @@ class GossipSub(IPubsubRouter):
         """
         Emit ihave message, sent to to_peer, for topic and msg_ids
         """
-        pass
+        ihave_msg = rpc_pb2.ControlIHave(
+            topicID=topic,
+            messageIDs=msg_ids
+            )
+        control_msg = rpc_pb2.ControlMessage(
+            ihave=[ihave_msg],
+            iwant=[],
+            graft=[],
+            prune=[]
+            )
+
+        await emit_control_message(control_msg, to_peer)
 
     async def emit_iwant(self, msg_ids, to_peer):
         """
         Emit iwant message, sent to to_peer, for msg_ids
         """
-        pass
+        iwant_msg = rpc_pb2.ControlIWant(
+            messageIDs=msg_ids
+            )
+        control_msg = rpc_pb2.ControlMessage(
+            ihave=[],
+            iwant=[iwant_msg],
+            graft=[],
+            prune=[]
+            )
+
+        await emit_control_message(control_msg, to_peer)
 
     async def emit_graft(self, topic, to_peer):
         """
         Emit graft message, sent to to_peer, for topic
         """
-        packet = rpc_pb2.RPC()
         graft_msg = rpc_pb2.ControlGraft(
             topicID=topic,
             )
@@ -294,21 +316,12 @@ class GossipSub(IPubsubRouter):
             prune=[]
             )
 
-        # Add control message to packet
-        packet.control.extend([control_msg])
-        rpc_msg = packet.SerializeToString()
-
-        # Get stream for peer from pubsub
-        peer_stream = self.pubsub.peers[to_peer]
-
-        # Write rpc to stream
-        await peer_stream.write(rpc_msg)
+        await emit_control_message(control_msg, to_peer)
 
     async def emit_prune(self, topic, to_peer):
         """
         Emit graft message, sent to to_peer, for topic
         """
-        packet = rpc_pb2.RPC()
         prune_msg = rpc_pb2.ControlPrune(
             topicID=topic,
             )
@@ -318,6 +331,11 @@ class GossipSub(IPubsubRouter):
             graft=[],
             prune=[prune_msg]
             )
+
+        await emit_control_message(control_msg, to_peer)
+
+    async def emit_control_message(self, control_msg, to_peer):
+        packet = rpc_pb2.RPC()
 
         # Add control message to packet
         packet.control.extend([control_msg])
