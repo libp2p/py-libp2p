@@ -10,7 +10,8 @@ from .pubsub_router_interface import IPubsubRouter
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, mcache_size=128, heartbeat_interval=120):
+    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, mcache_size=128,
+                 heartbeat_interval=120):
         self.protocols = protocols
         self.pubsub = None
 
@@ -136,7 +137,7 @@ class GossipSub(IPubsubRouter):
     async def heartbeat(self):
         """
         Call individual heartbeats.
-        Note: the heartbeats are called with awaits because each heartbeat depends on the 
+        Note: the heartbeats are called with awaits because each heartbeat depends on the
         state changes in the preceding heartbeat
         """
         await self.mesh_heartbeat()
