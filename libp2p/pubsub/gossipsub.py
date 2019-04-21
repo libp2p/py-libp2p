@@ -106,6 +106,28 @@ class GossipSub(IPubsubRouter):
         """
         Invoked to forward a new message that has been validated.
         """
+        packet = rpc_pb2.RPC()
+        packet.ParseFromString(rpc_message)
+        msg_sender = str(sender_peer_id)
+        # Deliver to self if self was origin
+        # Note: handle_talk checks if self is subscribed to topics in message
+        for message in packet.publish:
+            decoded_from_id = message.from_id.decode('utf-8')
+            # Deliver to self if needed
+            if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+                await self.pubsub.handle_talk(message)
+
+            # Deliver to peers
+            for topic in message.topicIDs:
+                # If topic has floodsub peers, deliver to floodsub peers
+                if topic in self.peers.floodsub:
+                    await self.deliver_messages_to_peers(self.peers_floodsub[topic], msg_sender, decoded_from_id)
+
+                # If you are subscribed to topic, send to mesh, otherwise send to fanout
+                if topic in self.my_topics:
+                    await self.deliver_messages_to_peers(self.mesh[topic], msg_sender, decoded_from_id)
+                else:
+                    await self.deliver_messages_to_peers(self.fanout[topic], msg_sender, decoded_from_id)
 
     def join(self, topic):
         """
@@ -132,6 +154,19 @@ class GossipSub(IPubsubRouter):
             return "flood"
         else:
             return "unknown"
+
+    async def deliver_messages_to_peers(self, peers, msg_sender, origin_id):
+        for peer_id_in_topic in peers:
+            # Forward to all known peers in the topic that are not the
+            # message sender and are not the message origin
+            if peer_id_in_topic not in (msg_sender, origin_id):
+                stream = self.pubsub.peers[peer_id_in_topic]
+                # Create new packet with just publish message
+                new_packet = rpc_pb2.RPC()
+                new_packet.publish.extend([message])
+
+                # Publish the packet
+                await stream.write(new_packet.SerializeToString())
 
     # Heartbeat
     async def heartbeat(self):
