@@ -8,7 +8,7 @@ import random
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120, degree, degree_low, degree_high):
+    def __init__(self, protocols, mcache_size=128, heartbeat_interval=120, degree, degree_low, degree_high, time_to_live):
         self.protocols = protocols
         self.pubsub = None
 
@@ -17,9 +17,15 @@ class GossipSub(IPubsubRouter):
         self.degree_high = degree_high
         self.degree_low = degree_low
 
+        # Store time to live (for topics in fanout)
+        self.time_to_live = time_to_live
+
         # Create topic --> list of peers mappings
         self.mesh = {}
         self.fanout = {}
+
+        # Create topic --> time since last publish map
+        self.time_since_last_publish = {}
 
         self.peers_gossipsub = []
         self.peers_floodsub = []
@@ -139,11 +145,12 @@ class GossipSub(IPubsubRouter):
         asyncio.ensure_future(self.heartbeat_timer.wait())
 
     async def mesh_heartbeat(self):
+        # Note: the comments here are the exact pseudocode from the spec
         for topic in mesh:
-            mesh_peers_in_topic = len(mesh[topic])
-            if mesh_peers_in_topic < degree_low:
+            num_mesh_peers_in_topic = len(mesh[topic])
+            if num_mesh_peers_in_topic < degree_low:
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
-                selected_peers = self.select_from_minus(self.degree - mesh_peers_in_topic, \
+                selected_peers = self.select_from_minus(self.degree - num_mesh_peers_in_topic, \
                     self.peers_gossipsub, mesh[topic])
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
@@ -152,15 +159,47 @@ class GossipSub(IPubsubRouter):
                     # Emit GRAFT(topic) control message to peer
                     await self.emit_graft(topic)
 
-            if mesh_peers_in_topic > degree_high:
+            if num_mesh_peers_in_topic > degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = self.select_from_minus(mesh_peers_in_topic - self.degree, mesh[topic], [])
+                selected_peers = self.select_from_minus(num_mesh_peers_in_topic - self.degree, mesh[topic], [])
                 for peer in selected_peers:
                     # Remove peer from mesh[topic]
                     mesh[topic].remove(peer)
 
                     # Emit PRUNE(topic) control message to peer
                     await self.emit_prune(topic)
+
+    async def fanout_heartbeat(self):
+        # Note: the comments here are the exact pseudocode from the spec
+        for topic in self.fanout:
+            # If time since last published > ttl
+            if self.time_since_last_publish[topic] > self.time_to_live:
+                # Remove topic from fanout
+                self.fanout.remove(topic)
+                self.time_since_last_publish.remove(topic)
+            else:
+                num_fanout_peers_in_topic = len(self.fanout[topic])
+                # If |fanout[topic]| < D
+                if num_fanout_peers_in_topic < self.degree:
+                    # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]
+                    selected_peers = self.select_from_minus(self.degree - num_fanout_peers_in_topic, self.peers_gossipsub[topic], self.fanout[topic])
+
+                    # Add the peers to fanout[topic]
+                    self.fanout[topic].extend(selected_peers)
+
+
+    async def gossip_heartbeat(self):
+        """
+        for each topic in mesh+fanout:
+          let mids be mcache.window[topic]
+          if mids is not empty:
+            select D peers from peers.gossipsub[topic]
+            for each peer not in mesh[topic] or fanout[topic]
+              emit IHAVE(mids)
+
+        shift the mcache
+        """
+        pass
 
     def select_from_minus(self, num_to_select, pool, minus):
         """
@@ -184,12 +223,6 @@ class GossipSub(IPubsubRouter):
 
         return selection
 
-    async def fanout_heartbeat(self):
-        pass
-
-    async def gossip_heartbeat(self):
-        pass
-
     # RPC handlers
 
     async def handle_ihave(self, ihave_msg):
@@ -203,6 +236,8 @@ class GossipSub(IPubsubRouter):
 
         # TODO: I think from_id needs to be gotten some other way because ControlMessage
         # does not have from_id attribute
+        # IMPT: go does use this in a similar way: https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
+        # but go seems to do RPC.from rather than getting the from in the message itself
         from_id_bytes = graft_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
@@ -219,6 +254,8 @@ class GossipSub(IPubsubRouter):
 
         # TODO: I think from_id needs to be gotten some other way because ControlMessage
         # does not have from_id attribute
+        # IMPT: go does use this in a similar way: https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
+        # but go seems to do RPC.from rather than getting the from in the message itself
         from_id_bytes = prune_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
