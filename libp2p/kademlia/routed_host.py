@@ -19,17 +19,3 @@ class RoutedHost(BasicHost):
 
     def kad_set_digest(self, dkey, value):
         return self.kad_network.set_digest(dkey, value)
-
-def check_dht_value_type(value):
-    """
-    Checks to see if the type of the value is a valid type for
-    placing in the dht.
-    """
-    typeset = [
-        int,
-        float,
-        bool,
-        str,
-        bytes
-    ]
-    return type(value) in typeset  # pylint: disable=unidiomatic-typecheck
