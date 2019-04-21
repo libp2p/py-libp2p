@@ -67,17 +67,19 @@ class GossipSub(IPubsubRouter):
         """
         # Add peer to the correct peer list
         peer_type = self.get_peer_type(protocol_id)
+        peer_id_str = str(peer_id)
         if peer_type == "gossip":
-            self.peers_gossipsub.append(peer_id)
+            self.peers_gossipsub.append(peer_id_str)
         elif peer_type == "flood":
-            self.peers_floodsub.append(peer_id)
+            self.peers_floodsub.append(peer_id_str)
 
     def remove_peer(self, peer_id):
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
-        self.peers_to_protocol.remove(peer_id)
+        peer_id_str = str(peer_id)
+        self.peers_to_protocol.remove(peer_id_str)
 
     async def handle_rpc(self, rpc):
         """
@@ -85,7 +87,6 @@ class GossipSub(IPubsubRouter):
         It is invoked after subscriptions and payload messages have been processed
         :param rpc: rpc message
         """
-
         control_message = rpc.control
 
         # Relay each rpc control  to the appropriate handler
@@ -113,6 +114,10 @@ class GossipSub(IPubsubRouter):
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
             decoded_from_id = message.from_id.decode('utf-8')
+            new_packet = rpc_pb2.RPC()
+            new_packet.publish.extend([message])
+            new_packet_serialized = new_packet.SerializeToString()
+
             # Deliver to self if needed
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
                 await self.pubsub.handle_talk(message)
@@ -120,14 +125,22 @@ class GossipSub(IPubsubRouter):
             # Deliver to peers
             for topic in message.topicIDs:
                 # If topic has floodsub peers, deliver to floodsub peers
-                if topic in self.peers.floodsub:
-                    await self.deliver_messages_to_peers(self.peers_floodsub[topic], msg_sender, decoded_from_id)
+                # TODO: This can be done more efficiently. Do it more efficiently.
+                floodsub_peers_in_topic = []
+                if topic in self.pubsub.peer_topics:
+                    for peer in self.pubsub.peer_topics[topic]:
+                        if str(peer) in self.peers_floodsub:
+                            floodsub_peers_in_topic.append(peer)
+                await self.deliver_messages_to_peers(floodsub_peers_in_topic, msg_sender, decoded_from_id, new_packet_serialized)
 
                 # If you are subscribed to topic, send to mesh, otherwise send to fanout
-                if topic in self.my_topics:
-                    await self.deliver_messages_to_peers(self.mesh[topic], msg_sender, decoded_from_id)
-                else:
-                    await self.deliver_messages_to_peers(self.fanout[topic], msg_sender, decoded_from_id)
+                if topic in self.pubsub.my_topics and topic in self.mesh:
+                    await self.deliver_messages_to_peers(self.mesh[topic], msg_sender, decoded_from_id, new_packet_serialized)
+                elif topic in self.fanout:
+                    # TODO: Is topic DEFINITELY supposed to be in fanout if we are not subscribed?
+                    # I assume there could be short periods between heartbeats where topic may not be
+                    # but we should check that this path gets hit appropriately
+                    await self.deliver_messages_to_peers(self.fanout[topic], msg_sender, decoded_from_id, new_packet_serialized)
 
     def join(self, topic):
         """
@@ -155,18 +168,15 @@ class GossipSub(IPubsubRouter):
         else:
             return "unknown"
 
-    async def deliver_messages_to_peers(self, peers, msg_sender, origin_id):
+    async def deliver_messages_to_peers(self, peers, msg_sender, origin_id, serialized_packet):
         for peer_id_in_topic in peers:
-            # Forward to all known peers in the topic that are not the
+            # Forward to all peers that are not the
             # message sender and are not the message origin
             if peer_id_in_topic not in (msg_sender, origin_id):
                 stream = self.pubsub.peers[peer_id_in_topic]
-                # Create new packet with just publish message
-                new_packet = rpc_pb2.RPC()
-                new_packet.publish.extend([message])
 
                 # Publish the packet
-                await stream.write(new_packet.SerializeToString())
+                await stream.write(serialized_packet)
 
     # Heartbeat
     async def heartbeat(self):
