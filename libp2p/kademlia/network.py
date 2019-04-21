@@ -219,7 +219,7 @@ class KademliaServer:
         log.info("Loading state from %s", fname)
         with open(fname, 'rb') as file:
             data = pickle.load(file)
-        svr = Server(data['ksize'], data['alpha'], data['id'])
+        svr = KademliaServer(data['ksize'], data['alpha'], data['id'])
         if data['neighbors']:
             svr.bootstrap(data['neighbors'])
         return svr
