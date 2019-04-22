@@ -255,7 +255,7 @@ class GossipSub(IPubsubRouter):
 
     def select_from_minus(self, num_to_select, pool, minus):
         """
-        Select subset of elements from the set (pool - minus) randomly 
+        Select at most num_to_select subset of elements from the set (pool - minus) randomly. 
         :param num_to_select: number of elements to randomly select
         :param pool: list of items to select from (excluding elements in minus)
         :param minus: elements to be excluded from selection pool
@@ -269,6 +269,11 @@ class GossipSub(IPubsubRouter):
         else:
             # Don't create a new selection_pool if we are not subbing anything
             selection_pool = pool
+
+        # If num_to_select > size(selection_pool), then return selection_pool (which has the most possible
+        # elements s.t. the number of elements is less than num_to_select)
+        if num_to_select > len(selection_pool):
+            return selection_pool
 
         # Random selection
         selection = random.sample(selection_pool, num_to_select)
