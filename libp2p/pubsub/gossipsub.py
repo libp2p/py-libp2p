@@ -330,7 +330,32 @@ class GossipSub(IPubsubRouter):
     # RPC handlers
 
     async def handle_ihave(self, ihave_msg):
-        pass
+        """
+        Checks the seen set and requests unknown messages with an IWANT message.
+        """
+        from_id_bytes = graft_msg.from_id
+
+        # TODO: convert bytes to string properly, is this proper?
+        from_id_str = from_id_bytes.decode()
+
+        msg_ids_wanted = []
+        for msg_id_in_ihave in ihave_msg.messageIDs:
+            # TODO: Is this how you iterate over a cache?
+            # TODO: Make this more efficient if possible
+            seen = False
+            for seen_elt in self.pubsub.seen_messages:
+                msg_id_in_seen_elt = seen_elt[0]
+                if msg_id_in_seen_elt == msg_id_in_ihave:
+                    # Message is known
+                    seen = True
+                    break
+
+            if not seen:
+                # Add message to list to be requested
+                msg_ids_wanted.append(msg_id_in_ihave)
+
+        # Request messages with IWANT message
+        await self.emit_iwant(msg_ids_wanted, from_id_str)
 
     async def handle_iwant(self, iwant_msg):
         pass
