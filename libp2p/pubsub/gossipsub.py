@@ -107,6 +107,11 @@ class GossipSub(IPubsubRouter):
         """
         Invoked to forward a new message that has been validated.
         """
+
+        # Add RPC message to cache
+        # TODO: Is this the correct way to add rpc message to cache?
+        self.mcache.add(rpc_message)
+
         packet = rpc_pb2.RPC()
         packet.ParseFromString(rpc_message)
         msg_sender = str(sender_peer_id)
