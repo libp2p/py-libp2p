@@ -355,10 +355,35 @@ class GossipSub(IPubsubRouter):
                 msg_ids_wanted.append(msg_id_in_ihave)
 
         # Request messages with IWANT message
-        await self.emit_iwant(msg_ids_wanted, from_id_str)
+        if len(msg_ids_wanted) > 0:
+            await self.emit_iwant(msg_ids_wanted, from_id_str)
 
     async def handle_iwant(self, iwant_msg):
-        pass
+        """
+        Forwards all request messages that are present in mcache to the requesting peer.
+        """
+        from_id_bytes = graft_msg.from_id
+
+        # TODO: convert bytes to string properly, is this proper?
+        from_id_str = from_id_bytes.decode()
+
+        msg_ids = iwant_msg.messageIDs
+        msgs_to_forward = []
+        for msg_id_iwant in msg_ids:
+            # Check if the wanted message ID is present in mcache
+            # TODO: Do I reference mcache correctly here? Does mcache store RPCs themselves or
+            # RPCs as strings?
+            for msg in self.mcache:
+                mcache_msg_id = elt.seqno
+                if msg_id_iwant == mcache_msg_id:
+                    # Add message to list of messages to forward to requesting peers
+                    msgs_to_forward.append(msg)
+
+        # Forward messages to requesting peer
+        # TODO: Implement correct message forwarding, should this just be publishing? No
+        # because then the message will forwarded to peers in the topics contained in the messages.
+        # We should package these messages into a single packet, serialize that packet, get the stream to this peer,
+        # and write the packet to the stream
 
     async def handle_graft(self, graft_msg):
         topic = graft_msg.topicID
