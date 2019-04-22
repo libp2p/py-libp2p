@@ -108,16 +108,16 @@ class GossipSub(IPubsubRouter):
         Invoked to forward a new message that has been validated.
         """
 
-        # Add RPC message to cache
-        # TODO: Is this the correct way to add rpc message to cache?
-        self.mcache.add(rpc_message)
-
         packet = rpc_pb2.RPC()
         packet.ParseFromString(rpc_message)
         msg_sender = str(sender_peer_id)
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
+            # Add RPC message to cache
+            # TODO: Is this the correct way to add rpc message to cache? I believe so
+            self.mcache[message.seqno] = message
+
             decoded_from_id = message.from_id.decode('utf-8')
             new_packet = rpc_pb2.RPC()
             new_packet.publish.extend([message])
@@ -343,21 +343,12 @@ class GossipSub(IPubsubRouter):
         # TODO: convert bytes to string properly, is this proper?
         from_id_str = from_id_bytes.decode()
 
-        msg_ids_wanted = []
-        for msg_id_in_ihave in ihave_msg.messageIDs:
-            # TODO: Is this how you iterate over a cache?
-            # TODO: Make this more efficient if possible
-            seen = False
-            for seen_elt in self.pubsub.seen_messages:
-                msg_id_in_seen_elt = seen_elt[0]
-                if msg_id_in_seen_elt == msg_id_in_ihave:
-                    # Message is known
-                    seen = True
-                    break
+        # Get list of all seen seqnos from the (seqno, from) tuples in seen_messages cache
+        seen_seqnos = [seqno_and_from[0] for seqno_and_from in self.pubsub.seen_messages.keys()]
 
-            if not seen:
-                # Add message to list to be requested
-                msg_ids_wanted.append(msg_id_in_ihave)
+        # Add all unknown message ids (ids that appear in ihave_msg but not in seen_seqnos) to list
+        # of messages we want to request
+        msg_ids_wanted = [msg_id for msg_id in ihave_msg.messageIDs if msg_id not in seen_seqnos]
 
         # Request messages with IWANT message
         if len(msg_ids_wanted) > 0:
@@ -376,13 +367,10 @@ class GossipSub(IPubsubRouter):
         msgs_to_forward = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            # TODO: Do I reference mcache correctly here? Does mcache store RPCs themselves or
-            # RPCs as strings?
-            for msg in self.mcache:
-                mcache_msg_id = elt.seqno
-                if msg_id_iwant == mcache_msg_id:
-                    # Add message to list of messages to forward to requesting peers
-                    msgs_to_forward.append(msg)
+            if msg_id_iwant in self.mcache:
+                # Add message to list of messages to forward to requesting peers
+                msg = self.mcache[msg_id_iwant]
+                msgs_to_forward.append(msg)
 
         # Forward messages to requesting peer
         # TODO: Implement correct message forwarding, should this just be publishing? No
