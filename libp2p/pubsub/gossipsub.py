@@ -143,6 +143,7 @@ class GossipSub(IPubsubRouter):
                     await self.deliver_messages_to_peers(self.fanout[topic], msg_sender, decoded_from_id, new_packet_serialized)
 
     def join(self, topic):
+        # Note: the comments here are the near-exact algorithm description from the spec
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -150,12 +151,58 @@ class GossipSub(IPubsubRouter):
         :param topic: topic to join
         """
 
+        # Create mesh[topic] if it does not yet exist
+        if topic not in self.mesh:
+            self.mesh[topic] = []
+
+        if topic in self.fanout and len(self.fanout[topic]) == self.degree:
+            # If router already has D peers from the fanout peers of a topic 
+            # TODO: Do we remove all peers from fanout[topic]?
+
+            # Add them to mesh[topic], and notifies them with a 
+            # GRAFT(topic) control message.
+            for peer in self.fanout[topic]:
+                self.mesh[topic].append(peer)
+                await self.emit_graft(topic, peer)
+        else:
+            # Otherwise, if there are less than D peers 
+            # (let this number be x) in the fanout for a topic (or the topic is not in the fanout),
+            x = 0
+            if topic in self.fanout:
+                x = len(self.fanout[topic])
+
+            # then it still adds them as above (if there are any)
+            for peer in self.fanout[topic]:
+                self.mesh[topic].append(peer)
+                await self.emit_graft(topic, peer)
+
+            if topic in self.peers_gossipsub:
+                # TODO: Should we have self.fanout[topic] here or [] (as the minus variable)?
+                # Selects the remaining number of peers (D-x) from peers.gossipsub[topic]
+                selected_peers = self.select_from_minus(self.degree - x, self.peers_gossipsub[topic], \
+                    self.fanout[topic] if topic in self.fanout else [])
+                
+                # And likewise adds them to mesh[topic] and notifies them with a 
+                # GRAFT(topic) control message.
+                for peer in selected_peers:
+                    self.mesh[topic].append(peer)
+                    await self.emit_graft(topic, peer)
+
+            # TODO: Do we remove all peers from fanout[topic]?
+
     def leave(self, topic):
+        # Note: the comments here are the near-exact algorithm description from the spec
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
         :param topic: topic to leave
         """
+        # Notify the peers in mesh[topic] with a PRUNE(topic) message
+        for peer in self.mesh[topic]:
+            await self.emit_prune(topic, peer)
+
+        # Forget mesh[topic]
+        self.mesh.remove(topic)
 
     # Interface Helper Functions
 
