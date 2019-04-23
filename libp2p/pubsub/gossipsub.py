@@ -373,10 +373,22 @@ class GossipSub(IPubsubRouter):
                 msgs_to_forward.append(msg)
 
         # Forward messages to requesting peer
-        # TODO: Implement correct message forwarding, should this just be publishing? No
+        # TODO: Is this correct message forwarding? should this just be publishing? No
         # because then the message will forwarded to peers in the topics contained in the messages.
-        # We should package these messages into a single packet, serialize that packet, get the stream to this peer,
-        # and write the packet to the stream
+        # We should 
+        # 1) Package these messages into a single packet
+        packet = rpc_pb2.RPC()
+        packet.publish = msgs_to_forward
+
+        # 2) Serialize that packet
+        rpc_msg = packet.SerializeToString()
+
+        # 3) Get the stream to this peer
+        # TODO: Should we pass in from_id or from_id_str here?
+        peer_stream = self.pubsub.peers[from_id_str]
+
+        # 4) And write the packet to the stream
+        await peer_stream.write(rpc_msg)
 
     async def handle_graft(self, graft_msg):
         topic = graft_msg.topicID
