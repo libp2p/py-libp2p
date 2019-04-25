@@ -1,6 +1,6 @@
+import hashlib
 import base58
 import multihash
-import hashlib
 
 # MaxInlineKeyLength is the maximum length a key can be for it to be inlined in
 # the peer ID.
