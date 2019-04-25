@@ -16,7 +16,9 @@ class KadmeliaPeerRouter(IPeerRouting):
         FindPeer searches for a peer with given peer_id, returns a peer.PeerInfo
         with relevant addresses.
         """
-        value = self.server.get(peer_id)
+        # switching peer_id to xor_id used by kademlia as node_id
+        xor_id = peer_id.get_xor_id()
+        value = self.server.get(xor_id)
         return decode_peerinfo(value)
 
 

@@ -16,7 +16,7 @@ class KadPeerInfo(PeerInfo):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
 
         self.peer_id = peer_id.get_raw_id()
-        self.long_id = int(digest(peer_id.get_raw_id()).hex(), 16)
+        self.xor_id = peer_id.get_xor_id()
 
         self.addrs = peer_data.get_addrs() if peer_data else None
 
@@ -34,7 +34,7 @@ class KadPeerInfo(PeerInfo):
         """
         Get the distance between this node and another.
         """
-        return self.long_id ^ node.long_id
+        return self.xor_id ^ node.xor_id
 
     def __iter__(self):
         """
@@ -43,7 +43,7 @@ class KadPeerInfo(PeerInfo):
         return iter([self.peer_id, self.ip, self.port])
 
     def __repr__(self):
-        return repr([self.long_id, self.ip, self.port])
+        return repr([self.xor_id, self.ip, self.port])
 
     def __str__(self):
         return "%s:%s" % (self.ip, str(self.port))

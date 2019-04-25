@@ -33,7 +33,7 @@ class KBucket:
         one = KBucket(self.range[0], midpoint, self.ksize)
         two = KBucket(midpoint + 1, self.range[1], self.ksize)
         for node in self.nodes.values():
-            bucket = one if node.long_id <= midpoint else two
+            bucket = one if node.xor_id <= midpoint else two
             bucket.nodes[node.peer_id] = node
         return (one, two)
 
@@ -48,7 +48,7 @@ class KBucket:
             self.nodes[newnode.peer_id] = newnode
 
     def has_in_range(self, node):
-        return self.range[0] <= node.long_id <= self.range[1]
+        return self.range[0] <= node.xor_id <= self.range[1]
 
     def is_new_node(self, node):
         return node.peer_id not in self.nodes
@@ -175,7 +175,7 @@ class RoutingTable:
         Get the index of the bucket that the given node would fall into.
         """
         for index, bucket in enumerate(self.buckets):
-            if node.long_id < bucket.range[1]:
+            if node.xor_id < bucket.range[1]:
                 return index
         # we should never be here, but make linter happy
         return None
