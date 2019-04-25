@@ -15,9 +15,8 @@ class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
 
-        # pylint: disable=protected-access
-        self.peer_id = peer_id._id_str
-        self.long_id = int(digest(peer_id._id_str).hex(), 16)
+        self.peer_id = peer_id.get_raw_id()
+        self.long_id = int(digest(peer_id.get_raw_id()).hex(), 16)
 
         self.addrs = peer_data.get_addrs() if peer_data else None
 

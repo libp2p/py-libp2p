@@ -1,13 +1,13 @@
 import pytest
-from libp2p.kademlia.network import Server
+from libp2p.kademlia.network import KademliaServer
 
 
 @pytest.mark.asyncio
 async def test_example():
-    node_a = Server()
+    node_a = KademliaServer()
     await node_a.listen(5678)
 
-    node_b = Server()
+    node_b = KademliaServer()
     await node_b.listen(5679)
 
     # Bootstrap the node by connecting to other known nodes, in this case
@@ -29,12 +29,12 @@ async def test_example():
 @pytest.mark.asyncio
 async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 
-    node_bootstrap = Server()
+    node_bootstrap = KademliaServer()
     await node_bootstrap.listen(3000 + nodes_nr * 2)
 
     nodes = []
     for i in range(nodes_nr):
-        node = Server()
+        node = KademliaServer()
         addrs = [("127.0.0.1", 3000 + nodes_nr * 2)]
         await node.listen(3001 + i + nodes_nr * 2)
         await node.bootstrap(addrs)
@@ -56,12 +56,12 @@ async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 @pytest.mark.parametrize("nodes_nr", [(2**i) for i in range(2, 5)])
 @pytest.mark.asyncio
 async def test_multiple_nodes_set_bootstrap_get(nodes_nr):
-    node_bootstrap = Server()
+    node_bootstrap = KademliaServer()
     await node_bootstrap.listen(2000 + nodes_nr * 2)
 
     nodes = []
     for i in range(nodes_nr):
-        node = Server()
+        node = KademliaServer()
         addrs = [("127.0.0.1", 2000 + nodes_nr * 2)]
         await node.listen(2001 + i + nodes_nr * 2)
         await node.bootstrap(addrs)
