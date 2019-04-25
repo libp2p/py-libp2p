@@ -11,21 +11,22 @@ from .host_interface import IHost
 class BasicHost(IHost):
 
     # default options constructor
-    def __init__(self, _network):
-        self.network = _network
-        self.peerstore = self.network.peerstore
+    def __init__(self, network, router=None):
+        self._network = network
+        self.peerstore = self._network.peerstore
+        self._router = router
 
     def get_id(self):
         """
         :return: peer_id of host
         """
-        return self.network.get_peer_id()
+        return self._network.get_peer_id()
 
     def get_network(self):
         """
         :return: network instance of host
         """
-        return self.network
+        return self._network
 
     def get_peerstore(self):
         """
@@ -45,7 +46,7 @@ class BasicHost(IHost):
         p2p_part = multiaddr.Multiaddr('/p2p/{}'.format(self.get_id().pretty()))
 
         addrs = []
-        for transport in self.network.listeners.values():
+        for transport in self._network.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
@@ -57,7 +58,7 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         :return: true if successful
         """
-        return self.network.set_stream_handler(protocol_id, stream_handler)
+        return self._network.set_stream_handler(protocol_id, stream_handler)
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
@@ -67,7 +68,7 @@ class BasicHost(IHost):
         :param protocol_id: protocol id that stream runs on
         :return: true if successful
         """
-        stream = await self.network.new_stream(peer_id, protocol_ids)
+        stream = await self._network.new_stream(peer_id, protocol_ids)
         return stream
 
     async def connect(self, peer_info):
@@ -84,7 +85,7 @@ class BasicHost(IHost):
         self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
 
         # there is already a connection to this peer
-        if peer_info.peer_id in self.network.connections:
+        if peer_info.peer_id in self._network.connections:
             return
 
-        await self.network.dial_peer(peer_info.peer_id)
+        await self._network.dial_peer(peer_info.peer_id)
