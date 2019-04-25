@@ -104,13 +104,13 @@ async def new_node(
             id_opt=id_opt, transport_opt=transport_opt,
             muxer_opt=muxer_opt, sec_opt=sec_opt,
             peerstore_opt=peerstore_opt)
-    if not disc_opt:
-        disc_opt = initialize_default_kademlia(ksize=20, alpha=3,
-                                               id_opt=id_opt, storage=None)
 
     # TODO enable support for other host type
     # TODO routing unimplemented
-    host = RoutedHost(swarm_opt, disc_opt)
+    if not disc_opt:
+        host = BasicHost(swarm_opt)
+    else:
+        host = RoutedHost(swarm_opt, disc_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())
