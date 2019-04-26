@@ -293,17 +293,35 @@ class GossipSub(IPubsubRouter):
 
 
     async def gossip_heartbeat(self):
-        """
-        for each topic in mesh+fanout:
-          let mids be mcache.window[topic]
-          if mids is not empty:
-            select D peers from peers.gossipsub[topic]
-            for each peer not in mesh[topic] or fanout[topic]
-              emit IHAVE(mids)
+        for topic in mesh:
+            msg_ids = self.mcache.window(topic)
+            if len(msg_ids) > 0:
+                # TODO: Make more efficient, possibly using a generator?
+                # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+                
+                # Select D peers from peers.gossipsub[topic]
+                peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                for peer in peers_to_emit_ihave_to:
+                    if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
+                        await self.emit_ihave(msg_ids)
 
-        shift the mcache
-        """
-        pass
+        # Do the same for fanout, for all topics not already hit in mesh
+        for topic in fanout:
+            if topic not in mesh:
+                msg_ids = self.mcache.window(topic)
+                if len(msg_ids) > 0:
+                    # TODO: Make more efficient, possibly using a generator?
+                    # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
+                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+                    
+                    # Select D peers from peers.gossipsub[topic]
+                    peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                    for peer in peers_to_emit_ihave_to:
+                        if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
+                            await self.emit_ihave(msg_ids)
+
+        self.mcache.shift()
 
     def select_from_minus(self, num_to_select, pool, minus):
         """
