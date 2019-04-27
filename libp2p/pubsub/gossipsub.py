@@ -291,9 +291,8 @@ class GossipSub(IPubsubRouter):
                     # Add the peers to fanout[topic]
                     self.fanout[topic].extend(selected_peers)
 
-
     async def gossip_heartbeat(self):
-        for topic in mesh:
+        for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if len(msg_ids) > 0:
                 # TODO: Make more efficient, possibly using a generator?
@@ -307,8 +306,8 @@ class GossipSub(IPubsubRouter):
                         await self.emit_ihave(msg_ids)
 
         # Do the same for fanout, for all topics not already hit in mesh
-        for topic in fanout:
-            if topic not in mesh:
+        for topic in self.fanout:
+            if topic not in self.mesh:
                 msg_ids = self.mcache.window(topic)
                 if len(msg_ids) > 0:
                     # TODO: Make more efficient, possibly using a generator?
@@ -356,7 +355,7 @@ class GossipSub(IPubsubRouter):
         """
         Checks the seen set and requests unknown messages with an IWANT message.
         """
-        from_id_bytes = graft_msg.from_id
+        from_id_bytes = ihave_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
         from_id_str = from_id_bytes.decode()
@@ -376,7 +375,7 @@ class GossipSub(IPubsubRouter):
         """
         Forwards all request messages that are present in mcache to the requesting peer.
         """
-        from_id_bytes = graft_msg.from_id
+        from_id_bytes = iwant_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
         from_id_str = from_id_bytes.decode()
@@ -459,7 +458,7 @@ class GossipSub(IPubsubRouter):
             prune=[]
             )
 
-        await emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, to_peer)
 
     async def emit_iwant(self, msg_ids, to_peer):
         """
@@ -475,7 +474,7 @@ class GossipSub(IPubsubRouter):
             prune=[]
             )
 
-        await emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, to_peer)
 
     async def emit_graft(self, topic, to_peer):
         """
@@ -491,7 +490,7 @@ class GossipSub(IPubsubRouter):
             prune=[]
             )
 
-        await emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, to_peer)
 
     async def emit_prune(self, topic, to_peer):
         """
@@ -507,7 +506,7 @@ class GossipSub(IPubsubRouter):
             prune=[prune_msg]
             )
 
-        await emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, to_peer)
 
     async def emit_control_message(self, control_msg, to_peer):
         packet = rpc_pb2.RPC()
