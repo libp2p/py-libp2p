@@ -5,13 +5,14 @@ from aio_timers import Timer
 from lru import LRU
 from .pb import rpc_pb2
 from .pubsub_router_interface import IPubsubRouter
+from .mcache import MessageCache
 
 
 class GossipSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, mcache_size=128,
-                 heartbeat_interval=120):
+    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, gossip_window=3,
+                 gossip_history=5, heartbeat_interval=120):
         self.protocols = protocols
         self.pubsub = None
 
@@ -34,7 +35,7 @@ class GossipSub(IPubsubRouter):
         self.peers_floodsub = []
 
         # Create message cache
-        self.mcache = LRU(mcache_size)
+        self.mcache = MessageCache(gossip_window, gossip_history)
 
         # Create heartbeat timer
         self.heartbeat_interval = heartbeat_interval
@@ -115,8 +116,7 @@ class GossipSub(IPubsubRouter):
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
             # Add RPC message to cache
-            # TODO: Is this the correct way to add rpc message to cache? I believe so
-            self.mcache[message.seqno] = message
+            self.mcache.put(message)
 
             decoded_from_id = message.from_id.decode('utf-8')
             new_packet = rpc_pb2.RPC()
@@ -384,9 +384,11 @@ class GossipSub(IPubsubRouter):
         msgs_to_forward = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            if msg_id_iwant in self.mcache:
+            msg = self.mcache.get(msg_id_iwant)
+
+            # Cache hit
+            if msg:
                 # Add message to list of messages to forward to requesting peers
-                msg = self.mcache[msg_id_iwant]
                 msgs_to_forward.append(msg)
 
         # Forward messages to requesting peer

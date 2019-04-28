@@ -7,13 +7,13 @@ class MessageCache:
         def __init__(self, mid, topics):
             """
             Constructor.
-            :param mid: (from_id, seqno) of the msg
+            :param mid: (seqno, from_id) of the msg
             :param topics: list of topics this message was sent on
             """
             self.mid = mid
             self.topics = topics
 
-    def __init(self, window_size, history_size):
+    def __init__(self, window_size, history_size):
         """
         Constructor.
         :param window_size: Size of the window desired.
@@ -24,7 +24,7 @@ class MessageCache:
         self.window_size = window_size
         self.history_size = history_size
 
-        # (from_id, seqno) -> rpc message
+        # (seqno, from_id) -> rpc message
         self.msgs = dict()
 
         # max length of history_size. each item is a list of CacheEntry.
@@ -34,12 +34,14 @@ class MessageCache:
     def put(self, msg):
         """
         Put a message into the mcache.
-        :param msg: The rpc message to put in. Should contain from_id and seqno
+        :param msg: The rpc message to put in. Should contain seqno and from_id
         """
-        mid = (msg.from_id, msg.seqno)
+        mid = (msg.seqno, msg.from_id)
         self.msgs[mid] = msg
 
-        if not self.history or not self.history[0]:
+        if not self.history:
+            self.history.append([])
+        elif not self.history[0]:
             self.history[0] = []
 
         self.history[0].append(self.CacheEntry(mid, msg.topicIDs))
@@ -47,7 +49,7 @@ class MessageCache:
     def get(self, mid):
         """
         Get a message from the mcache.
-        :param mid: (from_id, seqno) of the message to get.
+        :param mid: (seqno, from_id) of the message to get.
         :return: The rpc message associated with this mid
         """
         if mid in self.msgs:
