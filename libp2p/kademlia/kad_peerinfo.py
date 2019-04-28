@@ -44,10 +44,14 @@ class KadPeerInfo(PeerInfo):
         return iter([self.peer_id, self.ip, self.port])
 
     def __repr__(self):
-        return repr([self.xor_id, self.ip, self.port])
+        return repr([self.xor_id, self.ip, self.port, self.peer_id])
 
     def __str__(self):
         return "%s:%s" % (self.ip, str(self.port))
+
+    def encode(self):
+        return str(self.peer_id) + "\n" + \
+               str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
 
 class KadPeerHeap:
     """

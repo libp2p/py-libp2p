@@ -13,15 +13,14 @@ async def test_simple_two_nodes():
 
     node_a_value = await node_b.bootstrap([("127.0.0.1", 5678)])
     node_a_kad_peerinfo = node_a_value[0]
-
     await node_a.set(node_a_kad_peerinfo.xor_id,
-                     str(node_a_kad_peerinfo.ip)\
-                     + "/" + str(node_a_kad_peerinfo.port))
+                     repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_b)
     returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
-    assert returned_info == str(node_a_kad_peerinfo.ip)\
-                            + "/" + str(node_a_kad_peerinfo.port)
+    print(repr(returned_info))
+    print(repr(node_a_kad_peerinfo))
+    assert repr(returned_info) == repr(node_a_kad_peerinfo)
 
 @pytest.mark.asyncio
 async def test_simple_three_nodes():
@@ -39,9 +38,36 @@ async def test_simple_three_nodes():
 
     await node_c.bootstrap([("127.0.0.1", 5702)])
     await node_a.set(node_a_kad_peerinfo.xor_id,
-                     str(node_a_kad_peerinfo.ip)\
-                     + "/" + str(node_a_kad_peerinfo.port))
+                     repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_c)
     returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
-    assert returned_info == str(node_a_kad_peerinfo.ip) + "/" + str(node_a_kad_peerinfo.port)
+    assert str(returned_info) == str(node_a_kad_peerinfo)
+
+@pytest.mark.asyncio
+async def test_simple_four_nodes():
+    node_a = KademliaServer()
+    await node_a.listen(5801)
+
+    node_b = KademliaServer()
+    await node_b.listen(5802)
+
+    node_c = KademliaServer()
+    await node_c.listen(5803)
+
+    node_d = KademliaServer()
+    await node_d.listen(5804)
+
+    node_a_value = await node_b.bootstrap([("127.0.0.1", 5801)])
+    node_a_kad_peerinfo = node_a_value[0]
+
+    await node_c.bootstrap([("127.0.0.1", 5802)])
+
+    await node_d.bootstrap([("127.0.0.1", 5803)])
+
+    await node_b.set(node_a_kad_peerinfo.xor_id,
+                     repr(node_a_kad_peerinfo))
+
+    router = KadmeliaPeerRouter(node_d)
+    returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
+    assert str(returned_info) == str(node_a_kad_peerinfo)
