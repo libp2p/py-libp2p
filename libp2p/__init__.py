@@ -67,16 +67,18 @@ def initialize_default_swarm(
     if not id_opt:
         id_opt = generate_id()
 
+    # TODO parse transport_opt to determine transport
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
-    transport = [multiaddr.Multiaddr(t) for t in transport_opt]
-    # TODO wire muxer up with swarm
-    # muxer = muxer_opt or ["mplex/6.7.0"]
+    transport = TCP()
+
+    # TODO TransportUpgrader is not doing anything really
+    # TODO parse muxer and sec to pass into TransportUpgrader
+    muxer = muxer_opt or ["mplex/6.7.0"]
     sec = sec_opt or ["secio"]
+    upgrader = TransportUpgrader(sec, muxer)
+
     peerstore = peerstore_opt or PeerStore()
-    upgrader = TransportUpgrader(sec, transport)
-    swarm_opt = Swarm(id_opt, peerstore, upgrader)
-    tcp = TCP()
-    swarm_opt.add_transport(tcp)
+    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport)
 
     return swarm_opt
 
