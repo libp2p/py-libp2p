@@ -19,15 +19,14 @@ class KadmeliaPeerRouter(IPeerRouting):
         # switching peer_id to xor_id used by kademlia as node_id
         xor_id = peer_id.get_xor_id()
         value = await self.server.get(xor_id)
-        return decode_peerinfo(value)
+        return value
 
-
-def decode_peerinfo(encoded):
-    if isinstance(encoded, bytes):
-        encoded = encoded.decode()
-    lines = encoded.splitlines()
-    peer_id = lines[0]
-    addrs = lines[1:]
-    peer_data = PeerData()
-    peer_data.add_addrs(addrs)
-    return PeerInfo(peer_id, addrs)
+# def decode_peerinfo(encoded):
+#     if isinstance(encoded, bytes):
+#         encoded = encoded.decode()
+#     lines = encoded.splitlines()
+#     peer_id = lines[0]
+#     addrs = lines[1:]
+#     peer_data = PeerData()
+#     peer_data.add_addrs(addrs)
+#     return PeerInfo(peer_id, addrs)
