@@ -5,7 +5,6 @@ import logging
 from rpcudp.protocol import RPCProtocol
 from .kad_peerinfo import create_kad_peerinfo
 from .routing import RoutingTable
-from .utils import validate_provider_id
 
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -74,35 +73,39 @@ class KademliaProtocol(RPCProtocol):
             return self.rpc_find_node(sender, nodeid, key)
         return {'value': value}
 
-    def rpc_add_provider(self, sender, nodeid, key, provider_peerinfo):
+    def rpc_add_provider(self, sender, nodeid, key, provider_id):
+        # pylint: disable=unused-argument
         """
         rpc when receiving an add_provider call
         should validate received PeerInfo matches sender nodeid
         if it does, receipient must store a record in its datastore
+        we store a map of content_id to peer_id (non xor)
         """
-        log.info("adding provider for key %s in local table",
-                 str(key))
-        if validate_provider_id(nodeid, provider_peerinfo):
-            source = create_kad_peerinfo(nodeid, sender[0], sender[1])
-            # TODO differentiate this from key, value
-            self.storage[key] = provider_peerinfo
+        if nodeid == provider_id:
+            log.info("adding provider %s for key %s in local table",
+                     provider_id, str(key))
+            self.storage[key] = provider_id
             return True
         return False
 
     def rpc_get_providers(self, sender, key):
+        # pylint: disable=unused-argument
         """
         rpc when receiving a get_providers call
         should look up key in data store and respond with records
-        plus a list of closer peers in itrs routing table
+        plus a list of closer peers in its routing table
         """
         providers = []
         record = self.storage.get(key, None)
+
         if record:
             providers.append(record)
 
         keynode = create_kad_peerinfo(key)
         neighbors = self.router.find_neighbors(keynode)
-        providers.extend(neighbors)
+        for neighbor in neighbors:
+            if neighbor.peer_id != record:
+                providers.append(neighbor.peer_id)
 
         return providers
 
@@ -128,13 +131,15 @@ class KademliaProtocol(RPCProtocol):
         result = await self.store(address, self.source_node.peer_id, key, value)
         return self.handle_call_response(result, node_to_ask)
 
-    def call_add_provider(self, node_to_ask, key):
+    async def call_add_provider(self, node_to_ask, key, provider_id):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.add_provider(address,
-                                         self.source_node.peer_id, key)
+                                         self.source_node.peer_id,
+                                         key, provider_id)
+
         return self.handle_call_response(result, node_to_ask)
 
-    def call_get_providers(self, node_to_ask, key):
+    async def call_get_providers(self, node_to_ask, key):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.get_providers(address, key)
         return self.handle_call_response(result, node_to_ask)

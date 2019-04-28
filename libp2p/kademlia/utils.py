@@ -55,7 +55,3 @@ def shared_prefix(args):
 def bytes_to_bit_string(bites):
     bits = [bin(bite)[2:].rjust(8, '0') for bite in bites]
     return "".join(bits)
-
-
-def validate_provider_id(sender_id, sender_peerinfo):
-    return sender_id == sender_peerinfo.peer_id
