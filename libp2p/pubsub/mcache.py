@@ -20,7 +20,6 @@ class MessageCache:
         :param history_size: Size of the history desired.
         :return: the MessageCache
         """
-        # TODO: Go doesn't really use history size. How do we incorporate it?
         self.window_size = window_size
         self.history_size = history_size
 
@@ -31,6 +30,9 @@ class MessageCache:
         # messages lost upon shift().
         self.history = []
 
+        for i in range(history_size):
+            self.history.append([])
+
     def put(self, msg):
         """
         Put a message into the mcache.
@@ -39,11 +41,11 @@ class MessageCache:
         mid = (msg.seqno, msg.from_id)
         self.msgs[mid] = msg
 
-        if not self.history:
-            self.history.append([])
-        elif not self.history[0]:
+        if not self.history[0]:
+            print('hit')
             self.history[0] = []
 
+        print('now putting: ' + str(mid))
         self.history[0].append(self.CacheEntry(mid, msg.topicIDs))
 
     def get(self, mid):
@@ -86,5 +88,6 @@ class MessageCache:
 
         while i >= 0:
             self.history[i + 1] = self.history[i]
+            i -= 1
 
         self.history[0] = None
