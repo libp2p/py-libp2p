@@ -15,6 +15,7 @@ class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
 
+        self.peer_id_obj = peer_id
         self.peer_id = peer_id.get_raw_id()
         self.xor_id = peer_id.get_xor_id()
 

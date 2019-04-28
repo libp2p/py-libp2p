@@ -10,7 +10,7 @@ class KadmeliaPeerRouter(IPeerRouting):
     def __init__(self, dht_server):
         self.server = dht_server
 
-    def find_peer(self, peer_id):
+    async def find_peer(self, peer_id):
         """
         Find specific Peer
         FindPeer searches for a peer with given peer_id, returns a peer.PeerInfo
@@ -18,7 +18,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         """
         # switching peer_id to xor_id used by kademlia as node_id
         xor_id = peer_id.get_xor_id()
-        value = self.server.get(xor_id)
+        value = await self.server.get(xor_id)
         return decode_peerinfo(value)
 
 
