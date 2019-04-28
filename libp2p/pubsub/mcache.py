@@ -42,10 +42,8 @@ class MessageCache:
         self.msgs[mid] = msg
 
         if not self.history[0]:
-            print('hit')
             self.history[0] = []
 
-        print('now putting: ' + str(mid))
         self.history[0].append(self.CacheEntry(mid, msg.topicIDs))
 
     def get(self, mid):
