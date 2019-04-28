@@ -10,17 +10,17 @@ from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
+    # pylint: disable=too-many-instance-attributes,cell-var-from-loop,too-many-arguments
 
-    def __init__(self, peer_id, peerstore, upgrader, transport):
+    def __init__(self, peer_id, peerstore, upgrader, transport, router):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.transport = transport
+        self.router = router
         self.connections = dict()
         self.listeners = dict()
         self.stream_handlers = dict()
-        self.router = None
 
         # Protocol muxing
         self.multiselect = Multiselect()

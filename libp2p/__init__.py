@@ -52,8 +52,8 @@ def initialize_default_kademlia_router(
 
 
 def initialize_default_swarm(
-        id_opt=None, transport_opt=None,
-        muxer_opt=None, sec_opt=None, peerstore_opt=None):
+        id_opt=None, transport_opt=None, muxer_opt=None,
+        sec_opt=None, peerstore_opt=None, disc_opt=None):
     """
     initialize swarm when no swarm is passed in
     :param id_opt: optional id for host
@@ -79,7 +79,8 @@ def initialize_default_swarm(
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
-    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport)
+    swarm_opt = Swarm(id_opt, peerstore,\
+                      upgrader, transport, disc_opt)
 
     return swarm_opt
 
@@ -106,7 +107,7 @@ async def new_node(
         swarm_opt = initialize_default_swarm(
             id_opt=id_opt, transport_opt=transport_opt,
             muxer_opt=muxer_opt, sec_opt=sec_opt,
-            peerstore_opt=peerstore_opt)
+            peerstore_opt=peerstore_opt, disc_opt=disc_opt)
 
     swarm_opt.add_router(disc_opt)
 
