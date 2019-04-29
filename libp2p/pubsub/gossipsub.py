@@ -149,7 +149,15 @@ class GossipSub(IPubsubRouter):
                 if topic in self.pubsub.my_topics and topic in self.mesh:
                     print("publish to mesh peers " + str(self.mesh[topic]))
                     await self.deliver_messages_to_peers(self.mesh[topic], msg_sender, decoded_from_id, new_packet_serialized)
-                elif topic in self.fanout:
+                else:
+                    # Send to fanout peers
+                    if topic not in self.fanout:
+                        # If no peers in fanout, choose some peers from gossipsub peers in topic
+                        gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+
+                        selected = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                        self.fanout[topic] = selected
+
                     # TODO: Is topic DEFINITELY supposed to be in fanout if we are not subscribed?
                     # I assume there could be short periods between heartbeats where topic may not be
                     # but we should check that this path gets hit appropriately
@@ -193,7 +201,8 @@ class GossipSub(IPubsubRouter):
             if topic in self.peers_gossipsub:
                 # TODO: Should we have self.fanout[topic] here or [] (as the minus variable)?
                 # Selects the remaining number of peers (D-x) from peers.gossipsub[topic]
-                selected_peers = self.select_from_minus(self.degree - x, self.peers_gossipsub[topic], \
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+                selected_peers = self.select_from_minus(self.degree - x, gossipsub_peers_in_topic, \
                     self.fanout[topic] if topic in self.fanout else [])
                 
                 # And likewise adds them to mesh[topic] and notifies them with a 
@@ -258,27 +267,27 @@ class GossipSub(IPubsubRouter):
     async def mesh_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.mesh:
-            print("mesh heartbeating for topic in mesh")
+            # print("mesh heartbeating for topic in mesh")
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
-                print("mesh heartbeating low")
+                # print("mesh heartbeating low")
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
                 selected_peers = self.select_from_minus(self.degree - num_mesh_peers_in_topic, \
                     self.peers_gossipsub, self.mesh[topic])
-                print("mesh heartbeating peers " + str(self.peers_gossipsub))
-                print("mesh heartbeating selected " + str(selected_peers))
+                # print("mesh heartbeating peers " + str(self.peers_gossipsub))
+                # print("mesh heartbeating selected " + str(selected_peers))
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
-                    print("mesh heartbeating append")
+                    # print("mesh heartbeating append")
                     self.mesh[topic].append(peer)
-                    print("mesh heartbeating peer appended")
+                    # print("mesh heartbeating peer appended")
 
                     # Emit GRAFT(topic) control message to peer
                     await self.emit_graft(topic, peer)
-                    print("mesh heartbeating graft emitted")
+                    # print("mesh heartbeating graft emitted")
 
             if num_mesh_peers_in_topic > self.degree_high:
-                print("mesh heartbeating degree high")
+                # print("mesh heartbeating degree high")
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 selected_peers = self.select_from_minus(num_mesh_peers_in_topic - self.degree, self.mesh[topic], [])
                 for peer in selected_peers:
@@ -290,19 +299,26 @@ class GossipSub(IPubsubRouter):
 
     async def fanout_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
+        print("fanout_heartbeat enter")
         for topic in self.fanout:
+            print("fanout_heartbeat topic " + topic)
             # If time since last published > ttl
+            # TODO: there's no way time_since_last_publish gets set anywhere yet 
             if self.time_since_last_publish[topic] > self.time_to_live:
+                print("fanout_heartbeat TTL greater")
                 # Remove topic from fanout
                 self.fanout.remove(topic)
                 self.time_since_last_publish.remove(topic)
             else:
                 num_fanout_peers_in_topic = len(self.fanout[topic])
+                print("fanout_heartbeat TTL num fanout " + str(num_fanout_peers_in_topic))
                 # If |fanout[topic]| < D
                 if num_fanout_peers_in_topic < self.degree:
+                    print("fanout_heartbeat under degree")
                     # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]
-                    selected_peers = self.select_from_minus(self.degree - num_fanout_peers_in_topic, self.peers_gossipsub[topic], self.fanout[topic])
-
+                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+                    selected_peers = self.select_from_minus(self.degree - num_fanout_peers_in_topic, gossipsub_peers_in_topic, self.fanout[topic])
+                    print("fanout_heartbeat selected " + str(selected_peers))
                     # Add the peers to fanout[topic]
                     self.fanout[topic].extend(selected_peers)
 
