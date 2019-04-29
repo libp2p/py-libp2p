@@ -39,7 +39,6 @@ class GossipSub(IPubsubRouter):
 
         # Create heartbeat timer
         self.heartbeat_interval = heartbeat_interval
-        self.heartbeat_timer = Timer(heartbeat_interval, self.heartbeat)
 
     # Interface functions
 
@@ -66,6 +65,7 @@ class GossipSub(IPubsubRouter):
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
+        print("gossipsub add peer")
         # Add peer to the correct peer list
         peer_type = self.get_peer_type(protocol_id)
         peer_id_str = str(peer_id)
@@ -108,25 +108,30 @@ class GossipSub(IPubsubRouter):
         """
         Invoked to forward a new message that has been validated.
         """
-
+        print("publish")
         packet = rpc_pb2.RPC()
         packet.ParseFromString(rpc_message)
         msg_sender = str(sender_peer_id)
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
+        print("message in publish")
         for message in packet.publish:
             # Add RPC message to cache
+            print("putting on mcache")
             self.mcache.put(message)
 
+            print("creating new packet")
             decoded_from_id = message.from_id.decode('utf-8')
             new_packet = rpc_pb2.RPC()
             new_packet.publish.extend([message])
             new_packet_serialized = new_packet.SerializeToString()
 
+            print("Delivering to self if needed")
             # Deliver to self if needed
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
                 await self.pubsub.handle_talk(message)
 
+            print("iterate topics")
             # Deliver to peers
             for topic in message.topicIDs:
                 # If topic has floodsub peers, deliver to floodsub peers
@@ -136,18 +141,23 @@ class GossipSub(IPubsubRouter):
                     for peer in self.pubsub.peer_topics[topic]:
                         if str(peer) in self.peers_floodsub:
                             floodsub_peers_in_topic.append(peer)
+                print("sending to floodsub peers " + str(floodsub_peers_in_topic))
                 await self.deliver_messages_to_peers(floodsub_peers_in_topic, msg_sender, decoded_from_id, new_packet_serialized)
 
+                print("Sending to mesh + fanout")
                 # If you are subscribed to topic, send to mesh, otherwise send to fanout
                 if topic in self.pubsub.my_topics and topic in self.mesh:
+                    print("publish to mesh peers " + str(self.mesh[topic]))
                     await self.deliver_messages_to_peers(self.mesh[topic], msg_sender, decoded_from_id, new_packet_serialized)
                 elif topic in self.fanout:
                     # TODO: Is topic DEFINITELY supposed to be in fanout if we are not subscribed?
                     # I assume there could be short periods between heartbeats where topic may not be
                     # but we should check that this path gets hit appropriately
+                    print("publish to fanout peers " + str(self.fanout[topic]))
                     await self.deliver_messages_to_peers(self.fanout[topic], msg_sender, decoded_from_id, new_packet_serialized)
+        print("publish complete")
 
-    def join(self, topic):
+    async def join(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec
         """
         Join notifies the router that we want to receive and
@@ -175,11 +185,10 @@ class GossipSub(IPubsubRouter):
             x = 0
             if topic in self.fanout:
                 x = len(self.fanout[topic])
-
-            # then it still adds them as above (if there are any)
-            for peer in self.fanout[topic]:
-                self.mesh[topic].append(peer)
-                await self.emit_graft(topic, peer)
+                # then it still adds them as above (if there are any)
+                for peer in self.fanout[topic]:
+                    self.mesh[topic].append(peer)
+                    await self.emit_graft(topic, peer)
 
             if topic in self.peers_gossipsub:
                 # TODO: Should we have self.fanout[topic] here or [] (as the minus variable)?
@@ -195,7 +204,7 @@ class GossipSub(IPubsubRouter):
 
             # TODO: Do we remove all peers from fanout[topic]?
 
-    def leave(self, topic):
+    async def leave(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec
         """
         Leave notifies the router that we are no longer interested in a topic.
@@ -224,9 +233,10 @@ class GossipSub(IPubsubRouter):
         for peer_id_in_topic in peers:
             # Forward to all peers that are not the
             # message sender and are not the message origin
+            print("deliver_messages_to_peers Delivering to " + str(peer_id_in_topic))
             if peer_id_in_topic not in (msg_sender, origin_id):
                 stream = self.pubsub.peers[peer_id_in_topic]
-
+                print("deliver_messages_to_peers packet sent")
                 # Publish the packet
                 await stream.write(serialized_packet)
 
@@ -237,33 +247,38 @@ class GossipSub(IPubsubRouter):
         Note: the heartbeats are called with awaits because each heartbeat depends on the
         state changes in the preceding heartbeat
         """
-        await self.mesh_heartbeat()
-        await self.fanout_heartbeat()
-        await self.gossip_heartbeat()
+        while True:
+            print("HEARTBEAT HIT " + str(self.heartbeat_interval))
+            await self.mesh_heartbeat()
+            await self.fanout_heartbeat()
+            await self.gossip_heartbeat()
 
-        # Restart timer
-        self.heartbeat_timer = Timer(self.heartbeat_interval, self.heartbeat)
-
-        # TODO: Check if this is right way to use timer
-        asyncio.ensure_future(self.heartbeat_timer.wait())
+            await asyncio.sleep(self.heartbeat_interval)
 
     async def mesh_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.mesh:
+            print("mesh heartbeating for topic in mesh")
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
+                print("mesh heartbeating low")
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
                 selected_peers = self.select_from_minus(self.degree - num_mesh_peers_in_topic, \
                     self.peers_gossipsub, self.mesh[topic])
-
+                print("mesh heartbeating peers " + str(self.peers_gossipsub))
+                print("mesh heartbeating selected " + str(selected_peers))
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
+                    print("mesh heartbeating append")
                     self.mesh[topic].append(peer)
+                    print("mesh heartbeating peer appended")
 
                     # Emit GRAFT(topic) control message to peer
-                    await self.emit_graft(topic)
+                    await self.emit_graft(topic, peer)
+                    print("mesh heartbeating graft emitted")
 
             if num_mesh_peers_in_topic > self.degree_high:
+                print("mesh heartbeating degree high")
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 selected_peers = self.select_from_minus(num_mesh_peers_in_topic - self.degree, self.mesh[topic], [])
                 for peer in selected_peers:
@@ -271,7 +286,7 @@ class GossipSub(IPubsubRouter):
                     self.mesh[topic].remove(peer)
 
                     # Emit PRUNE(topic) control message to peer
-                    await self.emit_prune(topic)
+                    await self.emit_prune(topic, peer)
 
     async def fanout_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
@@ -446,6 +461,7 @@ class GossipSub(IPubsubRouter):
     # RPC emitters
 
     async def emit_ihave(self, topic, msg_ids, to_peer):
+        # TODO: FOLLOW MESSAGE CREATION AS DONE IN emit_graft
         """
         Emit ihave message, sent to to_peer, for topic and msg_ids
         """
@@ -454,15 +470,13 @@ class GossipSub(IPubsubRouter):
             messageIDs=msg_ids
             )
         control_msg = rpc_pb2.ControlMessage(
-            ihave=[ihave_msg],
-            iwant=[],
-            graft=[],
-            prune=[]
+            ihave=[ihave_msg]
             )
 
         await self.emit_control_message(control_msg, to_peer)
 
     async def emit_iwant(self, msg_ids, to_peer):
+        # TODO: FOLLOW MESSAGE CREATION AS DONE IN emit_graft
         """
         Emit iwant message, sent to to_peer, for msg_ids
         """
@@ -470,10 +484,7 @@ class GossipSub(IPubsubRouter):
             messageIDs=msg_ids
             )
         control_msg = rpc_pb2.ControlMessage(
-            ihave=[],
-            iwant=[iwant_msg],
-            graft=[],
-            prune=[]
+            iwant=[iwant_msg]
             )
 
         await self.emit_control_message(control_msg, to_peer)
@@ -482,43 +493,51 @@ class GossipSub(IPubsubRouter):
         """
         Emit graft message, sent to to_peer, for topic
         """
-        graft_msg = rpc_pb2.ControlGraft(
-            topicID=topic,
-            )
-        control_msg = rpc_pb2.ControlMessage(
-            ihave=[],
-            iwant=[],
-            graft=[graft_msg],
-            prune=[]
-            )
+        print("emit_graft enter")
+        graft_msg = rpc_pb2.ControlGraft()
+        graft_msg.topicID = topic
+
+        print("emit_graft graft_msg formed")
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.graft.extend([graft_msg])
+        print("emit_graft control_msg formed")
 
         await self.emit_control_message(control_msg, to_peer)
+        print("emit_graft emit success")
 
     async def emit_prune(self, topic, to_peer):
+        # TODO: FOLLOW MESSAGE CREATION AS DONE IN emit_graft
         """
         Emit graft message, sent to to_peer, for topic
         """
         prune_msg = rpc_pb2.ControlPrune(
-            topicID=topic,
+            topicID=topic
             )
         control_msg = rpc_pb2.ControlMessage(
-            ihave=[],
-            iwant=[],
-            graft=[],
             prune=[prune_msg]
             )
 
         await self.emit_control_message(control_msg, to_peer)
 
     async def emit_control_message(self, control_msg, to_peer):
-        packet = rpc_pb2.RPC()
+        print("emit_control_message create packet")
+        # packet = rpc_pb2.RPC()
 
         # Add control message to packet
-        packet.control.extend([control_msg])
+        print("emit_control_message extending control")
+        # packet.control = control_msg
+        
+        packet = rpc_pb2.RPC()
+        packet.control.CopyFrom(control_msg)
+        print("emit_control_message serializing")
         rpc_msg = packet.SerializeToString()
+
+        print("emit_control_message rpc_msg\n " + str(rpc_msg))
 
         # Get stream for peer from pubsub
         peer_stream = self.pubsub.peers[to_peer]
+        print("emit_control_message stream " + str(peer_stream))
 
         # Write rpc to stream
         await peer_stream.write(rpc_msg)
+        print("emit_control_message write success")

@@ -1,6 +1,13 @@
+import asyncio
+import multiaddr
 import uuid
+import random
 import struct
+from libp2p import new_node
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.pubsub.pubsub import Pubsub
+from libp2p.pubsub.gossipsub import GossipSub
 
 
 def message_id_generator(start_val):
@@ -42,3 +49,76 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
 
     packet.publish.extend([message])
     return packet
+
+async def connect(node1, node2):
+    """
+    Connect node1 to node2
+    """
+    addr = node2.get_addrs()[0]
+    info = info_from_p2p_addr(addr)
+    await node1.connect(info)
+
+async def create_libp2p_hosts(num_hosts):
+    """
+    Create libp2p hosts
+    :param num_hosts: number of hosts to create
+    """
+    hosts = []
+    tasks_create = []
+    for i in range(0, num_hosts):
+        # Create node
+        tasks_create.append(asyncio.ensure_future(new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])))
+    hosts = await asyncio.gather(*tasks_create)
+
+    tasks_listen = []
+    for node in hosts:
+        # Start listener
+        tasks_listen.append(asyncio.ensure_future(node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))))
+    await asyncio.gather(*tasks_listen)
+
+    return hosts
+
+def create_pubsub_and_gossipsub_instances(libp2p_hosts, supported_protocols, degree, degree_low, \
+    degree_high, time_to_live, gossip_window, gossip_history, heartbeat_interval):
+    pubsubs = []
+    gossipsubs = []
+    for node in libp2p_hosts:
+        gossipsub = GossipSub(supported_protocols, degree,
+                              degree_low, degree_high, time_to_live,
+                              gossip_window, gossip_history,
+                              heartbeat_interval)
+        pubsub = Pubsub(node, gossipsub, "a")
+        pubsubs.append(pubsub)
+        gossipsubs.append(gossipsub)
+
+    return pubsubs, gossipsubs
+
+async def sparse_connect(hosts):
+    await connect_some(hosts, 3)
+
+
+async def dense_connect(hosts):
+    await connect_some(hosts, 10)
+
+
+async def connect_some(hosts, degree):
+    for i, host in enumerate(hosts):
+        for j, host2 in enumerate(hosts):
+            if i != j and i < j:
+                await connect(host, host2)
+
+    # TODO: USE THE CODE BELOW
+    # for i, host in enumerate(hosts):
+    #     j = 0
+    #     while j < degree:
+    #         n = random.randint(0, len(hosts) - 1)
+
+    #         if n == i:
+    #             j -= 1
+    #             continue
+
+    #         neighbor = hosts[n]
+
+    #         await connect(host, neighbor)
+
+    #         j += 1

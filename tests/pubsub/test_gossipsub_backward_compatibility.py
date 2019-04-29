@@ -191,8 +191,8 @@ async def perform_test_from_obj(obj):
         # Look at each node in each topic
         for node_id in topic_map[topic]:
             # Get message from subscription queue
-            msg_on_node_str = await queues_map[node_id][topic].get()
-            assert actual_msg.publish[0].SerializeToString() == msg_on_node_str.SerializeToString()
+            msg_on_node = await queues_map[node_id][topic].get()
+            assert actual_msg.publish[0].SerializeToString() == msg_on_node.SerializeToString()
 
     # Success, terminate pending tasks.
     await cleanup()

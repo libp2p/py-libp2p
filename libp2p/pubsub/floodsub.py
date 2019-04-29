@@ -81,7 +81,7 @@ class FloodSub(IPubsubRouter):
                             # Publish the packet
                             await stream.write(new_packet.SerializeToString())
 
-    def join(self, topic):
+    async def join(self, topic):
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -89,7 +89,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to join
         """
 
-    def leave(self, topic):
+    async def leave(self, topic):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.

@@ -83,13 +83,16 @@ class Pubsub():
         peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
+            print("continuously_read_stream waiting to read")
             incoming = (await stream.read())
+            print("continuously_read_stream incoming received")
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
             should_publish = False
 
             if rpc_incoming.publish:
+                print("continuously_read_stream publish received")
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
                     id_in_seen_msgs = (message.seqno, message.from_id)
@@ -199,6 +202,7 @@ class Pubsub():
                 # we are subscribed to a topic this message was sent for,
                 # so add message to the subscription output queue
                 # for each topic
+                print("handle_talk ADDING TO USER QUEUE")
                 await self.my_topics[topic].put(publish_message)
 
     async def subscribe(self, topic_id):
@@ -221,7 +225,7 @@ class Pubsub():
         await self.message_all_peers(packet.SerializeToString())
 
         # Tell router we are joining this topic
-        self.router.join(topic_id)
+        await self.router.join(topic_id)
 
         # Return the asyncio queue for messages on this topic
         return self.my_topics[topic_id]
@@ -247,7 +251,7 @@ class Pubsub():
         await self.message_all_peers(packet.SerializeToString())
 
         # Tell router we are leaving this topic
-        self.router.leave(topic_id)
+        await self.router.leave(topic_id)
 
     async def message_all_peers(self, rpc_msg):
         """
