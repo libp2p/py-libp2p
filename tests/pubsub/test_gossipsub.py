@@ -63,7 +63,7 @@ async def test_sparse():
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
         # Assert that all blocking queues receive the message
         for queue in queues:
             print("pre-get")
@@ -71,5 +71,6 @@ async def test_sparse():
             print(msg)
             print("post-get")
             assert msg.SerializeToString() == packet.publish[0].SerializeToString()
+            print("assert passed")
         print("Message acked")
     await cleanup()

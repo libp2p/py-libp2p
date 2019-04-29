@@ -82,7 +82,7 @@ class GossipSub(IPubsubRouter):
         peer_id_str = str(peer_id)
         self.peers_to_protocol.remove(peer_id_str)
 
-    async def handle_rpc(self, rpc):
+    async def handle_rpc(self, rpc, sender_peer_id):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -93,16 +93,16 @@ class GossipSub(IPubsubRouter):
         # Relay each rpc control  to the appropriate handler
         if control_message.ihave:
             for ihave in control_message.ihave:
-                await self.handle_ihave(ihave)
+                await self.handle_ihave(ihave, sender_peer_id)
         if control_message.iwant:
             for iwant in control_message.iwant:
-                await self.handle_iwant(iwant)
+                await self.handle_iwant(iwant, sender_peer_id)
         if control_message.graft:
             for graft in control_message.graft:
-                await self.handle_graft(graft)
+                await self.handle_graft(graft, sender_peer_id)
         if control_message.prune:
             for prune in control_message.prune:
-                await self.handle_prune(prune)
+                await self.handle_prune(prune, sender_peer_id)
 
     async def publish(self, sender_peer_id, rpc_message):
         """
@@ -236,7 +236,7 @@ class GossipSub(IPubsubRouter):
             print("deliver_messages_to_peers Delivering to " + str(peer_id_in_topic))
             if peer_id_in_topic not in (msg_sender, origin_id):
                 stream = self.pubsub.peers[peer_id_in_topic]
-                print("deliver_messages_to_peers packet sent")
+                print("deliver_messages_to_peers packet sent " + str(stream) + "\n\nPACKET: " + str(serialized_packet))
                 # Publish the packet
                 await stream.write(serialized_packet)
 
@@ -366,14 +366,14 @@ class GossipSub(IPubsubRouter):
 
     # RPC handlers
 
-    async def handle_ihave(self, ihave_msg):
+    async def handle_ihave(self, ihave_msg, sender_peer_id):
         """
         Checks the seen set and requests unknown messages with an IWANT message.
         """
-        from_id_bytes = ihave_msg.from_id
+        # from_id_bytes = ihave_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
-        from_id_str = from_id_bytes.decode()
+        from_id_str = sender_peer_id
 
         # Get list of all seen seqnos from the (seqno, from) tuples in seen_messages cache
         seen_seqnos = [seqno_and_from[0] for seqno_and_from in self.pubsub.seen_messages.keys()]
@@ -386,14 +386,14 @@ class GossipSub(IPubsubRouter):
         if len(msg_ids_wanted) > 0:
             await self.emit_iwant(msg_ids_wanted, from_id_str)
 
-    async def handle_iwant(self, iwant_msg):
+    async def handle_iwant(self, iwant_msg, sender_peer_id):
         """
         Forwards all request messages that are present in mcache to the requesting peer.
         """
-        from_id_bytes = iwant_msg.from_id
+        # from_id_bytes = iwant_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
-        from_id_str = from_id_bytes.decode()
+        from_id_str = sender_peer_id
 
         msg_ids = iwant_msg.messageIDs
         msgs_to_forward = []
@@ -424,17 +424,23 @@ class GossipSub(IPubsubRouter):
         # 4) And write the packet to the stream
         await peer_stream.write(rpc_msg)
 
-    async def handle_graft(self, graft_msg):
+    async def handle_graft(self, graft_msg, sender_peer_id):
+        print("handle_graft enter")
         topic = graft_msg.topicID
+        print("handle_graft topic " + str(topic))
+        print("handle_graft msg " + str(graft_msg.SerializeToString()))
 
         # TODO: I think from_id needs to be gotten some other way because ControlMessage
         # does not have from_id attribute
         # IMPT: go does use this in a similar way: https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
         # but go seems to do RPC.from rather than getting the from in the message itself
-        from_id_bytes = graft_msg.from_id
+        # from_id_bytes = graft_msg.from_id
+        print("handle_graft death")
 
         # TODO: convert bytes to string properly, is this proper?
-        from_id_str = from_id_bytes.decode()
+        # from_id_str = from_id_bytes.decode()
+        from_id_str = sender_peer_id
+        print("handle_graft from_id_str " + str(from_id_str))
 
         # Add peer to mesh for topic
         if topic in self.mesh:
@@ -442,17 +448,17 @@ class GossipSub(IPubsubRouter):
         else:
             self.mesh[topic] = [from_id_str]
 
-    async def handle_prune(self, prune_msg):
+    async def handle_prune(self, prune_msg, sender_peer_id):
         topic = prune_msg.topicID
 
         # TODO: I think from_id needs to be gotten some other way because ControlMessage
         # does not have from_id attribute
         # IMPT: go does use this in a similar way: https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
         # but go seems to do RPC.from rather than getting the from in the message itself
-        from_id_bytes = prune_msg.from_id
+        # from_id_bytes = prune_msg.from_id
 
         # TODO: convert bytes to string properly, is this proper?
-        from_id_str = from_id_bytes.decode()
+        from_id_str = sender_peer_id
 
         # Remove peer from mesh for topic, if peer is in topic
         if topic in self.mesh and from_id_str in self.mesh[topic]:

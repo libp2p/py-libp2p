@@ -102,6 +102,7 @@ class Pubsub():
                         await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
+                print("continuously_read_stream subscription")
                 # deal with RPC.subscriptions
                 # We don't need to relay the subscription to our
                 # peers because a given node only needs its peers
@@ -116,8 +117,10 @@ class Pubsub():
                 await self.router.publish(peer_id, incoming)
 
             if rpc_incoming.control:
+                print("continuously_read_stream control")
+                print("continuously_read_stream did not die")
                 # Pass rpc to router so router could perform custom logic
-                await self.router.handle_rpc(rpc_incoming)
+                await self.router.handle_rpc(rpc_incoming, peer_id)
 
             # Force context switch
             await asyncio.sleep(0)
