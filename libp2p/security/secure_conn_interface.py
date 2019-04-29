@@ -14,6 +14,7 @@ class ISecureConn(ABC):
         :return: connection object that has been made secure
         """
 
+    @abstractmethod
     def get_security_details(self):
         """
         :return: map containing details about the connections security

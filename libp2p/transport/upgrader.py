@@ -10,16 +10,19 @@ class TransportUpgrader:
 
     def upgrade_listener(self, transport, listeners):
         """
-        upgrade multiaddr listeners to libp2p-transport listeners
-
+        Upgrade multiaddr listeners to libp2p-transport listeners
         """
 
-    def upgrade_security(self):
+    def upgrade_security(self, conn, peer_id):
+        """
+        Upgrade conn to be a secured connection
+        """
+        # TODO: Do exchange to determine security module
         pass
 
     def upgrade_connection(self, conn, generic_protocol_handler, peer_id):
         """
-        upgrade raw connection to muxed connection
+        Upgrade raw connection to muxed connection
         """
 
         # For PoC, no security, default to mplex
