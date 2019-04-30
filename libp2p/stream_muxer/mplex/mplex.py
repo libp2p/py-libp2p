@@ -11,7 +11,7 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    def __init__(self, conn, generic_protocol_handler, peer_id):
+    def __init__(self, secured_conn, generic_protocol_handler, peer_id):
         """
         create a new muxed connection
         :param conn: an instance of raw connection
@@ -19,10 +19,11 @@ class Mplex(IMuxedConn):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
-        super(Mplex, self).__init__(conn, generic_protocol_handler, peer_id)
+        super(Mplex, self).__init__(secured_conn, generic_protocol_handler, peer_id)
 
-        self.raw_conn = conn
-        self.initiator = conn.initiator
+        self.secured_conn = secured_conn
+        self.raw_conn = secured_conn.get_conn()
+        self.initiator = self.raw_conn.initiator
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler

@@ -10,6 +10,7 @@ from .kademlia.routed_host import RoutedHost
 from .transport.upgrader import TransportUpgrader
 from .transport.tcp.tcp import TCP
 from .kademlia.network import KademliaServer
+from libp2p.security.insecure_security import InsecureTransport
 
 
 async def cleanup_done_tasks():
@@ -71,7 +72,9 @@ def initialize_default_swarm(
     transport = [multiaddr.Multiaddr(t) for t in transport_opt]
     # TODO wire muxer up with swarm
     # muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or ["secio"]
+
+    # Use passed in security option or the default insecure option
+    sec = sec_opt or {"/insecure/1.0.0": InsecureTransport("insecure")}
     peerstore = peerstore_opt or PeerStore()
     upgrader = TransportUpgrader(sec, transport)
     swarm_opt = Swarm(id_opt, peerstore, upgrader)

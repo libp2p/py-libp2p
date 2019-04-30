@@ -82,9 +82,10 @@ class TCP(ITransport):
         await writer.drain()
 
         # Await ack for peer id
-        ack = (await reader.read(1024)).decode()
+        expected_ack_str = "received peer id"
+        ack = (await reader.read(len(expected_ack_str))).decode()
 
-        if ack != "received peer id":
+        if ack != expected_ack_str:
             raise Exception("Receiver did not receive peer id")
 
         return RawConnection(host, port, reader, writer, True)

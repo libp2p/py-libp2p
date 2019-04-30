@@ -10,7 +10,7 @@ class IMuxedConn(ABC):
     def __init__(self, conn, generic_protocol_handler, peer_id):
         """
         create a new muxed connection
-        :param conn: an instance of raw connection
+        :param conn: an instance of secured connection
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to

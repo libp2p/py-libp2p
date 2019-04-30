@@ -12,7 +12,7 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 """
 class SecurityMultistream(ABC):
 
-    def __init__():
+    def __init__(self):
         # Map protocol to secure transport 
         self.transports = {}
 

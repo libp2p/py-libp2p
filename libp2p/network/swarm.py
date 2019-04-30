@@ -69,8 +69,10 @@ class Swarm(INetwork):
             # Transport dials peer (gets back a raw conn)
             raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
-            # Use upgrader to upgrade raw conn to muxed conn
-            muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
+            # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
+            # the conn and then mux the conn
+            secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
+            muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
                 self.generic_protocol_handler, peer_id)
 
             # Store muxed connection in connections
@@ -145,7 +147,11 @@ class Swarm(INetwork):
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
-                muxed_conn = self.upgrader.upgrade_connection(raw_conn, \
+                
+                # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
+                # the conn and then mux the conn
+                secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, False)
+                muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
                     self.generic_protocol_handler, peer_id)
 
                 # Store muxed_conn with peer id

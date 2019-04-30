@@ -1,3 +1,4 @@
+import asyncio
 from .raw_connection_interface import IRawConnection
 
 
@@ -11,6 +12,19 @@ class RawConnection(IRawConnection):
         self.writer = writer
         self._next_id = 0 if initiator else 1
         self.initiator = initiator
+
+    async def write(self, data):
+        self.writer.write(data)
+        self.writer.write("\n".encode())
+        await self.writer.drain()
+
+    async def read(self):
+        line = await self.reader.readline()
+        adjusted_line = line.decode().rstrip('\n')
+
+        # TODO: figure out a way to remove \n without going back and forth with
+        # encoding and decoding
+        return adjusted_line.encode()
 
     def close(self):
         self.writer.close()
