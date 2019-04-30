@@ -44,7 +44,8 @@ class Pubsub():
             self.cache_size = 128
         else:
             self.cache_size = cache_size
-        self.seen_messages = LRU(self.cache_size)
+        #self.seen_messages = LRU(self.cache_size)
+        self.seen_messages = dict()
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
@@ -98,7 +99,10 @@ class Pubsub():
                     id_in_seen_msgs = (message.seqno, message.from_id)
                     if id_in_seen_msgs not in self.seen_messages:
                         should_publish = True
+                        if id_in_seen_msgs in self.seen_messages:
+                            print('shit')
                         self.seen_messages[id_in_seen_msgs] = 1
+                        print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
                         await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:

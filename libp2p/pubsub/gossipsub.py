@@ -3,6 +3,7 @@ import asyncio
 
 from aio_timers import Timer
 from lru import LRU
+from ast import literal_eval
 from .pb import rpc_pb2
 from .pubsub_router_interface import IPubsubRouter
 from .mcache import MessageCache
@@ -323,33 +324,47 @@ class GossipSub(IPubsubRouter):
                     self.fanout[topic].extend(selected_peers)
 
     async def gossip_heartbeat(self):
+        print('gossip_heartbeat reached')
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if len(msg_ids) > 0:
+                print('gossip_heartbeat msg_ids > 0 reached')
                 # TODO: Make more efficient, possibly using a generator?
                 # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
-                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
-                
-                # Select D peers from peers.gossipsub[topic]
-                peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
-                for peer in peers_to_emit_ihave_to:
-                    if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
-                        await self.emit_ihave(msg_ids)
+                if topic in self.pubsub.peer_topics:
+                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+                    print('gs peers in topic: ' + str(gossipsub_peers_in_topic))
+
+                    # Select D peers from peers.gossipsub[topic]
+                    peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+
+                    print('peers to emit ihave to: ' + str(peers_to_emit_ihave_to))
+                    for peer in peers_to_emit_ihave_to:
+                        print('gossip_heartbeat mesh: ' + str(self.mesh[topic]))
+                        # print('gossip_heartbeat fanout: ' + str(self.fanout[topic]))
+                        if (topic not in self.mesh or (peer not in self.mesh[topic])) and (topic not in self.fanout or (peer not in self.fanout[topic])):
+                            print('gossip_heartbeat emitting ihave')
+                            msg_ids = [str(msg) for msg in msg_ids]
+                            await self.emit_ihave(topic, msg_ids, peer)
 
         # Do the same for fanout, for all topics not already hit in mesh
         for topic in self.fanout:
             if topic not in self.mesh:
                 msg_ids = self.mcache.window(topic)
                 if len(msg_ids) > 0:
+                    print('gossip_heartbeat msg_ids > 0 reached fanout')
                     # TODO: Make more efficient, possibly using a generator?
                     # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
-                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
-                    
-                    # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
-                    for peer in peers_to_emit_ihave_to:
-                        if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
-                            await self.emit_ihave(msg_ids)
+                    if topic in self.pubsub.peer_topics:
+                        gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic] if peer in self.peers_gossipsub]
+
+                        # Select D peers from peers.gossipsub[topic]
+                        peers_to_emit_ihave_to = self.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                        for peer in peers_to_emit_ihave_to:
+                            if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
+                                print('gossip_heartbeat emitting ihave in fanout')
+                                msg_ids = [str(msg) for msg in msg_ids]
+                                await self.emit_ihave(topic, msg_ids, peer)
 
         self.mcache.shift()
 
@@ -388,19 +403,25 @@ class GossipSub(IPubsubRouter):
         """
         # from_id_bytes = ihave_msg.from_id
 
-        # TODO: convert bytes to string properly, is this proper?
         from_id_str = sender_peer_id
 
-        # Get list of all seen seqnos from the (seqno, from) tuples in seen_messages cache
-        seen_seqnos = [seqno_and_from[0] for seqno_and_from in self.pubsub.seen_messages.keys()]
+        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in seen_messages cache
+        seen_seqnos_and_peers = [seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()]
+
+        print('seen_seqnos: ' + str(seen_seqnos_and_peers))
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in seen_seqnos) to list
         # of messages we want to request
-        msg_ids_wanted = [msg_id for msg_id in ihave_msg.messageIDs if msg_id not in seen_seqnos]
+        msg_ids_wanted = [msg_id for msg_id in ihave_msg.messageIDs if literal_eval(msg_id) not in seen_seqnos_and_peers]
+
+        for msg_id in msg_ids_wanted:
+            print('i want: ' + msg_id)
 
         # Request messages with IWANT message
         if len(msg_ids_wanted) > 0:
             await self.emit_iwant(msg_ids_wanted, from_id_str)
+
+        print('handle_ihave success')
 
     async def handle_iwant(self, iwant_msg, sender_peer_id):
         """
@@ -411,14 +432,16 @@ class GossipSub(IPubsubRouter):
         # TODO: convert bytes to string properly, is this proper?
         from_id_str = sender_peer_id
 
-        msg_ids = iwant_msg.messageIDs
+        msg_ids = [literal_eval(msg) for msg in iwant_msg.messageIDs]
         msgs_to_forward = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
             msg = self.mcache.get(msg_id_iwant)
-
+            print("Handle_iwant getting: " +  str(msg_id_iwant))
+            print("Handle_iwant getting msg: " + str(msg))
             # Cache hit
             if msg:
+                print("handle_iwant got " + str(msg))
                 # Add message to list of messages to forward to requesting peers
                 msgs_to_forward.append(msg)
 
@@ -428,7 +451,8 @@ class GossipSub(IPubsubRouter):
         # We should 
         # 1) Package these messages into a single packet
         packet = rpc_pb2.RPC()
-        packet.publish = msgs_to_forward
+        print('msgs to forward: ' + str(msgs_to_forward))
+        packet.publish.extend(msgs_to_forward)
 
         # 2) Serialize that packet
         rpc_msg = packet.SerializeToString()
@@ -439,6 +463,7 @@ class GossipSub(IPubsubRouter):
 
         # 4) And write the packet to the stream
         await peer_stream.write(rpc_msg)
+        print('handle_iwant success')
 
     async def handle_graft(self, graft_msg, sender_peer_id):
         print("handle_graft enter")
@@ -487,29 +512,37 @@ class GossipSub(IPubsubRouter):
         """
         Emit ihave message, sent to to_peer, for topic and msg_ids
         """
-        ihave_msg = rpc_pb2.ControlIHave(
-            topicID=topic,
-            messageIDs=msg_ids
-            )
-        control_msg = rpc_pb2.ControlMessage(
-            ihave=[ihave_msg]
-            )
+        print('emit_ihave enter')
+        ihave_msg = rpc_pb2.ControlIHave()
+        print('emit_ihave consturct worked')
+        print('emit_ihave msg ids: ' + str(msg_ids))
+        ihave_msg.messageIDs.extend(msg_ids)
+        print('emit_ihave messageids worked')
+        ihave_msg.topicID = topic
+        print('emit_ihave topic worked')
+
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.ihave.extend([ihave_msg])
 
         await self.emit_control_message(control_msg, to_peer)
+
+        print('emit_ihave success')
 
     async def emit_iwant(self, msg_ids, to_peer):
         # TODO: FOLLOW MESSAGE CREATION AS DONE IN emit_graft
         """
         Emit iwant message, sent to to_peer, for msg_ids
         """
-        iwant_msg = rpc_pb2.ControlIWant(
-            messageIDs=msg_ids
-            )
-        control_msg = rpc_pb2.ControlMessage(
-            iwant=[iwant_msg]
-            )
+        print('emit_iwant')
+        iwant_msg = rpc_pb2.ControlIWant()
+        iwant_msg.messageIDs.extend(msg_ids)
+
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.iwant.extend([iwant_msg])
 
         await self.emit_control_message(control_msg, to_peer)
+
+        print('emit_iwant success')
 
     async def emit_graft(self, topic, to_peer):
         """

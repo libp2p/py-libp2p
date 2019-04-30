@@ -7,7 +7,8 @@ from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from utils import message_id_generator, generate_RPC_packet, \
-    create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect
+    create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect, \
+    connect
 from tests.utils import cleanup
 
 SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
@@ -70,9 +71,9 @@ async def test_dense():
             msg = await queue.get()
             print(msg)
             print("post-get")
-            assert msg.SerializeToString() == packet.publish[0].SerializeToString()
+            assert msg.data == packet.publish[0].data
             print("assert passed")
-        print("Message acked")
+        print("Message acked " + str(i))
     await cleanup()
 
 @pytest.mark.asyncio
@@ -275,5 +276,50 @@ async def test_fanout_maintenance():
             assert msg.SerializeToString() == packet.publish[0].SerializeToString()
             print("assert passed")
         print("Message acked")
+
+    await cleanup()
+
+@pytest.mark.asyncio
+async def test_gossip_propagation():
+    # Create libp2p hosts
+    print("Enter test")
+    next_msg_id_func = message_id_generator(0)
+
+    print("creating hosts")
+    num_hosts = 2
+    libp2p_hosts = await create_libp2p_hosts(num_hosts)
+
+    print("creating pubsub")
+    # Create pubsub, gossipsub instances
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
+                                                                SUPPORTED_PROTOCOLS, \
+                                                                1, 0, 2, 30, 50, 100, 0.5)
+    node1, node2 = libp2p_hosts[0], libp2p_hosts[1]
+    sub1, sub2 = pubsubs[0], pubsubs[1]
+    gsub1, gsub2 = gossipsubs[0], gossipsubs[1]
+
+    node1_queue = await sub1.subscribe('foo')
+
+    # node 1 publish to topic
+    msg_content = 'foo_msg'
+    node1_id = str(node1.get_id())
+
+    # Generate message packet
+    packet = generate_RPC_packet(node1_id, ["foo"], msg_content, next_msg_id_func())
+
+    # publish from the randomly chosen host
+    await gsub1.publish(node1_id, packet.SerializeToString())
+
+    # now node 2 subscribes
+    node2_queue = await sub2.subscribe('foo')
+
+    await connect(node2, node1)
+
+    # wait for gossip heartbeat
+    await asyncio.sleep(2)
+
+    # should be able to read message
+    msg = await node2_queue.get()
+    assert msg.SerializeToString() == packet.publish[0].SerializeToString()
 
     await cleanup()
