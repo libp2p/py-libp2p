@@ -40,7 +40,7 @@ class SecurityMultistream(ABC):
         """
 
         # Select a secure transport
-        transport = await self.select_transport(conn, True)
+        transport = await self.select_transport(conn, False)
 
         # Create secured connection
         secure_conn = await transport.secure_inbound(conn)
@@ -81,7 +81,6 @@ class SecurityMultistream(ABC):
             protocol = await self.multiselect_client.select_one_of(list(self.transports.keys()), conn)
         else:
             # Select protocol if non-initiator
-            protocol = await self.multiselect.negotiate(conn)
-
+            protocol, _ = await self.multiselect.negotiate(conn)
         # Return transport from protocol
         return self.transports[protocol]
