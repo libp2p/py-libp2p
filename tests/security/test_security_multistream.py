@@ -7,6 +7,7 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from tests.utils import cleanup, set_up_nodes_by_transport_opt
 from libp2p.security.security_multistream import SecurityMultistream
 from libp2p.security.insecure_security import InsecureConn, InsecureTransport
+from simple_security import SimpleSecurityTransport
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -42,21 +43,10 @@ async def perform_simple_test(assertion_func, transports_for_initiator, transpor
 
     await connect(node1, node2)
 
-    # Fill initiator
-    # sec_multi_initiator = SecurityMultistream()
-    # for i, transport in enumerate(transports_for_initiator):
-    #     sec_multi_initiator.add_transport(str(i), transport)
-
-    # # Fill non-initiator
-    # sec_multi_noninitiator = SecurityMultistream()
-    # for i, transport in enumerate(transports_for_noninitiator):
-    #     sec_multi_noninitiator.add_transport(str(i), transport)
-
-    # # Perform negotiation
-    # tasks = []
-    # tasks.append(asyncio.ensure_future(sec_multi_initiator.secure_inbound(conn)))
-    # tasks.append(asyncio.ensure_future(sec_multi_noninitiator.secure_inbound(conn)))
-    # mplex_conns = await asyncio.gather(*tasks)
+    # Wait a very short period to allow conns to be stored (since the functions 
+    # storing the conns are async, they may happen at slightly different times
+    # on each node) 
+    await asyncio.sleep(0.1)
 
     # Get conns
     node1_conn = node1.get_network().connections[peer_id_for_node(node2)]
@@ -71,12 +61,23 @@ async def perform_simple_test(assertion_func, transports_for_initiator, transpor
 
 
 @pytest.mark.asyncio
-async def test_single_security_transport_succeeds():
+async def test_single_insecure_security_transport_succeeds():
     transports_for_initiator = [InsecureTransport("foo")]
     transports_for_noninitiator = [InsecureTransport("foo")]
 
     def assertion_func(details):
         assert details["id"] == "foo"
+
+    await perform_simple_test(assertion_func,
+                              transports_for_initiator, transports_for_noninitiator)
+
+@pytest.mark.asyncio
+async def test_single_simple_test_security_transport_succeeds():
+    transports_for_initiator = [SimpleSecurityTransport("tacos")]
+    transports_for_noninitiator = [SimpleSecurityTransport("tacos")]
+
+    def assertion_func(details):
+        assert details["key_phrase"] == "tacos"
 
     await perform_simple_test(assertion_func,
                               transports_for_initiator, transports_for_noninitiator)
