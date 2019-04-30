@@ -225,7 +225,7 @@ class GossipSub(IPubsubRouter):
             await self.emit_prune(topic, peer)
 
         # Forget mesh[topic]
-        self.mesh.remove(topic)
+        self.mesh.pop(topic, None)
 
     # Interface Helper Functions
 

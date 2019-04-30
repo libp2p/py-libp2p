@@ -190,8 +190,9 @@ class Pubsub():
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].append(origin_id)
         else:
-            # TODO: Remove peer from topic
-            pass
+            if sub_message.topicid in self.peer_topics:
+                if origin_id in self.peer_topics[sub_message.topicid]:
+                    self.peer_topics[sub_message.topicid].remove(origin_id)
 
     async def handle_talk(self, publish_message):
         """
