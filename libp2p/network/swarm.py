@@ -12,14 +12,14 @@ from .connection.raw_connection import RawConnection
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
-    def __init__(self, peer_id, peerstore, upgrader):
+    def __init__(self, peer_id, peerstore, upgrader, transport):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
+        self.transport = transport
         self.connections = dict()
         self.listeners = dict()
         self.stream_handlers = dict()
-        self.transport = None
 
         # Protocol muxing
         self.multiselect = Multiselect()
@@ -188,10 +188,6 @@ class Swarm(INetwork):
             self.notifees.append(notifee)
             return True
         return False
-
-    def add_transport(self, transport):
-        # TODO: Support more than one transport
-        self.transport = transport
 
 def create_generic_protocol_handler(swarm):
     """

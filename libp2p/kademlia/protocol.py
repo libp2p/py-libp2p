@@ -36,12 +36,6 @@ class KademliaProtocol(RPCProtocol):
             ids.append(rid)
         return ids
 
-    def rpc_add_provider(self, sender, nodeid, key):
-        pass
-
-    def rpc_get_providers(self, sender, nodeid, key):
-        pass
-
     def rpc_stun(self, sender):  # pylint: disable=no-self-use
         return sender
 
@@ -79,6 +73,42 @@ class KademliaProtocol(RPCProtocol):
             return self.rpc_find_node(sender, nodeid, key)
         return {'value': value}
 
+    def rpc_add_provider(self, sender, nodeid, key, provider_id):
+        # pylint: disable=unused-argument
+        """
+        rpc when receiving an add_provider call
+        should validate received PeerInfo matches sender nodeid
+        if it does, receipient must store a record in its datastore
+        we store a map of content_id to peer_id (non xor)
+        """
+        if nodeid == provider_id:
+            log.info("adding provider %s for key %s in local table",
+                     provider_id, str(key))
+            self.storage[key] = provider_id
+            return True
+        return False
+
+    def rpc_get_providers(self, sender, key):
+        # pylint: disable=unused-argument
+        """
+        rpc when receiving a get_providers call
+        should look up key in data store and respond with records
+        plus a list of closer peers in its routing table
+        """
+        providers = []
+        record = self.storage.get(key, None)
+
+        if record:
+            providers.append(record)
+
+        keynode = create_kad_peerinfo(key)
+        neighbors = self.router.find_neighbors(keynode)
+        for neighbor in neighbors:
+            if neighbor.peer_id != record:
+                providers.append(neighbor.peer_id)
+
+        return providers
+
     async def call_find_node(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_node(address, self.source_node.peer_id,
@@ -99,6 +129,19 @@ class KademliaProtocol(RPCProtocol):
     async def call_store(self, node_to_ask, key, value):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.store(address, self.source_node.peer_id, key, value)
+        return self.handle_call_response(result, node_to_ask)
+
+    async def call_add_provider(self, node_to_ask, key, provider_id):
+        address = (node_to_ask.ip, node_to_ask.port)
+        result = await self.add_provider(address,
+                                         self.source_node.peer_id,
+                                         key, provider_id)
+
+        return self.handle_call_response(result, node_to_ask)
+
+    async def call_get_providers(self, node_to_ask, key):
+        address = (node_to_ask.ip, node_to_ask.port)
+        result = await self.get_providers(address, key)
         return self.handle_call_response(result, node_to_ask)
 
     def welcome_if_new(self, node):

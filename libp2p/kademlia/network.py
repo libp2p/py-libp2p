@@ -166,6 +166,20 @@ class KademliaServer:
         dkey = digest(key)
         return await self.set_digest(dkey, value)
 
+    async def provide(self, key):
+        """
+        publish to the network that it provides for a particular key
+        """
+        neighbors = self.protocol.router.find_neighbors(self.node)
+        return [await self.protocol.call_add_provider(n, key, self.node.peer_id) for n in neighbors]
+
+    async def get_providers(self, key):
+        """
+        get the list of providers for a key
+        """
+        neighbors = self.protocol.router.find_neighbors(self.node)
+        return [await self.protocol.call_get_providers(n, key) for n in neighbors]
+
     async def set_digest(self, dkey, value):
         """
         Set the given SHA1 digest key (bytes) to the given value in the
