@@ -4,6 +4,7 @@ import pytest
 
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure_security import InsecureTransport
 from tests.utils import cleanup
 from simple_security import SimpleSecurityTransport
@@ -90,6 +91,69 @@ async def test_two_simple_test_security_transport_for_initiator_succeeds():
 
     def assertion_func(details):
         assert details["key_phrase"] == "shleep"
+
+    await perform_simple_test(assertion_func,
+                              transports_for_initiator, transports_for_noninitiator)
+
+@pytest.mark.asyncio
+async def test_two_simple_test_security_transport_for_noninitiator_succeeds():
+    transports_for_initiator = {"tacos": SimpleSecurityTransport("tacos")}
+    transports_for_noninitiator = {"shleep": SimpleSecurityTransport("shleep"),
+                                   "tacos": SimpleSecurityTransport("tacos")}
+
+    def assertion_func(details):
+        assert details["key_phrase"] == "tacos"
+
+    await perform_simple_test(assertion_func,
+                              transports_for_initiator, transports_for_noninitiator)
+
+
+@pytest.mark.asyncio
+async def test_two_simple_test_security_transport_for_both_succeeds():
+    transports_for_initiator = {"a": SimpleSecurityTransport("a"),
+                                "b": SimpleSecurityTransport("b")}
+    transports_for_noninitiator = {"c": SimpleSecurityTransport("c"),
+                                   "b": SimpleSecurityTransport("b")}
+
+    def assertion_func(details):
+        assert details["key_phrase"] == "b"
+
+    await perform_simple_test(assertion_func,
+                              transports_for_initiator, transports_for_noninitiator)
+
+@pytest.mark.asyncio
+async def test_multiple_security_none_the_same_fails():
+    transports_for_initiator = {"a": SimpleSecurityTransport("a"),
+                                "b": SimpleSecurityTransport("b")}
+    transports_for_noninitiator = {"c": SimpleSecurityTransport("c"),
+                                   "d": SimpleSecurityTransport("d")}
+
+    def assertion_func(_):
+        assert False
+
+    with pytest.raises(MultiselectClientError):
+        await perform_simple_test(assertion_func,
+                                  transports_for_initiator, transports_for_noninitiator)
+
+    await cleanup()
+
+@pytest.mark.asyncio
+async def test_default_insecure_security():
+    transports_for_initiator = None
+    transports_for_noninitiator = None
+
+    details1 = None
+    details2 = None
+
+    def assertion_func(details):
+        nonlocal details1
+        nonlocal details2
+        if not details1:
+            details1 = details
+        elif not details2:
+            details2 = details
+        else:
+            assert details1 == details2
 
     await perform_simple_test(assertion_func,
                               transports_for_initiator, transports_for_noninitiator)
