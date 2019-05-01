@@ -130,6 +130,8 @@ class GossipSub(IPubsubRouter):
             print("Delivering to self if needed")
             # Deliver to self if needed
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+                # id_in_seen_msgs = (message.seqno, message.from_id)
+                # if id_in_seen_msgs not in self.pubsub.seen_messages:
                 await self.pubsub.handle_talk(message)
 
             print("iterate topics")

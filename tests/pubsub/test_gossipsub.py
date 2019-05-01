@@ -66,14 +66,16 @@ async def test_dense():
 
         await asyncio.sleep(0.5)
         # Assert that all blocking queues receive the message
+        items = []
         for queue in queues:
             print("pre-get")
             msg = await queue.get()
             print(msg)
             print("post-get")
             assert msg.data == packet.publish[0].data
+            items.append(msg.data)
             print("assert passed")
-        print("Message acked " + str(i))
+        print("Message acked " + str(i) + "| " + str(items))
     await cleanup()
 
 @pytest.mark.asyncio

@@ -57,6 +57,8 @@ class Pubsub():
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
+        self.lock = asyncio.Lock()
+
         # Call handle peer to keep waiting for updates to peer queue
         asyncio.ensure_future(self.handle_peer_queue())
 
@@ -84,9 +86,7 @@ class Pubsub():
         peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
-            print("continuously_read_stream waiting to read")
             incoming = (await stream.read())
-            print("continuously_read_stream incoming received")
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
@@ -97,13 +97,14 @@ class Pubsub():
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
                     id_in_seen_msgs = (message.seqno, message.from_id)
-                    if id_in_seen_msgs not in self.seen_messages:
-                        should_publish = True
-                        if id_in_seen_msgs in self.seen_messages:
-                            print('shit')
-                        self.seen_messages[id_in_seen_msgs] = 1
-                        print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
-                        await self.handle_talk(message)
+                    async with self.lock:
+                        if id_in_seen_msgs not in self.seen_messages:
+                            should_publish = True
+                            if id_in_seen_msgs in self.seen_messages:
+                                print('shit')
+                            self.seen_messages[id_in_seen_msgs] = 1
+                            print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
+                            await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
                 print("continuously_read_stream subscription")
@@ -121,8 +122,8 @@ class Pubsub():
                 await self.router.publish(peer_id, incoming)
 
             if rpc_incoming.control:
-                print("continuously_read_stream control")
-                print("continuously_read_stream did not die")
+                # print("continuously_read_stream control")
+                # print("continuously_read_stream did not die")
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
