@@ -6,8 +6,8 @@ from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure_security import InsecureTransport
+from libp2p.security.simple_security import SimpleSecurityTransport
 from tests.utils import cleanup
-from simple_security import SimpleSecurityTransport
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
