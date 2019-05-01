@@ -5,7 +5,7 @@ class InsecureTransport(ISecureTransport):
 
     def __init__(self, transport_id):
         self.transport_id = transport_id
-    
+
     async def secure_inbound(self, conn):
         """
         Secure the connection, either locally or by communicating with opposing node via conn,

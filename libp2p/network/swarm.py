@@ -147,7 +147,7 @@ class Swarm(INetwork):
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
                                          multiaddr.value_for_protocol('tcp'), reader, writer, False)
-                
+
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
                 secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, False)

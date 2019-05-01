@@ -6,7 +6,7 @@ class SimpleSecurityTransport(ISecureTransport):
 
     def __init__(self, key_phrase):
         self.key_phrase = key_phrase
-    
+
     async def secure_inbound(self, conn):
         """
         Secure the connection, either locally or by communicating with opposing node via conn,

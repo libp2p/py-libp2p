@@ -4,9 +4,8 @@ import pytest
 
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
-from libp2p.security.security_multistream import SecurityMultistream
-from libp2p.security.insecure_security import InsecureConn, InsecureTransport
+from libp2p.security.insecure_security import InsecureTransport
+from tests.utils import cleanup
 from simple_security import SimpleSecurityTransport
 
 # TODO: Add tests for multiple streams being opened on different
@@ -25,8 +24,9 @@ async def connect(node1, node2):
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
 
-async def perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator):
-    
+async def perform_simple_test(assertion_func, \
+        transports_for_initiator, transports_for_noninitiator):
+
     # Create libp2p nodes and connect them, then secure the connection, then check
     # the proper security was chosen
     # TODO: implement -- note we need to introduce the notion of communicating over a raw connection
@@ -43,9 +43,9 @@ async def perform_simple_test(assertion_func, transports_for_initiator, transpor
 
     await connect(node1, node2)
 
-    # Wait a very short period to allow conns to be stored (since the functions 
+    # Wait a very short period to allow conns to be stored (since the functions
     # storing the conns are async, they may happen at slightly different times
-    # on each node) 
+    # on each node)
     await asyncio.sleep(0.1)
 
     # Get conns
@@ -84,7 +84,7 @@ async def test_single_simple_test_security_transport_succeeds():
 
 @pytest.mark.asyncio
 async def test_two_simple_test_security_transport_for_initiator_succeeds():
-    transports_for_initiator = {"tacos": SimpleSecurityTransport("tacos"), 
+    transports_for_initiator = {"tacos": SimpleSecurityTransport("tacos"),
                                 "shleep": SimpleSecurityTransport("shleep")}
     transports_for_noninitiator = {"shleep": SimpleSecurityTransport("shleep")}
 
@@ -93,4 +93,3 @@ async def test_two_simple_test_security_transport_for_initiator_succeeds():
 
     await perform_simple_test(assertion_func,
                               transports_for_initiator, transports_for_noninitiator)
-

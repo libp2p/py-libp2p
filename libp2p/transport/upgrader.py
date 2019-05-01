@@ -25,8 +25,8 @@ class TransportUpgrader:
         """
         if initiator:
             return await self.security_multistream.secure_outbound(raw_conn, peer_id)
-        else:
-            return await self.security_multistream.secure_inbound(raw_conn)
+
+        return await self.security_multistream.secure_inbound(raw_conn)
 
     def upgrade_connection(self, conn, generic_protocol_handler, peer_id):
         """

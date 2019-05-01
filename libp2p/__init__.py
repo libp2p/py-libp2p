@@ -2,6 +2,7 @@ import asyncio
 import multiaddr
 
 from Crypto.PublicKey import RSA
+from libp2p.security.insecure_security import InsecureTransport
 from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm
@@ -10,7 +11,6 @@ from .kademlia.routed_host import RoutedHost
 from .transport.upgrader import TransportUpgrader
 from .transport.tcp.tcp import TCP
 from .kademlia.network import KademliaServer
-from libp2p.security.insecure_security import InsecureTransport
 
 
 async def cleanup_done_tasks():

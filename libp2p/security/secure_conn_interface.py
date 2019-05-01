@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+# pylint: disable=W0105
+
 """
 Represents a secured connection object, which includes a connection and details about the security
 involved in the secured connection
@@ -19,4 +21,3 @@ class ISecureConn(ABC):
         """
         :return: map containing details about the connections security
         """
-
