@@ -57,8 +57,6 @@ class Pubsub():
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
-        self.lock = asyncio.Lock()
-
         # Call handle peer to keep waiting for updates to peer queue
         asyncio.ensure_future(self.handle_peer_queue())
 
@@ -97,14 +95,14 @@ class Pubsub():
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
                     id_in_seen_msgs = (message.seqno, message.from_id)
-                    async with self.lock:
-                        if id_in_seen_msgs not in self.seen_messages:
-                            should_publish = True
-                            if id_in_seen_msgs in self.seen_messages:
-                                print('shit')
-                            self.seen_messages[id_in_seen_msgs] = 1
-                            print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
-                            await self.handle_talk(message)
+                    if id_in_seen_msgs not in self.seen_messages:
+                        should_publish = True
+                        if id_in_seen_msgs in self.seen_messages:
+                            print('shit')
+                        self.seen_messages[id_in_seen_msgs] = 1
+                        print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
+                        print('with id: ' + str(self.host.get_id()))
+                        await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
                 print("continuously_read_stream subscription")
