@@ -1,5 +1,6 @@
 # pylint: disable=no-name-in-module
 import asyncio
+
 from lru import LRU
 
 from .pb import rpc_pb2
@@ -34,8 +35,7 @@ class Pubsub():
         for protocol in self.protocols:
             self.host.set_stream_handler(protocol, self.stream_handler)
 
-        # TODO: determine if these need to be asyncio queues, or if could possibly
-        # be ordinary blocking queues
+        # Use asyncio queues for proper context switching
         self.incoming_msgs_from_peers = asyncio.Queue()
         self.outgoing_messages = asyncio.Queue()
 
@@ -44,8 +44,8 @@ class Pubsub():
             self.cache_size = 128
         else:
             self.cache_size = cache_size
-        #self.seen_messages = LRU(self.cache_size)
-        self.seen_messages = dict()
+
+        self.seen_messages = LRU(self.cache_size)
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
@@ -91,21 +91,16 @@ class Pubsub():
             should_publish = False
 
             if rpc_incoming.publish:
-                print("continuously_read_stream publish received")
                 # deal with RPC.publish
                 for message in rpc_incoming.publish:
                     id_in_seen_msgs = (message.seqno, message.from_id)
                     if id_in_seen_msgs not in self.seen_messages:
                         should_publish = True
-                        if id_in_seen_msgs in self.seen_messages:
-                            print('shit')
                         self.seen_messages[id_in_seen_msgs] = 1
-                        print("SEEN MESSAGES IN CONT: " + str(self.seen_messages))
-                        print('with id: ' + str(self.host.get_id()))
+
                         await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
-                print("continuously_read_stream subscription")
                 # deal with RPC.subscriptions
                 # We don't need to relay the subscription to our
                 # peers because a given node only needs its peers
@@ -120,8 +115,6 @@ class Pubsub():
                 await self.router.publish(peer_id, incoming)
 
             if rpc_incoming.control:
-                # print("continuously_read_stream control")
-                # print("continuously_read_stream did not die")
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
@@ -209,7 +202,6 @@ class Pubsub():
                 # we are subscribed to a topic this message was sent for,
                 # so add message to the subscription output queue
                 # for each topic
-                print("handle_talk ADDING TO USER QUEUE")
                 await self.my_topics[topic].put(publish_message)
 
     async def subscribe(self, topic_id):

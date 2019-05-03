@@ -20,8 +20,6 @@ class MessageCache:
         :param history_size: Size of the history desired.
         :return: the MessageCache
         """
-        print('mcache window: ' + str(window_size))
-        print('mcache history: ' + str(history_size))
         self.window_size = window_size
         self.history_size = history_size
 
@@ -79,7 +77,6 @@ class MessageCache:
         """
         Shift the window over by 1 position, dropping the last element of the history.
         """
-        print('mcache hist start of shift: ' + str(self.history))
         last_entries = self.history[len(self.history) - 1]
 
         for entry in last_entries:
@@ -92,5 +89,3 @@ class MessageCache:
             i -= 1
 
         self.history[0] = []
-
-        print('mcache hist: ' + str(self.history))
