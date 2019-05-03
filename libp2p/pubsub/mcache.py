@@ -1,6 +1,7 @@
 class MessageCache:
 
     class CacheEntry:
+        # pylint: disable=too-few-public-methods
         """
         A logical representation of an entry in the mcache's _history_.
         """
@@ -30,7 +31,7 @@ class MessageCache:
         # messages lost upon shift().
         self.history = []
 
-        for i in range(history_size):
+        for _ in range(history_size):
             self.history.append([])
 
     def put(self, msg):
