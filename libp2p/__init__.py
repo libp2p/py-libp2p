@@ -6,10 +6,10 @@ from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm
 from .host.basic_host import BasicHost
-from .kademlia.routed_host import RoutedHost
 from .transport.upgrader import TransportUpgrader
 from .transport.tcp.tcp import TCP
 from .kademlia.network import KademliaServer
+from .routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 
 
 async def cleanup_done_tasks():
@@ -31,7 +31,7 @@ def generate_id():
     # private_key = new_key.exportKey("PEM")
     return new_id
 
-def initialize_default_kademlia(
+def initialize_default_kademlia_router(
         ksize=20, alpha=3, id_opt=None, storage=None):
     """
     initialize swam when no swarm is passed in
@@ -46,13 +46,14 @@ def initialize_default_kademlia(
         id_opt = generate_id()
 
     node_id = id_opt.get_raw_id()
-    return KademliaServer(ksize=ksize, alpha=alpha,
-                          node_id=node_id, storage=storage)
+    server = KademliaServer(ksize=ksize, alpha=alpha,
+                            node_id=node_id, storage=storage)
+    return KadmeliaPeerRouter(server)
 
 
 def initialize_default_swarm(
-        id_opt=None, transport_opt=None,
-        muxer_opt=None, sec_opt=None, peerstore_opt=None):
+        id_opt=None, transport_opt=None, muxer_opt=None,
+        sec_opt=None, peerstore_opt=None, disc_opt=None):
     """
     initialize swarm when no swarm is passed in
     :param id_opt: optional id for host
@@ -78,7 +79,8 @@ def initialize_default_swarm(
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
-    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport)
+    swarm_opt = Swarm(id_opt, peerstore,\
+                      upgrader, transport, disc_opt)
 
     return swarm_opt
 
@@ -105,14 +107,11 @@ async def new_node(
         swarm_opt = initialize_default_swarm(
             id_opt=id_opt, transport_opt=transport_opt,
             muxer_opt=muxer_opt, sec_opt=sec_opt,
-            peerstore_opt=peerstore_opt)
+            peerstore_opt=peerstore_opt, disc_opt=disc_opt)
 
     # TODO enable support for other host type
     # TODO routing unimplemented
-    if not disc_opt:
-        host = BasicHost(swarm_opt)
-    else:
-        host = RoutedHost(swarm_opt, disc_opt)
+    host = BasicHost(swarm_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())

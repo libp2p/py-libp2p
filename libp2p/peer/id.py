@@ -1,3 +1,4 @@
+import hashlib
 import base58
 import multihash
 
@@ -20,6 +21,9 @@ class ID:
 
     def pretty(self):
         return base58.b58encode(self._id_str).decode()
+
+    def get_xor_id(self):
+        return int(digest(self.get_raw_id()).hex(), 16)
 
     def __str__(self):
         pid = self.pretty()
@@ -67,3 +71,8 @@ def id_from_public_key(key):
 
 def id_from_private_key(key):
     return id_from_public_key(key.publickey())
+
+def digest(string):
+    if not isinstance(string, bytes):
+        string = str(string).encode('utf8')
+    return hashlib.sha1(string).digest()

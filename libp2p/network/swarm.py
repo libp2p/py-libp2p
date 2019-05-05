@@ -10,13 +10,14 @@ from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection
 
 class Swarm(INetwork):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
+    # pylint: disable=too-many-instance-attributes,cell-var-from-loop,too-many-arguments
 
-    def __init__(self, peer_id, peerstore, upgrader, transport):
+    def __init__(self, peer_id, peerstore, upgrader, transport, router):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.transport = transport
+        self.router = router
         self.connections = dict()
         self.listeners = dict()
         self.stream_handlers = dict()
@@ -57,8 +58,10 @@ class Swarm(INetwork):
         if not addrs:
             raise SwarmException("No known addresses to peer")
 
-        # TODO: define logic to choose which address to use, or try them all ?
-        multiaddr = addrs[0]
+        if not self.router:
+            multiaddr = addrs[0]
+        else:
+            multiaddr = self.router.find_peer(peer_id)
 
         if peer_id in self.connections:
             # If muxed connection already exists for peer_id,
@@ -182,6 +185,9 @@ class Swarm(INetwork):
             self.notifees.append(notifee)
             return True
         return False
+
+    def add_router(self, router):
+        self.router = router
 
 def create_generic_protocol_handler(swarm):
     """
