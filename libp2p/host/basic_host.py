@@ -13,8 +13,8 @@ class BasicHost(IHost):
     # default options constructor
     def __init__(self, network, router=None):
         self._network = network
-        self.peerstore = self._network.peerstore
         self._router = router
+        self.peerstore = self._network.peerstore
 
     def get_id(self):
         """

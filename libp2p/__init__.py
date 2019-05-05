@@ -109,8 +109,6 @@ async def new_node(
             muxer_opt=muxer_opt, sec_opt=sec_opt,
             peerstore_opt=peerstore_opt, disc_opt=disc_opt)
 
-    swarm_opt.add_router(disc_opt)
-
     # TODO enable support for other host type
     # TODO routing unimplemented
     host = BasicHost(swarm_opt)
