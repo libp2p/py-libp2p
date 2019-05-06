@@ -104,7 +104,6 @@ async def perform_test_from_obj(obj):
                 pubsub_map[neighbor_id] = pubsub
 
             # Connect node and neighbor
-            # await connect(node_map[start_node_id], node_map[neighbor_id])
             tasks_connect.append(asyncio.ensure_future(connect(node_map[start_node_id], node_map[neighbor_id])))
     tasks_connect.append(asyncio.sleep(2))
     await asyncio.gather(*tasks_connect)
@@ -168,7 +167,6 @@ async def perform_test_from_obj(obj):
         msg_talk = generate_RPC_packet(actual_node_id, topics, data, next_msg_id_func())
 
         # Publish message
-        # await gossipsub_map[node_id].publish(actual_node_id, msg_talk.to_str())
         tasks_publish.append(asyncio.ensure_future(gossipsub_map[node_id].publish(\
             actual_node_id, msg_talk.SerializeToString())))
 

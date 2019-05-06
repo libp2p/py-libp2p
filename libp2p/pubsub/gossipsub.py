@@ -422,9 +422,6 @@ class GossipSub(IPubsubRouter):
         """
         Forwards all request messages that are present in mcache to the requesting peer.
         """
-        # from_id_bytes = iwant_msg.from_id
-
-        # TODO: convert bytes to string properly, is this proper?
         from_id_str = sender_peer_id
 
         msg_ids = [literal_eval(msg) for msg in iwant_msg.messageIDs]
@@ -439,7 +436,7 @@ class GossipSub(IPubsubRouter):
                 msgs_to_forward.append(msg)
 
         # Forward messages to requesting peer
-        # TODO: Is this correct message forwarding? should this just be publishing? No
+        # Should this just be publishing? No
         # because then the message will forwarded to peers in the topics contained in the messages.
         # We should
         # 1) Package these messages into a single packet
@@ -460,13 +457,6 @@ class GossipSub(IPubsubRouter):
     async def handle_graft(self, graft_msg, sender_peer_id):
         topic = graft_msg.topicID
 
-        # TODO: I think from_id needs to be gotten some other way because ControlMessage
-        # does not have from_id attribute
-        # IMPT: go does use this in a similar way:
-        # https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
-        # but go seems to do RPC.from rather than getting the from in the message itself
-
-        # TODO: convert bytes to string properly, is this proper?
         from_id_str = sender_peer_id
 
         # Add peer to mesh for topic
@@ -478,14 +468,6 @@ class GossipSub(IPubsubRouter):
     async def handle_prune(self, prune_msg, sender_peer_id):
         topic = prune_msg.topicID
 
-        # TODO: I think from_id needs to be gotten some other way because ControlMessage
-        # does not have from_id attribute
-        # IMPT: go does use this in a similar way:
-        # https://github.com/libp2p/go-libp2p-pubsub/blob/master/gossipsub.go#L97
-        # but go seems to do RPC.from rather than getting the from in the message itself
-        # from_id_bytes = prune_msg.from_id
-
-        # TODO: convert bytes to string properly, is this proper?
         from_id_str = sender_peer_id
 
         # Remove peer from mesh for topic, if peer is in topic
