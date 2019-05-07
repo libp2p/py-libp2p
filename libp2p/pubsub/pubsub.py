@@ -1,5 +1,6 @@
 # pylint: disable=no-name-in-module
 import asyncio
+
 from lru import LRU
 
 from .pb import rpc_pb2
@@ -34,8 +35,7 @@ class Pubsub():
         for protocol in self.protocols:
             self.host.set_stream_handler(protocol, self.stream_handler)
 
-        # TODO: determine if these need to be asyncio queues, or if could possibly
-        # be ordinary blocking queues
+        # Use asyncio queues for proper context switching
         self.incoming_msgs_from_peers = asyncio.Queue()
         self.outgoing_messages = asyncio.Queue()
 
@@ -44,9 +44,10 @@ class Pubsub():
             self.cache_size = 128
         else:
             self.cache_size = cache_size
+
         self.seen_messages = LRU(self.cache_size)
 
-        # Map of topics we are subscribed to to handler functions
+        # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
         self.my_topics = {}
 
@@ -96,6 +97,7 @@ class Pubsub():
                     if id_in_seen_msgs not in self.seen_messages:
                         should_publish = True
                         self.seen_messages[id_in_seen_msgs] = 1
+
                         await self.handle_talk(message)
 
             if rpc_incoming.subscriptions:
@@ -111,6 +113,10 @@ class Pubsub():
             if should_publish:
                 # relay message to peers with router
                 await self.router.publish(peer_id, incoming)
+
+            if rpc_incoming.control:
+                # Pass rpc to router so router could perform custom logic
+                await self.router.handle_rpc(rpc_incoming, peer_id)
 
             # Force context switch
             await asyncio.sleep(0)
@@ -180,8 +186,9 @@ class Pubsub():
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].append(origin_id)
         else:
-            # TODO: Remove peer from topic
-            pass
+            if sub_message.topicid in self.peer_topics:
+                if origin_id in self.peer_topics[sub_message.topicid]:
+                    self.peer_topics[sub_message.topicid].remove(origin_id)
 
     async def handle_talk(self, publish_message):
         """
@@ -217,7 +224,7 @@ class Pubsub():
         await self.message_all_peers(packet.SerializeToString())
 
         # Tell router we are joining this topic
-        self.router.join(topic_id)
+        await self.router.join(topic_id)
 
         # Return the asyncio queue for messages on this topic
         return self.my_topics[topic_id]
@@ -243,7 +250,7 @@ class Pubsub():
         await self.message_all_peers(packet.SerializeToString())
 
         # Tell router we are leaving this topic
-        self.router.leave(topic_id)
+        await self.router.leave(topic_id)
 
     async def message_all_peers(self, rpc_msg):
         """

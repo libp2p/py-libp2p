@@ -31,10 +31,13 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def handle_rpc(self, rpc):
+    def handle_rpc(self, rpc, sender_peer_id):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
+        TODO: Check if this interface is ok. It's not the exact same as the go code, but the go
+        code is really confusing with the msg origin, they specify `rpc.from` even when the rpc
+        shouldn't have a from
         :param rpc: rpc message
         """
 

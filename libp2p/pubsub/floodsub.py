@@ -35,7 +35,7 @@ class FloodSub(IPubsubRouter):
         :param peer_id: id of peer to remove
         """
 
-    def handle_rpc(self, rpc):
+    async def handle_rpc(self, rpc, sender_peer_id):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -64,6 +64,11 @@ class FloodSub(IPubsubRouter):
         for message in packet.publish:
             decoded_from_id = message.from_id.decode('utf-8')
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+                id_in_seen_msgs = (message.seqno, message.from_id)
+
+                if id_in_seen_msgs not in self.pubsub.seen_messages:
+                    self.pubsub.seen_messages[id_in_seen_msgs] = 1
+
                 await self.pubsub.handle_talk(message)
 
             # Deliver to self and peers
@@ -81,7 +86,7 @@ class FloodSub(IPubsubRouter):
                             # Publish the packet
                             await stream.write(new_packet.SerializeToString())
 
-    def join(self, topic):
+    async def join(self, topic):
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -89,7 +94,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to join
         """
 
-    def leave(self, topic):
+    async def leave(self, topic):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.

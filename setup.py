@@ -25,7 +25,8 @@ setuptools.setup(
         "rpcudp",
         "grpcio",
         "grpcio-tools",
-        "lru-dict>=1.1.6"
+        "lru-dict>=1.1.6",
+        "aio_timers"
     ],
     packages=["libp2p"],
     zip_safe=False,
