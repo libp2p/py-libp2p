@@ -64,6 +64,11 @@ class FloodSub(IPubsubRouter):
         for message in packet.publish:
             decoded_from_id = message.from_id.decode('utf-8')
             if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+                id_in_seen_msgs = (message.seqno, message.from_id)
+
+                if id_in_seen_msgs not in self.pubsub.seen_messages:
+                    self.pubsub.seen_messages[id_in_seen_msgs] = 1
+
                 await self.pubsub.handle_talk(message)
 
             # Deliver to self and peers
