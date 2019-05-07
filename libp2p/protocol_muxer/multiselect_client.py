@@ -45,7 +45,6 @@ class MultiselectClient(IMultiselectClient):
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
         """
-
         # Create a communicator to handle all communication across the stream
         communicator = MultiselectCommunicator(stream)
 

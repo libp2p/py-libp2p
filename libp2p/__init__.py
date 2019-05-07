@@ -2,6 +2,7 @@ import asyncio
 import multiaddr
 
 from Crypto.PublicKey import RSA
+from libp2p.security.insecure_security import InsecureTransport
 from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm
@@ -75,7 +76,7 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or ["secio"]
+    sec = sec_opt or {"insecure/1.0.0": InsecureTransport("insecure")}
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
