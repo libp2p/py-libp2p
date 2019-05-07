@@ -49,16 +49,16 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Identify Protocol                            | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Identify`**                               | :tomato:      |
+| **`Identify`**                               | :lemon:      |
 
 
 | Transport Protocols                          | Status        |
 | -------------------------------------------- | :-----------: |
-| **`TCP`**                                    | :lemon: tests |
+| **`TCP`**                                    | :green_apple: |
 | **`UDP`**                                    | :tomato:      |
-| **`WebSockets`**                             | :tomato:      |
-| **`UTP`**                                    | :tomato:      |
-| **`WebRTC`**                                 | :tomato:      |
+| **`WebSockets`**                             | :chestnut:    |
+| **`UTP`**                                    | :chestnut:    |
+| **`WebRTC`**                                 | :chestnut:    |
 | **`SCTP`**                                   | :chestnut:    |
 | **`Tor`**                                    | :chestnut:    |
 | **`i2p`**                                    | :chestnut:    |
@@ -71,7 +71,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Stream Muxers                                | Status        |
 | -------------------------------------------- | :-----------: |
-| **`multiplex`**                              | :lemon: tests |
+| **`multiplex`**                              | :green_apple: |
 | **`yamux`**                                  | :tomato:      |
 | **`benchmarks`**                             | :chestnut:    |
 | **`muxado`**                                 | :chestnut:    |
@@ -88,39 +88,39 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Switch (Swarm)                               | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Switch`**                                 | :lemon: tests |
-| **`Dialer stack`**                           | :chestnut:    |
+| **`Switch`**                                 | :green_apple: |
+| **`Dialer stack`**                           | :green_apple: |
 
 
 | Peer Discovery                               | Status        |
 | -------------------------------------------- | :-----------: |
-| **`bootstrap list`**                         | :green_apple: |
-| **`Kademlia DHT`**                           | :tomato:      |
-| **`mDNS`**                                   | :tomato:      |
+| **`bootstrap list`**                         | :tomato:      |
+| **`Kademlia DHT`**                           | :lemon:       |
+| **`mDNS`**                                   | :chestnut:    |
 | **`PEX`**                                    | :chestnut:    |
 | **`DNS`**                                    | :chestnut:    |
 
 
 | Content Routing                              | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :tomato:      |
-| **`floodsub`**                               | :tomato:      |
-| **`gossipsub`**                              | :tomato:      |
+| **`Kademlia DHT`**                           | :lemon:       |
+| **`floodsub`**                               | :green_apple: |
+| **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |
 
 
 | Peer Routing                                 | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :tomato:      |
-| **`floodsub`**                               | :tomato:      |
-| **`gossipsub`**                              | :tomato:      |
+| **`Kademlia DHT`**                           | :green_apple: |
+| **`floodsub`**                               | :green_apple: |
+| **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |
 
 
 | NAT Traversal                                | Status        |
 | -------------------------------------------- | :-----------: |
-| **`nat-pmp`**                                | :tomato:      |
-| **`upnp`**                                   | :tomato:      |
+| **`nat-pmp`**                                | :chestnut:    |
+| **`upnp`**                                   | :chestnut:    |
 | **`ext addr discovery`**                     | :chestnut:    |
 | **`STUN-like`**                              | :chestnut:    |
 | **`line-switch relay`**                      | :chestnut:    |
