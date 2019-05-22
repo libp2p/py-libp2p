@@ -36,7 +36,7 @@ def test_str_less_than_10():
     for _ in range(5):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
-    expected = "<peer.ID " + pid  + ">"
+    expected = pid
     actual = ID(random_id_string).__str__()
 
     assert actual == expected
@@ -46,7 +46,7 @@ def test_str_more_than_10():
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
-    expected = "<peer.ID " + pid + ">"
+    expected = pid
     actual = ID(random_id_string).__str__()
 
     assert actual == expected
