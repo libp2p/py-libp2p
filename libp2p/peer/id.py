@@ -27,7 +27,7 @@ class ID:
 
     def __str__(self):
         pid = self.pretty()
-        return "<peer.ID %s>" % pid
+        return pid
 
     __repr__ = __str__
 
