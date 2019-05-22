@@ -21,7 +21,7 @@ setuptools.setup(
         "click",
         "base58",
         "pymultihash",
-        "multiaddr",
+        "multiaddr==0.0.4",
         "rpcudp",
         "grpcio",
         "grpcio-tools",
