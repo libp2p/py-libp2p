@@ -2,7 +2,6 @@ from .net_stream_interface import INetStream
 
 
 class NetStream(INetStream):
-
     def __init__(self, muxed_stream):
         self.muxed_stream = muxed_stream
         self.mplex_conn = muxed_stream.mplex_conn

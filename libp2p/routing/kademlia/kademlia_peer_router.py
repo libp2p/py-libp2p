@@ -21,6 +21,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         value = await self.server.get(xor_id)
         return decode_peerinfo(value)
 
+
 def decode_peerinfo(encoded):
     if isinstance(encoded, bytes):
         encoded = encoded.decode()
@@ -28,7 +29,7 @@ def decode_peerinfo(encoded):
         lines = ast.literal_eval(encoded)
     except SyntaxError:
         return None
-    ip = lines[1] # pylint: disable=invalid-name
+    ip = lines[1]  # pylint: disable=invalid-name
     port = lines[2]
     peer_id = lines[3]
     peer_info = create_kad_peerinfo(peer_id, ip, port)

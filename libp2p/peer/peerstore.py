@@ -4,7 +4,6 @@ from .peerinfo import PeerInfo
 
 
 class PeerStore(IPeerStore):
-
     def __init__(self):
         IPeerStore.__init__(self)
         self.peer_map = {}

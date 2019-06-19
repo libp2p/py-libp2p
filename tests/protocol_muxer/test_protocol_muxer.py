@@ -12,8 +12,9 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 # when using the same ports across tests
 
 
-async def perform_simple_test(expected_selected_protocol,
-                              protocols_for_client, protocols_with_handlers):
+async def perform_simple_test(
+    expected_selected_protocol, protocols_for_client, protocols_with_handlers
+):
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
@@ -51,15 +52,15 @@ async def perform_simple_test(expected_selected_protocol,
 @pytest.mark.asyncio
 async def test_single_protocol_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
-    await perform_simple_test(expected_selected_protocol,
-                              ["/echo/1.0.0"], ["/echo/1.0.0"])
+    await perform_simple_test(
+        expected_selected_protocol, ["/echo/1.0.0"], ["/echo/1.0.0"]
+    )
 
 
 @pytest.mark.asyncio
 async def test_single_protocol_fails():
     with pytest.raises(MultiselectClientError):
-        await perform_simple_test("", ["/echo/1.0.0"],
-                                  ["/potato/1.0.0"])
+        await perform_simple_test("", ["/echo/1.0.0"], ["/potato/1.0.0"])
 
     # Cleanup not reached on error
     await cleanup()
@@ -70,8 +71,9 @@ async def test_multiple_protocol_first_is_valid_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
     protocols_for_client = ["/echo/1.0.0", "/potato/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
-    await perform_simple_test(expected_selected_protocol, protocols_for_client,
-                              protocols_for_listener)
+    await perform_simple_test(
+        expected_selected_protocol, protocols_for_client, protocols_for_listener
+    )
 
 
 @pytest.mark.asyncio
@@ -79,8 +81,9 @@ async def test_multiple_protocol_second_is_valid_succeeds():
     expected_selected_protocol = "/foo/1.0.0"
     protocols_for_client = ["/rock/1.0.0", "/foo/1.0.0"]
     protocols_for_listener = ["/foo/1.0.0", "/echo/1.0.0"]
-    await perform_simple_test(expected_selected_protocol, protocols_for_client,
-                              protocols_for_listener)
+    await perform_simple_test(
+        expected_selected_protocol, protocols_for_client, protocols_for_listener
+    )
 
 
 @pytest.mark.asyncio
@@ -88,8 +91,7 @@ async def test_multiple_protocol_fails():
     protocols_for_client = ["/rock/1.0.0", "/foo/1.0.0", "/bar/1.0.0"]
     protocols_for_listener = ["/aspyn/1.0.0", "/rob/1.0.0", "/zx/1.0.0", "/alex/1.0.0"]
     with pytest.raises(MultiselectClientError):
-        await perform_simple_test("", protocols_for_client,
-                                  protocols_for_listener)
+        await perform_simple_test("", protocols_for_client, protocols_for_listener)
 
     # Cleanup not reached on error
     await cleanup()

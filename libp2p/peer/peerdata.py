@@ -2,7 +2,6 @@ from .peerdata_interface import IPeerData
 
 
 class PeerData(IPeerData):
-
     def __init__(self):
         self.metadata = {}
         self.protocols = []

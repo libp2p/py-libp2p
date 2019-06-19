@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-class IPubsubRouter(ABC):
 
+class IPubsubRouter(ABC):
     @abstractmethod
     def get_protocols(self):
         """

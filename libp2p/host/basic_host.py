@@ -43,7 +43,7 @@ class BasicHost(IHost):
         """
         :return: all the multiaddr addresses this host is listening too
         """
-        p2p_part = multiaddr.Multiaddr('/p2p/{}'.format(self.get_id().pretty()))
+        p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_id().pretty()))
 
         addrs = []
         for transport in self._network.listeners.values():

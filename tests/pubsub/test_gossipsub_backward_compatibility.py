@@ -13,6 +13,7 @@ from tests.utils import cleanup
 
 # pylint: disable=too-many-locals
 
+
 async def connect(node1, node2):
     """
     Connect node1 to node2
@@ -20,6 +21,7 @@ async def connect(node1, node2):
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
+
 
 @pytest.mark.asyncio
 async def test_init():
@@ -36,6 +38,7 @@ async def test_init():
     assert gossipsub and pubsub
 
     await cleanup()
+
 
 async def perform_test_from_obj(obj):
     """
@@ -94,8 +97,10 @@ async def perform_test_from_obj(obj):
             # Create neighbor if neighbor does not yet exist
             if neighbor_id not in node_map:
                 neighbor_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-                await neighbor_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-                
+                await neighbor_node.get_network().listen(
+                    multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+                )
+
                 node_map[neighbor_id] = neighbor_node
 
                 gossipsub = GossipSub(supported_protocols, 3, 2, 4, 30)
@@ -104,7 +109,11 @@ async def perform_test_from_obj(obj):
                 pubsub_map[neighbor_id] = pubsub
 
             # Connect node and neighbor
-            tasks_connect.append(asyncio.ensure_future(connect(node_map[start_node_id], node_map[neighbor_id])))
+            tasks_connect.append(
+                asyncio.ensure_future(
+                    connect(node_map[start_node_id], node_map[neighbor_id])
+                )
+            )
     tasks_connect.append(asyncio.sleep(2))
     await asyncio.gather(*tasks_connect)
 
@@ -130,7 +139,9 @@ async def perform_test_from_obj(obj):
             # Store queue in topic-queue map for node
             queues_map[node_id][topic] = q
             """
-            tasks_topic.append(asyncio.ensure_future(pubsub_map[node_id].subscribe(topic)))
+            tasks_topic.append(
+                asyncio.ensure_future(pubsub_map[node_id].subscribe(topic))
+            )
             tasks_topic_data.append((node_id, topic))
     tasks_topic.append(asyncio.sleep(2))
 
@@ -167,8 +178,13 @@ async def perform_test_from_obj(obj):
         msg_talk = generate_RPC_packet(actual_node_id, topics, data, next_msg_id_func())
 
         # Publish message
-        tasks_publish.append(asyncio.ensure_future(gossipsub_map[node_id].publish(\
-            actual_node_id, msg_talk.SerializeToString())))
+        tasks_publish.append(
+            asyncio.ensure_future(
+                gossipsub_map[node_id].publish(
+                    actual_node_id, msg_talk.SerializeToString()
+                )
+            )
+        )
 
         # For each topic in topics, add topic, msg_talk tuple to ordered test list
         # TODO: Update message sender to be correct message sender before
@@ -190,224 +206,128 @@ async def perform_test_from_obj(obj):
         for node_id in topic_map[topic]:
             # Get message from subscription queue
             msg_on_node = await queues_map[node_id][topic].get()
-            assert actual_msg.publish[0].SerializeToString() == msg_on_node.SerializeToString()
+            assert (
+                actual_msg.publish[0].SerializeToString()
+                == msg_on_node.SerializeToString()
+            )
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_simple_two_nodes_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "A": ["B"]
-        },
-        "topic_map": {
-            "topic1": ["B"]
-        },
-        "messages": [
-            {
-                "topics": ["topic1"],
-                "data": "foo",
-                "node_id": "A"
-            }
-        ]
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
+        "messages": [{"topics": ["topic1"], "data": "foo", "node_id": "A"}],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_three_nodes_two_topics_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "A": ["B"],
-            "B": ["C"]
-        },
-        "topic_map": {
-            "topic1": ["B", "C"],
-            "topic2": ["B", "C"]
-        },
+        "adj_list": {"A": ["B"], "B": ["C"]},
+        "topic_map": {"topic1": ["B", "C"], "topic2": ["B", "C"]},
         "messages": [
-            {
-                "topics": ["topic1"],
-                "data": "foo",
-                "node_id": "A"
-            },
-            {
-                "topics": ["topic2"],
-                "data": "Alex is tall",
-                "node_id": "A"
-            }
-        ]
+            {"topics": ["topic1"], "data": "foo", "node_id": "A"},
+            {"topics": ["topic2"], "data": "Alex is tall", "node_id": "A"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_two_nodes_one_topic_single_subscriber_is_sender_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "A": ["B"]
-        },
-        "topic_map": {
-            "topic1": ["B"]
-        },
-        "messages": [
-            {
-                "topics": ["topic1"],
-                "data": "Alex is tall",
-                "node_id": "B"
-            }
-        ]
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
+        "messages": [{"topics": ["topic1"], "data": "Alex is tall", "node_id": "B"}],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_two_nodes_one_topic_two_msgs_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "A": ["B"]
-        },
-        "topic_map": {
-            "topic1": ["B"]
-        },
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
         "messages": [
-            {
-                "topics": ["topic1"],
-                "data": "Alex is tall",
-                "node_id": "B"
-            },
-            {
-                "topics": ["topic1"],
-                "data": "foo",
-                "node_id": "A"
-            }
-        ]
+            {"topics": ["topic1"], "data": "Alex is tall", "node_id": "B"},
+            {"topics": ["topic1"], "data": "foo", "node_id": "A"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_seven_nodes_tree_one_topics_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"]
-        },
-        "topic_map": {
-            "astrophysics": ["2", "3", "4", "5", "6", "7"]
-        },
-        "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            }
-        ]
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
+        "topic_map": {"astrophysics": ["2", "3", "4", "5", "6", "7"]},
+        "messages": [{"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"}],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_seven_nodes_tree_three_topics_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"]
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
         "topic_map": {
             "astrophysics": ["2", "3", "4", "5", "6", "7"],
             "space": ["2", "3", "4", "5", "6", "7"],
-            "onions": ["2", "3", "4", "5", "6", "7"]
+            "onions": ["2", "3", "4", "5", "6", "7"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["space"],
-                "data": "foobar",
-                "node_id": "1"
-            },
-            {
-                "topics": ["onions"],
-                "data": "I am allergic",
-                "node_id": "1"
-            }
-        ]
+            {"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"},
+            {"topics": ["space"], "data": "foobar", "node_id": "1"},
+            {"topics": ["onions"], "data": "I am allergic", "node_id": "1"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_seven_nodes_tree_three_topics_diff_origin_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"]
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
         "topic_map": {
             "astrophysics": ["1", "2", "3", "4", "5", "6", "7"],
             "space": ["1", "2", "3", "4", "5", "6", "7"],
-            "onions": ["1", "2", "3", "4", "5", "6", "7"]
+            "onions": ["1", "2", "3", "4", "5", "6", "7"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["space"],
-                "data": "foobar",
-                "node_id": "4"
-            },
-            {
-                "topics": ["onions"],
-                "data": "I am allergic",
-                "node_id": "7"
-            }
-        ]
+            {"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"},
+            {"topics": ["space"], "data": "foobar", "node_id": "4"},
+            {"topics": ["onions"], "data": "I am allergic", "node_id": "7"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_three_nodes_clique_two_topic_diff_origin_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["3"]
-        },
-        "topic_map": {
-            "astrophysics": ["1", "2", "3"],
-            "school": ["1", "2", "3"]
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["3"]},
+        "topic_map": {"astrophysics": ["1", "2", "3"], "school": ["1", "2", "3"]},
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic",
-                "node_id": "1"
-            }
-        ]
+            {"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic", "node_id": "1"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_four_nodes_clique_two_topic_diff_origin_many_msgs_test_obj():
@@ -417,103 +337,42 @@ async def test_four_nodes_clique_two_topic_diff_origin_many_msgs_test_obj():
             "1": ["2", "3", "4"],
             "2": ["1", "3", "4"],
             "3": ["1", "2", "4"],
-            "4": ["1", "2", "3"]
+            "4": ["1", "2", "3"],
         },
         "topic_map": {
             "astrophysics": ["1", "2", "3", "4"],
-            "school": ["1", "2", "3", "4"]
+            "school": ["1", "2", "3", "4"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar2",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar3",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic3",
-                "node_id": "1"
-            }
-        ]
+            {"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar2", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic2", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar3", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic3", "node_id": "1"},
+        ],
     }
     await perform_test_from_obj(test_obj)
+
 
 @pytest.mark.asyncio
 async def test_five_nodes_ring_two_topic_diff_origin_many_msgs_test_obj():
     test_obj = {
         "supported_protocols": ["/floodsub/1.0.0"],
-        "adj_list": {
-            "1": ["2"],
-            "2": ["3"],
-            "3": ["4"],
-            "4": ["5"],
-            "5": ["1"]
-        },
+        "adj_list": {"1": ["2"], "2": ["3"], "3": ["4"], "4": ["5"], "5": ["1"]},
         "topic_map": {
             "astrophysics": ["1", "2", "3", "4", "5"],
-            "school": ["1", "2", "3", "4", "5"]
+            "school": ["1", "2", "3", "4", "5"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": "e=mc^2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar2",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic2",
-                "node_id": "1"
-            },
-            {
-                "topics": ["school"],
-                "data": "foobar3",
-                "node_id": "2"
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": "I am allergic3",
-                "node_id": "1"
-            }
-        ]
+            {"topics": ["astrophysics"], "data": "e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar2", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic2", "node_id": "1"},
+            {"topics": ["school"], "data": "foobar3", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": "I am allergic3", "node_id": "1"},
+        ],
     }
     await perform_test_from_obj(test_obj)

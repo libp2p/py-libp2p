@@ -12,8 +12,17 @@ class GossipSub(IPubsubRouter):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-public-methods
 
-    def __init__(self, protocols, degree, degree_low, degree_high, time_to_live, gossip_window=3,
-                 gossip_history=5, heartbeat_interval=120):
+    def __init__(
+        self,
+        protocols,
+        degree,
+        degree_low,
+        degree_high,
+        time_to_live,
+        gossip_window=3,
+        gossip_history=5,
+        heartbeat_interval=120,
+    ):
         # pylint: disable=too-many-arguments
         self.protocols = protocols
         self.pubsub = None
@@ -122,13 +131,15 @@ class GossipSub(IPubsubRouter):
             # Add RPC message to cache
             self.mcache.put(message)
 
-            decoded_from_id = message.from_id.decode('utf-8')
+            decoded_from_id = message.from_id.decode("utf-8")
             new_packet = rpc_pb2.RPC()
             new_packet.publish.extend([message])
             new_packet_serialized = new_packet.SerializeToString()
 
             # Deliver to self if needed
-            if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+            if msg_sender == decoded_from_id and msg_sender == str(
+                self.pubsub.host.get_id()
+            ):
                 id_in_seen_msgs = (message.seqno, message.from_id)
 
                 if id_in_seen_msgs not in self.pubsub.seen_messages:
@@ -146,30 +157,46 @@ class GossipSub(IPubsubRouter):
                         if str(peer) in self.peers_floodsub:
                             floodsub_peers_in_topic.append(peer)
 
-                await self.deliver_messages_to_peers(floodsub_peers_in_topic, msg_sender,
-                                                     decoded_from_id, new_packet_serialized)
+                await self.deliver_messages_to_peers(
+                    floodsub_peers_in_topic,
+                    msg_sender,
+                    decoded_from_id,
+                    new_packet_serialized,
+                )
 
                 # If you are subscribed to topic, send to mesh, otherwise send to fanout
                 if topic in self.pubsub.my_topics and topic in self.mesh:
-                    await self.deliver_messages_to_peers(self.mesh[topic], msg_sender,
-                                                         decoded_from_id, new_packet_serialized)
+                    await self.deliver_messages_to_peers(
+                        self.mesh[topic],
+                        msg_sender,
+                        decoded_from_id,
+                        new_packet_serialized,
+                    )
                 else:
                     # Send to fanout peers
                     if topic not in self.fanout:
                         # If no peers in fanout, choose some peers from gossipsub peers in topic
-                        gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                                    if peer in self.peers_gossipsub]
+                        gossipsub_peers_in_topic = [
+                            peer
+                            for peer in self.pubsub.peer_topics[topic]
+                            if peer in self.peers_gossipsub
+                        ]
 
-                        selected = \
-                            GossipSub.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                        selected = GossipSub.select_from_minus(
+                            self.degree, gossipsub_peers_in_topic, []
+                        )
                         self.fanout[topic] = selected
 
                     # TODO: Is topic DEFINITELY supposed to be in fanout if we are not subscribed?
                     # I assume there could be short periods between heartbeats where topic may not
                     # be but we should check that this path gets hit appropriately
 
-                    await self.deliver_messages_to_peers(self.fanout[topic], msg_sender,
-                                                         decoded_from_id, new_packet_serialized)
+                    await self.deliver_messages_to_peers(
+                        self.fanout[topic],
+                        msg_sender,
+                        decoded_from_id,
+                        new_packet_serialized,
+                    )
 
     async def join(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec
@@ -206,12 +233,16 @@ class GossipSub(IPubsubRouter):
             if topic in self.peers_gossipsub:
                 # TODO: Should we have self.fanout[topic] here or [] (as the minus variable)?
                 # Selects the remaining number of peers (D-x) from peers.gossipsub[topic]
-                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                            if peer in self.peers_gossipsub]
-                selected_peers = \
-                    GossipSub.select_from_minus(self.degree - fanout_size,
-                                                gossipsub_peers_in_topic,
-                                                self.fanout[topic] if topic in self.fanout else [])
+                gossipsub_peers_in_topic = [
+                    peer
+                    for peer in self.pubsub.peer_topics[topic]
+                    if peer in self.peers_gossipsub
+                ]
+                selected_peers = GossipSub.select_from_minus(
+                    self.degree - fanout_size,
+                    gossipsub_peers_in_topic,
+                    self.fanout[topic] if topic in self.fanout else [],
+                )
 
                 # And likewise adds them to mesh[topic] and notifies them with a
                 # GRAFT(topic) control message.
@@ -245,7 +276,9 @@ class GossipSub(IPubsubRouter):
             return "flood"
         return "unknown"
 
-    async def deliver_messages_to_peers(self, peers, msg_sender, origin_id, serialized_packet):
+    async def deliver_messages_to_peers(
+        self, peers, msg_sender, origin_id, serialized_packet
+    ):
         for peer_id_in_topic in peers:
             # Forward to all peers that are not the
             # message sender and are not the message origin
@@ -279,8 +312,11 @@ class GossipSub(IPubsubRouter):
             if num_mesh_peers_in_topic < self.degree_low:
 
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
-                selected_peers = GossipSub.select_from_minus(self.degree - num_mesh_peers_in_topic,
-                                                             self.peers_gossipsub, self.mesh[topic])
+                selected_peers = GossipSub.select_from_minus(
+                    self.degree - num_mesh_peers_in_topic,
+                    self.peers_gossipsub,
+                    self.mesh[topic],
+                )
 
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
@@ -291,8 +327,9 @@ class GossipSub(IPubsubRouter):
 
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = GossipSub.select_from_minus(num_mesh_peers_in_topic - self.degree,
-                                                             self.mesh[topic], [])
+                selected_peers = GossipSub.select_from_minus(
+                    num_mesh_peers_in_topic - self.degree, self.mesh[topic], []
+                )
                 for peer in selected_peers:
                     # Remove peer from mesh[topic]
                     self.mesh[topic].remove(peer)
@@ -315,11 +352,16 @@ class GossipSub(IPubsubRouter):
                 # If |fanout[topic]| < D
                 if num_fanout_peers_in_topic < self.degree:
                     # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]
-                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                                if peer in self.peers_gossipsub]
-                    selected_peers = \
-                        GossipSub.select_from_minus(self.degree - num_fanout_peers_in_topic,
-                                                    gossipsub_peers_in_topic, self.fanout[topic])
+                    gossipsub_peers_in_topic = [
+                        peer
+                        for peer in self.pubsub.peer_topics[topic]
+                        if peer in self.peers_gossipsub
+                    ]
+                    selected_peers = GossipSub.select_from_minus(
+                        self.degree - num_fanout_peers_in_topic,
+                        gossipsub_peers_in_topic,
+                        self.fanout[topic],
+                    )
 
                     # Add the peers to fanout[topic]
                     self.fanout[topic].extend(selected_peers)
@@ -332,17 +374,24 @@ class GossipSub(IPubsubRouter):
                 # TODO: Make more efficient, possibly using a generator?
                 # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
                 if topic in self.pubsub.peer_topics:
-                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                                if peer in self.peers_gossipsub]
+                    gossipsub_peers_in_topic = [
+                        peer
+                        for peer in self.pubsub.peer_topics[topic]
+                        if peer in self.peers_gossipsub
+                    ]
 
                     # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = \
-                        GossipSub.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                    peers_to_emit_ihave_to = GossipSub.select_from_minus(
+                        self.degree, gossipsub_peers_in_topic, []
+                    )
 
                     for peer in peers_to_emit_ihave_to:
                         # TODO: this line is a monster, can hopefully be simplified
-                        if (topic not in self.mesh or (peer not in self.mesh[topic]))\
-                                and (topic not in self.fanout or (peer not in self.fanout[topic])):
+                        if (
+                            topic not in self.mesh or (peer not in self.mesh[topic])
+                        ) and (
+                            topic not in self.fanout or (peer not in self.fanout[topic])
+                        ):
                             msg_ids = [str(msg) for msg in msg_ids]
                             await self.emit_ihave(topic, msg_ids, peer)
 
@@ -354,14 +403,21 @@ class GossipSub(IPubsubRouter):
                     # TODO: Make more efficient, possibly using a generator?
                     # Get all pubsub peers in topic and only add if they are gossipsub peers also
                     if topic in self.pubsub.peer_topics:
-                        gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                                    if peer in self.peers_gossipsub]
+                        gossipsub_peers_in_topic = [
+                            peer
+                            for peer in self.pubsub.peer_topics[topic]
+                            if peer in self.peers_gossipsub
+                        ]
 
                         # Select D peers from peers.gossipsub[topic]
-                        peers_to_emit_ihave_to = \
-                            GossipSub.select_from_minus(self.degree, gossipsub_peers_in_topic, [])
+                        peers_to_emit_ihave_to = GossipSub.select_from_minus(
+                            self.degree, gossipsub_peers_in_topic, []
+                        )
                         for peer in peers_to_emit_ihave_to:
-                            if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
+                            if (
+                                peer not in self.mesh[topic]
+                                and peer not in self.fanout[topic]
+                            ):
 
                                 msg_ids = [str(msg) for msg in msg_ids]
                                 await self.emit_ihave(topic, msg_ids, peer)
@@ -406,13 +462,17 @@ class GossipSub(IPubsubRouter):
         from_id_str = sender_peer_id
 
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in seen_messages cache
-        seen_seqnos_and_peers = [seqno_and_from
-                                 for seqno_and_from in self.pubsub.seen_messages.keys()]
+        seen_seqnos_and_peers = [
+            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()
+        ]
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in seen_seqnos) to list
         # of messages we want to request
-        msg_ids_wanted = [msg_id for msg_id in ihave_msg.messageIDs
-                          if literal_eval(msg_id) not in seen_seqnos_and_peers]
+        msg_ids_wanted = [
+            msg_id
+            for msg_id in ihave_msg.messageIDs
+            if literal_eval(msg_id) not in seen_seqnos_and_peers
+        ]
 
         # Request messages with IWANT message
         if msg_ids_wanted:

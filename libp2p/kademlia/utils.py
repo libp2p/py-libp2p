@@ -14,7 +14,7 @@ async def gather_dict(dic):
 
 def digest(string):
     if not isinstance(string, bytes):
-        string = str(string).encode('utf8')
+        string = str(string).encode("utf8")
     return hashlib.sha1(string).digest()
 
 
@@ -53,5 +53,5 @@ def shared_prefix(args):
 
 
 def bytes_to_bit_string(bites):
-    bits = [bin(bite)[2:].rjust(8, '0') for bite in bites]
+    bits = [bin(bite)[2:].rjust(8, "0") for bite in bites]
     return "".join(bits)

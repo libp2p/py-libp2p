@@ -2,7 +2,6 @@ from libp2p.routing.interfaces import IContentRouting
 
 
 class KadmeliaContentRouter(IContentRouting):
-
     def provide(self, cid, announce=True):
         """
         Provide adds the given cid to the content routing system. If announce is True,

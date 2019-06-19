@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class IPeerData(ABC):
-
     @abstractmethod
     def get_protocols(self):
         """

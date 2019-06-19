@@ -15,6 +15,7 @@ class KBucket:
     each k-bucket implements a last seen eviction
     policy except that live nodes are never removed
     """
+
     def __init__(self, rangeLower, rangeUpper, ksize):
         self.range = (rangeLower, rangeUpper)
         self.nodes = OrderedDict()
@@ -92,7 +93,7 @@ class TableTraverser:
         table.buckets[index].touch_last_updated()
         self.current_nodes = table.buckets[index].get_nodes()
         self.left_buckets = table.buckets[:index]
-        self.right_buckets = table.buckets[(index + 1):]
+        self.right_buckets = table.buckets[(index + 1) :]
         self.left = True
 
     def __iter__(self):

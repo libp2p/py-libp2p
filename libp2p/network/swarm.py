@@ -9,6 +9,7 @@ from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .connection.raw_connection import RawConnection
 
+
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes,cell-var-from-loop,too-many-arguments
 
@@ -75,8 +76,9 @@ class Swarm(INetwork):
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
-            muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
-                self.generic_protocol_handler, peer_id)
+            muxed_conn = self.upgrader.upgrade_connection(
+                secured_conn, self.generic_protocol_handler, peer_id
+            )
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -109,7 +111,9 @@ class Swarm(INetwork):
         muxed_stream = await muxed_conn.open_stream(protocol_ids[0], multiaddr)
 
         # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(protocol_ids, muxed_stream)
+        selected_protocol = await self.multiselect_client.select_one_of(
+            protocol_ids, muxed_stream
+        )
 
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
@@ -148,14 +152,22 @@ class Swarm(INetwork):
 
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
-                                         multiaddr.value_for_protocol('tcp'), reader, writer, False)
+                raw_conn = RawConnection(
+                    multiaddr.value_for_protocol("ip4"),
+                    multiaddr.value_for_protocol("tcp"),
+                    reader,
+                    writer,
+                    False,
+                )
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
-                secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, False)
-                muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
-                    self.generic_protocol_handler, peer_id)
+                secured_conn = await self.upgrader.upgrade_security(
+                    raw_conn, peer_id, False
+                )
+                muxed_conn = self.upgrader.upgrade_connection(
+                    secured_conn, self.generic_protocol_handler, peer_id
+                )
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
@@ -195,6 +207,7 @@ class Swarm(INetwork):
     def add_router(self, router):
         self.router = router
 
+
 def create_generic_protocol_handler(swarm):
     """
     Create a generic protocol handler from the given swarm. We use swarm
@@ -219,6 +232,7 @@ def create_generic_protocol_handler(swarm):
         asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
+
 
 class SwarmException(Exception):
     pass

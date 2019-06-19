@@ -62,8 +62,10 @@ class FloodSub(IPubsubRouter):
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:
-            decoded_from_id = message.from_id.decode('utf-8')
-            if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
+            decoded_from_id = message.from_id.decode("utf-8")
+            if msg_sender == decoded_from_id and msg_sender == str(
+                self.pubsub.host.get_id()
+            ):
                 id_in_seen_msgs = (message.seqno, message.from_id)
 
                 if id_in_seen_msgs not in self.pubsub.seen_messages:

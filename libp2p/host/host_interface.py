@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class IHost(ABC):
-
     @abstractmethod
     def get_id(self):
         """

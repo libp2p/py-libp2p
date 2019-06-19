@@ -3,26 +3,35 @@ import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
-from libp2p.peer.id import ID, id_b58_encode, id_b58_decode, id_from_public_key, id_from_private_key
+from libp2p.peer.id import (
+    ID,
+    id_b58_encode,
+    id_b58_decode,
+    id_from_public_key,
+    id_from_private_key,
+)
 
 
-ALPHABETS = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
 
 def test_init_():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
     assert peer_id._id_str == random_id_string
+
 
 def test_no_init_value():
     with pytest.raises(Exception) as _:
-        #pylint: disable=no-value-for-parameter
+        # pylint: disable=no-value-for-parameter
         ID()
 
+
 def test_pretty():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string)
@@ -31,8 +40,9 @@ def test_pretty():
 
     assert actual == expected
 
+
 def test_str_less_than_10():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(5):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
@@ -41,8 +51,9 @@ def test_str_less_than_10():
 
     assert actual == expected
 
+
 def test_str_more_than_10():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     pid = base58.b58encode(random_id_string).decode()
@@ -51,8 +62,9 @@ def test_str_more_than_10():
 
     assert actual == expected
 
+
 def test_eq_true():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     other = ID(random_id_string)
@@ -62,6 +74,7 @@ def test_eq_true():
 
     assert actual == expected
 
+
 def test_eq_false():
     other = ID("efgh")
 
@@ -70,8 +83,9 @@ def test_eq_false():
 
     assert actual == expected
 
+
 def test_hash():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
 
@@ -80,8 +94,9 @@ def test_hash():
 
     assert actual == expected
 
+
 def test_id_b58_encode():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     expected = base58.b58encode(random_id_string).decode()
@@ -89,14 +104,16 @@ def test_id_b58_encode():
 
     assert actual == expected
 
+
 def test_id_b58_decode():
-    random_id_string = ''
+    random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     expected = ID(base58.b58decode(random_id_string))
     actual = id_b58_decode(random_id_string)
 
     assert actual == expected
+
 
 def test_id_from_public_key():
     bits_list = [1024, 1280, 1536, 1536, 2048]
@@ -109,9 +126,9 @@ def test_id_from_public_key():
 
     assert actual == expected
 
+
 def test_id_from_private_key():
     key = RSA.generate(2048, e=65537)
     id_from_pub = id_from_public_key(key.publickey())
     id_from_priv = id_from_private_key(key)
     assert id_from_pub == id_from_priv
-    

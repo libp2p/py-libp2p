@@ -17,7 +17,8 @@ CRYPTO_TOPIC = "ethereum"
 #                 Ex. set,rob,5
 # Determine message type by looking at first item before first comma
 
-class DummyAccountNode():
+
+class DummyAccountNode:
     """
     Node which has an internal balance mapping, meant to serve as 
     a dummy crypto blockchain. There is no actual blockchain, just a simple
@@ -41,7 +42,9 @@ class DummyAccountNode():
         self = DummyAccountNode()
 
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-        await libp2p_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        await libp2p_node.get_network().listen(
+            multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+        )
 
         self.libp2p_node = libp2p_node
 
@@ -55,7 +58,7 @@ class DummyAccountNode():
         """
         while True:
             incoming = await self.q.get()
-            msg_comps = incoming.data.decode('utf-8').split(",")
+            msg_comps = incoming.data.decode("utf-8").split(",")
 
             if msg_comps[0] == "send":
                 self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
@@ -80,7 +83,9 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
+        packet = generate_RPC_packet(
+            my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func()
+        )
         await self.floodsub.publish(my_id, packet.SerializeToString())
 
     async def publish_set_crypto(self, user, amount):
@@ -91,7 +96,9 @@ class DummyAccountNode():
         """
         my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
+        packet = generate_RPC_packet(
+            my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func()
+        )
 
         await self.floodsub.publish(my_id, packet.SerializeToString())
 
@@ -130,4 +137,3 @@ class DummyAccountNode():
             return self.balances[user]
         else:
             return -1
-

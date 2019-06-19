@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
+
 # pylint: disable=too-few-public-methods
 
 
 class IContentRouting(ABC):
-
     @abstractmethod
     def provide(self, cid, announce=True):
         """
@@ -21,7 +21,6 @@ class IContentRouting(ABC):
 
 
 class IPeerRouting(ABC):
-
     @abstractmethod
     def find_peer(self, peer_id):
         """

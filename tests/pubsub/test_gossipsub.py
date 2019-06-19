@@ -6,9 +6,15 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
-from utils import message_id_generator, generate_RPC_packet, \
-    create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect, \
-    connect
+from utils import (
+    message_id_generator,
+    generate_RPC_packet,
+    create_libp2p_hosts,
+    create_pubsub_and_gossipsub_instances,
+    sparse_connect,
+    dense_connect,
+    connect,
+)
 from tests.utils import cleanup
 
 SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
@@ -24,9 +30,9 @@ async def test_dense():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar
     queues = []
@@ -51,7 +57,9 @@ async def test_dense():
         host_id = str(origin_host.get_id())
 
         # Generate message packet
-        packet = generate_RPC_packet(host_id, ["foobar"], msg_content, next_msg_id_func())
+        packet = generate_RPC_packet(
+            host_id, ["foobar"], msg_content, next_msg_id_func()
+        )
 
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
@@ -65,6 +73,7 @@ async def test_dense():
             items.append(msg.data)
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_fanout():
     # Create libp2p hosts
@@ -75,9 +84,9 @@ async def test_fanout():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar
     queues = []
@@ -103,7 +112,9 @@ async def test_fanout():
         host_id = str(origin_host.get_id())
 
         # Generate message packet
-        packet = generate_RPC_packet(host_id, ["foobar"], msg_content, next_msg_id_func())
+        packet = generate_RPC_packet(
+            host_id, ["foobar"], msg_content, next_msg_id_func()
+        )
 
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
@@ -127,7 +138,9 @@ async def test_fanout():
         host_id = str(origin_host.get_id())
 
         # Generate message packet
-        packet = generate_RPC_packet(host_id, ["foobar"], msg_content, next_msg_id_func())
+        packet = generate_RPC_packet(
+            host_id, ["foobar"], msg_content, next_msg_id_func()
+        )
 
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
@@ -140,6 +153,7 @@ async def test_fanout():
 
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_fanout_maintenance():
     # Create libp2p hosts
@@ -150,9 +164,9 @@ async def test_fanout_maintenance():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar
     queues = []
@@ -178,7 +192,9 @@ async def test_fanout_maintenance():
         host_id = str(origin_host.get_id())
 
         # Generate message packet
-        packet = generate_RPC_packet(host_id, ["foobar"], msg_content, next_msg_id_func())
+        packet = generate_RPC_packet(
+            host_id, ["foobar"], msg_content, next_msg_id_func()
+        )
 
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
@@ -190,7 +206,7 @@ async def test_fanout_maintenance():
             assert msg.SerializeToString() == packet.publish[0].SerializeToString()
 
     for sub in pubsubs:
-        await sub.unsubscribe('foobar')
+        await sub.unsubscribe("foobar")
 
     queues = []
 
@@ -215,7 +231,9 @@ async def test_fanout_maintenance():
         host_id = str(origin_host.get_id())
 
         # Generate message packet
-        packet = generate_RPC_packet(host_id, ["foobar"], msg_content, next_msg_id_func())
+        packet = generate_RPC_packet(
+            host_id, ["foobar"], msg_content, next_msg_id_func()
+        )
 
         # publish from the randomly chosen host
         await gossipsubs[origin_idx].publish(host_id, packet.SerializeToString())
@@ -228,6 +246,7 @@ async def test_fanout_maintenance():
 
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_gossip_propagation():
     # Create libp2p hosts
@@ -237,17 +256,17 @@ async def test_gossip_propagation():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                1, 0, 2, 30, 50, 100, 0.5)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 1, 0, 2, 30, 50, 100, 0.5
+    )
     node1, node2 = libp2p_hosts[0], libp2p_hosts[1]
     sub1, sub2 = pubsubs[0], pubsubs[1]
     gsub1, gsub2 = gossipsubs[0], gossipsubs[1]
 
-    node1_queue = await sub1.subscribe('foo')
+    node1_queue = await sub1.subscribe("foo")
 
     # node 1 publish to topic
-    msg_content = 'foo_msg'
+    msg_content = "foo_msg"
     node1_id = str(node1.get_id())
 
     # Generate message packet
@@ -257,7 +276,7 @@ async def test_gossip_propagation():
     await gsub1.publish(node1_id, packet.SerializeToString())
 
     # now node 2 subscribes
-    node2_queue = await sub2.subscribe('foo')
+    node2_queue = await sub2.subscribe("foo")
 
     await connect(node2, node1)
 

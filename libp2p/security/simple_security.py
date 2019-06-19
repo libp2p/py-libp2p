@@ -2,8 +2,8 @@ import asyncio
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
-class SimpleSecurityTransport(ISecureTransport):
 
+class SimpleSecurityTransport(ISecureTransport):
     def __init__(self, key_phrase):
         self.key_phrase = key_phrase
 
@@ -17,7 +17,9 @@ class SimpleSecurityTransport(ISecureTransport):
         incoming = (await conn.read()).decode()
 
         if incoming != self.key_phrase:
-            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
+            raise Exception(
+                "Key phrase differed between nodes. Expected " + self.key_phrase
+            )
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
@@ -36,13 +38,15 @@ class SimpleSecurityTransport(ISecureTransport):
         await asyncio.sleep(0)
 
         if incoming != self.key_phrase:
-            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
+            raise Exception(
+                "Key phrase differed between nodes. Expected " + self.key_phrase
+            )
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
 
-class SimpleSecureConn(ISecureConn):
 
+class SimpleSecureConn(ISecureConn):
     def __init__(self, conn, key_phrase):
         self.conn = conn
         self.details = {}
