@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class INetwork(ABC):
-
     @abstractmethod
     def get_peer_id(self):
         """

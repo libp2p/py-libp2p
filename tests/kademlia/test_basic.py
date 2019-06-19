@@ -25,7 +25,7 @@ async def test_example():
     assert await node_a.get(key) == value
 
 
-@pytest.mark.parametrize("nodes_nr", [(2**i) for i in range(2, 5)])
+@pytest.mark.parametrize("nodes_nr", [(2 ** i) for i in range(2, 5)])
 @pytest.mark.asyncio
 async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
 
@@ -53,7 +53,7 @@ async def test_multiple_nodes_bootstrap_set_get(nodes_nr):
             assert await node.get(key) == value
 
 
-@pytest.mark.parametrize("nodes_nr", [(2**i) for i in range(2, 5)])
+@pytest.mark.parametrize("nodes_nr", [(2 ** i) for i in range(2, 5)])
 @pytest.mark.asyncio
 async def test_multiple_nodes_set_bootstrap_get(nodes_nr):
     node_bootstrap = KademliaServer()

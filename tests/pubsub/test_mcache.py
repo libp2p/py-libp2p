@@ -3,11 +3,11 @@ from libp2p.pubsub.mcache import MessageCache
 
 
 class Msg:
-
     def __init__(self, topicIDs, seqno, from_id):
         self.topicIDs = topicIDs
-        self.seqno = seqno,
+        self.seqno = (seqno,)
         self.from_id = from_id
+
 
 @pytest.mark.asyncio
 async def test_mcache():
@@ -31,7 +31,7 @@ async def test_mcache():
         # successful read
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 10
 
@@ -53,7 +53,7 @@ async def test_mcache():
 
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 20
 
@@ -106,7 +106,7 @@ async def test_mcache():
 
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 30
 

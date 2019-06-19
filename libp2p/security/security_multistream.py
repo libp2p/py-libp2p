@@ -10,8 +10,9 @@ involved in the secured connection
 
 Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
 """
-class SecurityMultistream(ABC):
 
+
+class SecurityMultistream(ABC):
     def __init__(self):
         # Map protocol to secure transport
         self.transports = {}
@@ -31,7 +32,6 @@ class SecurityMultistream(ABC):
         # we only care about selecting the protocol, not any handler function
         self.multiselect.add_handler(protocol, None)
 
-
     async def secure_inbound(self, conn):
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
@@ -46,7 +46,6 @@ class SecurityMultistream(ABC):
         secure_conn = await transport.secure_inbound(conn)
 
         return secure_conn
-
 
     async def secure_outbound(self, conn, peer_id):
         """
@@ -63,7 +62,6 @@ class SecurityMultistream(ABC):
 
         return secure_conn
 
-
     async def select_transport(self, conn, initiator):
         """
         Select a transport that both us and the node on the
@@ -79,8 +77,9 @@ class SecurityMultistream(ABC):
         protocol = None
         if initiator:
             # Select protocol if initiator
-            protocol = \
-                await self.multiselect_client.select_one_of(list(self.transports.keys()), conn)
+            protocol = await self.multiselect_client.select_one_of(
+                list(self.transports.keys()), conn
+            )
         else:
             # Select protocol if non-initiator
             protocol, _ = await self.multiselect.negotiate(conn)

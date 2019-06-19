@@ -2,10 +2,7 @@ import setuptools
 
 
 classifiers = [
-    (
-        "Programming Language :: Python :: %s" % version
-    )
-    for version in ["3.7"]
+    ("Programming Language :: Python :: %s" % version) for version in ["3.7"]
 ]
 
 
@@ -26,7 +23,7 @@ setuptools.setup(
         "grpcio",
         "grpcio-tools",
         "lru-dict>=1.1.6",
-        "aio_timers"
+        "aio_timers",
     ],
     packages=["libp2p"],
     zip_safe=False,

@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class ITransport(ABC):
-
     @abstractmethod
     def dial(self, multiaddr, self_id, options=None):
         """

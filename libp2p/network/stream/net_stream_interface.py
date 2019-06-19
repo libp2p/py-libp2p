@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class INetStream(ABC):
-
     @abstractmethod
     def get_protocol(self):
         """

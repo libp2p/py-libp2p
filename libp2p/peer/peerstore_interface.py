@@ -5,7 +5,6 @@ from .peermetadata_interface import IPeerMetadata
 
 
 class IPeerStore(IAddrBook, IPeerMetadata):
-
     def __init__(self):
         IPeerMetadata.__init__(self)
         IAddrBook.__init__(self)

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-class INotifee(ABC):
 
+class INotifee(ABC):
     @abstractmethod
     async def opened_stream(self, network, stream):
         """

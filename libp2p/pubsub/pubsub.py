@@ -7,7 +7,7 @@ from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
 
 
-class Pubsub():
+class Pubsub:
     # pylint: disable=too-many-instance-attributes, no-member
 
     def __init__(self, host, router, my_id, cache_size=None):
@@ -68,8 +68,9 @@ class Pubsub():
         packet = rpc_pb2.RPC()
         if self.my_topics:
             for topic_id in self.my_topics:
-                packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-                    subscribe=True, topicid=topic_id)])
+                packet.subscriptions.extend(
+                    [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
+                )
 
         return packet.SerializeToString()
 
@@ -84,7 +85,7 @@ class Pubsub():
         peer_id = str(stream.mplex_conn.peer_id)
 
         while True:
-            incoming = (await stream.read())
+            incoming = await stream.read()
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
@@ -215,10 +216,9 @@ class Pubsub():
 
         # Create subscribe message
         packet = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe=True,
-            topicid=topic_id.encode('utf-8')
-            )])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id.encode("utf-8"))]
+        )
 
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -241,10 +241,9 @@ class Pubsub():
 
         # Create unsubscribe message
         packet = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe=False,
-            topicid=topic_id.encode('utf-8')
-            )])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id.encode("utf-8"))]
+        )
 
         # Send out unsubscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())

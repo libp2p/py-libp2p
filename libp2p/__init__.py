@@ -26,14 +26,15 @@ async def cleanup_done_tasks():
         # Some sleep necessary to context switch
         await asyncio.sleep(3)
 
+
 def generate_id():
     new_key = RSA.generate(2048, e=65537)
     new_id = id_from_public_key(new_key.publickey())
     # private_key = new_key.exportKey("PEM")
     return new_id
 
-def initialize_default_kademlia_router(
-        ksize=20, alpha=3, id_opt=None, storage=None):
+
+def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=None):
     """
     initialize swam when no swarm is passed in
     :param ksize: The k parameter from the paper
@@ -47,14 +48,18 @@ def initialize_default_kademlia_router(
         id_opt = generate_id()
 
     node_id = id_opt.get_raw_id()
-    server = KademliaServer(ksize=ksize, alpha=alpha,
-                            node_id=node_id, storage=storage)
+    server = KademliaServer(ksize=ksize, alpha=alpha, node_id=node_id, storage=storage)
     return KadmeliaPeerRouter(server)
 
 
 def initialize_default_swarm(
-        id_opt=None, transport_opt=None, muxer_opt=None,
-        sec_opt=None, peerstore_opt=None, disc_opt=None):
+    id_opt=None,
+    transport_opt=None,
+    muxer_opt=None,
+    sec_opt=None,
+    peerstore_opt=None,
+    disc_opt=None,
+):
     """
     initialize swarm when no swarm is passed in
     :param id_opt: optional id for host
@@ -80,16 +85,20 @@ def initialize_default_swarm(
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
-    swarm_opt = Swarm(id_opt, peerstore,\
-                      upgrader, transport, disc_opt)
+    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
 
     return swarm_opt
 
 
 async def new_node(
-        swarm_opt=None, id_opt=None, transport_opt=None,
-        muxer_opt=None, sec_opt=None, peerstore_opt=None,
-        disc_opt=None):
+    swarm_opt=None,
+    id_opt=None,
+    transport_opt=None,
+    muxer_opt=None,
+    sec_opt=None,
+    peerstore_opt=None,
+    disc_opt=None,
+):
     """
     create new libp2p node
     :param id_opt: optional id for host
@@ -106,9 +115,13 @@ async def new_node(
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
-            id_opt=id_opt, transport_opt=transport_opt,
-            muxer_opt=muxer_opt, sec_opt=sec_opt,
-            peerstore_opt=peerstore_opt, disc_opt=disc_opt)
+            id_opt=id_opt,
+            transport_opt=transport_opt,
+            muxer_opt=muxer_opt,
+            sec_opt=sec_opt,
+            peerstore_opt=peerstore_opt,
+            disc_opt=disc_opt,
+        )
 
     # TODO enable support for other host type
     # TODO routing unimplemented

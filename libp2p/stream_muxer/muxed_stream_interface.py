@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class IMuxedStream(ABC):
-
     @abstractmethod
     def read(self):
         """

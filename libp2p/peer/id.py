@@ -12,7 +12,6 @@ MAX_INLINE_KEY_LENGTH = 42
 
 
 class ID:
-
     def __init__(self, id_str):
         self._id_str = id_str
 
@@ -32,7 +31,7 @@ class ID:
     __repr__ = __str__
 
     def __eq__(self, other):
-        #pylint: disable=protected-access
+        # pylint: disable=protected-access
         return self._id_str == other._id_str
 
     def __hash__(self):
@@ -43,7 +42,7 @@ def id_b58_encode(peer_id):
     """
     return a b58-encoded string
     """
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
     return base58.b58encode(peer_id._id_str).decode()
 
 
@@ -70,7 +69,8 @@ def id_from_public_key(key):
 def id_from_private_key(key):
     return id_from_public_key(key.publickey())
 
+
 def digest(string):
     if not isinstance(string, bytes):
-        string = str(string).encode('utf8')
+        string = str(string).encode("utf8")
     return hashlib.sha1(string).digest()

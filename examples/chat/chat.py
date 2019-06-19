@@ -9,7 +9,7 @@ from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
-PROTOCOL_ID = '/chat/1.0.0'
+PROTOCOL_ID = "/chat/1.0.0"
 
 
 async def read_data(stream):
@@ -31,28 +31,30 @@ async def write_data(stream):
 
 
 async def run(port, destination):
-    external_ip = urllib.request.urlopen(
-        'https://v4.ident.me/').read().decode('utf8')
+    external_ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
     transport_opt = "/ip4/%s/tcp/%s" % (external_ip, port)
-    host = await new_node(
-        transport_opt=[transport_opt])
+    host = await new_node(transport_opt=[transport_opt])
 
     await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
 
     if not destination:  # its the server
+
         async def stream_handler(stream):
             asyncio.ensure_future(read_data(stream))
             asyncio.ensure_future(write_data(stream))
+
         host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
         if not port:
             raise RuntimeError("was not able to find the actual local port")
 
-        print("Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n" %
-              (int(port) + 1, external_ip, port, host.get_id().pretty()))
+        print(
+            "Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n"
+            % (int(port) + 1, external_ip, port, host.get_id().pretty())
+        )
         print("\nWaiting for incoming connection\n\n")
 
-    else: # its the client
+    else:  # its the client
         m = multiaddr.Multiaddr(destination)
         info = info_from_p2p_addr(m)
         # Associate the peer with local ip address
@@ -68,16 +70,22 @@ async def run(port, destination):
 
 
 @click.command()
-@click.option('--port', '-p', help='source port number', default=8000)
-@click.option('--destination', '-d', help="Destination multiaddr string")
-@click.option('--help', is_flag=True, default=False, help='display help')
+@click.option("--port", "-p", help="source port number", default=8000)
+@click.option("--destination", "-d", help="Destination multiaddr string")
+@click.option("--help", is_flag=True, default=False, help="display help")
 # @click.option('--debug', is_flag=True, default=False, help='Debug generates the same node ID on every execution')
 def main(port, destination, help):
 
     if help:
-        print("This program demonstrates a simple p2p chat application using libp2p\n\n")
-        print("Usage: Run './chat -p <SOURCE_PORT>' where <SOURCE_PORT> can be any port number.")
-        print("Now run './chat -p <PORT> -d <MULTIADDR>' where <MULTIADDR> is multiaddress of previous listener host.")
+        print(
+            "This program demonstrates a simple p2p chat application using libp2p\n\n"
+        )
+        print(
+            "Usage: Run './chat -p <SOURCE_PORT>' where <SOURCE_PORT> can be any port number."
+        )
+        print(
+            "Now run './chat -p <PORT> -d <MULTIADDR>' where <MULTIADDR> is multiaddress of previous listener host."
+        )
         return
 
     loop = asyncio.get_event_loop()
@@ -90,5 +98,5 @@ def main(port, destination, help):
         loop.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

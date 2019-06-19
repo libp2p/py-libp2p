@@ -10,12 +10,10 @@ from ..transport_interface import ITransport
 
 
 class TCP(ITransport):
-
     def __init__(self):
         self.listener = self.Listener()
 
     class Listener(IListener):
-
         def __init__(self, handler_function=None):
             self.multiaddrs = []
             self.server = None
@@ -28,11 +26,13 @@ class TCP(ITransport):
             :return: return True if successful
             """
             _multiaddr = multiaddr
-            _multiaddr = _multiaddr.decapsulate('/p2p')
+            _multiaddr = _multiaddr.decapsulate("/p2p")
 
-            coroutine = asyncio.start_server(self.handler,
-                                             _multiaddr.value_for_protocol('ip4'),
-                                             _multiaddr.value_for_protocol('tcp'))
+            coroutine = asyncio.start_server(
+                self.handler,
+                _multiaddr.value_for_protocol("ip4"),
+                _multiaddr.value_for_protocol("tcp"),
+            )
             self.server = await coroutine
             socket = self.server.sockets[0]
             self.multiaddrs.append(_multiaddr_from_socket(socket))
@@ -72,8 +72,8 @@ class TCP(ITransport):
         :param options: optional object
         :return: True if successful
         """
-        host = multiaddr.value_for_protocol('ip4')
-        port = int(multiaddr.value_for_protocol('tcp'))
+        host = multiaddr.value_for_protocol("ip4")
+        port = int(multiaddr.value_for_protocol("tcp"))
 
         reader, writer = await asyncio.open_connection(host, port)
 

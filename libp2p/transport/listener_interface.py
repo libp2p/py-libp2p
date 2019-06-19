@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 
 class IListener(ABC):
-
     @abstractmethod
     def listen(self, multiaddr):
         """

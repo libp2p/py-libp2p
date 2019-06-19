@@ -1,7 +1,7 @@
 from .raw_connection_interface import IRawConnection
 
-class RawConnection(IRawConnection):
 
+class RawConnection(IRawConnection):
     def __init__(self, ip, port, reader, writer, initiator):
         # pylint: disable=too-many-arguments
         self.conn_ip = ip
@@ -18,7 +18,7 @@ class RawConnection(IRawConnection):
 
     async def read(self):
         line = await self.reader.readline()
-        adjusted_line = line.decode().rstrip('\n')
+        adjusted_line = line.decode().rstrip("\n")
 
         # TODO: figure out a way to remove \n without going back and forth with
         # encoding and decoding
