@@ -19,7 +19,12 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 """
 
 
-class SecurityMultistream(ABC):
+class SecurityMultistream:
+    """
+    SSMuxer is a multistream stream security transport multiplexer.
+    go impl.: github.com/libp2p/go-conn-security-multistream/ssms.go
+    """
+
     transports: Dict[TProtocol, ISecureTransport]
     multiselect: Multiselect
     multiselect_client: MultiselectClient
@@ -66,6 +71,7 @@ class SecurityMultistream(ABC):
         """
 
         # Select a secure transport
+        print(f"!@# self.transports={self.transports}")
         transport = await self.select_transport(conn, True)
 
         # Create secured connection

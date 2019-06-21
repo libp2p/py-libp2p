@@ -6,6 +6,7 @@ from libp2p.typing import NegotiableTransport, TProtocol
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator import MultiselectCommunicator
 from .multiselect_communicator_interface import IMultiselectCommunicator
+from .utils import delim_read, delim_write
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
@@ -28,11 +29,16 @@ class MultiselectClient(IMultiselectClient):
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to counterparty
-        await communicator.write(MULTISELECT_PROTOCOL_ID)
+        rwtor = communicator.reader_writer
+        await delim_write(rwtor.writer, MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read_stream_until_eof()
+        # handshake_contents = await communicator.read_stream_until_eof()
+        handshake_contents = await delim_read(rwtor.reader)
 
+        print(
+            f"!@# multiselect_client.handshake: handshake_contents={handshake_contents}"
+        )
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
             raise MultiselectClientError("multiselect protocol ID mismatch")
@@ -102,10 +108,11 @@ class MultiselectClient(IMultiselectClient):
         """
 
         # Tell counterparty we want to use protocol
-        await communicator.write(protocol)
+        rwtor = communicator.reader_writer
+        await delim_write(rwtor.writer, protocol)
 
         # Get what counterparty says in response
-        response = await communicator.read_stream_until_eof()
+        response = await delim_read(rwtor.reader)
 
         # Return protocol if response is equal to protocol or raise error
         if response == protocol:

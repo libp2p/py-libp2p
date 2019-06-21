@@ -10,6 +10,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
 from .constants import HeaderTags
+from libp2p.protocol_muxer.utils import delim_read
 from .mplex_stream import MplexStream
 from .utils import decode_uvarint_from_stream, encode_uvarint
 
@@ -34,7 +35,7 @@ class Mplex(IMuxedConn):
     ) -> None:
         """
         create a new muxed connection
-        :param conn: an instance of raw connection
+        :param secured_conn: an instance of raw connection
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
@@ -150,7 +151,9 @@ class Mplex(IMuxedConn):
         # TODO Deal with other types of messages using flag (currently _)
 
         while True:
+            # FIXME: This is blocked only for `timeout` time, which consumes unnecessary CPUs.
             stream_id, flag, message = await self.read_message()
+            print(f"!@# stream_id={stream_id}, flag={flag}, message={message}")
 
             if stream_id is not None and flag is not None and message is not None:
                 if stream_id not in self.buffers:
@@ -162,7 +165,10 @@ class Mplex(IMuxedConn):
                     await self.accept_stream()
 
                 if message:
-                    await self.buffers[stream_id].put(message)
+                    # FIXME: Added to prevent the initial `b"0"` goes into the queue.
+                    #  Need to find out what `b"0"` mean.
+                    if flag != HeaderTags.NewStream.value:
+                        await self.buffers[stream_id].put(message)
 
             # Force context switch
             await asyncio.sleep(0)

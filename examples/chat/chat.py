@@ -8,6 +8,7 @@ import multiaddr
 from libp2p import new_node
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.protocol.identify import id as id_protocol
 from libp2p.typing import TProtocol
 
 PROTOCOL_ID = TProtocol("/chat/1.0.0")
@@ -41,6 +42,9 @@ async def run(port: int, destination: str, localhost: bool) -> None:
     host = await new_node(transport_opt=[transport_opt])
 
     await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
+    # support Identify
+    id_service = id_protocol.IdentifyService(host=host)
+    host.set_stream_handler(id_protocol.PROTOCOL_ID, id_service.request_handler)
 
     if not destination:  # its the server
 

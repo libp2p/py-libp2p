@@ -11,10 +11,14 @@ from libp2p.typing import TProtocol
 
 from .listener_interface import IListener
 from .transport_interface import ITransport
+from libp2p.stream_muxer.muxed_multistream import (
+    MuxedMultistream,
+)
 
 
 class TransportUpgrader:
     security_multistream: SecurityMultistream
+    muxed_multistream: MuxedMultistream
     muxer: Sequence[str]
 
     def __init__(
@@ -22,11 +26,14 @@ class TransportUpgrader:
     ) -> None:
         # Store security option
         self.security_multistream = SecurityMultistream()
-        for key in secOpt:
-            self.security_multistream.add_transport(key, secOpt[key])
-
+        for key, value in secOpt.items():
+            self.security_multistream.add_transport(key, value)
         # Store muxer option
-        self.muxer = muxerOpt
+        # muxerOpt = ["mplex/6.7.0"]
+        # /yamux/1.0.0 /mplex/6.7.0
+        self.muxed_multistream = MuxedMultistream()
+        for key, value in muxerOpt.items():
+            self.muxed_multistream.add_transport(key, value)
 
     def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
         """
@@ -45,16 +52,19 @@ class TransportUpgrader:
 
         return await self.security_multistream.secure_inbound(raw_conn)
 
-    @staticmethod
     def upgrade_connection(
+        self,
         conn: ISecureConn,
         generic_protocol_handler: GenericProtocolHandlerFn,
         peer_id: ID,
+        initiator: bool,
     ) -> Mplex:
         """
-        Upgrade raw connection to muxed connection
+        Upgrade conn to be a muxed connection
         """
-
-        # For PoC, no security, default to mplex
-        # TODO do exchange to determine multiplexer
-        return Mplex(conn, generic_protocol_handler, peer_id)
+        return await self.muxed_multistream.new_conn(
+            conn,
+            generic_protocol_handler,
+            peer_id,
+            initiator,
+        )

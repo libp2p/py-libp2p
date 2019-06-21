@@ -1,4 +1,5 @@
 import asyncio
+from io import BytesIO
 
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
@@ -18,6 +19,7 @@ class MplexStream(IMuxedStream):
     local_closed: bool
     remote_closed: bool
     stream_lock: asyncio.Lock
+    buf: bytes
 
     def __init__(self, stream_id: int, initiator: bool, mplex_conn: IMuxedConn) -> None:
         """
@@ -34,13 +36,32 @@ class MplexStream(IMuxedStream):
         self.local_closed = False
         self.remote_closed = False
         self.stream_lock = asyncio.Lock()
+        self.buf = None
 
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         """
         read messages associated with stream from buffer til end of file
         :return: bytes of input
         """
-        return await self.mplex_conn.read_buffer(self.stream_id)
+        if n == -1:
+            return await self.mplex_conn.read_buffer(self.stream_id)
+        return await self.read_bytes(n)
+
+    async def read_bytes(self, n: int) -> bytes:
+        if self.buf is None:
+            self.buf = await self.mplex_conn.read_buffer(self.stream_id)
+        n_read = 0
+        bytes_buf = BytesIO()
+        while self.buf is not None and n_read < n:
+            n_to_read = min(n - n_read, len(self.buf))
+            bytes_buf.write(self.buf[:n_to_read])
+            if n_to_read == n - n_read:
+                self.buf = self.buf[n_to_read:]
+            else:
+                self.buf = None
+                self.buf = await self.mplex_conn.read_buffer(self.stream_id)
+            n_read += n_to_read
+        return bytes_buf.getvalue()
 
     async def write(self, data: bytes) -> int:
         """

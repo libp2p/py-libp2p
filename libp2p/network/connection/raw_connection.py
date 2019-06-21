@@ -1,4 +1,5 @@
 import asyncio
+from multiaddr import Multiaddr
 
 from .raw_connection_interface import IRawConnection
 
@@ -26,6 +27,10 @@ class RawConnection(IRawConnection):
         self.writer = writer
         self._next_id = 0 if initiator else 1
         self.initiator = initiator
+
+    @property
+    def remote_addr(self) -> Multiaddr:
+        return Multiaddr(f"/ip4/{self.conn_ip}/tcp/{self.conn_port}")
 
     async def write(self, data: bytes) -> None:
         self.writer.write(data)

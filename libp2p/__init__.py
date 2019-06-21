@@ -17,6 +17,7 @@ from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
+from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
 async def cleanup_done_tasks() -> None:
@@ -91,15 +92,13 @@ def initialize_default_swarm(
 
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
-    muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or {TProtocol("insecure/1.0.0"): InsecureTransport("insecure")}
+    muxer = muxer_opt or {TProtocol("/mplex/6.7.0"): Mplex}
+    sec = sec_opt or {TProtocol("/plaintext/1.0.0"): InsecureTransport("insecure")}
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
-    # TODO: Initialize discovery if not presented
-    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
 
-    return swarm_opt
+    return Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
 
 
 async def new_node(
