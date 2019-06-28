@@ -1,16 +1,14 @@
 import asyncio
+
 import multiaddr
 import pytest
+from utils import generate_RPC_packet, message_id_generator
 
-from tests.utils import cleanup
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
-from utils import message_id_generator, generate_RPC_packet
-
-# pylint: disable=too-many-locals
+from libp2p.pubsub.pubsub import Pubsub
+from tests.utils import cleanup
 
 
 async def connect(node1, node2):
@@ -33,7 +31,7 @@ async def test_simple_two_nodes():
     supported_protocols = ["/floodsub/1.0.0"]
 
     floodsub_a = FloodSub(supported_protocols)
-    pubsub_a = Pubsub(node_a, floodsub_a, "a")
+    _ = Pubsub(node_a, floodsub_a, "a")
     floodsub_b = FloodSub(supported_protocols)
     pubsub_b = Pubsub(node_b, floodsub_b, "b")
 
@@ -78,7 +76,7 @@ async def test_lru_cache_two_nodes():
 
     # initialize PubSub with a cache_size of 4
     floodsub_a = FloodSub(supported_protocols)
-    pubsub_a = Pubsub(node_a, floodsub_a, "a", 4)
+    _ = Pubsub(node_a, floodsub_a, "a", 4)
     floodsub_b = FloodSub(supported_protocols)
     pubsub_b = Pubsub(node_b, floodsub_b, "b", 4)
 
@@ -143,7 +141,7 @@ async def perform_test_from_obj(obj):
     """
     Perform a floodsub test from a test obj.
     test obj are composed as follows:
-    
+
     {
         "supported_protocols": ["supported/protocol/1.0.0",...],
         "adj_list": {

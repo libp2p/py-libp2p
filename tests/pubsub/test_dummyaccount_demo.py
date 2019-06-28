@@ -1,14 +1,12 @@
 import asyncio
-import multiaddr
-import pytest
-
 from threading import Thread
-from tests.utils import cleanup
-from libp2p import new_node
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pubsub import Pubsub
-from libp2p.pubsub.floodsub import FloodSub
+
+import pytest
 from dummy_account_node import DummyAccountNode
+
+from libp2p.peer.peerinfo import info_from_p2p_addr
+from tests.utils import cleanup
+
 
 # pylint: disable=too-many-locals
 
@@ -33,7 +31,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     in various network topologies
     :param num_nodes: number of nodes in the test
     :param adjacency_map: adjacency map defining each node and its list of neighbors
-    :param action_func: function to execute that includes actions by the nodes, 
+    :param action_func: function to execute that includes actions by the nodes,
     such as send crypto and set crypto
     :param assertion_func: assertions for testing the results of the actions are correct
     """

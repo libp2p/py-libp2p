@@ -1,13 +1,13 @@
 import asyncio
-import multiaddr
-import uuid
-import random
 import struct
+
+import multiaddr
+
 from libp2p import new_node
-from libp2p.pubsub.pb import rpc_pb2
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import Pubsub
 
 
 def message_id_generator(start_val):

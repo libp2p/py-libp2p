@@ -1,21 +1,19 @@
 """
 Package for interacting on the network at a high level.
 """
-import pickle
 import asyncio
 import logging
+import pickle
 
-from .protocol import KademliaProtocol
-from .utils import digest
-from .storage import ForgetfulStorage
+from .crawling import NodeSpiderCrawl, ValueSpiderCrawl
 from .kad_peerinfo import create_kad_peerinfo
-from .crawling import ValueSpiderCrawl
-from .crawling import NodeSpiderCrawl
+from .protocol import KademliaProtocol
+from .storage import ForgetfulStorage
+from .utils import digest
 
-log = logging.getLogger(__name__)  # pylint: disable=invalid-name
+log = logging.getLogger(__name__)
 
 
-# pylint: disable=too-many-instance-attributes
 class KademliaServer:
     """
     High level view of a node instance.  This is the object that should be
@@ -260,4 +258,4 @@ def check_dht_value_type(value):
     placing in the dht.
     """
     typeset = [int, float, bool, str, bytes]
-    return type(value) in typeset  # pylint: disable=unidiomatic-typecheck
+    return type(value) in typeset

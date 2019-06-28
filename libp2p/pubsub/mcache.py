@@ -1,6 +1,5 @@
 class MessageCache:
     class CacheEntry:
-        # pylint: disable=too-few-public-methods
         """
         A logical representation of an entry in the mcache's _history_.
         """

@@ -1,20 +1,16 @@
 import asyncio
-import pytest
 import random
 
-from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import Pubsub
+import pytest
 from utils import (
-    message_id_generator,
-    generate_RPC_packet,
+    connect,
     create_libp2p_hosts,
     create_pubsub_and_gossipsub_instances,
-    sparse_connect,
     dense_connect,
-    connect,
+    generate_RPC_packet,
+    message_id_generator,
 )
+
 from tests.utils import cleanup
 
 SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
@@ -261,9 +257,9 @@ async def test_gossip_propagation():
     )
     node1, node2 = libp2p_hosts[0], libp2p_hosts[1]
     sub1, sub2 = pubsubs[0], pubsubs[1]
-    gsub1, gsub2 = gossipsubs[0], gossipsubs[1]
+    gsub1, _ = gossipsubs[0], gossipsubs[1]
 
-    node1_queue = await sub1.subscribe("foo")
+    await sub1.subscribe("foo")
 
     # node 1 publish to topic
     msg_content = "foo_msg"

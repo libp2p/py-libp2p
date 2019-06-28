@@ -1,11 +1,12 @@
 import heapq
 import random
-
 from operator import itemgetter
+
 from multiaddr import Multiaddr
-from libp2p.peer.peerinfo import PeerInfo
+
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData
+from libp2p.peer.peerinfo import PeerInfo
 from .utils import digest
 
 P_IP = "ip4"
@@ -22,7 +23,6 @@ class KadPeerInfo(PeerInfo):
 
         self.addrs = peer_data.get_addrs() if peer_data else None
 
-        # pylint: disable=invalid-name
         self.ip = self.addrs[0].value_for_protocol(P_IP) if peer_data else None
         self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if peer_data else None
 
@@ -142,7 +142,7 @@ def create_kad_peerinfo(raw_node_id=None, sender_ip=None, sender_port=None):
     node_id = ID(raw_node_id) if raw_node_id else ID(digest(random.getrandbits(255)))
     peer_data = None
     if sender_ip and sender_port:
-        peer_data = PeerData()  # pylint: disable=no-value-for-parameter
+        peer_data = PeerData()
         addr = [
             Multiaddr(
                 "/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port)

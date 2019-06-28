@@ -1,4 +1,5 @@
 import hashlib
+
 import base58
 import multihash
 
@@ -31,7 +32,6 @@ class ID:
     __repr__ = __str__
 
     def __eq__(self, other):
-        # pylint: disable=protected-access
         return self._id_str == other._id_str
 
     def __hash__(self):
@@ -42,7 +42,6 @@ def id_b58_encode(peer_id):
     """
     return a b58-encoded string
     """
-    # pylint: disable=protected-access
     return base58.b58encode(peer_id._id_str).decode()
 
 

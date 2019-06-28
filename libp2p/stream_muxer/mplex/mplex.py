@@ -1,12 +1,11 @@
 import asyncio
 
-from .utils import encode_uvarint, decode_uvarint_from_stream, get_flag
 from .mplex_stream import MplexStream
+from .utils import decode_uvarint_from_stream, encode_uvarint, get_flag
 from ..muxed_connection_interface import IMuxedConn
 
 
 class Mplex(IMuxedConn):
-    # pylint: disable=too-many-instance-attributes
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """

@@ -5,7 +5,6 @@ from ..muxed_stream_interface import IMuxedStream
 
 
 class MplexStream(IMuxedStream):
-    # pylint: disable=too-many-instance-attributes
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
     """

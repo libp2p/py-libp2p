@@ -2,8 +2,6 @@ from libp2p.network.notifee_interface import INotifee
 
 
 class PubsubNotifee(INotifee):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
-
     def __init__(self, initiator_peers_queue):
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub

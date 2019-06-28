@@ -13,8 +13,8 @@ install:
 
 script:
   - pytest --cov=./libp2p tests/
-  - pylint --rcfile=.pylintrc libp2p tests
   - black --check examples libp2p tests setup.py
+  - flake8 libp2p/ tests/
 
 after_success:
   - codecov

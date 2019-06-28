@@ -1,8 +1,7 @@
 from abc import ABC
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect import Multiselect
 
-# pylint: disable=W0105
+from libp2p.protocol_muxer.multiselect import Multiselect
+from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 
 """
 Represents a secured connection object, which includes a connection and details about the security

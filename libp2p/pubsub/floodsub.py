@@ -3,8 +3,6 @@ from .pubsub_router_interface import IPubsubRouter
 
 
 class FloodSub(IPubsubRouter):
-    # pylint: disable=no-member
-
     def __init__(self, protocols):
         self.protocols = protocols
         self.pubsub = None

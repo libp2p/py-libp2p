@@ -1,11 +1,12 @@
 import asyncio
-import multiaddr
 import uuid
 
-from utils import message_id_generator, generate_RPC_packet
+import multiaddr
+from utils import generate_RPC_packet, message_id_generator
+
 from libp2p import new_node
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
+from libp2p.pubsub.pubsub import Pubsub
 
 SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
 CRYPTO_TOPIC = "ethereum"
@@ -20,7 +21,7 @@ CRYPTO_TOPIC = "ethereum"
 
 class DummyAccountNode:
     """
-    Node which has an internal balance mapping, meant to serve as 
+    Node which has an internal balance mapping, meant to serve as
     a dummy crypto blockchain. There is no actual blockchain, just a simple
     map indicating how much crypto each user in the mappings holds
     """
@@ -107,7 +108,7 @@ class DummyAccountNode:
         Handle incoming send_crypto message
         :param source_user: user to send crypto from
         :param dest_user: user to send crypto to
-        :param amount: amount of crypto to send 
+        :param amount: amount of crypto to send
         """
         if source_user in self.balances:
             self.balances[source_user] -= amount

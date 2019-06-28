@@ -3,11 +3,14 @@
 
 import sys
 
+from google.protobuf import (
+    descriptor as _descriptor,
+    message as _message,
+    reflection as _reflection,
+    symbol_database as _symbol_database,
+)
+
 _b = sys.version_info[0] < 3 and (lambda x: x) or (lambda x: x.encode("latin1"))
-from google.protobuf import descriptor as _descriptor
-from google.protobuf import message as _message
-from google.protobuf import reflection as _reflection
-from google.protobuf import symbol_database as _symbol_database
 
 # @@protoc_insertion_point(imports)
 

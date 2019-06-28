@@ -3,7 +3,6 @@ from .raw_connection_interface import IRawConnection
 
 class RawConnection(IRawConnection):
     def __init__(self, ip, port, reader, writer, initiator):
-        # pylint: disable=too-many-arguments
         self.conn_ip = ip
         self.conn_port = port
         self.reader = reader

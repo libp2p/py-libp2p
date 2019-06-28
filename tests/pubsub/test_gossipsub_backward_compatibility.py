@@ -1,15 +1,15 @@
 import asyncio
+
 import multiaddr
 import pytest
+from utils import generate_RPC_packet, message_id_generator
 
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
-from utils import message_id_generator, generate_RPC_packet
 from tests.utils import cleanup
+
 
 # pylint: disable=too-many-locals
 
@@ -44,7 +44,7 @@ async def perform_test_from_obj(obj):
     """
     Perform a floodsub test from a test obj.
     test obj are composed as follows:
-    
+
     {
         "supported_protocols": ["supported/protocol/1.0.0",...],
         "adj_list": {

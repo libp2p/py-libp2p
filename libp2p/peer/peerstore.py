@@ -1,6 +1,6 @@
-from .peerstore_interface import IPeerStore
 from .peerdata import PeerData
 from .peerinfo import PeerInfo
+from .peerstore_interface import IPeerStore
 
 
 class PeerStore(IPeerStore):

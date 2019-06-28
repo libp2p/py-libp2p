@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-# pylint: disable=W0105
-
 """
 Transport that is used to secure a connection. This transport is
 chosen by a security transport multistream module.

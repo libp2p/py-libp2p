@@ -9,25 +9,20 @@ TODO: Add tests for closed_stream disconnected, listen_close when those
 features are implemented in swarm
 """
 
-import pytest
 import multiaddr
+import pytest
 
-
+from libp2p import initialize_default_swarm, new_node
+from libp2p.host.basic_host import BasicHost
+from libp2p.network.notifee_interface import INotifee
 from tests.utils import (
     cleanup,
     echo_stream_handler,
     perform_two_host_set_up_custom_handler,
 )
-from libp2p import new_node, initialize_default_swarm
-from libp2p.network.notifee_interface import INotifee
-from libp2p.host.basic_host import BasicHost
-
-# pylint: disable=too-many-locals
 
 
 class MyNotifee(INotifee):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
-
     def __init__(self, events, val_to_append_to_event):
         self.events = events
         self.val_to_append_to_event = val_to_append_to_event
@@ -52,8 +47,6 @@ class MyNotifee(INotifee):
 
 
 class InvalidNotifee:
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
-
     def __init__(self):
         pass
 

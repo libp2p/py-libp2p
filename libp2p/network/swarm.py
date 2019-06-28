@@ -1,18 +1,15 @@
 import asyncio
 
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.peer.id import id_b58_decode
-
+from libp2p.protocol_muxer.multiselect import Multiselect
+from libp2p.protocol_muxer.multiselect_client import MultiselectClient
+from .connection.raw_connection import RawConnection
 from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
-from .connection.raw_connection import RawConnection
 
 
 class Swarm(INetwork):
-    # pylint: disable=too-many-instance-attributes,cell-var-from-loop,too-many-arguments
-
     def __init__(self, peer_id, peerstore, upgrader, transport, router):
         self.self_id = peer_id
         self.peerstore = peerstore

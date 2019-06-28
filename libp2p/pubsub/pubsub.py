@@ -1,4 +1,3 @@
-# pylint: disable=no-name-in-module
 import asyncio
 
 from lru import LRU
@@ -8,8 +7,6 @@ from .pubsub_notifee import PubsubNotifee
 
 
 class Pubsub:
-    # pylint: disable=too-many-instance-attributes, no-member
-
     def __init__(self, host, router, my_id, cache_size=None):
         """
         Construct a new Pubsub object, which is responsible for handling all
