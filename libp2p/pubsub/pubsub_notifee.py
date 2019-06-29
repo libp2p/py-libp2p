@@ -10,9 +10,11 @@ class PubsubNotifee(INotifee):
         self.initiator_peers_queue = initiator_peers_queue
 
     async def opened_stream(self, network, stream):
+        # pragma: no cover
         pass
 
     async def closed_stream(self, network, stream):
+        # pragma: no cover
         pass
 
     async def connected(self, network, conn):
@@ -29,10 +31,13 @@ class PubsubNotifee(INotifee):
             await self.initiator_peers_queue.put(conn.peer_id)
 
     async def disconnected(self, network, conn):
+        # pragma: no cover
         pass
 
     async def listen(self, network, multiaddr):
+        # pragma: no cover
         pass
 
     async def listen_close(self, network, multiaddr):
+        # pragma: no cover
         pass

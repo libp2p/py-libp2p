@@ -50,6 +50,7 @@ class KademliaServer:
             self.refresh_loop.cancel()
 
         if self.save_state_loop:
+            # pragma: no cover
             self.save_state_loop.cancel()
 
     def _create_protocol(self):
