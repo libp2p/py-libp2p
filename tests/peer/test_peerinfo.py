@@ -35,9 +35,12 @@ def test_init_no_value():
 @pytest.mark.parametrize(
     'addr',
     (
-        None,
-        random.randint(0, 255),
-        multiaddr.Multiaddr('/'),
+        pytest.param(None),
+        pytest.param(random.randint(0, 255), id='random integer'),
+        pytest.param(multiaddr.Multiaddr('/'), id='empty multiaddr'),
+        pytest.param(
+            multiaddr.Multiaddr('/ip4/127.0.0.1'), id='multiaddr without peer_id(p2p protocol)'
+        ),
     )
 )
 def test_info_from_p2p_addr_invalid(addr):
