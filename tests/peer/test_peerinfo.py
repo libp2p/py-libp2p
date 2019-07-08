@@ -22,7 +22,7 @@ def test_init_():
 
 def test_init_no_value():
     with pytest.raises(Exception) as _:
-        #pylint: disable=no-value-for-parameter
+        # pylint: disable=no-value-for-parameter
         PeerInfo()
 
 def test_invalid_addr_1():
@@ -30,10 +30,10 @@ def test_invalid_addr_1():
         info_from_p2p_addr(None)
 
 def test_invalid_addr_2(monkeypatch):
-    random_addrs = [random.randint(0, 255) for r in range(4)]
-    monkeypatch.setattr("multiaddr.util.split", lambda x: None)
+    random_addr = random.randint(0, 255)
+    monkeypatch.setattr("multiaddr.Multiaddr.split", lambda x: None)
     with pytest.raises(InvalidAddrError):
-        info_from_p2p_addr(random_addrs)
+        info_from_p2p_addr(random_addr)
 
 def test_info_from_p2p_addr():
     # pylint: disable=line-too-long

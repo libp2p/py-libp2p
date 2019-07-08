@@ -27,13 +27,11 @@ class TCP(ITransport):
             :param maddr: maddr of peer
             :return: return True if successful
             """
-            _multiaddr = maddr
-            _multiaddr = _multiaddr.decapsulate('/p2p')
-
-            coroutine = asyncio.start_server(self.handler,
-                                             _multiaddr.value_for_protocol('ip4'),
-                                             _multiaddr.value_for_protocol('tcp'))
-            self.server = await coroutine
+            self.server = await asyncio.start_server(
+                self.handler,
+                maddr.value_for_protocol('ip4'),
+                maddr.value_for_protocol('tcp'),
+            )
             socket = self.server.sockets[0]
             self.multiaddrs.append(_multiaddr_from_socket(socket))
 
