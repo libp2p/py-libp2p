@@ -209,6 +209,10 @@ class Pubsub():
         :param topic_id: topic_id to subscribe to
         """
 
+        # Already subscribed
+        if topic_id in self.my_topics:
+            return self.my_topics[topic_id]
+
         # Map topic_id to blocking queue
         self.my_topics[topic_id] = asyncio.Queue()
 
