@@ -107,8 +107,7 @@ class Pubsub():
                 # to know that it is subscribed to the topic (doesn't
                 # need everyone to know)
                 for message in rpc_incoming.subscriptions:
-                    if message.subscribe:
-                        self.handle_subscription(peer_id, message)
+                    self.handle_subscription(peer_id, message)
 
             if should_publish:
                 # relay message to peers with router
