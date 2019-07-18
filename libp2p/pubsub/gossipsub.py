@@ -191,15 +191,16 @@ class GossipSub(IPubsubRouter):
             # There are less than D peers (let this number be x)
             # in the fanout for a topic (or the topic is not in the fanout).
             # Selects the remaining number of peers (D-x) from peers.gossipsub[topic].
-            gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                        if peer in self.peers_gossipsub]
-            selected_peers = \
-                GossipSub.select_from_minus(self.degree - fanout_size,
-                                            gossipsub_peers_in_topic,
-                                            fanout_peers)
+            if topic in self.pubsub.peer_topics:
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
+                                            if peer in self.peers_gossipsub]
+                selected_peers = \
+                    GossipSub.select_from_minus(self.degree - fanout_size,
+                                                gossipsub_peers_in_topic,
+                                                fanout_peers)
 
-            # Combine fanout peers with selected peers
-            fanout_peers += selected_peers
+                # Combine fanout peers with selected peers
+                fanout_peers += selected_peers
 
         # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message.
         for peer in fanout_peers:
