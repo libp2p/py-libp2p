@@ -462,7 +462,8 @@ class GossipSub(IPubsubRouter):
         if topic in self.mesh:
             self.mesh[topic].append(from_id_str)
         else:
-            self.mesh[topic] = [from_id_str]
+            # Respond with PRUNE if not subscribed to the topic
+            await self.emit_prune(topic, sender_peer_id)
 
     async def handle_prune(self, prune_msg, sender_peer_id):
         topic = prune_msg.topicID
