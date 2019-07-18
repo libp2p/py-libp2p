@@ -267,10 +267,12 @@ class GossipSub(IPubsubRouter):
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
+                                                    if peer in self.peers_gossipsub]
 
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
                 selected_peers = GossipSub.select_from_minus(self.degree - num_mesh_peers_in_topic,
-                                                             self.peers_gossipsub, self.mesh[topic])
+                                                             gossipsub_peers_in_topic, self.mesh[topic])
 
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
