@@ -2,10 +2,6 @@ import asyncio
 import pytest
 import random
 
-from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import Pubsub
 from utils import message_id_generator, generate_RPC_packet, \
     create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect, \
     connect, one_to_all_connect
@@ -17,8 +13,6 @@ SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
 @pytest.mark.asyncio
 async def test_join():
     # Create libp2p hosts
-    next_msg_id_func = message_id_generator(0)
-
     num_hosts = 10
     hosts_indices = list(range(num_hosts))
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
@@ -37,7 +31,7 @@ async def test_join():
 
     # All pubsub except the one of central node subscribe to topic
     for i in subscribed_peer_indices:
-        q = await pubsubs[i].subscribe(topic)
+        await pubsubs[i].subscribe(topic)
 
     # Connect central host to all other hosts
     await one_to_all_connect(libp2p_hosts, central_node_index)
@@ -57,6 +51,8 @@ async def test_join():
             assert str(libp2p_hosts[i].get_id()) in gossipsubs[central_node_index].mesh[topic]
         else:
             assert str(libp2p_hosts[i].get_id()) not in gossipsubs[central_node_index].mesh[topic]
+
+    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -128,11 +124,9 @@ async def test_dense():
 
         await asyncio.sleep(0.5)
         # Assert that all blocking queues receive the message
-        items = []
         for queue in queues:
             msg = await queue.get()
             assert msg.data == packet.publish[0].data
-            items.append(msg.data)
     await cleanup()
 
 @pytest.mark.asyncio
