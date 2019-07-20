@@ -13,10 +13,10 @@ class PeerInfo:
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
-        raise InvalidAddrError("addr should not be None")
+        raise InvalidAddrError("`addr` should not be `None`")
 
     if not isinstance(addr, multiaddr.Multiaddr):
-        raise InvalidAddrError(f"addr={addr} should be in type Multiaddr")
+        raise InvalidAddrError(f"`addr`={addr} should be of type `Multiaddr`")
 
     parts = addr.split()
     if not parts:
@@ -26,7 +26,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     last_protocol_code = p2p_part.protocols()[0].code
     if last_protocol_code != multiaddr.protocols.P_P2P:
         raise InvalidAddrError(
-            f"the last protocol should be P_P2P instead of {last_protocol_code}"
+            f"The last protocol should be `P_P2P` instead of `{last_protocol_code}`"
         )
 
     # make sure the /p2p value parses as a peer.ID
