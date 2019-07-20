@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 class IListener(ABC):
 
     @abstractmethod
-    def listen(self, multiaddr):
+    def listen(self, maddr):
         """
         put listener in listening mode and wait for incoming connections
-        :param multiaddr: multiaddr of peer
+        :param maddr: multiaddr of peer
         :return: return True if successful
         """
 

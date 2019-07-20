@@ -1,8 +1,8 @@
 import asyncio
-import multiaddr
 
 from Crypto.PublicKey import RSA
-from libp2p.security.insecure_security import InsecureTransport
+
+from .security.insecure_security import InsecureTransport
 from .peer.peerstore import PeerStore
 from .peer.id import id_from_public_key
 from .network.swarm import Swarm

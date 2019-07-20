@@ -2,9 +2,7 @@ import setuptools
 
 
 classifiers = [
-    (
-        "Programming Language :: Python :: %s" % version
-    )
+    f"Programming Language :: Python :: {version}"
     for version in ["3.7"]
 ]
 
@@ -28,6 +26,6 @@ setuptools.setup(
         "lru-dict>=1.1.6",
         "aio_timers"
     ],
-    packages=["libp2p"],
+    packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
     zip_safe=False,
 )

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 class ITransport(ABC):
 
     @abstractmethod
-    def dial(self, multiaddr, self_id, options=None):
+    def dial(self, maddr, self_id, options=None):
         """
         dial a transport to peer listening on multiaddr
         :param multiaddr: multiaddr of peer

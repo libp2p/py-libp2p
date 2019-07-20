@@ -21,13 +21,13 @@ class TCP(ITransport):
             self.server = None
             self.handler = handler_function
 
-        async def listen(self, multiaddr):
+        async def listen(self, maddr):
             """
             put listener in listening mode and wait for incoming connections
-            :param multiaddr: multiaddr of peer
+            :param maddr: maddr of peer
             :return: return True if successful
             """
-            _multiaddr = multiaddr
+            _multiaddr = maddr
             _multiaddr = _multiaddr.decapsulate('/p2p')
 
             coroutine = asyncio.start_server(self.handler,
@@ -64,16 +64,16 @@ class TCP(ITransport):
             self.server = None
             return True
 
-    async def dial(self, multiaddr, self_id, options=None):
+    async def dial(self, maddr, self_id, options=None):
         """
         dial a transport to peer listening on multiaddr
-        :param multiaddr: multiaddr of peer
+        :param maddr: multiaddr of peer
         :param self_id: peer_id of the dialer (to send to receiver)
         :param options: optional object
         :return: True if successful
         """
-        host = multiaddr.value_for_protocol('ip4')
-        port = int(multiaddr.value_for_protocol('tcp'))
+        host = maddr.value_for_protocol('ip4')
+        port = int(maddr.value_for_protocol('tcp'))
 
         reader, writer = await asyncio.open_connection(host, port)
 
