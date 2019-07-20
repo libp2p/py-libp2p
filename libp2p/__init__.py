@@ -35,7 +35,7 @@ def generate_id():
 def initialize_default_kademlia_router(
         ksize=20, alpha=3, id_opt=None, storage=None):
     """
-    initialize swam when no swarm is passed in
+    initialize kadmelia router when no kademlia router is passed in
     :param ksize: The k parameter from the paper
     :param alpha: The alpha parameter from the paper
     :param id_opt: optional id for host
@@ -62,6 +62,7 @@ def initialize_default_swarm(
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
+    :param disc_opt: optional discovery
     :return: return a default swarm instance
     """
     # pylint: disable=too-many-arguments, unused-argument
@@ -80,6 +81,7 @@ def initialize_default_swarm(
     upgrader = TransportUpgrader(sec, muxer)
 
     peerstore = peerstore_opt or PeerStore()
+    # TODO: Initialize discovery if not presented
     swarm_opt = Swarm(id_opt, peerstore,\
                       upgrader, transport, disc_opt)
 
@@ -92,12 +94,14 @@ async def new_node(
         disc_opt=None):
     """
     create new libp2p node
+    :param swarm_opt: optional swarm
     :param id_opt: optional id for host
     :param transport_opt: optional choice of transport upgrade
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
-    :return: return a default swarm instance
+    :param disc_opt: optional discovery
+    :return: return a host instance
     """
     # pylint: disable=too-many-arguments
 
