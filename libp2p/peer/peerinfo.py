@@ -20,7 +20,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
 
     parts = addr.split()
     if not parts:
-        raise InvalidAddrError()
+        raise InvalidAddrError(f"`parts`={parts} should at least have a protocol `P_P2P`")
 
     p2p_part = parts[-1]
     last_protocol_code = p2p_part.protocols()[0].code
