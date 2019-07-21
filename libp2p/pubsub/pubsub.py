@@ -107,8 +107,7 @@ class Pubsub():
                 # to know that it is subscribed to the topic (doesn't
                 # need everyone to know)
                 for message in rpc_incoming.subscriptions:
-                    if message.subscribe:
-                        self.handle_subscription(peer_id, message)
+                    self.handle_subscription(peer_id, message)
 
             if should_publish:
                 # relay message to peers with router
@@ -210,6 +209,10 @@ class Pubsub():
         :param topic_id: topic_id to subscribe to
         """
 
+        # Already subscribed
+        if topic_id in self.my_topics:
+            return self.my_topics[topic_id]
+
         # Map topic_id to blocking queue
         self.my_topics[topic_id] = asyncio.Queue()
 
@@ -235,9 +238,11 @@ class Pubsub():
         :param topic_id: topic_id to unsubscribe from
         """
 
+        # Return if we already unsubscribed from the topic
+        if topic_id not in self.my_topics:
+            return
         # Remove topic_id from map if present
-        if topic_id in self.my_topics:
-            del self.my_topics[topic_id]
+        del self.my_topics[topic_id]
 
         # Create unsubscribe message
         packet = rpc_pb2.RPC()

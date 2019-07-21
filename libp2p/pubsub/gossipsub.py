@@ -179,9 +179,10 @@ class GossipSub(IPubsubRouter):
         subscription announcement
         :param topic: topic to join
         """
+        if topic in self.mesh:
+            return
         # Create mesh[topic] if it does not yet exist
-        if topic not in self.mesh:
-            self.mesh[topic] = []
+        self.mesh[topic] = []
 
         if topic in self.fanout and len(self.fanout[topic]) == self.degree:
             # If router already has D peers from the fanout peers of a topic
@@ -228,6 +229,8 @@ class GossipSub(IPubsubRouter):
         It is invoked after the unsubscription announcement.
         :param topic: topic to leave
         """
+        if topic not in self.mesh:
+            return
         # Notify the peers in mesh[topic] with a PRUNE(topic) message
         for peer in self.mesh[topic]:
             await self.emit_prune(topic, peer)

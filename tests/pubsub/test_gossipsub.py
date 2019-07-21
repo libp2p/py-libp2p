@@ -15,6 +15,54 @@ SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
 
 
 @pytest.mark.asyncio
+async def test_join():
+    num_hosts = 1
+    libp2p_hosts = await create_libp2p_hosts(num_hosts)
+
+    # Create pubsub, gossipsub instances
+    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
+                                                                SUPPORTED_PROTOCOLS, \
+                                                                10, 9, 11, 30, 3, 5, 0.5)
+
+    gossipsub = gossipsubs[0]
+    topic = "test_join"
+
+    assert topic not in gossipsub.mesh
+    await gossipsub.join(topic)
+    assert topic in gossipsub.mesh
+
+    # Test re-join
+    await gossipsub.join(topic)
+
+    await cleanup()
+
+
+@pytest.mark.asyncio
+async def test_leave():
+    num_hosts = 1
+    libp2p_hosts = await create_libp2p_hosts(num_hosts)
+
+    # Create pubsub, gossipsub instances
+    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
+                                                                SUPPORTED_PROTOCOLS, \
+                                                                10, 9, 11, 30, 3, 5, 0.5)
+
+    gossipsub = gossipsubs[0]
+    topic = "test_leave"
+
+    await gossipsub.join(topic)
+    assert topic in gossipsub.mesh
+
+    await gossipsub.leave(topic)
+    assert topic not in gossipsub.mesh
+
+    # Test re-leave
+    await gossipsub.leave(topic)
+
+    await cleanup()
+
+
+@pytest.mark.asyncio
 async def test_dense():
     # Create libp2p hosts
     next_msg_id_func = message_id_generator(0)
