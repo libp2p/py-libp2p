@@ -207,7 +207,8 @@ class GossipSub(IPubsubRouter):
             self.mesh[topic].append(peer)
             await self.emit_graft(topic, peer)
 
-        # TODO: Do we remove all peers from fanout[topic]?
+        if topic_in_fanout:
+            del self.fanout[topic]
 
     async def leave(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec
@@ -303,7 +304,7 @@ class GossipSub(IPubsubRouter):
             # TODO: there's no way time_since_last_publish gets set anywhere yet
             if self.time_since_last_publish[topic] > self.time_to_live:
                 # Remove topic from fanout
-                self.fanout.remove(topic)
+                del self.fanout[topic]
                 self.time_since_last_publish.remove(topic)
             else:
                 num_fanout_peers_in_topic = len(self.fanout[topic])
