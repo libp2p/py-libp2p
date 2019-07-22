@@ -9,6 +9,14 @@ from typing import (
     Tuple,
 )
 
+from typing import (
+    Any,
+    Dict,
+    List,
+    Sequence,
+    Tuple,
+)
+
 from lru import LRU
 
 from libp2p.host.host_interface import (
@@ -319,3 +327,19 @@ class Pubsub:
         for _, stream in self.peers.items():
             # Write message to stream
             await stream.write(rpc_msg)
+
+    def list_peers(self, topic_id: str) -> Tuple[ID]:
+        return
+
+    def publish(self, topic_id: str, data: bytes) -> None:
+        # TODO: Create pb message
+        # TODO: Sign with our signing key
+        # TODO: `p.pushMsg(p.host.ID(), msg)`
+        # TODO: - Check if the source is in the blacklist. If yes, reject.
+        # TODO: - Check if the `from` is in the blacklist. If yes, reject.
+        # TODO: - Check if the message is seen. If yes, reject it.
+        # TODO: - Validate the message. If failed, reject it.
+        # TODO: - Mark as seen and `publishMessage`
+        # TODO:     - Notify the subscribers
+        # TODO:     - Router.Publish
+        return
