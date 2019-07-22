@@ -265,26 +265,28 @@ class GossipSub(IPubsubRouter):
     async def mesh_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.mesh:
+            # Skip if no peers have subscribed to the topic
+            if topic not in self.pubsub.peer_topics:
+                continue
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
-                if topic in self.pubsub.peer_topics:
-                    gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
-                                                if peer in self.peers_gossipsub]
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
+                                            if peer in self.peers_gossipsub]
 
-                    # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
-                    selected_peers = GossipSub.select_from_minus(
-                        self.degree - num_mesh_peers_in_topic,
-                        gossipsub_peers_in_topic,
-                        self.mesh[topic]
-                    )
+                # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
+                selected_peers = GossipSub.select_from_minus(
+                    self.degree - num_mesh_peers_in_topic,
+                    gossipsub_peers_in_topic,
+                    self.mesh[topic]
+                )
 
-                    for peer in selected_peers:
-                        # Add peer to mesh[topic]
-                        self.mesh[topic].append(peer)
+                for peer in selected_peers:
+                    # Add peer to mesh[topic]
+                    self.mesh[topic].append(peer)
 
-                        # Emit GRAFT(topic) control message to peer
-                        await self.emit_graft(topic, peer)
+                    # Emit GRAFT(topic) control message to peer
+                    await self.emit_graft(topic, peer)
 
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
