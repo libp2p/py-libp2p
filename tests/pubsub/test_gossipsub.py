@@ -39,12 +39,26 @@ async def test_join():
     # Wait 2 seconds for heartbeat to allow mesh to connect
     await asyncio.sleep(2)
 
-    # Check that the pubsub of central node does not have mesh or fanout for the topic
-    assert topic not in gossipsubs[central_node_index].fanout
+    # Central node publish to the topic so that this topic
+    # is added to central node's fanout
+    next_msg_id_func = message_id_generator(0)
+    msg_content = ""
+    host_id = str(libp2p_hosts[central_node_index].get_id())
+    # Generate message packet
+    packet = generate_RPC_packet(host_id, [topic], msg_content, next_msg_id_func())
+    # publish from the randomly chosen host
+    await gossipsubs[central_node_index].publish(host_id, packet.SerializeToString())
+
+    # Check that the gossipsub of central node has fanout for the topic
+    assert topic in gossipsubs[central_node_index].fanout
+    # Check that the gossipsub of central node does not has mesh for the topic
     assert topic not in gossipsubs[central_node_index].mesh
 
     # Central node subscribe message origin
     await pubsubs[central_node_index].subscribe(topic)
+
+    # Check that the gossipsub of central node no longer has fanout for the topic
+    assert topic not in gossipsubs[central_node_index].fanout
 
     for i in hosts_indices:
         if i in subscribed_peer_indices:
