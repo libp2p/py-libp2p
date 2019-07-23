@@ -51,7 +51,7 @@ async def test_join():
 
     # Check that the gossipsub of central node has fanout for the topic
     assert topic in gossipsubs[central_node_index].fanout
-    # Check that the gossipsub of central node does not has mesh for the topic
+    # Check that the gossipsub of central node does not have a mesh for the topic
     assert topic not in gossipsubs[central_node_index].mesh
 
     # Central node subscribe message origin
