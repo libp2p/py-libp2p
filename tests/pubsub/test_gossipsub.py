@@ -63,8 +63,10 @@ async def test_join():
     for i in hosts_indices:
         if i in subscribed_peer_indices:
             assert str(libp2p_hosts[i].get_id()) in gossipsubs[central_node_index].mesh[topic]
+            assert str(libp2p_hosts[central_node_index].get_id()) in gossipsubs[i].mesh[topic]
         else:
             assert str(libp2p_hosts[i].get_id()) not in gossipsubs[central_node_index].mesh[topic]
+            assert str(libp2p_hosts[central_node_index].get_id()) not in gossipsubs[i].mesh[topic]
 
     await cleanup()
 
