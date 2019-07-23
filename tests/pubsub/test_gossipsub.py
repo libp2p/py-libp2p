@@ -2,13 +2,9 @@ import asyncio
 import pytest
 import random
 
-from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import Pubsub
 from utils import message_id_generator, generate_RPC_packet, \
     create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect, \
-    connect
+    connect, one_to_all_connect
 from tests.utils import cleanup
 
 SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
@@ -16,23 +12,63 @@ SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
 
 @pytest.mark.asyncio
 async def test_join():
-    num_hosts = 1
+    # Create libp2p hosts
+    num_hosts = 4
+    hosts_indices = list(range(num_hosts))
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
                                                                 SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+                                                                4, 3, 5, 30, 3, 5, 0.5)
 
-    gossipsub = gossipsubs[0]
     topic = "test_join"
+    central_node_index = 0
+    # Remove index of central host from the indices
+    hosts_indices.remove(central_node_index)
+    num_subscribed_peer = 2
+    subscribed_peer_indices = random.sample(hosts_indices, num_subscribed_peer)
 
-    assert topic not in gossipsub.mesh
-    await gossipsub.join(topic)
-    assert topic in gossipsub.mesh
+    # All pubsub except the one of central node subscribe to topic
+    for i in subscribed_peer_indices:
+        await pubsubs[i].subscribe(topic)
 
-    # Test re-join
-    await gossipsub.join(topic)
+    # Connect central host to all other hosts
+    await one_to_all_connect(libp2p_hosts, central_node_index)
+
+    # Wait 2 seconds for heartbeat to allow mesh to connect
+    await asyncio.sleep(2)
+
+    # Central node publish to the topic so that this topic
+    # is added to central node's fanout
+    next_msg_id_func = message_id_generator(0)
+    msg_content = ""
+    host_id = str(libp2p_hosts[central_node_index].get_id())
+    # Generate message packet
+    packet = generate_RPC_packet(host_id, [topic], msg_content, next_msg_id_func())
+    # publish from the randomly chosen host
+    await gossipsubs[central_node_index].publish(host_id, packet.SerializeToString())
+
+    # Check that the gossipsub of central node has fanout for the topic
+    assert topic in gossipsubs[central_node_index].fanout
+    # Check that the gossipsub of central node does not have a mesh for the topic
+    assert topic not in gossipsubs[central_node_index].mesh
+
+    # Central node subscribes the topic
+    await pubsubs[central_node_index].subscribe(topic)
+
+    await asyncio.sleep(2)
+
+    # Check that the gossipsub of central node no longer has fanout for the topic
+    assert topic not in gossipsubs[central_node_index].fanout
+
+    for i in hosts_indices:
+        if i in subscribed_peer_indices:
+            assert str(libp2p_hosts[i].get_id()) in gossipsubs[central_node_index].mesh[topic]
+            assert str(libp2p_hosts[central_node_index].get_id()) in gossipsubs[i].mesh[topic]
+        else:
+            assert str(libp2p_hosts[i].get_id()) not in gossipsubs[central_node_index].mesh[topic]
+            assert topic not in gossipsubs[i].mesh
 
     await cleanup()
 
@@ -106,11 +142,9 @@ async def test_dense():
 
         await asyncio.sleep(0.5)
         # Assert that all blocking queues receive the message
-        items = []
         for queue in queues:
             msg = await queue.get()
             assert msg.data == packet.publish[0].data
-            items.append(msg.data)
     await cleanup()
 
 @pytest.mark.asyncio

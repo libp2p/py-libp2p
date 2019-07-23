@@ -122,3 +122,8 @@ async def connect_some(hosts, degree):
     #         await connect(host, neighbor)
 
     #         j += 1
+
+async def one_to_all_connect(hosts, central_host_index):
+    for i, host in enumerate(hosts):
+        if i != central_host_index:
+            await connect(hosts[central_host_index], host)

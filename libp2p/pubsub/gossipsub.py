@@ -184,43 +184,31 @@ class GossipSub(IPubsubRouter):
         # Create mesh[topic] if it does not yet exist
         self.mesh[topic] = []
 
-        if topic in self.fanout and len(self.fanout[topic]) == self.degree:
-            # If router already has D peers from the fanout peers of a topic
-            # TODO: Do we remove all peers from fanout[topic]?
-
-            # Add them to mesh[topic], and notifies them with a
-            # GRAFT(topic) control message.
-            for peer in self.fanout[topic]:
-                self.mesh[topic].append(peer)
-                await self.emit_graft(topic, peer)
-        else:
-            # Otherwise, if there are less than D peers
-            # (let this number be x) in the fanout for a topic (or the topic is not in the fanout),
-            fanout_size = 0
-            if topic in self.fanout:
-                fanout_size = len(self.fanout[topic])
-                # then it still adds them as above (if there are any)
-                for peer in self.fanout[topic]:
-                    self.mesh[topic].append(peer)
-                    await self.emit_graft(topic, peer)
-
-            if topic in self.peers_gossipsub:
-                # TODO: Should we have self.fanout[topic] here or [] (as the minus variable)?
-                # Selects the remaining number of peers (D-x) from peers.gossipsub[topic]
+        topic_in_fanout = topic in self.fanout
+        fanout_peers = self.fanout[topic] if topic_in_fanout else []
+        fanout_size = len(fanout_peers)
+        if not topic_in_fanout or (topic_in_fanout and fanout_size < self.degree):
+            # There are less than D peers (let this number be x)
+            # in the fanout for a topic (or the topic is not in the fanout).
+            # Selects the remaining number of peers (D-x) from peers.gossipsub[topic].
+            if topic in self.pubsub.peer_topics:
                 gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
                                             if peer in self.peers_gossipsub]
                 selected_peers = \
                     GossipSub.select_from_minus(self.degree - fanout_size,
                                                 gossipsub_peers_in_topic,
-                                                self.fanout[topic] if topic in self.fanout else [])
+                                                fanout_peers)
 
-                # And likewise adds them to mesh[topic] and notifies them with a
-                # GRAFT(topic) control message.
-                for peer in selected_peers:
-                    self.mesh[topic].append(peer)
-                    await self.emit_graft(topic, peer)
+                # Combine fanout peers with selected peers
+                fanout_peers += selected_peers
 
-            # TODO: Do we remove all peers from fanout[topic]?
+        # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message.
+        for peer in fanout_peers:
+            self.mesh[topic].append(peer)
+            await self.emit_graft(topic, peer)
+
+        if topic_in_fanout:
+            del self.fanout[topic]
 
     async def leave(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec
@@ -277,13 +265,21 @@ class GossipSub(IPubsubRouter):
     async def mesh_heartbeat(self):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.mesh:
+            # Skip if no peers have subscribed to the topic
+            if topic not in self.pubsub.peer_topics:
+                continue
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
+                gossipsub_peers_in_topic = [peer for peer in self.pubsub.peer_topics[topic]
+                                            if peer in self.peers_gossipsub]
 
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
-                selected_peers = GossipSub.select_from_minus(self.degree - num_mesh_peers_in_topic,
-                                                             self.peers_gossipsub, self.mesh[topic])
+                selected_peers = GossipSub.select_from_minus(
+                    self.degree - num_mesh_peers_in_topic,
+                    gossipsub_peers_in_topic,
+                    self.mesh[topic]
+                )
 
                 for peer in selected_peers:
                     # Add peer to mesh[topic]
@@ -310,7 +306,7 @@ class GossipSub(IPubsubRouter):
             # TODO: there's no way time_since_last_publish gets set anywhere yet
             if self.time_since_last_publish[topic] > self.time_to_live:
                 # Remove topic from fanout
-                self.fanout.remove(topic)
+                del self.fanout[topic]
                 self.time_since_last_publish.remove(topic)
             else:
                 num_fanout_peers_in_topic = len(self.fanout[topic])
