@@ -1,7 +1,0 @@
-pytest>=3.7
-codecov
-pytest-cov
-pytest-asyncio
-pylint
-grpcio
-grpcio-tools

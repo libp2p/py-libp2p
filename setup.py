@@ -10,17 +10,17 @@ classifiers = [
 # pylint: disable=invalid-name
 extras_require = {
     "test": [
-        "codecov",
-        "pytest",
-        "pytest-cov",
-        "pytest-asyncio",
+        "codecov>=2.0.15,<3.0.0",
+        "pytest>=4.6.3,<5.0.0",
+        "pytest-cov>=2.7.1,<3.0.0",
+        "pytest-asyncio>=0.10.0,<1.0.0",
     ],
     "lint": [
-        "pylint",
-        "mypy",
+        "pylint>=2.3.1,<3.0.0",
+        "mypy>=0.701,<1.0",
     ],
     "dev": [
-        "tox",
+        "tox>=3.13.2,<4.0.0",
     ],
 }
 
