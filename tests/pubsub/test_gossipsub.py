@@ -164,9 +164,9 @@ async def test_handle_prune():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                          SUPPORTED_PROTOCOLS, \
-                                                          10, 9, 11, 30, 3, 5, 2)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
+                                                                SUPPORTED_PROTOCOLS, \
+                                                                10, 9, 11, 30, 3, 5, 3)
 
     index_alice = 0
     id_alice = str(libp2p_hosts[index_alice].get_id())
@@ -174,13 +174,13 @@ async def test_handle_prune():
     id_bob = str(libp2p_hosts[index_bob].get_id())
 
     topic = "test_handle_prune"
-    await gossipsubs[index_alice].join(topic)
-    await gossipsubs[index_bob].join(topic)
+    for pubsub in pubsubs:
+        await pubsub.subscribe(topic)
 
     await connect(libp2p_hosts[index_alice], libp2p_hosts[index_bob])
 
-    # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    # Wait 3 seconds for heartbeat to allow mesh to connect
+    await asyncio.sleep(3)
 
     # Check that they are each other's mesh peer
     assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -191,7 +191,7 @@ async def test_handle_prune():
     await gossipsubs[index_alice].emit_prune(topic, id_bob)
 
     # FIXME: This test currently works because the heartbeat interval
-    # is increased to 2 seconds, so alice won't get add back into
+    # is increased to 3 seconds, so alice won't get add back into
     # bob's mesh peer during heartbeat.
     await asyncio.sleep(1)
 
