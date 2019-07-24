@@ -36,7 +36,6 @@ setuptools.setup(
     classifiers=classifiers,
     install_requires=[
         "pycryptodome>=3.8.2,<4.0.0",
-        "click>=7.0,<8.0",
         "base58>=1.0.3,<2.0.0",
         "pymultihash>=0.8.2",
         "multiaddr>=0.0.8,<0.1.0",
