@@ -7,6 +7,26 @@ classifiers = [
 ]
 
 
+# pylint: disable=invalid-name
+extras_require = {
+    "test": [
+        "codecov",
+        "pytest",
+        "pytest-cov",
+        "pytest-asyncio",
+    ],
+    "lint": [
+        "pylint",
+        "mypy",
+    ],
+    "dev": [
+        "tox",
+    ],
+}
+
+extras_require["dev"] = extras_require["test"] + extras_require["lint"] + extras_require["dev"]
+
+
 setuptools.setup(
     name="libp2p",
     description="libp2p implementation written in python",
@@ -26,6 +46,7 @@ setuptools.setup(
         "lru-dict>=1.1.6",
         "aio_timers>=0.0.1,<0.1.0",
     ],
+    extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
     zip_safe=False,
 )
