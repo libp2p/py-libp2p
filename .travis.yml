@@ -5,19 +5,18 @@ matrix:
     - python: 3.7
       dist: xenial
       sudo: true
+      after_success:
+        - codecov
+    - python: 3.7
+      dist: xenial
+      sudo: true
+      env: TOXENV=lint
 
 install:
-  - pip install --upgrade pip
-  - pip install -r requirements_dev.txt
-  - python setup.py develop
+  - pip install --upgrade pip codecov
 
 script:
-  - pytest --cov=./libp2p tests/
-  - pylint --rcfile=.pylintrc libp2p tests
-
-after_success:
-  - codecov
+  - tox
 
 notifications:
     slack: py-libp2p:RK0WVoQZhQXLgIKfHNPL1TR2
-
