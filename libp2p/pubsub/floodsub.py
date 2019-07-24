@@ -46,7 +46,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
 
-    async def publish(self, from_peer: ID, pubsub_message: rpc_pb2.Message) -> None:
+    async def publish(self, sender_peer_id: ID, rpc_message: rpc_pb2.Message) -> None:
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
