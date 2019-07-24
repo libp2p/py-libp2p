@@ -23,6 +23,7 @@ async def read_data(stream):
                 print("\x1b[32m %s\x1b[0m " % read_string, end="")
 
 
+# FIXME(mhchia): Reconsider whether we should use a thread pool here.
 async def write_data(stream):
     loop = asyncio.get_event_loop()
     while True:
@@ -85,6 +86,7 @@ def main():
         "-p",
         "--port",
         default=8000,
+        type=int,
         help="source port number",
     )
     parser.add_argument(
