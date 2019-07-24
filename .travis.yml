@@ -14,7 +14,7 @@ matrix:
       env: TOXENV=lint
 
 install:
-  - pip install --upgrade pip codecov
+  - pip install --upgrade pip codecov tox
 
 script:
   - tox
