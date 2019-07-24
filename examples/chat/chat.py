@@ -1,8 +1,8 @@
+import argparse
 import asyncio
 import sys
 import urllib.request
 
-import click
 import multiaddr
 
 from libp2p import new_node
@@ -23,6 +23,7 @@ async def read_data(stream):
                 print("\x1b[32m %s\x1b[0m " % read_string, end="")
 
 
+# FIXME(mhchia): Reconsider whether we should use a thread pool here.
 async def write_data(stream):
     loop = asyncio.get_event_loop()
     while True:
@@ -52,9 +53,9 @@ async def run(port, destination):
               (int(port) + 1, external_ip, port, host.get_id().pretty()))
         print("\nWaiting for incoming connection\n\n")
 
-    else: # its the client
-        m = multiaddr.Multiaddr(destination)
-        info = info_from_p2p_addr(m)
+    else:  # its the client
+        maddr = multiaddr.Multiaddr(destination)
+        info = info_from_p2p_addr(maddr)
         # Associate the peer with local ip address
         await host.connect(info)
 
@@ -67,22 +68,38 @@ async def run(port, destination):
         print("Connected to peer %s" % info.addrs[0])
 
 
-@click.command()
-@click.option('--port', '-p', help='source port number', default=8000)
-@click.option('--destination', '-d', help="Destination multiaddr string")
-@click.option('--help', is_flag=True, default=False, help='display help')
-# @click.option('--debug', is_flag=True, default=False, help='Debug generates the same node ID on every execution')
-def main(port, destination, help):
-
-    if help:
-        print("This program demonstrates a simple p2p chat application using libp2p\n\n")
-        print("Usage: Run './chat -p <SOURCE_PORT>' where <SOURCE_PORT> can be any port number.")
-        print("Now run './chat -p <PORT> -d <MULTIADDR>' where <MULTIADDR> is multiaddress of previous listener host.")
-        return
+def main():
+    description = """
+    This program demonstrates a simple p2p chat application using libp2p.
+    To use it, first run 'python ./chat -p <PORT>', where <PORT> is the port number.
+    Then, run another host with 'python ./chat -p <ANOTHER_PORT> -d <DESTINATION>',
+    where <DESTINATION> is the multiaddress of the previous listener host.
+    """
+    example_maddr = "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--debug",
+        action='store_true',
+        help='generate the same node ID on every execution',
+    )
+    parser.add_argument(
+        "-p",
+        "--port",
+        default=8000,
+        type=int,
+        help="source port number",
+    )
+    parser.add_argument(
+        "-d",
+        "--destination",
+        type=str,
+        help=f"destination multiaddr string, e.g. {example_maddr}",
+    )
+    args = parser.parse_args()
 
     loop = asyncio.get_event_loop()
     try:
-        asyncio.ensure_future(run(port, destination))
+        asyncio.ensure_future(run(args.port, args.destination))
         loop.run_forever()
     except KeyboardInterrupt:
         pass

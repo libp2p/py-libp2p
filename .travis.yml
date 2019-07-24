@@ -4,20 +4,17 @@ matrix:
   include:
     - python: 3.7
       dist: xenial
-      sudo: true
+      env: TOXENV=py37-test
+    - python: 3.7
+      dist: xenial
+      env: TOXENV=lint
 
 install:
   - pip install --upgrade pip
-  - pip install -r requirements_dev.txt
-  - python setup.py develop
+  - pip install tox
 
 script:
-  - pytest --cov=./libp2p tests/
-  - pylint --rcfile=.pylintrc libp2p tests
-
-after_success:
-  - codecov
+  - tox
 
 notifications:
     slack: py-libp2p:RK0WVoQZhQXLgIKfHNPL1TR2
-
