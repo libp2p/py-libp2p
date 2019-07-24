@@ -46,7 +46,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
 
-    async def publish(self, sender_peer_id: ID, rpc_message: rpc_pb2.Message) -> None:
+    async def publish(self, from_peer: ID, pubsub_message: rpc_pb2.Message) -> None:
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
@@ -60,9 +60,14 @@ class FloodSub(IPubsubRouter):
         :param sender_peer_id: peer_id of message sender
         :param rpc_message: pubsub message in RPC string format
         """
-        packet = rpc_pb2.RPC()
-        packet.ParseFromString(rpc_message)
-        msg_sender = str(sender_peer_id)
+        # packet = rpc_pb2.RPC()
+        # packet.ParseFromString(rpc_message)
+
+        from_peer_str = str(from_peer)
+        for topic in pubsub_message.topicIDs:
+            if topic not in self.pubsub.topics:
+                continue
+            peers = self.pubsub.peer_topics[topic]
         # Deliver to self if self was origin
         # Note: handle_talk checks if self is subscribed to topics in message
         for message in packet.publish:

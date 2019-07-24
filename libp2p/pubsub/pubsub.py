@@ -341,16 +341,23 @@ class Pubsub:
             from_id=self.host.get_id().to_bytes(),
             seqno=self._next_seqno(),
         )
+
         # TODO: Sign with our signing key
+
         self.push_msg(self.host.get_id(), msg)
 
     async def push_msg(self, src: ID, msg: rpc_pb2.Message):
         # TODO: - Check if the source is in the blacklist. If yes, reject.
+
         # TODO: - Check if the `from` is in the blacklist. If yes, reject.
+
         # TODO: - Check if signing is required and if so signature should be attached.
+
         if self._is_msg_seen(msg):
             return
+
         # TODO: - Validate the message. If failed, reject it.
+
         self._mark_msg_seen(msg)
         await self.handle_talk(msg)
         await self.router.publish(src, msg)
