@@ -204,8 +204,9 @@ class GossipSub(IPubsubRouter):
 
         # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message.
         for peer in fanout_peers:
-            self.mesh[topic].append(peer)
-            await self.emit_graft(topic, peer)
+            if peer not in self.mesh[topic]:
+                self.mesh[topic].append(peer)
+                await self.emit_graft(topic, peer)
 
         if topic_in_fanout:
             del self.fanout[topic]
@@ -281,7 +282,12 @@ class GossipSub(IPubsubRouter):
                     self.mesh[topic]
                 )
 
-                for peer in selected_peers:
+                fanout_peers_not_in_mesh = [
+                    peer
+                    for peer in selected_peers
+                    if peer not in self.mesh[topic]
+                ]
+                for peer in fanout_peers_not_in_mesh:
                     # Add peer to mesh[topic]
                     self.mesh[topic].append(peer)
 
@@ -460,9 +466,11 @@ class GossipSub(IPubsubRouter):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
-            self.mesh[topic].append(from_id_str)
+            if from_id_str not in self.mesh[topic]:
+                self.mesh[topic].append(from_id_str)
         else:
-            self.mesh[topic] = [from_id_str]
+            # Respond with PRUNE if not subscribed to the topic
+            await self.emit_prune(topic, sender_peer_id)
 
     async def handle_prune(self, prune_msg, sender_peer_id):
         topic = prune_msg.topicID
