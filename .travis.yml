@@ -5,6 +5,7 @@ matrix:
     - python: 3.7
       dist: xenial
       sudo: true
+      env: TOXENV=py37-test
       after_success:
         - codecov
     - python: 3.7
