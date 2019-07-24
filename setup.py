@@ -43,7 +43,6 @@ setuptools.setup(
         "grpcio>=1.21.1,<2.0.0",
         "grpcio-tools>=1.21.1,<2.0.0",
         "lru-dict>=1.1.6",
-        "aio_timers>=0.0.1,<0.1.0",
     ],
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
