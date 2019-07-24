@@ -1,17 +1,6 @@
 # pylint: disable=no-name-in-module
 import asyncio
 import time
-<<<<<<< HEAD
-from typing import (
-    Any,
-    Dict,
-    List,
-    Sequence,
-    Tuple,
-)
-
-=======
->>>>>>> Add basic functionalities of `publish`
 from typing import (
     Any,
     Dict,
