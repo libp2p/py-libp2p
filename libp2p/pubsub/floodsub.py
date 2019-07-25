@@ -76,6 +76,8 @@ class FloodSub(IPubsubRouter):
         )
         for peer_id in peers_gen:
             stream = self.pubsub.peers[str(peer_id)]
+            # FIXME: We should add a `WriteMsg` similar to write delimited messages.
+            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             await stream.write(rpc_msg.SerializeToString())
 
     def _get_peers_to_send(
@@ -84,7 +86,10 @@ class FloodSub(IPubsubRouter):
             src: ID,
             origin: ID) -> Iterable[ID]:
         """
-        :return: the list of protocols supported by the router
+        Get the eligible peers to send the data to.
+        :param src: the peer id of the peer who forwards the message to me.
+        :param origin: the peer id of the peer who originally broadcast the message.
+        :return: a generator of the peer ids who we send data to.
         """
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:

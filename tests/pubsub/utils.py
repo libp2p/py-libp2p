@@ -70,14 +70,6 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     return packet
 
 
-async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
-    addr = node2.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await node1.connect(info)
-
 async def create_libp2p_hosts(num_hosts):
     """
     Create libp2p hosts
