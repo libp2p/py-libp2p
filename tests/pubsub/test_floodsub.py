@@ -8,7 +8,12 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
-from utils import message_id_generator, generate_RPC_packet
+
+from .utils import (
+    make_pubsub_msg,
+    message_id_generator,
+    generate_RPC_packet,
+)
 
 # pylint: disable=too-many-locals
 
@@ -20,6 +25,7 @@ async def connect(node1, node2):
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
 
+
 @pytest.mark.asyncio
 async def test_simple_two_nodes():
     node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
@@ -29,6 +35,8 @@ async def test_simple_two_nodes():
     await node_b.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
     supported_protocols = ["/floodsub/1.0.0"]
+    topic = "my_topic"
+    data = b"some data"
 
     floodsub_a = FloodSub(supported_protocols)
     pubsub_a = Pubsub(node_a, floodsub_a, "a")
@@ -38,25 +46,29 @@ async def test_simple_two_nodes():
     await connect(node_a, node_b)
 
     await asyncio.sleep(0.25)
-    qb = await pubsub_b.subscribe("my_topic")
+    sub_b = await pubsub_b.subscribe(topic)
 
     await asyncio.sleep(0.25)
-
-    node_a_id = str(node_a.get_id())
 
     next_msg_id_func = message_id_generator(0)
-    msg = generate_RPC_packet(node_a_id, ["my_topic"], "some data", next_msg_id_func())
-    await floodsub_a.publish(node_a_id, msg.SerializeToString())
+    msg = make_pubsub_msg(
+        origin_id=node_a.get_id(),
+        topic_ids=[topic],
+        data=data,
+        seqno=next_msg_id_func(),
+    )
+    await floodsub_a.publish(node_a.get_id(), msg)
     await asyncio.sleep(0.25)
 
-    res_b = await qb.get()
+    res_b = await sub_b.get()
 
     # Check that the msg received by node_b is the same
     # as the message sent by node_a
-    assert res_b.SerializeToString() == msg.publish[0].SerializeToString()
+    assert res_b.SerializeToString() == msg.SerializeToString()
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_lru_cache_two_nodes():
@@ -100,7 +112,7 @@ async def test_lru_cache_two_nodes():
     messages = [first_message]
     # for the next 5 messages
     for i in range(2, 6):
-        # write first message     
+        # write first message
         await floodsub_a.publish(node_a_id, first_message.SerializeToString())
         await asyncio.sleep(0.25)
 
@@ -127,7 +139,7 @@ async def test_lru_cache_two_nodes():
     res_b = await qb.get()
     assert res_b.SerializeToString() == first_message.publish[0].SerializeToString()
     assert qb.empty()
-    
+
     # Success, terminate pending tasks.
     await cleanup()
 
@@ -136,7 +148,7 @@ async def perform_test_from_obj(obj):
     """
     Perform a floodsub test from a test obj.
     test obj are composed as follows:
-    
+
     {
         "supported_protocols": ["supported/protocol/1.0.0",...],
         "adj_list": {
@@ -190,7 +202,7 @@ async def perform_test_from_obj(obj):
             if neighbor_id not in node_map:
                 neighbor_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
                 await neighbor_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-                
+
                 node_map[neighbor_id] = neighbor_node
 
                 floodsub = FloodSub(supported_protocols)

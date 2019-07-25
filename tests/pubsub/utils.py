@@ -3,9 +3,14 @@ import multiaddr
 import uuid
 import random
 import struct
+from typing import (
+    Sequence,
+)
+
 from libp2p import new_node
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
 
@@ -29,6 +34,20 @@ def message_id_generator(start_val):
 
     return generator
 
+
+def make_pubsub_msg(
+        origin_id: ID,
+        topic_ids: Sequence[str],
+        data: bytes,
+        seqno: bytes) -> rpc_pb2.Message:
+    return rpc_pb2.Message(
+        from_id=origin_id.to_bytes(),
+        seqno=seqno,
+        data=data,
+        topicIDs=list(topic_ids),
+    )
+
+
 def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     """
     Generate RPC packet to send over wire
@@ -42,13 +61,14 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
         from_id=origin_id.encode('utf-8'),
         seqno=msg_id,
         data=msg_content.encode('utf-8'),
-        )
+    )
 
     for topic in topics:
         message.topicIDs.extend([topic.encode('utf-8')])
 
     packet.publish.extend([message])
     return packet
+
 
 async def connect(node1, node2):
     """
