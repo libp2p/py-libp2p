@@ -91,6 +91,7 @@ class GossipSub(IPubsubRouter):
         :param rpc: rpc message
         """
         control_message = rpc.control
+        sender_peer_id = str(sender_peer_id)
 
         # Relay each rpc control  to the appropriate handler
         if control_message.ihave:

@@ -128,26 +128,21 @@ class Pubsub:
         messages from other nodes
         :param stream: stream to continously read from
         """
-
-        # TODO check on types here
-        peer_id = str(stream.mplex_conn.peer_id)
+        peer_id = stream.mplex_conn.peer_id
 
         while True:
             incoming = (await stream.read())
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
-            should_publish = False
-
             if rpc_incoming.publish:
                 # deal with RPC.publish
-                for message in rpc_incoming.publish:
-                    id_in_seen_msgs = (message.seqno, message.from_id)
-                    if id_in_seen_msgs not in self.seen_messages:
-                        should_publish = True
-                        self.seen_messages[id_in_seen_msgs] = 1
-
-                        await self.handle_talk(message)
+                for msg in rpc_incoming.publish:
+                    if not self._is_subscribed_to_msg(msg):
+                        continue
+                    # TODO(mhchia): This will block this read_stream loop until all data are pushed.
+                    #   Should investigate further if this is an issue.
+                    await self.push_msg(src=peer_id, msg=msg)
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -157,10 +152,6 @@ class Pubsub:
                 # need everyone to know)
                 for message in rpc_incoming.subscriptions:
                     self.handle_subscription(peer_id, message)
-
-            if should_publish:
-                # relay message to peers with router
-                await self.router.publish(peer_id, incoming)
 
             if rpc_incoming.control:
                 # Pass rpc to router so router could perform custom logic
@@ -228,6 +219,7 @@ class Pubsub:
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
+        origin_id = str(origin_id)
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = [origin_id]
@@ -379,3 +371,8 @@ class Pubsub:
         # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there is a
         #   more appropriate way.
         self.seen_messages[msg_id] = 1
+
+    def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
+        if len(self.my_topics) == 0:
+            return False
+        return all([topic in self.my_topics for topic in msg.topicIDs])

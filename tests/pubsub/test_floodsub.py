@@ -4,16 +4,16 @@ import pytest
 
 from tests.utils import cleanup
 from libp2p import new_node
+from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
 
 from .utils import (
-    make_pubsub_msg,
     message_id_generator,
     generate_RPC_packet,
 )
+
 
 # pylint: disable=too-many-locals
 
@@ -39,106 +39,84 @@ async def test_simple_two_nodes():
     data = b"some data"
 
     floodsub_a = FloodSub(supported_protocols)
-    pubsub_a = Pubsub(node_a, floodsub_a, "a")
+    pubsub_a = Pubsub(node_a, floodsub_a, ID(b"a" * 32))
     floodsub_b = FloodSub(supported_protocols)
-    pubsub_b = Pubsub(node_b, floodsub_b, "b")
+    pubsub_b = Pubsub(node_b, floodsub_b, ID(b"b" * 32))
 
     await connect(node_a, node_b)
-
     await asyncio.sleep(0.25)
+
     sub_b = await pubsub_b.subscribe(topic)
-
+    # Sleep to let a know of b's subscription
     await asyncio.sleep(0.25)
 
-    next_msg_id_func = message_id_generator(0)
-    msg = make_pubsub_msg(
-        origin_id=node_a.get_id(),
-        topic_ids=[topic],
-        data=data,
-        seqno=next_msg_id_func(),
-    )
-    await floodsub_a.publish(node_a.get_id(), msg)
-    await asyncio.sleep(0.25)
+    await pubsub_a.publish(topic, data)
 
     res_b = await sub_b.get()
 
     # Check that the msg received by node_b is the same
     # as the message sent by node_a
-    assert res_b.SerializeToString() == msg.SerializeToString()
+    assert ID(res_b.from_id) == node_a.get_id()
+    assert res_b.data == data
+    assert res_b.topicIDs == [topic]
 
     # Success, terminate pending tasks.
     await cleanup()
 
 
 @pytest.mark.asyncio
-async def test_lru_cache_two_nodes():
+async def test_lru_cache_two_nodes(monkeypatch):
     # two nodes with cache_size of 4
-    # node_a send the following messages to node_b
-    # [1, 1, 2, 1, 3, 1, 4, 1, 5, 1]
-    # node_b should only receive the following
-    # [1, 2, 3, 4, 5, 1]
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
+    # `node_a` send the following messages to node_b
+    message_indices = [1, 1, 2, 1, 3, 1, 4, 1, 5, 1]
+    # `node_b` should only receive the following
+    expected_received_indices = [1, 2, 3, 4, 5, 1]
 
-    await node_a.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-    await node_b.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    listen_maddr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+    node_a = await new_node()
+    node_b = await new_node()
+
+    await node_a.get_network().listen(listen_maddr)
+    await node_b.get_network().listen(listen_maddr)
 
     supported_protocols = ["/floodsub/1.0.0"]
+    topic = "my_topic"
 
-    # initialize PubSub with a cache_size of 4
+    # Mock `get_msg_id` to make us easier to manipulate `msg_id` by `data`.
+    def get_msg_id(msg):
+        # Originally it is `(msg.seqno, msg.from_id)`
+        return (msg.data, msg.from_id)
+    import libp2p.pubsub.pubsub
+    monkeypatch.setattr(libp2p.pubsub.pubsub, "get_msg_id", get_msg_id)
+
+    # Initialize Pubsub with a cache_size of 4
+    cache_size = 4
     floodsub_a = FloodSub(supported_protocols)
-    pubsub_a = Pubsub(node_a, floodsub_a, "a", 4)
+    pubsub_a = Pubsub(node_a, floodsub_a, ID(b"a" * 32), cache_size)
+
     floodsub_b = FloodSub(supported_protocols)
-    pubsub_b = Pubsub(node_b, floodsub_b, "b", 4)
+    pubsub_b = Pubsub(node_b, floodsub_b, ID(b"b" * 32), cache_size)
 
     await connect(node_a, node_b)
-
-    await asyncio.sleep(0.25)
-    qb = await pubsub_b.subscribe("my_topic")
-
     await asyncio.sleep(0.25)
 
-    node_a_id = str(node_a.get_id())
-
-    # initialize message_id_generator
-    # store first message
-    next_msg_id_func = message_id_generator(0)
-    first_message = generate_RPC_packet(node_a_id, ["my_topic"], "some data 1", next_msg_id_func())
-
-    await floodsub_a.publish(node_a_id, first_message.SerializeToString())
-    await asyncio.sleep(0.25)
-    print (first_message)
-
-    messages = [first_message]
-    # for the next 5 messages
-    for i in range(2, 6):
-        # write first message
-        await floodsub_a.publish(node_a_id, first_message.SerializeToString())
-        await asyncio.sleep(0.25)
-
-        # generate and write next message
-        msg = generate_RPC_packet(node_a_id, ["my_topic"], "some data " + str(i), next_msg_id_func())
-        messages.append(msg)
-
-        await floodsub_a.publish(node_a_id, msg.SerializeToString())
-        await asyncio.sleep(0.25)
-
-    # write first message again
-    await floodsub_a.publish(node_a_id, first_message.SerializeToString())
+    sub_b = await pubsub_b.subscribe(topic)
     await asyncio.sleep(0.25)
 
-    # check the first five messages in queue
-    # should only see 1 first_message
-    for i in range(5):
-        # Check that the msg received by node_b is the same
-        # as the message sent by node_a
-        res_b = await qb.get()
-        assert res_b.SerializeToString() == messages[i].publish[0].SerializeToString()
+    def _make_testing_data(i: int) -> bytes:
+        num_int_bytes = 4
+        if i >= 2**(num_int_bytes * 8):
+            raise ValueError("")
+        return b"data" + i.to_bytes(num_int_bytes, "big")
 
-    # the 6th message should be first_message
-    res_b = await qb.get()
-    assert res_b.SerializeToString() == first_message.publish[0].SerializeToString()
-    assert qb.empty()
+    for index in message_indices:
+        await pubsub_a.publish(topic, _make_testing_data(index))
+    await asyncio.sleep(0.25)
+
+    for index in expected_received_indices:
+        res_b = await sub_b.get()
+        assert res_b.data == _make_testing_data(index)
+    assert sub_b.empty()
 
     # Success, terminate pending tasks.
     await cleanup()
