@@ -8,18 +8,17 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import Pubsub
-from utils import message_id_generator, generate_RPC_packet
+
 from tests.utils import cleanup
 
-# pylint: disable=too-many-locals
+from .utils import (
+    connect,
+    message_id_generator,
+    generate_RPC_packet,
+)
 
-async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
-    addr = node2.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await node1.connect(info)
+
+# pylint: disable=too-many-locals
 
 @pytest.mark.asyncio
 async def test_init():
@@ -37,11 +36,12 @@ async def test_init():
 
     await cleanup()
 
+
 async def perform_test_from_obj(obj):
     """
     Perform a floodsub test from a test obj.
     test obj are composed as follows:
-    
+
     {
         "supported_protocols": ["supported/protocol/1.0.0",...],
         "adj_list": {
@@ -95,7 +95,7 @@ async def perform_test_from_obj(obj):
             if neighbor_id not in node_map:
                 neighbor_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
                 await neighbor_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-                
+
                 node_map[neighbor_id] = neighbor_node
 
                 gossipsub = GossipSub(supported_protocols, 3, 2, 4, 30)
@@ -104,7 +104,7 @@ async def perform_test_from_obj(obj):
                 pubsub_map[neighbor_id] = pubsub
 
             # Connect node and neighbor
-            tasks_connect.append(asyncio.ensure_future(connect(node_map[start_node_id], node_map[neighbor_id])))
+            tasks_connect.append(connect(node_map[start_node_id], node_map[neighbor_id]))
     tasks_connect.append(asyncio.sleep(2))
     await asyncio.gather(*tasks_connect)
 
@@ -130,7 +130,7 @@ async def perform_test_from_obj(obj):
             # Store queue in topic-queue map for node
             queues_map[node_id][topic] = q
             """
-            tasks_topic.append(asyncio.ensure_future(pubsub_map[node_id].subscribe(topic)))
+            tasks_topic.append(pubsub_map[node_id].subscribe(topic))
             tasks_topic_data.append((node_id, topic))
     tasks_topic.append(asyncio.sleep(2))
 
@@ -152,29 +152,27 @@ async def perform_test_from_obj(obj):
     topics_in_msgs_ordered = []
     messages = obj["messages"]
     tasks_publish = []
-    next_msg_id_func = message_id_generator(0)
 
     for msg in messages:
         topics = msg["topics"]
-
         data = msg["data"]
         node_id = msg["node_id"]
 
-        # Get actual id for sender node (not the id from the test obj)
-        actual_node_id = str(node_map[node_id].get_id())
-
-        # Create correctly formatted message
-        msg_talk = generate_RPC_packet(actual_node_id, topics, data, next_msg_id_func())
-
         # Publish message
-        tasks_publish.append(asyncio.ensure_future(gossipsub_map[node_id].publish(\
-            actual_node_id, msg_talk.SerializeToString())))
+        # FIXME: This should be one RPC packet with several topics
+        for topic in topics:
+            tasks_publish.append(
+                pubsub_map[node_id].publish(
+                    topic,
+                    data,
+                )
+            )
 
         # For each topic in topics, add topic, msg_talk tuple to ordered test list
         # TODO: Update message sender to be correct message sender before
         # adding msg_talk to this list
         for topic in topics:
-            topics_in_msgs_ordered.append((topic, msg_talk))
+            topics_in_msgs_ordered.append((topic, data))
 
     # Allow time for publishing before continuing
     # await asyncio.sleep(0.4)
@@ -183,14 +181,12 @@ async def perform_test_from_obj(obj):
 
     # Step 4) Check that all messages were received correctly.
     # TODO: Check message sender too
-    for i in range(len(topics_in_msgs_ordered)):
-        topic, actual_msg = topics_in_msgs_ordered[i]
-
+    for topic, data in topics_in_msgs_ordered:
         # Look at each node in each topic
         for node_id in topic_map[topic]:
             # Get message from subscription queue
             msg_on_node = await queues_map[node_id][topic].get()
-            assert actual_msg.publish[0].SerializeToString() == msg_on_node.SerializeToString()
+            assert msg_on_node.data == data
 
     # Success, terminate pending tasks.
     await cleanup()

@@ -80,6 +80,21 @@ class FloodSub(IPubsubRouter):
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             await stream.write(rpc_msg.SerializeToString())
 
+    async def join(self, topic):
+        """
+        Join notifies the router that we want to receive and
+        forward messages in a topic. It is invoked after the
+        subscription announcement
+        :param topic: topic to join
+        """
+
+    async def leave(self, topic):
+        """
+        Leave notifies the router that we are no longer interested in a topic.
+        It is invoked after the unsubscription announcement.
+        :param topic: topic to leave
+        """
+
     def _get_peers_to_send(
             self,
             topic_ids: Iterable[str],
@@ -102,18 +117,3 @@ class FloodSub(IPubsubRouter):
                 if str(peer_id) not in self.pubsub.peers:
                     continue
                 yield peer_id
-
-    async def join(self, topic):
-        """
-        Join notifies the router that we want to receive and
-        forward messages in a topic. It is invoked after the
-        subscription announcement
-        :param topic: topic to join
-        """
-
-    async def leave(self, topic):
-        """
-        Leave notifies the router that we are no longer interested in a topic.
-        It is invoked after the unsubscription announcement.
-        :param topic: topic to leave
-        """

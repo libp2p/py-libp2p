@@ -2,10 +2,13 @@ import asyncio
 import multiaddr
 import uuid
 
-from utils import message_id_generator, generate_RPC_packet
 from libp2p import new_node
+from libp2p.host.host_interface import IHost
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
+
+from .utils import message_id_generator, generate_RPC_packet
+
 
 SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
 CRYPTO_TOPIC = "ethereum"
@@ -17,14 +20,25 @@ CRYPTO_TOPIC = "ethereum"
 #                 Ex. set,rob,5
 # Determine message type by looking at first item before first comma
 
-class DummyAccountNode():
+
+class DummyAccountNode:
     """
-    Node which has an internal balance mapping, meant to serve as 
+    Node which has an internal balance mapping, meant to serve as
     a dummy crypto blockchain. There is no actual blockchain, just a simple
     map indicating how much crypto each user in the mappings holds
     """
+    libp2p_node: IHost
+    pubsub: Pubsub
+    floodsub: FloodSub
 
-    def __init__(self):
+    def __init__(
+            self,
+            libp2p_node: IHost,
+            pubsub: Pubsub,
+            floodsub: FloodSub):
+        self.libp2p_node = libp2p_node
+        self.pubsub = pubsub
+        self.floodsub = floodsub
         self.balances = {}
         self.next_msg_id_func = message_id_generator(0)
         self.node_id = str(uuid.uuid1())
@@ -38,16 +52,21 @@ class DummyAccountNode():
         We use create as this serves as a factory function and allows us
         to use async await, unlike the init function
         """
-        self = DummyAccountNode()
 
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
         await libp2p_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
-        self.libp2p_node = libp2p_node
-
-        self.floodsub = FloodSub(SUPPORTED_PUBSUB_PROTOCOLS)
-        self.pubsub = Pubsub(self.libp2p_node, self.floodsub, "a")
-        return self
+        floodsub = FloodSub(SUPPORTED_PUBSUB_PROTOCOLS)
+        pubsub = Pubsub(
+            libp2p_node,
+            floodsub,
+            "a",
+        )
+        return cls(
+            libp2p_node=libp2p_node,
+            pubsub=pubsub,
+            floodsub=floodsub,
+        )
 
     async def handle_incoming_msgs(self):
         """
@@ -78,10 +97,8 @@ class DummyAccountNode():
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send
         """
-        my_id = str(self.libp2p_node.get_id())
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
-        await self.floodsub.publish(my_id, packet.SerializeToString())
+        await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
     async def publish_set_crypto(self, user, amount):
         """
@@ -89,18 +106,15 @@ class DummyAccountNode():
         :param user: user to set crypto for
         :param amount: amount of crypto
         """
-        my_id = str(self.libp2p_node.get_id())
         msg_contents = "set," + user + "," + str(amount)
-        packet = generate_RPC_packet(my_id, [CRYPTO_TOPIC], msg_contents, self.next_msg_id_func())
-
-        await self.floodsub.publish(my_id, packet.SerializeToString())
+        await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
     def handle_send_crypto(self, source_user, dest_user, amount):
         """
         Handle incoming send_crypto message
         :param source_user: user to send crypto from
         :param dest_user: user to send crypto to
-        :param amount: amount of crypto to send 
+        :param amount: amount of crypto to send
         """
         if source_user in self.balances:
             self.balances[source_user] -= amount

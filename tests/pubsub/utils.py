@@ -14,6 +14,8 @@ from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
 
+from tests.utils import connect
+
 
 def message_id_generator(start_val):
     """
@@ -22,6 +24,7 @@ def message_id_generator(start_val):
     :return: message id
     """
     val = start_val
+
     def generator():
         # Allow manipulation of val within closure
         nonlocal val
@@ -105,6 +108,10 @@ def create_pubsub_and_gossipsub_instances(libp2p_hosts, supported_protocols, deg
 
     return pubsubs, gossipsubs
 
+
+# FIXME: There is no difference between `sparse_connect` and `dense_connect`,
+#   before `connect_some` is fixed.
+
 async def sparse_connect(hosts):
     await connect_some(hosts, 3)
 
@@ -113,6 +120,7 @@ async def dense_connect(hosts):
     await connect_some(hosts, 10)
 
 
+# FIXME: `degree` is not used at all
 async def connect_some(hosts, degree):
     for i, host in enumerate(hosts):
         for j, host2 in enumerate(hosts):
@@ -134,6 +142,7 @@ async def connect_some(hosts, degree):
     #         await connect(host, neighbor)
 
     #         j += 1
+
 
 async def one_to_all_connect(hosts, central_host_index):
     for i, host in enumerate(hosts):
