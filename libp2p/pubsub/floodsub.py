@@ -1,5 +1,7 @@
 from typing import (
     Iterable,
+    List,
+    Sequence,
 )
 
 from libp2p.peer.id import (
@@ -8,23 +10,31 @@ from libp2p.peer.id import (
 )
 
 from .pb import rpc_pb2
+from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
 
 
 class FloodSub(IPubsubRouter):
     # pylint: disable=no-member
 
-    def __init__(self, protocols):
+    protocols: List[str]
+
+    pubsub: Pubsub
+
+    def __init__(self, protocols: Sequence[str]) -> None:
         self.protocols = protocols
         self.pubsub = None
 
-    def get_protocols(self):
+    def get_protocols(self) -> List[str]:
         """
         :return: the list of protocols supported by the router
         """
         return self.protocols
 
-    def attach(self, pubsub):
+    def attach(self, pubsub: Pubsub) -> None:
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.
@@ -32,19 +42,19 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id, protocol_id):
+    def add_peer(self, peer_id: ID, protocol_id: str):
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
 
-    def remove_peer(self, peer_id):
+    def remove_peer(self, peer_id: ID):
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
 
-    async def handle_rpc(self, rpc, sender_peer_id):
+    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: ID):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -80,7 +90,7 @@ class FloodSub(IPubsubRouter):
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             await stream.write(rpc_msg.SerializeToString())
 
-    async def join(self, topic):
+    async def join(self, topic: str):
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -88,7 +98,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to join
         """
 
-    async def leave(self, topic):
+    async def leave(self, topic: str):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
