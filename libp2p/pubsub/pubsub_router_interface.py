@@ -1,15 +1,24 @@
 from abc import ABC, abstractmethod
+from typing import (
+    List,
+)
+
+from .pb import rpc_pb2
+from .pubsub import Pubsub
+from libp2p.peer.id import (
+    ID,
+)
 
 class IPubsubRouter(ABC):
 
     @abstractmethod
-    def get_protocols(self):
+    def get_protocols(self) -> List[str]:
         """
         :return: the list of protocols supported by the router
         """
 
     @abstractmethod
-    def attach(self, pubsub):
+    def attach(self, pubsub: Pubsub) -> None:
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.
@@ -17,21 +26,21 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id, protocol_id):
+    def add_peer(self, peer_id: ID, protocol_id: str) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
 
     @abstractmethod
-    def remove_peer(self, peer_id):
+    def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
 
     @abstractmethod
-    def handle_rpc(self, rpc, sender_peer_id):
+    def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -42,7 +51,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    async def publish(self, msg_forwarder, pubsub_msg):
+    async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message):
         """
         Invoked to forward a new message that has been validated
         :param msg_forwarder: peer_id of message sender
@@ -50,7 +59,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def join(self, topic):
+    def join(self, topic: str) -> None:
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -59,7 +68,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def leave(self, topic):
+    def leave(self, topic: str) -> None:
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
