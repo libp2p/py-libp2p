@@ -1,6 +1,33 @@
+from typing import (
+    Any,
+    Callable,
+    List,
+    Sequence,
+)
+
 import multiaddr
 
-from .host_interface import IHost
+from .host_interface import (
+    IHost,
+)
+from libp2p.network.swarm import (
+    Swarm
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore import (
+    PeerStore,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.routing.kademlia.kademlia_peer_router import (
+    KadmeliaPeerRouter,
+)
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
@@ -10,48 +37,53 @@ from .host_interface import IHost
 
 class BasicHost(IHost):
 
+    _network: Swarm
+    router: KadmeliaPeerRouter
+    peerstore: PeerStore
+
     # default options constructor
-    def __init__(self, network, router=None):
+    def __init__(self, network: Swarm, router: KadmeliaPeerRouter=None) -> None:
         self._network = network
         self._router = router
         self.peerstore = self._network.peerstore
 
-    def get_id(self):
+    def get_id(self) -> ID:
         """
         :return: peer_id of host
         """
         return self._network.get_peer_id()
 
-    def get_network(self):
+    def get_network(self) -> Swarm:
         """
         :return: network instance of host
         """
         return self._network
 
-    def get_peerstore(self):
+    def get_peerstore(self) -> PeerStore:
         """
         :return: peerstore of the host (same one as in its network instance)
         """
         return self.peerstore
 
-    def get_mux(self):
+    # FIXME: Replace with correct return type
+    def get_mux(self) -> Any:
         """
         :return: mux instance of host
         """
 
-    def get_addrs(self):
+    def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening too
         """
         p2p_part = multiaddr.Multiaddr('/p2p/{}'.format(self.get_id().pretty()))
 
-        addrs = []
+        addrs: List[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(self, protocol_id, stream_handler):
+    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[INetStream], None]) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -62,16 +94,15 @@ class BasicHost(IHost):
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
-    async def new_stream(self, peer_id, protocol_ids):
+    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_id: protocol id that stream runs on
-        :return: true if successful
+        :return: stream: new stream created
         """
-        stream = await self._network.new_stream(peer_id, protocol_ids)
-        return stream
+        return await self._network.new_stream(peer_id, protocol_ids)
 
-    async def connect(self, peer_info):
+    async def connect(self, peer_info: PeerInfo) -> None:
         """
         connect ensures there is a connection between this host and the peer with
         given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal
