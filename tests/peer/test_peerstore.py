@@ -55,4 +55,4 @@ def test_peers():
     store.put("peer2", "key", "val")
     store.add_addr("peer3", "/foo", 10)
 
-    assert set(store.peers()) == set(["peer1", "peer2", "peer3"])
+    assert set(store.peer_ids()) == set(["peer1", "peer2", "peer3"])

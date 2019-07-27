@@ -1,12 +1,23 @@
+from typing import (
+    List,
+)
+
 import multiaddr
 
-from .id import id_b58_decode
+from .id import (
+    ID,
+    id_b58_decode,
+)
 from .peerdata import PeerData
 
 
 class PeerInfo:
     # pylint: disable=too-few-public-methods
-    def __init__(self, peer_id, peer_data=None):
+
+    peer_id: ID
+    addrs: List[multiaddr.Multiaddr]
+
+    def __init__(self, peer_id: ID, peer_data: PeerData=None) -> None:
         self.peer_id = peer_id
         self.addrs = peer_data.get_addrs() if peer_data else None
 
@@ -30,16 +41,16 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
         )
 
     # make sure the /p2p value parses as a peer.ID
-    peer_id_str = p2p_part.value_for_protocol(multiaddr.protocols.P_P2P)
-    peer_id = id_b58_decode(peer_id_str)
+    peer_id_str: str = p2p_part.value_for_protocol(multiaddr.protocols.P_P2P)
+    peer_id: ID = id_b58_decode(peer_id_str)
 
     # we might have received just an / p2p part, which means there's no addr.
     if len(parts) > 1:
         addr = multiaddr.Multiaddr.join(*parts[:-1])
 
     peer_data = PeerData()
-    peer_data.addrs = [addr]
-    peer_data.protocols = [p.code for p in addr.protocols()]
+    peer_data.add_addrs(addr)
+    peer_data.set_protocols([p.code for p in addr.protocols()])
 
     return PeerInfo(peer_id, peer_data)
 
