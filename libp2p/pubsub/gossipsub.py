@@ -27,7 +27,7 @@ class GossipSub(IPubsubRouter):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-public-methods
 
-    protocols: Sequence[str]
+    protocols: List[str]
     pubsub: Pubsub
 
     degree: int
@@ -62,8 +62,8 @@ class GossipSub(IPubsubRouter):
                  gossip_history: int=5,
                  heartbeat_interval: int=120) -> None:
         # pylint: disable=too-many-arguments
-        self.protocols: List[str] = protocols
-        self.pubsub: Pubsub = None
+        self.protocols = list(protocols)
+        self.pubsub = None
 
         # Store target degree, upper degree bound, and lower degree bound
         self.degree = degree
@@ -71,7 +71,7 @@ class GossipSub(IPubsubRouter):
         self.degree_high = degree_high
 
         # Store time to live (for topics in fanout)
-        self.time_to_live: int = time_to_live
+        self.time_to_live = time_to_live
 
         # Create topic --> list of peers mappings
         self.mesh = {}
@@ -91,7 +91,7 @@ class GossipSub(IPubsubRouter):
 
     # Interface functions
 
-    def get_protocols(self) -> List:
+    def get_protocols(self) -> List[str]:
         """
         :return: the list of protocols supported by the router
         """
@@ -109,7 +109,8 @@ class GossipSub(IPubsubRouter):
         # TODO: Start after delay
         asyncio.ensure_future(self.heartbeat())
 
-    def add_peer(self, peer_id: ID, protocol_id: str):
+    # FIXME: Shoudl be changed to type 'peer.ID'
+    def add_peer(self, peer_id: str, protocol_id: str) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
@@ -133,7 +134,7 @@ class GossipSub(IPubsubRouter):
         self.peers_to_protocol.remove(peer_id_str)
 
     # FIXME: type of `sender_peer_id` should be changed to `ID`
-    async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: str):
+    async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: str) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -300,7 +301,7 @@ class GossipSub(IPubsubRouter):
                                         peers: List[str],
                                         msg_sender: str,
                                         origin_id: str,
-                                        serialized_packet: bytes):
+                                        serialized_packet: bytes) -> None:
         for peer_id_in_topic in peers:
             # Forward to all peers that are not the
             # message sender and are not the message origin
@@ -358,7 +359,7 @@ class GossipSub(IPubsubRouter):
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 # FIXME: Should be changed to `List[ID]`
-                selected_peers: List[str] = GossipSub.select_from_minus(
+                selected_peers = GossipSub.select_from_minus(
                     num_mesh_peers_in_topic - self.degree,
                     self.mesh[topic],
                     [],
@@ -378,7 +379,7 @@ class GossipSub(IPubsubRouter):
             if self.time_since_last_publish[topic] > self.time_to_live:
                 # Remove topic from fanout
                 del self.fanout[topic]
-                self.time_since_last_publish.remove(topic)
+                del self.time_since_last_publish[topic]
             else:
                 num_fanout_peers_in_topic = len(self.fanout[topic])
 
@@ -393,7 +394,7 @@ class GossipSub(IPubsubRouter):
                     # Add the peers to fanout[topic]
                     self.fanout[topic].extend(selected_peers)
 
-    async def gossip_heartbeat(self):
+    async def gossip_heartbeat(self) -> None:
         # pylint: disable=too-many-nested-blocks
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
@@ -412,14 +413,14 @@ class GossipSub(IPubsubRouter):
                         # TODO: this line is a monster, can hopefully be simplified
                         if (topic not in self.mesh or (peer not in self.mesh[topic]))\
                                 and (topic not in self.fanout or (peer not in self.fanout[topic])):
-                            msg_ids: List[str] = [str(msg) for msg in msg_ids]
-                            await self.emit_ihave(topic, msg_ids, peer)
+                            msg_id_strs = [str(msg_id) for msg_id in msg_ids]
+                            await self.emit_ihave(topic, msg_id_strs, peer)
 
         # TODO: Refactor and Dedup. This section is the roughly the same as the above.
         # Do the same for fanout, for all topics not already hit in mesh
         for topic in self.fanout:
             if topic not in self.mesh:
-                msg_ids: List[str] = self.mcache.window(topic)
+                msg_ids = self.mcache.window(topic)
                 if msg_ids:
                     # TODO: Make more efficient, possibly using a generator?
                     # Get all pubsub peers in topic and only add if they are gossipsub peers also
@@ -433,8 +434,8 @@ class GossipSub(IPubsubRouter):
                         for peer in peers_to_emit_ihave_to:
                             if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
 
-                                msg_ids: List[str] = [str(msg) for msg in msg_ids]
-                                await self.emit_ihave(topic, msg_ids, peer)
+                                msg_id_strs = [str(msg) for msg in msg_ids]
+                                await self.emit_ihave(topic, msg_id_strs, peer)
 
         self.mcache.shift()
 
@@ -453,7 +454,7 @@ class GossipSub(IPubsubRouter):
             selection_pool: List[Any] = [x for x in pool if x not in minus]
         else:
             # Don't create a new selection_pool if we are not subbing anything
-            selection_pool: List[Any] = pool
+            selection_pool = list(pool)
 
         # If num_to_select > size(selection_pool), then return selection_pool (which has the most
         # possible elements s.t. the number of elements is less than num_to_select)
@@ -518,7 +519,7 @@ class GossipSub(IPubsubRouter):
 
         # FIXME: Update type of message ID
         msg_ids: List[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
-        msgs_to_forward: List = []
+        msgs_to_forward: List[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
             msg: rpc_pb2.Message = self.mcache.get(msg_id_iwant)

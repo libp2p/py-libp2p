@@ -25,7 +25,7 @@ class FloodSub(IPubsubRouter):
     pubsub: Pubsub
 
     def __init__(self, protocols: Sequence[str]) -> None:
-        self.protocols = protocols
+        self.protocols = list(protocols)
         self.pubsub = None
 
     def get_protocols(self) -> List[str]:
@@ -42,19 +42,21 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id: ID, protocol_id: str):
+    # FIXME: Should be changed to type 'peer.ID'
+    def add_peer(self, peer_id: str, protocol_id: str) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
         """
 
-    def remove_peer(self, peer_id: ID):
+    def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
 
-    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: ID):
+    # FIXME: Should be changed to type 'peer.ID'
+    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: str) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -90,7 +92,7 @@ class FloodSub(IPubsubRouter):
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             await stream.write(rpc_msg.SerializeToString())
 
-    async def join(self, topic: str):
+    async def join(self, topic: str) -> None:
         """
         Join notifies the router that we want to receive and
         forward messages in a topic. It is invoked after the
@@ -98,7 +100,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to join
         """
 
-    async def leave(self, topic: str):
+    async def leave(self, topic: str) -> None:
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.

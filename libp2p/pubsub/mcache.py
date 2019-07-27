@@ -2,38 +2,41 @@ from typing import (
     Dict,
     List,
     Optional,
+    Sequence,
     Tuple,
 )
 
 from .pb import rpc_pb2
 
 
+class CacheEntry:
+    # pylint: disable=too-few-public-methods
+
+    mid: Tuple[bytes, bytes]
+    topics: List[str]
+
+    """
+    A logical representation of an entry in the mcache's _history_.
+    """
+    def __init__(self, mid: Tuple[bytes, bytes], topics: Sequence[str]) -> None:
+        """
+        Constructor.
+        :param mid: (seqno, from_id) of the msg
+        :param topics: list of topics this message was sent on
+        """
+        self.mid = mid
+        self.topics = list(topics)
+
+
 class MessageCache:
 
-    class CacheEntry:
-        # pylint: disable=too-few-public-methods
-
-        mid: Tuple[bytes, bytes]
-        topics: List[str]
-
-        """
-        A logical representation of an entry in the mcache's _history_.
-        """
-        def __init__(self, mid: Tuple[bytes, bytes], topics: List[str]) -> None:
-            """
-            Constructor.
-            :param mid: (seqno, from_id) of the msg
-            :param topics: list of topics this message was sent on
-            """
-            self.mid = mid
-            self.topics = topics
 
     window_size: int
     history_size: int
 
     msgs: Dict[Tuple[bytes, bytes], rpc_pb2.Message]
 
-    history = List[List[CacheEntry]]
+    history: List[List[CacheEntry]]
 
     def __init__(self, window_size: int, history_size: int) -> None:
         """
@@ -50,10 +53,10 @@ class MessageCache:
 
         # max length of history_size. each item is a list of CacheEntry.
         # messages lost upon shift().
-        self.history = []
-
-        for _ in range(history_size):
-            self.history.append([])
+        self.history = [
+            []
+            for _ in range(history_size)
+        ]
 
     def put(self, msg: rpc_pb2.Message) -> None:
         """
@@ -63,10 +66,7 @@ class MessageCache:
         mid: Tuple[bytes, bytes] = (msg.seqno, msg.from_id)
         self.msgs[mid] = msg
 
-        if not self.history[0]:
-            self.history[0] = []
-
-        self.history[0].append(self.CacheEntry(mid, msg.topicIDs))
+        self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
     def get(self, mid: Tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
         """
