@@ -1,11 +1,12 @@
 import asyncio
-import multiaddr
-import uuid
 import random
 import struct
 from typing import (
     Sequence,
 )
+import uuid
+
+import multiaddr
 
 from libp2p import new_node
 from libp2p.pubsub.pb import rpc_pb2
@@ -93,8 +94,17 @@ async def create_libp2p_hosts(num_hosts):
 
     return hosts
 
-def create_pubsub_and_gossipsub_instances(libp2p_hosts, supported_protocols, degree, degree_low, \
-    degree_high, time_to_live, gossip_window, gossip_history, heartbeat_interval):
+
+def create_pubsub_and_gossipsub_instances(
+        libp2p_hosts,
+        supported_protocols,
+        degree,
+        degree_low,
+        degree_high,
+        time_to_live,
+        gossip_window,
+        gossip_history,
+        heartbeat_interval):
     pubsubs = []
     gossipsubs = []
     for node in libp2p_hosts:

@@ -1,6 +1,7 @@
 import asyncio
-import multiaddr
 import uuid
+
+import multiaddr
 
 from libp2p import new_node
 from libp2p.host.host_interface import IHost
@@ -144,4 +145,3 @@ class DummyAccountNode:
             return self.balances[user]
         else:
             return -1
-

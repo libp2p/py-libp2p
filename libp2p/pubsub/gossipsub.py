@@ -32,8 +32,8 @@ class GossipSub(IPubsubRouter):
 
         # Store target degree, upper degree bound, and lower degree bound
         self.degree = degree
-        self.degree_high = degree_high
         self.degree_low = degree_low
+        self.degree_high = degree_high
 
         # Store time to live (for topics in fanout)
         self.time_to_live = time_to_live

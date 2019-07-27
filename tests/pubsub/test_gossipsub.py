@@ -8,9 +8,13 @@ from tests.utils import (
     connect,
 )
 
-from .utils import message_id_generator, generate_RPC_packet, \
-    create_libp2p_hosts, create_pubsub_and_gossipsub_instances, sparse_connect, dense_connect, \
-    one_to_all_connect
+from .utils import (
+    create_libp2p_hosts,
+    create_pubsub_and_gossipsub_instances,
+    dense_connect,
+    one_to_all_connect,
+)
+
 
 SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
 
