@@ -39,9 +39,9 @@ async def test_simple_two_nodes():
     data = b"some data"
 
     floodsub_a = FloodSub(supported_protocols)
-    pubsub_a = Pubsub(node_a, floodsub_a, ID(b"a" * 32))
+    pubsub_a = Pubsub(node_a, floodsub_a, ID(b"\x12\x20" + b"a" * 32))
     floodsub_b = FloodSub(supported_protocols)
-    pubsub_b = Pubsub(node_b, floodsub_b, ID(b"b" * 32))
+    pubsub_b = Pubsub(node_b, floodsub_b, ID(b"\x12\x20" + b"a" * 32))
 
     await connect(node_a, node_b)
     await asyncio.sleep(0.25)

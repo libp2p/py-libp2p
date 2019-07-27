@@ -80,7 +80,7 @@ async def create_libp2p_hosts(num_hosts):
     tasks_create = []
     for i in range(0, num_hosts):
         # Create node
-        tasks_create.append(asyncio.ensure_future(new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])))
+        tasks_create.append(new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"]))
     hosts = await asyncio.gather(*tasks_create)
 
     tasks_listen = []

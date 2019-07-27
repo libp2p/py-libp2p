@@ -340,11 +340,11 @@ class Pubsub:
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message we are going to push out.
         """
-        # TODO: - Check if the `source` is in the blacklist. If yes, reject.
+        # TODO: Check if the `source` is in the blacklist. If yes, reject.
 
-        # TODO: - Check if the `from` is in the blacklist. If yes, reject.
+        # TODO: Check if the `from` is in the blacklist. If yes, reject.
 
-        # TODO: - Check if signing is required and if so signature should be attached.
+        # TODO: Check if signing is required and if so signature should be attached.
 
         if self._is_msg_seen(msg):
             return
