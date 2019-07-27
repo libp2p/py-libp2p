@@ -313,9 +313,6 @@ class Pubsub:
             # Write message to stream
             await stream.write(rpc_msg)
 
-    def list_peers(self, topic_id: str) -> Tuple[ID, ...]:
-        return
-
     async def publish(self, topic_id: str, data: bytes) -> None:
         """
         Publish data to a topic
