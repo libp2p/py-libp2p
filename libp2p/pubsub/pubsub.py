@@ -322,7 +322,7 @@ class Pubsub:
         msg = rpc_pb2.Message(
             data=data,
             topicIDs=[topic_id],
-            # Origin is myself.
+            # Origin is ourself.
             from_id=self.host.get_id().to_bytes(),
             seqno=self._next_seqno(),
         )
