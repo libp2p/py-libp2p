@@ -102,7 +102,7 @@ class FloodSub(IPubsubRouter):
             origin: ID) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
-        :param src: the peer id of the peer who forwards the message to me.
+        :param src: peer ID of the peer who forwards the message to us
         :param origin: the peer id of the peer who originally broadcast the message.
         :return: a generator of the peer ids who we send data to.
         """
