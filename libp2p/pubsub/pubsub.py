@@ -10,21 +10,14 @@ from typing import (
 
 from lru import LRU
 
+from libp2p.host.host_interface import IHost
+from libp2p.peer.id import ID
+
+from libp2p.network.stream.net_stream_interface import INetStream
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
-from .pubsub_router_interface import (
-    IPubsubRouter,
-)
-from libp2p.host.host_interface import (
-    IHost,
-)
-from libp2p.peer.id import (
-    ID,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
+from .pubsub_router_interface import IPubsubRouter
 
 
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:

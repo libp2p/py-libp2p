@@ -1,3 +1,4 @@
+from ast import literal_eval
 import asyncio
 import random
 from typing import (
@@ -8,8 +9,6 @@ from typing import (
     MutableSet,
     Sequence,
 )
-
-from ast import literal_eval
 
 from libp2p.peer.id import (
     ID,

@@ -1,13 +1,13 @@
+import hashlib
 from typing import (
     Union,
 )
 
-from Crypto.PublicKey.RSA import (
-    RsaKey,
-)
-import hashlib
 import base58
+
 import multihash
+
+from Crypto.PublicKey.RSA import RsaKey
 
 # MaxInlineKeyLength is the maximum length a key can be for it to be inlined in
 # the peer ID.

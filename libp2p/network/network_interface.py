@@ -8,12 +8,11 @@ from typing import (
 
 from multiaddr import Multiaddr
 
+from libp2p.peer.id import ID
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
-from libp2p.peer.id import (
-    ID,
-)
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
 
 class INetwork(ABC):

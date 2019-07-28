@@ -1,6 +1,7 @@
-from .net_stream_interface import INetStream
-from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
 from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
+
+from .net_stream_interface import INetStream
 
 
 class NetStream(INetStream):

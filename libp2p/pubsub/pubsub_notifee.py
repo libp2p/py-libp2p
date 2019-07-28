@@ -5,21 +5,12 @@ from typing import (
 
 from multiaddr import Multiaddr
 
-from libp2p.peer.id import (
-    ID,
-)
-from libp2p.stream_muxer.muxed_connection_interface import (
-    IMuxedConn,
-)
-from libp2p.network.notifee_interface import (
-    INotifee,
-)
-from libp2p.network.network_interface import (
-    INetwork,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
+from libp2p.peer.id import ID
+from libp2p.network.network_interface import INetwork
+from libp2p.network.notifee_interface import INotifee
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
+from libp2p.network.stream.net_stream_interface import INetStream
 
 
 class PubsubNotifee(INotifee):

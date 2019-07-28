@@ -5,9 +5,9 @@ from typing import (
 )
 
 
+from .addrbook_interface import IAddrBook
 from .id import ID
 from .peerinfo import PeerInfo
-from .addrbook_interface import IAddrBook
 from .peermetadata_interface import IPeerMetadata
 
 

@@ -12,9 +12,6 @@ from libp2p.peer.id import (
 from .pb import rpc_pb2
 from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
 
 
 class FloodSub(IPubsubRouter):

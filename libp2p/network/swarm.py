@@ -10,10 +10,6 @@ from typing import (
 
 from multiaddr import Multiaddr
 
-from .network_interface import INetwork
-from .notifee_interface import INotifee
-from .connection.raw_connection import RawConnection
-from .stream.net_stream import NetStream
 from libp2p.peer.id import (
     ID,
     id_b58_decode,
@@ -25,8 +21,14 @@ from libp2p.routing.interfaces import IPeerRouting
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.listener_interface import IListener
-from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
+from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
+
+from .network_interface import INetwork
+from .notifee_interface import INotifee
+from .connection.raw_connection import RawConnection
+from .stream.net_stream import NetStream
 
 
 class Swarm(INetwork):

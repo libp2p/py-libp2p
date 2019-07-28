@@ -8,27 +8,15 @@ from typing import (
 
 import multiaddr
 
-from .host_interface import (
-    IHost,
-)
-from libp2p.network.swarm import (
-    Swarm
-)
-from libp2p.peer.id import (
-    ID,
-)
-from libp2p.peer.peerinfo import (
-    PeerInfo,
-)
-from libp2p.peer.peerstore import (
-    PeerStore,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
-from libp2p.routing.kademlia.kademlia_peer_router import (
-    KadmeliaPeerRouter,
-)
+from libp2p.network.swarm import Swarm
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+from libp2p.peer.peerstore import PeerStore
+
+from libp2p.network.stream.net_stream_interface import INetStream
+from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
+
+from .host_interface import IHost
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.

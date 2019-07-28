@@ -9,9 +9,9 @@ from typing import (
 from multiaddr import Multiaddr
 
 from .id import ID
-from .peerstore_interface import IPeerStore
 from .peerdata import PeerData
 from .peerinfo import PeerInfo
+from .peerstore_interface import IPeerStore
 
 
 class PeerStore(IPeerStore):

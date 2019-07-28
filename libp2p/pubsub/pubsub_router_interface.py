@@ -3,11 +3,10 @@ from typing import (
     List,
 )
 
+from libp2p.peer.id import ID
+
 from .pb import rpc_pb2
 from .pubsub import Pubsub
-from libp2p.peer.id import (
-    ID,
-)
 
 class IPubsubRouter(ABC):
 
