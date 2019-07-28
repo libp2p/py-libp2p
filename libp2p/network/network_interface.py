@@ -1,16 +1,31 @@
 from abc import ABC, abstractmethod
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Sequence,
+)
+
+from multiaddr import Multiaddr
+
+from .notifee_interface import INotifee
+from .stream.net_stream import NetStream
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
 
 class INetwork(ABC):
 
     @abstractmethod
-    def get_peer_id(self):
+    def get_peer_id(self) -> ID:
         """
         :return: the peer id
         """
 
     @abstractmethod
-    def dial_peer(self, peer_id):
+    def dial_peer(self, peer_id: ID) -> Coroutine[Any, Any, IMuxedConn]:
         """
         dial_peer try to create a connection to peer_id
 
@@ -20,7 +35,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id, stream_handler):
+    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[NetStream], None]) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -28,7 +43,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def new_stream(self, peer_id, protocol_ids):
+    def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> Coroutine[Any, Any, NetStream]:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream
@@ -36,14 +51,14 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def listen(self, *args):
+    def listen(self, *args: Multiaddr) -> Coroutine[Any, Any, bool]:
         """
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success
         """
 
     @abstractmethod
-    def notify(self, notifee):
+    def notify(self, notifee: INotifee) -> bool:
         """
         :param notifee: object implementing Notifee interface
         :return: true if notifee registered successfully, false otherwise
