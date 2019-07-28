@@ -118,12 +118,14 @@ class Pubsub:
         Generate subscription message with all topics we are subscribed to
         only send hello packet if we have subscribed topics
         """
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        if self.my_topics:
-            for topic_id in self.my_topics:
-                packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-                    subscribe=True, topicid=topic_id)])
-
+        packet = rpc_pb2.RPC()
+        for topic_id in self.my_topics:
+            packet.subscriptions.extend([
+                rpc_pb2.RPC.SubOpts(
+                    subscribe=True,
+                    topicid=topic_id,
+                )
+            ])
         return packet.SerializeToString()
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -182,6 +184,8 @@ class Pubsub:
         await stream.write(hello)
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continuously_read_stream(stream))
+        # Force context switch
+        await asyncio.sleep(0)
 
     async def handle_peer_queue(self) -> None:
         """
@@ -208,6 +212,9 @@ class Pubsub:
             hello: bytes = self.get_hello_packet()
             await stream.write(hello)
 
+            # pylint: disable=line-too-long
+            # TODO: Investigate whether this should be replaced by `handlePeerEOF`
+            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/49274b0e8aecdf6cad59d768e5702ff00aa48488/comm.go#L80  # noqa: E501
             # Pass stream off to stream reader
             asyncio.ensure_future(self.continuously_read_stream(stream))
 

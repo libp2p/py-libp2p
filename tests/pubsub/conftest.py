@@ -27,21 +27,25 @@ def num_hosts():
 
 @pytest.fixture
 async def hosts(num_hosts):
-    new_node_coros = tuple(
+    _hosts = await asyncio.gather(*[
         new_node(transport_opt=[str(LISTEN_MADDR)])
         for _ in range(num_hosts)
-    )
-    _hosts = await asyncio.gather(*new_node_coros)
+    ])
     await asyncio.gather(*[
         _host.get_network().listen(LISTEN_MADDR)
         for _host in _hosts
     ])
     yield _hosts
     # Clean up
+    listeners = []
     for _host in _hosts:
         for listener in _host.get_network().listeners.values():
             listener.server.close()
-            await listener.server.wait_closed()
+            listeners.append(listener)
+    await asyncio.gather(*[
+        listener.server.wait_closed()
+        for listener in listeners
+    ])
 
 
 @pytest.fixture
