@@ -41,6 +41,9 @@ class GossipSub(IPubsubRouter):
     # FIXME: Should be changed to `Dict[str, List[ID]]`
     fanout: Dict[str, List[str]]
 
+    # FIXME: Should be changed to `Dict[ID, str]`
+    peers_to_protocol: Dict[str, str]
+
     time_since_last_publish: Dict[str, int]
 
     #FIXME: Should be changed to List[ID]
@@ -119,6 +122,9 @@ class GossipSub(IPubsubRouter):
         # Add peer to the correct peer list
         peer_type = GossipSub.get_peer_type(protocol_id)
         peer_id_str = str(peer_id)
+
+        self.peers_to_protocol[peer_id_str] = protocol_id
+
         if peer_type == "gossip":
             self.peers_gossipsub.append(peer_id_str)
         elif peer_type == "flood":
@@ -130,7 +136,12 @@ class GossipSub(IPubsubRouter):
         :param peer_id: id of peer to remove
         """
         peer_id_str = str(peer_id)
-        self.peers_to_protocol.remove(peer_id_str)
+        del self.peers_to_protocol[peer_id_str]
+
+        if peer_id_str in self.peers_gossipsub:
+            self.peers_gossipsub.remove(peer_id_str)
+        if peer_id_str in self.peers_gossipsub:
+            self.peers_floodsub.remove(peer_id_str)
 
     # FIXME: type of `sender_peer_id` should be changed to `ID`
     async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: str) -> None:
