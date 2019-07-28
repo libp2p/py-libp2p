@@ -62,7 +62,7 @@ class FloodSub(IPubsubRouter):
         so that seen messages are not further forwarded.
         It also never forwards a message back to the source
         or the peer that forwarded the message.
-        :param src: the peer id of the peer who forwards the message to me.
+        :param src: peer ID of the peer who forwards the message to us
         :param pubsub_msg: pubsub message in protobuf.
         """
 
