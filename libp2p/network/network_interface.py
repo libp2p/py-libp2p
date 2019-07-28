@@ -35,7 +35,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[NetStream], None]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[NetStream], Coroutine[Any, Any, None]]) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance

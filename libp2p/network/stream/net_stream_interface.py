@@ -4,8 +4,12 @@ from typing import (
     Coroutine,
 )
 
+from libp2p.stream_muxer.mplex.mplex import Mplex
+
 
 class INetStream(ABC):
+
+    mplex_conn: Mplex
 
     @abstractmethod
     def get_protocol(self) -> str:

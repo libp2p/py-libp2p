@@ -42,8 +42,7 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    # FIXME: Should be changed to type 'peer.ID'
-    def add_peer(self, peer_id: str, protocol_id: str) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: str) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add

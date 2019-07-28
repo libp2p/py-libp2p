@@ -1,6 +1,7 @@
 from typing import (
     Any,
     Callable,
+    Coroutine,
     List,
     Sequence,
 )
@@ -83,7 +84,7 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[INetStream], None]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[INetStream], Coroutine[Any, Any, None]]) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream

@@ -1,10 +1,15 @@
 from abc import ABC, abstractmethod
 
+from libp2p.peer.id import ID
+
 
 class IMuxedConn(ABC):
     """
     reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
     """
+
+    initiator: bool
+    peer_id: ID
 
     @abstractmethod
     def __init__(self, conn, generic_protocol_handler, peer_id):

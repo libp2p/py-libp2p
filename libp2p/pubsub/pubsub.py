@@ -22,8 +22,8 @@ from libp2p.host.host_interface import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.network.stream.net_stream import (
-    NetStream,
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
 )
 
 
@@ -40,8 +40,7 @@ class Pubsub:
 
     router: IPubsubRouter
 
-    # FIXME: Should be changed to `asyncio.Queue[ID]`
-    peer_queue: asyncio.Queue[str]
+    peer_queue: asyncio.Queue[ID]
 
     protocols: List[str]
 
@@ -78,7 +77,6 @@ class Pubsub:
         self.router.attach(self)
 
         # Register a notifee
-        # FIXME: Should be changed to `asyncio.Queue[ID]`
         self.peer_queue = asyncio.Queue()
         self.host.get_network().notify(PubsubNotifee(self.peer_queue))
 
@@ -109,7 +107,7 @@ class Pubsub:
         self.peer_topics = {}
 
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
-        # FIXME: Should be changed to `Dict[ID, NetStream]`
+        # FIXME: Should be changed to `Dict[ID, INetStream]`
         self.peers = {}
 
         self.counter = time.time_ns()
@@ -130,7 +128,7 @@ class Pubsub:
 
         return packet.SerializeToString()
 
-    async def continuously_read_stream(self, stream: NetStream) -> None:
+    async def continuously_read_stream(self, stream: INetStream) -> None:
         """
         Read from input stream in an infinite loop. Process
         messages from other nodes
@@ -168,7 +166,7 @@ class Pubsub:
             # Force context switch
             await asyncio.sleep(0)
 
-    async def stream_handler(self, stream: NetStream) -> None:
+    async def stream_handler(self, stream: INetStream) -> None:
         """
         Stream handler for pubsub. Gets invoked whenever a new stream is created
         on one of the supported pubsub protocols.
@@ -196,13 +194,12 @@ class Pubsub:
         """
         while True:
 
-            # FIXME: Should be changed to type 'ID'
-            peer_id: str = await self.peer_queue.get()
+            peer_id: ID = await self.peer_queue.get()
 
             # Open a stream to peer on existing connection
             # (we know connection exists since that's the only way
             # an element gets added to peer_queue)
-            stream: NetStream = await self.host.new_stream(peer_id, self.protocols)
+            stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
 
             # Add Peer
             # Map peer to stream
