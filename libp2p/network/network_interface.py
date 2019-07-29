@@ -1,9 +1,13 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
 from typing import (
     Any,
     Callable,
     Coroutine,
     Sequence,
+    TYPE_CHECKING,
 )
 
 from multiaddr import Multiaddr
@@ -11,8 +15,13 @@ from multiaddr import Multiaddr
 from libp2p.peer.id import ID
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
-from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
+
+if TYPE_CHECKING:
+    from .notifee_interface import INotifee
+
+
+StreamHandlerFn = Callable[[NetStream], Coroutine[Any, Any, None]]
 
 
 class INetwork(ABC):
@@ -34,7 +43,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[NetStream], Coroutine[Any, Any, None]]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -42,7 +51,9 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> Coroutine[Any, Any, NetStream]:
+    def new_stream(self,
+                   peer_id: ID,
+                   protocol_ids: Sequence[str]) -> Coroutine[Any, Any, NetStream]:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream
@@ -57,7 +68,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def notify(self, notifee: INotifee) -> bool:
+    def notify(self, notifee: 'INotifee') -> bool:
         """
         :param notifee: object implementing Notifee interface
         :return: true if notifee registered successfully, false otherwise

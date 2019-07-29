@@ -6,6 +6,7 @@ from typing import (
     Dict,
     List,
     Tuple,
+    TYPE_CHECKING,
 )
 
 from lru import LRU
@@ -17,7 +18,9 @@ from libp2p.network.stream.net_stream_interface import INetStream
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
-from .pubsub_router_interface import IPubsubRouter
+
+if TYPE_CHECKING:
+    from .pubsub_router_interface import IPubsubRouter
 
 
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
@@ -31,17 +34,19 @@ class Pubsub:
     host: IHost
     my_id: ID
 
-    router: IPubsubRouter
+    router: 'IPubsubRouter'
 
-    peer_queue: asyncio.Queue[ID]
+    peer_queue: asyncio.Queue
 
     protocols: List[str]
 
-    incoming_msgs_from_peers: asyncio.Queue[rpc_pb2.Message]
-    outgoing_messages: asyncio.Queue[rpc_pb2.Message]
+    incoming_msgs_from_peers: asyncio.Queue
+    outgoing_messages: asyncio.Queue
 
     seen_messages: LRU
+
     my_topics: Dict[str, asyncio.Queue]
+
     # FIXME: Should be changed to `Dict[str, List[ID]]`
     peer_topics: Dict[str, List[str]]
     # FIXME: Should be changed to `Dict[ID, INetStream]`
@@ -52,7 +57,7 @@ class Pubsub:
 
     def __init__(self,
                  host: IHost,
-                 router: IPubsubRouter,
+                 router: 'IPubsubRouter',
                  my_id: ID,
                  cache_size: int = None) -> None:
         """
@@ -247,7 +252,7 @@ class Pubsub:
                 # for each topic
                 await self.my_topics[topic].put(publish_message)
 
-    async def subscribe(self, topic_id: str) -> asyncio.Queue[rpc_pb2.Message]:
+    async def subscribe(self, topic_id: str) -> asyncio.Queue:
         """
         Subscribe ourself to a topic
         :param topic_id: topic_id to subscribe to

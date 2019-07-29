@@ -86,5 +86,5 @@ def id_from_private_key(key: RsaKey) -> ID:
 
 def digest(data: Union[str, bytes]) -> bytes:
     if not isinstance(data, bytes):
-        data_bytes = str(data).encode('utf8')
-    return hashlib.sha1(data_bytes).digest()
+        data = str(data).encode('utf8')
+    return hashlib.sha1(data).digest()

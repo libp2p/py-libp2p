@@ -12,10 +12,11 @@ import multiaddr
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerStore
 
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
+
+
+StreamHandlerFn = Callable[[INetStream], Coroutine[Any, Any, None]]
 
 
 class IHost(ABC):
@@ -46,7 +47,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[INetStream], Coroutine[Any, Any, None]]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -57,7 +58,9 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> Coroutine[Any, Any, INetStream]:
+    def new_stream(self,
+                   peer_id: ID,
+                   protocol_ids: Sequence[str]) -> Coroutine[Any, Any, INetStream]:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on

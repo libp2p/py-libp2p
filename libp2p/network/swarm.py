@@ -31,6 +31,9 @@ from .connection.raw_connection import RawConnection
 from .stream.net_stream import NetStream
 
 
+StreamHandlerFn = Callable[[NetStream], Coroutine[Any, Any, None]]
+
+
 class Swarm(INetwork):
     # pylint: disable=too-many-instance-attributes,cell-var-from-loop,too-many-arguments
 
@@ -76,7 +79,7 @@ class Swarm(INetwork):
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[NetStream], Coroutine[Any, Any, None]]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -150,7 +153,10 @@ class Swarm(INetwork):
         muxed_stream = await muxed_conn.open_stream(protocol_ids[0], multiaddr)
 
         # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(list(protocol_ids), muxed_stream)
+        selected_protocol = await self.multiselect_client.select_one_of(
+            list(protocol_ids),
+            muxed_stream,
+        )
 
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
@@ -180,7 +186,8 @@ class Swarm(INetwork):
             if str(multiaddr) in self.listeners:
                 return True
 
-            async def conn_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            async def conn_handler(reader: asyncio.StreamReader,
+                                   writer: asyncio.StreamWriter) -> None:
                 # Read in first message (should be peer_id of initiator) and ack
                 peer_id = id_b58_decode((await reader.read(1024)).decode())
 

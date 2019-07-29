@@ -8,7 +8,7 @@ from libp2p.routing.interfaces import IContentRouting
 
 class KadmeliaContentRouter(IContentRouting):
 
-    def provide(self, cid: bytes, announce: bool=True) -> None:
+    def provide(self, cid: bytes, announce: bool = True) -> None:
         """
         Provide adds the given cid to the content routing system. If announce is True,
         it also announces it, otherwise it is just kept in the local

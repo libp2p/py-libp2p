@@ -17,7 +17,7 @@ class PeerInfo:
     peer_id: ID
     addrs: List[multiaddr.Multiaddr]
 
-    def __init__(self, peer_id: ID, peer_data: PeerData=None) -> None:
+    def __init__(self, peer_id: ID, peer_data: PeerData = None) -> None:
         self.peer_id = peer_id
         self.addrs = peer_data.get_addrs() if peer_data else None
 
@@ -49,7 +49,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
         addr = multiaddr.Multiaddr.join(*parts[:-1])
 
     peer_data = PeerData()
-    peer_data.add_addrs(addr)
+    peer_data.add_addrs([addr])
     peer_data.set_protocols([p.code for p in addr.protocols()])
 
     return PeerInfo(peer_id, peer_data)

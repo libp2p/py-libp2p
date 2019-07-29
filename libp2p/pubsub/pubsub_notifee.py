@@ -1,11 +1,7 @@
 import asyncio
-from typing import (
-    Sequence,
-)
 
 from multiaddr import Multiaddr
 
-from libp2p.peer.id import ID
 from libp2p.network.network_interface import INetwork
 from libp2p.network.notifee_interface import INotifee
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
@@ -16,9 +12,9 @@ from libp2p.network.stream.net_stream_interface import INetStream
 class PubsubNotifee(INotifee):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
-    initiator_peers_queue: asyncio.Queue[ID]
+    initiator_peers_queue: asyncio.Queue
 
-    def __init__(self, initiator_peers_queue: asyncio.Queue[ID]) -> None:
+    def __init__(self, initiator_peers_queue: asyncio.Queue) -> None:
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub
         can process new peers after we connect to them

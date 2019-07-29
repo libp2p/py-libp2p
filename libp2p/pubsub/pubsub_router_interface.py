@@ -1,12 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import (
     List,
+    TYPE_CHECKING,
 )
 
 from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
-from .pubsub import Pubsub
+
+if TYPE_CHECKING:
+    from .pubsub import Pubsub
 
 class IPubsubRouter(ABC):
 
@@ -17,7 +20,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def attach(self, pubsub: Pubsub) -> None:
+    def attach(self, pubsub: 'Pubsub') -> None:
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.

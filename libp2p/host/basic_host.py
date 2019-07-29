@@ -24,6 +24,9 @@ from .host_interface import IHost
 # telling it to listen on the given listen addresses.
 
 
+StreamHandlerFn = Callable[[INetStream], Coroutine[Any, Any, None]]
+
+
 class BasicHost(IHost):
 
     _network: Swarm
@@ -31,7 +34,7 @@ class BasicHost(IHost):
     peerstore: PeerStore
 
     # default options constructor
-    def __init__(self, network: Swarm, router: KadmeliaPeerRouter=None) -> None:
+    def __init__(self, network: Swarm, router: KadmeliaPeerRouter = None) -> None:
         self._network = network
         self._router = router
         self.peerstore = self._network.peerstore
@@ -72,7 +75,7 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: Callable[[INetStream], Coroutine[Any, Any, None]]) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream

@@ -60,9 +60,9 @@ class GossipSub(IPubsubRouter):
                  degree_low: int,
                  degree_high: int,
                  time_to_live: int,
-                 gossip_window: int=3,
-                 gossip_history: int=5,
-                 heartbeat_interval: int=120) -> None:
+                 gossip_window: int = 3,
+                 gossip_history: int = 5,
+                 heartbeat_interval: int = 120) -> None:
         # pylint: disable=too-many-arguments
         self.protocols = list(protocols)
         self.pubsub = None
@@ -78,6 +78,9 @@ class GossipSub(IPubsubRouter):
         # Create topic --> list of peers mappings
         self.mesh = {}
         self.fanout = {}
+
+        # Create peer --> protocol mapping
+        self.peers_to_protocol = {}
 
         # Create topic --> time since last publish map
         self.time_since_last_publish = {}
@@ -449,7 +452,9 @@ class GossipSub(IPubsubRouter):
         self.mcache.shift()
 
     @staticmethod
-    def select_from_minus(num_to_select: int, pool: Sequence[Any], minus: Sequence[Any]) -> List[Any]:
+    def select_from_minus(num_to_select: int,
+                          pool: Sequence[Any],
+                          minus: Sequence[Any]) -> List[Any]:
         """
         Select at most num_to_select subset of elements from the set (pool - minus) randomly.
         :param num_to_select: number of elements to randomly select
@@ -510,7 +515,7 @@ class GossipSub(IPubsubRouter):
         # Add all unknown message ids (ids that appear in ihave_msg but not in seen_seqnos) to list
         # of messages we want to request
         # FIXME: Update type of message ID
-        msg_ids_wanted = [
+        msg_ids_wanted: List[Any] = [
             msg_id
             for msg_id in ihave_msg.messageIDs
             if literal_eval(msg_id) not in seen_seqnos_and_peers
