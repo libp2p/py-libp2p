@@ -14,6 +14,8 @@ from libp2p.pubsub.pubsub import Pubsub
 
 from tests.utils import connect
 
+from .configs import LISTEN_MADDR
+
 
 def message_id_generator(start_val):
     """
@@ -80,13 +82,13 @@ async def create_libp2p_hosts(num_hosts):
     tasks_create = []
     for i in range(0, num_hosts):
         # Create node
-        tasks_create.append(new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"]))
+        tasks_create.append(new_node(transport_opt=[str(LISTEN_MADDR)]))
     hosts = await asyncio.gather(*tasks_create)
 
     tasks_listen = []
     for node in hosts:
         # Start listener
-        tasks_listen.append(asyncio.ensure_future(node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))))
+        tasks_listen.append(node.get_network().listen(LISTEN_MADDR))
     await asyncio.gather(*tasks_listen)
 
     return hosts
@@ -109,7 +111,7 @@ def create_pubsub_and_gossipsub_instances(
                               degree_low, degree_high, time_to_live,
                               gossip_window, gossip_history,
                               heartbeat_interval)
-        pubsub = Pubsub(node, gossipsub, "a")
+        pubsub = Pubsub(node, gossipsub, node.get_id())
         pubsubs.append(pubsub)
         gossipsubs.append(gossipsub)
 
