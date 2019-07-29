@@ -1,13 +1,16 @@
 import pytest
+
 from libp2p.pubsub.mcache import MessageCache
 
 
 class Msg:
 
     def __init__(self, topicIDs, seqno, from_id):
+        # pylint: disable=invalid-name
         self.topicIDs = topicIDs
-        self.seqno = seqno,
+        self.seqno = seqno
         self.from_id = from_id
+
 
 @pytest.mark.asyncio
 async def test_mcache():

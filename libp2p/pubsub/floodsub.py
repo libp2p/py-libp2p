@@ -51,7 +51,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
 
-    async def publish(self, src: ID, pubsub_msg: rpc_pb2.Message) -> None:
+    async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
@@ -62,13 +62,13 @@ class FloodSub(IPubsubRouter):
         so that seen messages are not further forwarded.
         It also never forwards a message back to the source
         or the peer that forwarded the message.
-        :param src: peer ID of the peer who forwards the message to us
+        :param msg_forwarder: peer ID of the peer who forwards the message to us
         :param pubsub_msg: pubsub message in protobuf.
         """
 
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
-            src=src,
+            msg_forwarder=msg_forwarder,
             origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(
@@ -98,11 +98,11 @@ class FloodSub(IPubsubRouter):
     def _get_peers_to_send(
             self,
             topic_ids: Iterable[str],
-            src: ID,
+            msg_forwarder: ID,
             origin: ID) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
-        :param src: peer ID of the peer who forwards the message to us.
+        :param msg_forwarder: peer ID of the peer who forwards the message to us.
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
@@ -111,7 +111,7 @@ class FloodSub(IPubsubRouter):
                 continue
             for peer_id_str in self.pubsub.peer_topics[topic]:
                 peer_id = id_b58_decode(peer_id_str)
-                if peer_id in (src, origin):
+                if peer_id in (msg_forwarder, origin):
                     continue
                 # FIXME: Should change `self.pubsub.peers` to Dict[PeerID, ...]
                 if str(peer_id) not in self.pubsub.peers:

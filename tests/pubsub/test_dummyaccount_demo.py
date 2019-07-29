@@ -1,19 +1,13 @@
 import asyncio
 from threading import Thread
 
-import multiaddr
-
 import pytest
-
-from libp2p import new_node
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pubsub import Pubsub
-from libp2p.pubsub.floodsub import FloodSub
 
 from tests.utils import (
     cleanup,
     connect,
 )
+
 from .dummy_account_node import DummyAccountNode
 
 # pylint: disable=too-many-locals

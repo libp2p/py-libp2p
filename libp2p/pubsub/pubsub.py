@@ -142,7 +142,7 @@ class Pubsub:
                         continue
                     # TODO(mhchia): This will block this read_stream loop until all data are pushed.
                     #   Should investigate further if this is an issue.
-                    await self.push_msg(src=peer_id, msg=msg)
+                    await self.push_msg(msg_forwarder=peer_id, msg=msg)
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -331,10 +331,10 @@ class Pubsub:
 
         await self.push_msg(self.host.get_id(), msg)
 
-    async def push_msg(self, src: ID, msg: rpc_pb2.Message) -> None:
+    async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
         Push a pubsub message to others.
-        :param src: the peer who forward us the message.
+        :param msg_forwarder: the peer who forward us the message.
         :param msg: the message we are going to push out.
         """
         # TODO: - Check if the `source` is in the blacklist. If yes, reject.
@@ -350,7 +350,7 @@ class Pubsub:
 
         self._mark_msg_seen(msg)
         await self.handle_talk(msg)
-        await self.router.publish(src, msg)
+        await self.router.publish(msg_forwarder, msg)
 
     def _next_seqno(self) -> bytes:
         """

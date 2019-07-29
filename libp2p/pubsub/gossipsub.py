@@ -119,7 +119,7 @@ class GossipSub(IPubsubRouter):
             for prune in control_message.prune:
                 await self.handle_prune(prune, sender_peer_id)
 
-    async def publish(self, src: ID, pubsub_msg: rpc_pb2.Message) -> None:
+    async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         # pylint: disable=too-many-locals
         """
         Invoked to forward a new message that has been validated.
@@ -128,7 +128,7 @@ class GossipSub(IPubsubRouter):
 
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
-            src=src,
+            msg_forwarder=msg_forwarder,
             origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(
@@ -144,11 +144,11 @@ class GossipSub(IPubsubRouter):
     def _get_peers_to_send(
             self,
             topic_ids: Iterable[str],
-            src: ID,
+            msg_forwarder: ID,
             origin: ID) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
-        :param src: the peer id of the peer who forwards the message to me.
+        :param msg_forwarder: the peer id of the peer who forwards the message to me.
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
@@ -167,10 +167,10 @@ class GossipSub(IPubsubRouter):
 
             # gossipsub peers
             # FIXME: Change `str` to `ID`
-            gossipsub_peers: List[str] = None
+            in_topic_gossipsub_peers: List[str] = None
             # TODO: Do we need to check `topic in self.pubsub.my_topics`?
             if topic in self.mesh:
-                gossipsub_peers = self.mesh[topic]
+                in_topic_gossipsub_peers = self.mesh[topic]
             else:
                 # TODO(robzajac): Is topic DEFINITELY supposed to be in fanout if we are not
                 #   subscribed?
@@ -185,11 +185,11 @@ class GossipSub(IPubsubRouter):
                         self.degree,
                         [],
                     )
-                gossipsub_peers = self.fanout[topic]
-            for peer_id_str in gossipsub_peers:
+                in_topic_gossipsub_peers = self.fanout[topic]
+            for peer_id_str in in_topic_gossipsub_peers:
                 send_to.add(id_b58_decode(peer_id_str))
-        # Excludes `src` and `origin`
-        yield from send_to.difference([src, origin])
+        # Excludes `msg_forwarder` and `origin`
+        yield from send_to.difference([msg_forwarder, origin])
 
     async def join(self, topic):
         # Note: the comments here are the near-exact algorithm description from the spec

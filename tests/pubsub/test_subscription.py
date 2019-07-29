@@ -5,7 +5,10 @@ from libp2p import new_node
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
 
-SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
+from .configs import FLOODSUB_PROTOCOL_ID
+
+
+SUPPORTED_PUBSUB_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 TESTING_TOPIC = "TEST_SUBSCRIBE"
 
 

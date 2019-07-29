@@ -2,8 +2,6 @@ import asyncio
 
 import pytest
 
-import multiaddr
-
 from libp2p import new_node
 from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import Pubsub
@@ -13,8 +11,12 @@ from tests.utils import (
     connect,
 )
 
+from .configs import (
+    FLOODSUB_PROTOCOL_ID,
+    LISTEN_MADDR,
+)
 
-FLOODSUB_PROTOCOL_ID = "/floodsub/1.0.0"
+
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 
 FLOODSUB_PROTOCOL_TEST_CASES = [
@@ -349,7 +351,6 @@ async def perform_test_from_obj(obj, router_factory):
     or B as a neighbor of A once. Do NOT list both A: ["B"] and B:["A"] as the behavior
     is undefined (even if it may work)
     """
-    listen_maddr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 
     # Step 1) Create graph
     adj_list = obj["adj_list"]
@@ -357,8 +358,8 @@ async def perform_test_from_obj(obj, router_factory):
     pubsub_map = {}
 
     async def add_node(node_id: str) -> None:
-        node = await new_node(transport_opt=[str(listen_maddr)])
-        await node.get_network().listen(listen_maddr)
+        node = await new_node(transport_opt=[str(LISTEN_MADDR)])
+        await node.get_network().listen(LISTEN_MADDR)
         node_map[node_id] = node
         pubsub_router = router_factory(protocols=obj["supported_protocols"])
         pubsub = Pubsub(node, pubsub_router, ID(node_id.encode()))
@@ -417,7 +418,7 @@ async def perform_test_from_obj(obj, router_factory):
         node_id = msg["node_id"]
 
         # Publish message
-        # FIXME: Should be single RPC package with several topics
+        # TODO: Should be single RPC package with several topics
         for topic in topics:
             tasks_publish.append(
                 pubsub_map[node_id].publish(
@@ -426,23 +427,22 @@ async def perform_test_from_obj(obj, router_factory):
                 )
             )
 
-        # For each topic in topics, add topic, msg_talk tuple to ordered test list
-        # TODO: Update message sender to be correct message sender before
-        # adding msg_talk to this list
+        # For each topic in topics, add (topic, node_id, data) tuple to ordered test list
         for topic in topics:
-            topics_in_msgs_ordered.append((topic, data))
+            topics_in_msgs_ordered.append((topic, node_id, data))
 
     # Allow time for publishing before continuing
     await asyncio.gather(*tasks_publish, asyncio.sleep(2))
 
     # Step 4) Check that all messages were received correctly.
-    # TODO: Check message sender too
-    for topic, data in topics_in_msgs_ordered:
+    for topic, origin_node_id, data in topics_in_msgs_ordered:
         # Look at each node in each topic
         for node_id in topic_map[topic]:
             # Get message from subscription queue
             msg = await queues_map[node_id][topic].get()
             assert data == msg.data
+            # Check the message origin
+            assert node_map[origin_node_id].get_id().to_bytes() == msg.from_id
 
     # Success, terminate pending tasks.
     await cleanup()

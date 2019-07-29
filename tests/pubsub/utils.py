@@ -1,19 +1,16 @@
 import asyncio
-import random
 import struct
 from typing import (
     Sequence,
 )
-import uuid
 
 import multiaddr
 
 from libp2p import new_node
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.id import ID
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import Pubsub
 
 from tests.utils import connect
 

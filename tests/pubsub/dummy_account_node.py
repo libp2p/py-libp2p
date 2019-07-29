@@ -5,13 +5,14 @@ import multiaddr
 
 from libp2p import new_node
 from libp2p.host.host_interface import IHost
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.floodsub import FloodSub
+from libp2p.pubsub.pubsub import Pubsub
 
-from .utils import message_id_generator, generate_RPC_packet
+from .configs import FLOODSUB_PROTOCOL_ID
+from .utils import message_id_generator
 
 
-SUPPORTED_PUBSUB_PROTOCOLS = ["/floodsub/1.0.0"]
+SUPPORTED_PUBSUB_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 CRYPTO_TOPIC = "ethereum"
 
 # Message format:

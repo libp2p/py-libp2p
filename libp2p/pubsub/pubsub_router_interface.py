@@ -42,10 +42,10 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    async def publish(self, src, pubsub_msg) -> None:
+    async def publish(self, msg_forwarder, pubsub_msg):
         """
         Invoked to forward a new message that has been validated
-        :param src: peer_id of message sender
+        :param msg_forwarder: peer_id of message sender
         :param pubsub_msg: pubsub message to forward
         """
 

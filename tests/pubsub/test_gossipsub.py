@@ -8,6 +8,7 @@ from tests.utils import (
     connect,
 )
 
+from .configs import GOSSIPSUB_PROTOCOL_ID
 from .utils import (
     create_libp2p_hosts,
     create_pubsub_and_gossipsub_instances,
@@ -16,7 +17,7 @@ from .utils import (
 )
 
 
-SUPPORTED_PROTOCOLS = ["/gossipsub/1.0.0"]
+SUPPORTED_PROTOCOLS = [GOSSIPSUB_PROTOCOL_ID]
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ async def test_join():
     # Central node publish to the topic so that this topic
     # is added to central node's fanout
     # publish from the randomly chosen host
-    await pubsubs[central_node_index].publish(topic, b"")
+    await pubsubs[central_node_index].publish(topic, b"data")
 
     # Check that the gossipsub of central node has fanout for the topic
     assert topic in gossipsubs[central_node_index].fanout
