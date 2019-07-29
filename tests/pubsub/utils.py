@@ -1,13 +1,18 @@
 import asyncio
-import multiaddr
-import uuid
-import random
 import struct
+from typing import (
+    Sequence,
+)
+
+import multiaddr
+
 from libp2p import new_node
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pubsub import Pubsub
+from libp2p.peer.id import ID
 from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import Pubsub
+
+from tests.utils import connect
 
 
 def message_id_generator(start_val):
@@ -17,6 +22,7 @@ def message_id_generator(start_val):
     :return: message id
     """
     val = start_val
+
     def generator():
         # Allow manipulation of val within closure
         nonlocal val
@@ -28,6 +34,20 @@ def message_id_generator(start_val):
         return struct.pack('>Q', val)
 
     return generator
+
+
+def make_pubsub_msg(
+        origin_id: ID,
+        topic_ids: Sequence[str],
+        data: bytes,
+        seqno: bytes) -> rpc_pb2.Message:
+    return rpc_pb2.Message(
+        from_id=origin_id.to_bytes(),
+        seqno=seqno,
+        data=data,
+        topicIDs=list(topic_ids),
+    )
+
 
 def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     """
@@ -42,7 +62,7 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
         from_id=origin_id.encode('utf-8'),
         seqno=msg_id,
         data=msg_content.encode('utf-8'),
-        )
+    )
 
     for topic in topics:
         message.topicIDs.extend([topic.encode('utf-8')])
@@ -50,13 +70,6 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     packet.publish.extend([message])
     return packet
 
-async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
-    addr = node2.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await node1.connect(info)
 
 async def create_libp2p_hosts(num_hosts):
     """
@@ -78,8 +91,17 @@ async def create_libp2p_hosts(num_hosts):
 
     return hosts
 
-def create_pubsub_and_gossipsub_instances(libp2p_hosts, supported_protocols, degree, degree_low, \
-    degree_high, time_to_live, gossip_window, gossip_history, heartbeat_interval):
+
+def create_pubsub_and_gossipsub_instances(
+        libp2p_hosts,
+        supported_protocols,
+        degree,
+        degree_low,
+        degree_high,
+        time_to_live,
+        gossip_window,
+        gossip_history,
+        heartbeat_interval):
     pubsubs = []
     gossipsubs = []
     for node in libp2p_hosts:
@@ -93,6 +115,10 @@ def create_pubsub_and_gossipsub_instances(libp2p_hosts, supported_protocols, deg
 
     return pubsubs, gossipsubs
 
+
+# FIXME: There is no difference between `sparse_connect` and `dense_connect`,
+#   before `connect_some` is fixed.
+
 async def sparse_connect(hosts):
     await connect_some(hosts, 3)
 
@@ -101,6 +127,7 @@ async def dense_connect(hosts):
     await connect_some(hosts, 10)
 
 
+# FIXME: `degree` is not used at all
 async def connect_some(hosts, degree):
     for i, host in enumerate(hosts):
         for j, host2 in enumerate(hosts):
@@ -122,6 +149,7 @@ async def connect_some(hosts, degree):
     #         await connect(host, neighbor)
 
     #         j += 1
+
 
 async def one_to_all_connect(hosts, central_host_index):
     for i, host in enumerate(hosts):

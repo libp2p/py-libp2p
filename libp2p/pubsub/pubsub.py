@@ -45,7 +45,8 @@ class Pubsub:
     outgoing_messages: asyncio.Queue()
     seen_messages: LRU
     my_topics: Dict[str, asyncio.Queue]
-    peer_topics: Dict[str, List[ID]]
+    # FIXME: Should be changed to `Dict[str, List[ID]]`
+    peer_topics: Dict[str, List[str]]
     # FIXME: Should be changed to `Dict[ID, INetStream]`
     peers: Dict[str, INetStream]
     # NOTE: Be sure it is increased atomically everytime.
@@ -127,26 +128,21 @@ class Pubsub:
         messages from other nodes
         :param stream: stream to continously read from
         """
-
-        # TODO check on types here
-        peer_id = str(stream.mplex_conn.peer_id)
+        peer_id = stream.mplex_conn.peer_id
 
         while True:
             incoming = (await stream.read())
             rpc_incoming = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
-            should_publish = False
-
             if rpc_incoming.publish:
                 # deal with RPC.publish
-                for message in rpc_incoming.publish:
-                    id_in_seen_msgs = (message.seqno, message.from_id)
-                    if id_in_seen_msgs not in self.seen_messages:
-                        should_publish = True
-                        self.seen_messages[id_in_seen_msgs] = 1
-
-                        await self.handle_talk(message)
+                for msg in rpc_incoming.publish:
+                    if not self._is_subscribed_to_msg(msg):
+                        continue
+                    # TODO(mhchia): This will block this read_stream loop until all data are pushed.
+                    #   Should investigate further if this is an issue.
+                    await self.push_msg(msg_forwarder=peer_id, msg=msg)
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -156,10 +152,6 @@ class Pubsub:
                 # need everyone to know)
                 for message in rpc_incoming.subscriptions:
                     self.handle_subscription(peer_id, message)
-
-            if should_publish:
-                # relay message to peers with router
-                await self.router.publish(peer_id, incoming)
 
             if rpc_incoming.control:
                 # Pass rpc to router so router could perform custom logic
@@ -227,6 +219,7 @@ class Pubsub:
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
+        origin_id = str(origin_id)
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = [origin_id]
@@ -319,3 +312,64 @@ class Pubsub:
         for _, stream in self.peers.items():
             # Write message to stream
             await stream.write(rpc_msg)
+
+    async def publish(self, topic_id: str, data: bytes) -> None:
+        """
+        Publish data to a topic
+        :param topic_id: topic which we are going to publish the data to
+        :param data: data which we are publishing
+        """
+        msg = rpc_pb2.Message(
+            data=data,
+            topicIDs=[topic_id],
+            # Origin is ourself.
+            from_id=self.host.get_id().to_bytes(),
+            seqno=self._next_seqno(),
+        )
+
+        # TODO: Sign with our signing key
+
+        await self.push_msg(self.host.get_id(), msg)
+
+    async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
+        """
+        Push a pubsub message to others.
+        :param msg_forwarder: the peer who forward us the message.
+        :param msg: the message we are going to push out.
+        """
+        # TODO: - Check if the `source` is in the blacklist. If yes, reject.
+
+        # TODO: - Check if the `from` is in the blacklist. If yes, reject.
+
+        # TODO: - Check if signing is required and if so signature should be attached.
+
+        if self._is_msg_seen(msg):
+            return
+
+        # TODO: - Validate the message. If failed, reject it.
+
+        self._mark_msg_seen(msg)
+        await self.handle_talk(msg)
+        await self.router.publish(msg_forwarder, msg)
+
+    def _next_seqno(self) -> bytes:
+        """
+        Make the next message sequence id.
+        """
+        self.counter += 1
+        return self.counter.to_bytes(8, 'big')
+
+    def _is_msg_seen(self, msg: rpc_pb2.Message) -> bool:
+        msg_id = get_msg_id(msg)
+        return msg_id in self.seen_messages
+
+    def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
+        msg_id = get_msg_id(msg)
+        # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there is a
+        #   more appropriate way.
+        self.seen_messages[msg_id] = 1
+
+    def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
+        if len(self.my_topics) == 0:
+            return False
+        return all([topic in self.my_topics for topic in msg.topicIDs])

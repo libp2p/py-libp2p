@@ -16,6 +16,9 @@ class ID:
     def __init__(self, id_str):
         self._id_str = id_str
 
+    def to_bytes(self) -> bytes:
+        return self._id_str
+
     def get_raw_id(self):
         return self._id_str
 

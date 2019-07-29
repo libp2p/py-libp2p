@@ -1,27 +1,23 @@
 import asyncio
-import multiaddr
+from threading import Thread
+
 import pytest
 
-from threading import Thread
-from tests.utils import cleanup
-from libp2p import new_node
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.pubsub.pubsub import Pubsub
-from libp2p.pubsub.floodsub import FloodSub
-from dummy_account_node import DummyAccountNode
+from tests.utils import (
+    cleanup,
+    connect,
+)
+
+from .dummy_account_node import DummyAccountNode
 
 # pylint: disable=too-many-locals
 
-async def connect(node1, node2):
-    # node1 connects to node2
-    addr = node2.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await node1.connect(info)
 
 def create_setup_in_new_thread_func(dummy_node):
     def setup_in_new_thread():
         asyncio.ensure_future(dummy_node.setup_crypto_networking())
     return setup_in_new_thread
+
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     """
@@ -29,7 +25,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     in various network topologies
     :param num_nodes: number of nodes in the test
     :param adjacency_map: adjacency map defining each node and its list of neighbors
-    :param action_func: function to execute that includes actions by the nodes, 
+    :param action_func: function to execute that includes actions by the nodes,
     such as send crypto and set crypto
     :param assertion_func: assertions for testing the results of the actions are correct
     """
@@ -73,6 +69,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     # Success, terminate pending tasks.
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_simple_two_nodes():
     num_nodes = 2
@@ -85,6 +82,7 @@ async def test_simple_two_nodes():
         assert dummy_node.get_balance("aspyn") == 10
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
 
 @pytest.mark.asyncio
 async def test_simple_three_nodes_line_topography():
@@ -99,6 +97,7 @@ async def test_simple_three_nodes_line_topography():
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
+
 @pytest.mark.asyncio
 async def test_simple_three_nodes_triangle_topography():
     num_nodes = 3
@@ -112,6 +111,7 @@ async def test_simple_three_nodes_triangle_topography():
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
+
 @pytest.mark.asyncio
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
@@ -124,6 +124,7 @@ async def test_simple_seven_nodes_tree_topography():
         assert dummy_node.get_balance("aspyn") == 20
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
 
 @pytest.mark.asyncio
 async def test_set_then_send_from_root_seven_nodes_tree_topography():

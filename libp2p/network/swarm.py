@@ -195,6 +195,15 @@ class Swarm(INetwork):
     def add_router(self, router):
         self.router = router
 
+    # TODO: `tear_down`
+    async def tear_down(self) -> None:
+        # pylint: disable=line-too-long
+        # Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L118  # noqa: E501
+        pass
+
+    # TODO: `disconnect`?
+
+
 def create_generic_protocol_handler(swarm):
     """
     Create a generic protocol handler from the given swarm. We use swarm

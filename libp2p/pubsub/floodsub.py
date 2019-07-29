@@ -1,5 +1,10 @@
+from typing import (
+    Iterable,
+)
+
 from libp2p.peer.id import (
     ID,
+    id_b58_decode,
 )
 
 from .pb import rpc_pb2
@@ -46,7 +51,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
 
-    async def publish(self, sender_peer_id: ID, rpc_message: rpc_pb2.Message) -> None:
+    async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
         Invoked to forward a new message that has been validated.
         This is where the "flooding" part of floodsub happens
@@ -57,38 +62,23 @@ class FloodSub(IPubsubRouter):
         so that seen messages are not further forwarded.
         It also never forwards a message back to the source
         or the peer that forwarded the message.
-        :param sender_peer_id: peer_id of message sender
-        :param rpc_message: pubsub message in RPC string format
+        :param msg_forwarder: peer ID of the peer who forwards the message to us
+        :param pubsub_msg: pubsub message in protobuf.
         """
-        packet = rpc_pb2.RPC()
-        packet.ParseFromString(rpc_message)
-        msg_sender = str(sender_peer_id)
-        # Deliver to self if self was origin
-        # Note: handle_talk checks if self is subscribed to topics in message
-        for message in packet.publish:
-            decoded_from_id = message.from_id.decode('utf-8')
-            if msg_sender == decoded_from_id and msg_sender == str(self.pubsub.host.get_id()):
-                id_in_seen_msgs = (message.seqno, message.from_id)
 
-                if id_in_seen_msgs not in self.pubsub.seen_messages:
-                    self.pubsub.seen_messages[id_in_seen_msgs] = 1
-
-                await self.pubsub.handle_talk(message)
-
-            # Deliver to self and peers
-            for topic in message.topicIDs:
-                if topic in self.pubsub.peer_topics:
-                    for peer_id_in_topic in self.pubsub.peer_topics[topic]:
-                        # Forward to all known peers in the topic that are not the
-                        # message sender and are not the message origin
-                        if peer_id_in_topic not in (msg_sender, decoded_from_id):
-                            stream = self.pubsub.peers[peer_id_in_topic]
-                            # Create new packet with just publish message
-                            new_packet = rpc_pb2.RPC()
-                            new_packet.publish.extend([message])
-
-                            # Publish the packet
-                            await stream.write(new_packet.SerializeToString())
+        peers_gen = self._get_peers_to_send(
+            pubsub_msg.topicIDs,
+            msg_forwarder=msg_forwarder,
+            origin=ID(pubsub_msg.from_id),
+        )
+        rpc_msg = rpc_pb2.RPC(
+            publish=[pubsub_msg],
+        )
+        for peer_id in peers_gen:
+            stream = self.pubsub.peers[str(peer_id)]
+            # FIXME: We should add a `WriteMsg` similar to write delimited messages.
+            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
+            await stream.write(rpc_msg.SerializeToString())
 
     async def join(self, topic):
         """
@@ -104,3 +94,26 @@ class FloodSub(IPubsubRouter):
         It is invoked after the unsubscription announcement.
         :param topic: topic to leave
         """
+
+    def _get_peers_to_send(
+            self,
+            topic_ids: Iterable[str],
+            msg_forwarder: ID,
+            origin: ID) -> Iterable[ID]:
+        """
+        Get the eligible peers to send the data to.
+        :param msg_forwarder: peer ID of the peer who forwards the message to us.
+        :param origin: peer id of the peer the message originate from.
+        :return: a generator of the peer ids who we send data to.
+        """
+        for topic in topic_ids:
+            if topic not in self.pubsub.peer_topics:
+                continue
+            for peer_id_str in self.pubsub.peer_topics[topic]:
+                peer_id = id_b58_decode(peer_id_str)
+                if peer_id in (msg_forwarder, origin):
+                    continue
+                # FIXME: Should change `self.pubsub.peers` to Dict[PeerID, ...]
+                if str(peer_id) not in self.pubsub.peers:
+                    continue
+                yield peer_id
