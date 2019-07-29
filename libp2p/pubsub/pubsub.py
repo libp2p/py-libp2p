@@ -159,7 +159,11 @@ class Pubsub:
                 for message in rpc_incoming.subscriptions:
                     self.handle_subscription(peer_id, message)
 
-            if rpc_incoming.control:
+            # pylint: disable=line-too-long
+            # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
+            #   This is necessary because `control` is an optional field in pb2.
+            #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2
+            if rpc_incoming.HasField("control"):
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
