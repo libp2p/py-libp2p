@@ -1,16 +1,16 @@
-from libp2p.stream_muxer.mplex.mplex import Mplex
-from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
 
 from .net_stream_interface import INetStream
 
 
 class NetStream(INetStream):
 
-    muxed_stream: MplexStream
-    mplex_conn: Mplex
+    muxed_stream: IMuxedStream
+    mplex_conn: IMuxedConn
     protocol_id: str
 
-    def __init__(self, muxed_stream: MplexStream) -> None:
+    def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream
         self.mplex_conn = muxed_stream.mplex_conn
         self.protocol_id = None

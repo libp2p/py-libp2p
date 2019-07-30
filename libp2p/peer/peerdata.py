@@ -39,10 +39,10 @@ class PeerData(IPeerData):
     def clear_addrs(self) -> None:
         self.addrs = []
 
-    def put_metadata(self, key: Any, val: Any) -> None:
+    def put_metadata(self, key: str, val: Any) -> None:
         self.metadata[key] = val
 
-    def get_metadata(self, key: Any) -> Any:
+    def get_metadata(self, key: str) -> Any:
         if key in self.metadata:
             return self.metadata[key]
         raise PeerDataError("key not found")

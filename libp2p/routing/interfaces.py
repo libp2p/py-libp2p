@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import (
     Any,
-    Coroutine,
     Iterable,
 )
 
@@ -31,7 +30,7 @@ class IContentRouting(ABC):
 class IPeerRouting(ABC):
 
     @abstractmethod
-    def find_peer(self, peer_id: ID) -> Coroutine[Any, Any, PeerInfo]:
+    async def find_peer(self, peer_id: ID) -> PeerInfo:
         """
         Find specific Peer
         FindPeer searches for a peer with given peer_id, returns a peer.PeerInfo

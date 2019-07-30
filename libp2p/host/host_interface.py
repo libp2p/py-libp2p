@@ -1,22 +1,22 @@
 from abc import ABC, abstractmethod
 from typing import (
     Any,
+    Awaitable,
     Callable,
-    Coroutine,
     List,
     Sequence,
 )
 
 import multiaddr
 
-from libp2p.network.swarm import Swarm
+from libp2p.network.network_interface import INetwork
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
 from libp2p.network.stream.net_stream_interface import INetStream
 
 
-StreamHandlerFn = Callable[[INetStream], Coroutine[Any, Any, None]]
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class IHost(ABC):
@@ -28,7 +28,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def get_network(self) -> Swarm:
+    def get_network(self) -> INetwork:
         """
         :return: network instance of host
         """
@@ -58,9 +58,9 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    def new_stream(self,
+    async def new_stream(self,
                    peer_id: ID,
-                   protocol_ids: Sequence[str]) -> Coroutine[Any, Any, INetStream]:
+                   protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on
@@ -68,7 +68,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def connect(self, peer_info: PeerInfo) -> Coroutine[Any, Any, None]:
+    async def connect(self, peer_info: PeerInfo) -> None:
         """
         connect ensures there is a connection between this host and the peer with
         given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal

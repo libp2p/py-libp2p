@@ -7,6 +7,8 @@ from typing import (
 
 from multiaddr import Multiaddr
 
+from .peermetadata_interface import IPeerMetadata
+
 
 class IPeerData(ABC):
 
@@ -47,7 +49,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def put_metadata(self, key: Any, val: Any) -> None:
+    def put_metadata(self, key: str, val: Any) -> None:
         """
         :param key: key in KV pair
         :param val: val to associate with key
@@ -55,7 +57,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def get_metadata(self, key: Any) -> Any:
+    def get_metadata(self, key: str) -> IPeerMetadata:
         """
         :param key: key in KV pair
         :return: val for key

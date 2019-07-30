@@ -306,8 +306,7 @@ class Pubsub:
         # Tell router we are leaving this topic
         await self.router.leave(topic_id)
 
-    # FIXME: `raw_msg` can be further type hinted with mypy_protobuf
-    async def message_all_peers(self, raw_msg: Any) -> None:
+    async def message_all_peers(self, raw_msg: bytes) -> None:
         """
         Broadcast a message to peers
         :param raw_msg: raw contents of the message to broadcast

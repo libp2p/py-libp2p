@@ -1,17 +1,17 @@
 from typing import (
     Any,
+    Awaitable,
     Callable,
-    Coroutine,
     List,
     Sequence,
 )
 
 import multiaddr
 
-from libp2p.network.swarm import Swarm
+from libp2p.network.network_interface import INetwork
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerStore
+from libp2p.peer.peerstore_interface import IPeerStore
 
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
@@ -24,17 +24,17 @@ from .host_interface import IHost
 # telling it to listen on the given listen addresses.
 
 
-StreamHandlerFn = Callable[[INetStream], Coroutine[Any, Any, None]]
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class BasicHost(IHost):
 
-    _network: Swarm
+    _network: INetwork
     router: KadmeliaPeerRouter
-    peerstore: PeerStore
+    peerstore: IPeerStore
 
     # default options constructor
-    def __init__(self, network: Swarm, router: KadmeliaPeerRouter = None) -> None:
+    def __init__(self, network: INetwork, router: KadmeliaPeerRouter = None) -> None:
         self._network = network
         self._router = router
         self.peerstore = self._network.peerstore
@@ -45,13 +45,13 @@ class BasicHost(IHost):
         """
         return self._network.get_peer_id()
 
-    def get_network(self) -> Swarm:
+    def get_network(self) -> INetwork:
         """
         :return: network instance of host
         """
         return self._network
 
-    def get_peerstore(self) -> PeerStore:
+    def get_peerstore(self) -> IPeerStore:
         """
         :return: peerstore of the host (same one as in its network instance)
         """

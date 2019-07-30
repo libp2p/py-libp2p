@@ -58,13 +58,13 @@ class PeerStore(IPeerStore):
     def peer_ids(self) -> List[ID]:
         return list(self.peer_map.keys())
 
-    def get(self, peer_id: ID, key: Any) -> Any:
+    def get(self, peer_id: ID, key: str) -> Any:
         if peer_id in self.peer_map:
             val = self.peer_map[peer_id].get_metadata(key)
             return val
         raise PeerStoreError("peer ID not found")
 
-    def put(self, peer_id: ID, key: Any, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
         # <<?>>
         # This can output an error, not sure what the possible errors are
         peer = self.__create_or_get_peer(peer_id)

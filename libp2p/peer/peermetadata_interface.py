@@ -14,7 +14,7 @@ class IPeerMetadata(ABC):
         pass
 
     @abstractmethod
-    def get(self, peer_id: ID, key: Any) -> Any:
+    def get(self, peer_id: ID, key: str) -> Any:
         """
         :param peer_id: peer ID to lookup key for
         :param key: key to look up
@@ -23,7 +23,7 @@ class IPeerMetadata(ABC):
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: Any, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
         """
         :param peer_id: peer ID to lookup key for
         :param key: key to associate with peer

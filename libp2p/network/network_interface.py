@@ -4,8 +4,9 @@ from abc import (
 )
 from typing import (
     Any,
+    Awaitable,
     Callable,
-    Coroutine,
+    Dict,
     Sequence,
     TYPE_CHECKING,
 )
@@ -13,18 +14,24 @@ from typing import (
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
+from libp2p.peer.peerstore import PeerStore
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.transport.listener_interface import IListener
 
-from .stream.net_stream import NetStream
+from .stream.net_stream_interface import INetStream
 
 if TYPE_CHECKING:
     from .notifee_interface import INotifee
 
 
-StreamHandlerFn = Callable[[NetStream], Coroutine[Any, Any, None]]
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class INetwork(ABC):
+
+    peerstore: PeerStore
+    connections: Dict[ID, IMuxedConn]
+    listeners: Dict[str, IListener]
 
     @abstractmethod
     def get_peer_id(self) -> ID:
@@ -33,7 +40,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def dial_peer(self, peer_id: ID) -> Coroutine[Any, Any, IMuxedConn]:
+    async def dial_peer(self, peer_id: ID) -> IMuxedConn:
         """
         dial_peer try to create a connection to peer_id
 
@@ -51,9 +58,9 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def new_stream(self,
+    async def new_stream(self,
                    peer_id: ID,
-                   protocol_ids: Sequence[str]) -> Coroutine[Any, Any, NetStream]:
+                   protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream
@@ -61,7 +68,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def listen(self, *args: Multiaddr) -> Coroutine[Any, Any, bool]:
+    async def listen(self, *args: Multiaddr) -> bool:
         """
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success

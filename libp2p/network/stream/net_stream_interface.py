@@ -1,15 +1,14 @@
 from abc import ABC, abstractmethod
 from typing import (
     Any,
-    Coroutine,
 )
 
-from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
 
 class INetStream(ABC):
 
-    mplex_conn: Mplex
+    mplex_conn: IMuxedConn
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -25,21 +24,21 @@ class INetStream(ABC):
         """
 
     @abstractmethod
-    def read(self) -> Coroutine[Any, Any, bytes]:
+    async def read(self) -> bytes:
         """
         reads from the underlying muxed_stream
         :return: bytes of input
         """
 
     @abstractmethod
-    def write(self, data: bytes) -> Coroutine[Any, Any, int]:
+    async def write(self, data: bytes) -> int:
         """
         write to the underlying muxed_stream
         :return: number of bytes written
         """
 
     @abstractmethod
-    def close(self) -> Coroutine[Any, Any, bool]:
+    async def close(self) -> bool:
         """
         close the underlying muxed stream
         :return: true if successful
