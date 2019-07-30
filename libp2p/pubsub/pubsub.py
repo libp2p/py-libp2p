@@ -323,7 +323,7 @@ class Pubsub:
         """
 
         # Broadcast message
-        for _, stream in self.peers.items():
+        for stream in self.peers.values():
             # Write message to stream
             await stream.write(raw_msg)
 
