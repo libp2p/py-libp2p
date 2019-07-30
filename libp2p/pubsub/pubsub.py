@@ -36,16 +36,16 @@ class Pubsub:
 
     router: 'IPubsubRouter'
 
-    peer_queue: asyncio.Queue[ID]
+    peer_queue: 'asyncio.Queue[ID]'
 
     protocols: List[str]
 
-    incoming_msgs_from_peers: asyncio.Queue[rpc_pb2.Message]
-    outgoing_messages: asyncio.Queue[rpc_pb2.Message]
+    incoming_msgs_from_peers: 'asyncio.Queue[rpc_pb2.Message]'
+    outgoing_messages: 'asyncio.Queue[rpc_pb2.Message]'
 
     seen_messages: LRU
 
-    my_topics: Dict[str, asyncio.Queue[rpc_pb2.Message]]
+    my_topics: Dict[str, 'asyncio.Queue[rpc_pb2.Message]']
 
     # FIXME: Should be changed to `Dict[str, List[ID]]`
     peer_topics: Dict[str, List[str]]
@@ -251,7 +251,7 @@ class Pubsub:
                 # for each topic
                 await self.my_topics[topic].put(publish_message)
 
-    async def subscribe(self, topic_id: str) -> asyncio.Queue[rpc_pb2.Message]:
+    async def subscribe(self, topic_id: str) -> 'asyncio.Queue[rpc_pb2.Message]':
         """
         Subscribe ourself to a topic
         :param topic_id: topic_id to subscribe to
