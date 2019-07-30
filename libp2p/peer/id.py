@@ -20,16 +20,15 @@ MAX_INLINE_KEY_LENGTH = 42
 
 class ID:
 
-    _id_str: str
+    _id_str: bytes
 
-    def __init__(self, id_str: str) -> None:
+    def __init__(self, id_str: bytes) -> None:
         self._id_str = id_str
 
-    # FIXME: Should return type `bytes`
-    def to_bytes(self) -> str:
+    def to_bytes(self) -> bytes:
         return self._id_str
 
-    def get_raw_id(self) -> str:
+    def get_raw_id(self) -> bytes:
         return self._id_str
 
     def pretty(self) -> str:
@@ -86,6 +85,6 @@ def id_from_private_key(key: RsaKey) -> ID:
     return id_from_public_key(key.publickey())
 
 def digest(data: Union[str, bytes]) -> bytes:
-    if not isinstance(data, bytes):
-        data = str(data).encode('utf8')
+    if isinstance(data, str):
+        data = data.encode('utf8')
     return hashlib.sha1(data).digest()

@@ -373,6 +373,6 @@ class Pubsub:
         self.seen_messages[msg_id] = 1
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
-        if not bool(self.my_topics):
+        if not self.my_topics:
             return False
         return all([topic in self.my_topics for topic in msg.topicIDs])

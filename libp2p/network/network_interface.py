@@ -67,7 +67,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def listen(self, *args: Multiaddr) -> bool:
+    async def listen(self, *args: Sequence[Multiaddr]) -> bool:
         """
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success

@@ -533,6 +533,7 @@ class GossipSub(IPubsubRouter):
         from_id_str = sender_peer_id
 
         # FIXME: Update type of message ID
+        # FIXME: Find a better way to parse the msg ids
         msg_ids: List[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
         msgs_to_forward: List[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
