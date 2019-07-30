@@ -3,7 +3,6 @@ from abc import (
     abstractmethod,
 )
 from typing import (
-    Any,
     Awaitable,
     Callable,
     Dict,
@@ -59,8 +58,8 @@ class INetwork(ABC):
 
     @abstractmethod
     async def new_stream(self,
-                   peer_id: ID,
-                   protocol_ids: Sequence[str]) -> INetStream:
+                         peer_id: ID,
+                         protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream

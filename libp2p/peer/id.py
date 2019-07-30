@@ -25,7 +25,8 @@ class ID:
     def __init__(self, id_str: str) -> None:
         self._id_str = id_str
 
-    def to_bytes(self) -> bytes:
+    # FIXME: Should return type `bytes`
+    def to_bytes(self) -> str:
         return self._id_str
 
     def get_raw_id(self) -> str:

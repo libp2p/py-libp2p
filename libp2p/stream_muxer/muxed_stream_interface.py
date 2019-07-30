@@ -1,11 +1,18 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    TYPE_CHECKING,
+)
 
-from libp2p.stream_muxer.mplex.mplex import Mplex
+if TYPE_CHECKING:
+    from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
 class IMuxedStream(ABC):
 
-    mplex_conn: Mplex
+    mplex_conn: 'Mplex'
 
     @abstractmethod
     def read(self):

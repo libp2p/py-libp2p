@@ -1,7 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-)
 
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 

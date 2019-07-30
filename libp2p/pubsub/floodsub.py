@@ -51,8 +51,7 @@ class FloodSub(IPubsubRouter):
         :param peer_id: id of peer to remove
         """
 
-    # FIXME: Should be changed to type 'peer.ID'
-    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: str) -> None:
+    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed

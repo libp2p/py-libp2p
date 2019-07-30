@@ -9,7 +9,6 @@ from libp2p.kademlia.kad_peerinfo import (
 )
 from libp2p.kademlia.network import KademliaServer
 from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
 from libp2p.routing.interfaces import IPeerRouting
 
 

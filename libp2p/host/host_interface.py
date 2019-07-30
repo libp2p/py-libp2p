@@ -59,8 +59,8 @@ class IHost(ABC):
     # stream will decide which protocol_id to run on
     @abstractmethod
     async def new_stream(self,
-                   peer_id: ID,
-                   protocol_ids: Sequence[str]) -> INetStream:
+                         peer_id: ID,
+                         protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on

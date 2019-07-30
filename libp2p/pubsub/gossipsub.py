@@ -6,7 +6,7 @@ from typing import (
     Dict,
     Iterable,
     List,
-    MutableSet,
+    Set,
     Sequence,
 )
 
@@ -145,8 +145,7 @@ class GossipSub(IPubsubRouter):
         if peer_id_str in self.peers_gossipsub:
             self.peers_floodsub.remove(peer_id_str)
 
-    # FIXME: type of `sender_peer_id` should be changed to `ID`
-    async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: str) -> None:
+    async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -154,21 +153,21 @@ class GossipSub(IPubsubRouter):
         :param sender_peer_id: id of the peer who sent the message
         """
         control_message = rpc.control
-        sender_peer_id = str(sender_peer_id)
+        sender_peer_id_str = str(sender_peer_id)
 
         # Relay each rpc control message to the appropriate handler
         if control_message.ihave:
             for ihave in control_message.ihave:
-                await self.handle_ihave(ihave, sender_peer_id)
+                await self.handle_ihave(ihave, sender_peer_id_str)
         if control_message.iwant:
             for iwant in control_message.iwant:
-                await self.handle_iwant(iwant, sender_peer_id)
+                await self.handle_iwant(iwant, sender_peer_id_str)
         if control_message.graft:
             for graft in control_message.graft:
-                await self.handle_graft(graft, sender_peer_id)
+                await self.handle_graft(graft, sender_peer_id_str)
         if control_message.prune:
             for prune in control_message.prune:
-                await self.handle_prune(prune, sender_peer_id)
+                await self.handle_prune(prune, sender_peer_id_str)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         # pylint: disable=too-many-locals
@@ -203,7 +202,8 @@ class GossipSub(IPubsubRouter):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
-        send_to: MutableSet[ID] = set()
+        # pylint: disable=len-as-condition
+        send_to: Set[ID] = set()
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
                 continue
@@ -228,7 +228,6 @@ class GossipSub(IPubsubRouter):
                 # I assume there could be short periods between heartbeats where topic may not
                 # be but we should check that this path gets hit appropriately
 
-                # pylint: disable=len-as-condition
                 if (topic not in self.fanout) or (len(self.fanout[topic]) == 0):
                     # If no peers in fanout, choose some peers from gossipsub peers in topic.
                     self.fanout[topic] = self._get_in_topic_gossipsub_peers_from_minus(
@@ -480,11 +479,13 @@ class GossipSub(IPubsubRouter):
 
         return selection
 
+    # FIXME: type of `minus` should be changed to type `Sequence[ID]`
+    # FIXME: return type should be changed to type `List[ID]`
     def _get_in_topic_gossipsub_peers_from_minus(
             self,
             topic: str,
             num_to_select: int,
-            minus: Sequence[ID]) -> List[ID]:
+            minus: Sequence[str]) -> List[str]:
         gossipsub_peers_in_topic = [
             peer_str
             for peer_str in self.pubsub.peer_topics[topic]

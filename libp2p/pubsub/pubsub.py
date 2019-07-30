@@ -29,23 +29,23 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
 
 
 class Pubsub:
-    # pylint: disable=too-many-instance-attributes, no-member
+    # pylint: disable=too-many-instance-attributes, no-member, unsubscriptable-object
 
     host: IHost
     my_id: ID
 
     router: 'IPubsubRouter'
 
-    peer_queue: asyncio.Queue
+    peer_queue: asyncio.Queue[ID]
 
     protocols: List[str]
 
-    incoming_msgs_from_peers: asyncio.Queue
-    outgoing_messages: asyncio.Queue
+    incoming_msgs_from_peers: asyncio.Queue[rpc_pb2.Message]
+    outgoing_messages: asyncio.Queue[rpc_pb2.Message]
 
     seen_messages: LRU
 
-    my_topics: Dict[str, asyncio.Queue]
+    my_topics: Dict[str, asyncio.Queue[rpc_pb2.Message]]
 
     # FIXME: Should be changed to `Dict[str, List[ID]]`
     peer_topics: Dict[str, List[str]]
@@ -214,9 +214,8 @@ class Pubsub:
             # Force context switch
             await asyncio.sleep(0)
 
-    # FIXME: type of `origin_id` should be changed to `ID`
     # FIXME: `sub_message` can be further type hinted with mypy_protobuf
-    def handle_subscription(self, origin_id: str, sub_message: Any) -> None:
+    def handle_subscription(self, origin_id: ID, sub_message: Any) -> None:
         """
         Handle an incoming subscription message from a peer. Update internal
         mapping to mark the peer as subscribed or unsubscribed to topics as
@@ -224,17 +223,17 @@ class Pubsub:
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
-        origin_id = str(origin_id)
+        origin_id_str = str(origin_id)
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = [origin_id]
-            elif origin_id not in self.peer_topics[sub_message.topicid]:
+                self.peer_topics[sub_message.topicid] = [origin_id_str]
+            elif origin_id_str not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
-                self.peer_topics[sub_message.topicid].append(origin_id)
+                self.peer_topics[sub_message.topicid].append(origin_id_str)
         else:
             if sub_message.topicid in self.peer_topics:
-                if origin_id in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].remove(origin_id)
+                if origin_id_str in self.peer_topics[sub_message.topicid]:
+                    self.peer_topics[sub_message.topicid].remove(origin_id_str)
 
     # FIXME(mhchia): Change the function name?
     # FIXME(mhchia): `publish_message` can be further type hinted with mypy_protobuf
@@ -252,7 +251,7 @@ class Pubsub:
                 # for each topic
                 await self.my_topics[topic].put(publish_message)
 
-    async def subscribe(self, topic_id: str) -> asyncio.Queue:
+    async def subscribe(self, topic_id: str) -> asyncio.Queue[rpc_pb2.Message]:
         """
         Subscribe ourself to a topic
         :param topic_id: topic_id to subscribe to
@@ -374,6 +373,6 @@ class Pubsub:
         self.seen_messages[msg_id] = 1
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
-        if len(self.my_topics) == 0:
+        if not bool(self.my_topics):
             return False
         return all([topic in self.my_topics for topic in msg.topicIDs])
