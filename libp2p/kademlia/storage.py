@@ -12,8 +12,8 @@ from typing import (
 if TYPE_CHECKING:
     from typing import Any
 
-TKey = TypeVar('TKey', bound='IStorage')
-TValue = TypeVar('TValue', bound='IStorage')
+TKey = TypeVar('TKey')
+TValue = TypeVar('TValue')
 
 
 class IStorage(ABC):

@@ -57,7 +57,7 @@ class KadPeerInfo(PeerInfo):
         """
         Enables use of Node as a tuple - i.e., tuple(node) works.
         """
-        return iter([self.peer_id, self.ip, self.port])
+        return iter([self.peer_id_raw, self.ip, self.port])
 
     def __repr__(self) -> str:
         return repr([self.xor_id, self.ip, self.port, self.peer_id])
@@ -162,8 +162,8 @@ class KadPeerHeap:
 
 
 def create_kad_peerinfo(raw_node_id: bytes = None,
-                        sender_ip: str=None,
-                        sender_port: int=None) -> 'KadPeerInfo':
+                        sender_ip: str = None,
+                        sender_port: int = None) -> 'KadPeerInfo':
     node_id = (
         ID(raw_node_id)
         if raw_node_id
