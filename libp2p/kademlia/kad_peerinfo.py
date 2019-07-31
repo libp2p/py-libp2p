@@ -29,10 +29,10 @@ class KadPeerInfo(PeerInfo):
     ip: str
     port: int
 
-    def __init__(self, peer_id_obj: ID, peer_data: PeerData = None) -> None:
-        super().__init__(peer_id_obj, peer_data)
+    def __init__(self, peer_id: ID, peer_data: PeerData = None) -> None:
+        super().__init__(peer_id, peer_data)
 
-        self.xor_id = peer_id_obj.get_xor_id()
+        self.xor_id = peer_id.get_xor_id()
 
         # pylint: disable=invalid-name
         self.ip = (
@@ -103,13 +103,13 @@ class KadPeerHeap:
             return
         nheap: List[Tuple[int, 'KadPeerInfo']] = []
         for distance, node in self.heap:
-            if node.peer_id not in peers:
+            if node not in peers:
                 heapq.heappush(nheap, (distance, node))
         self.heap = nheap
 
     def get_node(self, node_id: bytes) -> 'KadPeerInfo':
         for _, node in self.heap:
-            if node.peer_id == node_id:
+            if node.peer_id_raw == node_id:
                 return node
         return None
 
@@ -117,10 +117,10 @@ class KadPeerHeap:
         return len(self.get_uncontacted()) == 0
 
     def get_ids(self) -> List[bytes]:
-        return [n.peer_id for n in self]
+        return [n.peer_id_raw for n in self]
 
     def mark_contacted(self, node: 'KadPeerInfo') -> None:
-        self.contacted.add(node.peer_id)
+        self.contacted.add(node.peer_id_raw)
 
     def popleft(self) -> 'KadPeerInfo':
         return heapq.heappop(self.heap)[1] if self else None
@@ -153,12 +153,12 @@ class KadPeerHeap:
 
     def __contains__(self, node: 'KadPeerInfo') -> bool:
         for _, other in self.heap:
-            if node.peer_id == other.peer_id:
+            if node.peer_id_raw == other.peer_id_raw:
                 return True
         return False
 
     def get_uncontacted(self) -> List['KadPeerInfo']:
-        return [n for n in self if n.peer_id not in self.contacted]
+        return [n for n in self if n.peer_id_raw not in self.contacted]
 
 
 def create_kad_peerinfo(raw_node_id: bytes = None,

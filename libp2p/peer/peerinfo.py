@@ -16,16 +16,16 @@ from .peerdata import PeerData
 class PeerInfo(ABC):
     # pylint: disable=too-few-public-methods
 
-    peer_id_obj: ID
+    peer_id: ID
     addrs: List[multiaddr.Multiaddr]
 
-    def __init__(self, peer_id_obj: ID, peer_data: PeerData = None) -> None:
-        self.peer_id_obj = peer_id_obj
+    def __init__(self, peer_id: ID, peer_data: PeerData = None) -> None:
+        self.peer_id = peer_id
         self.addrs = peer_data.get_addrs() if peer_data else None
 
     @property
-    def peer_id(self):
-        return self.peer_id_obj.get_raw_id()
+    def peer_id_raw(self) -> bytes:
+        return self.peer_id.get_raw_id()
 
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
