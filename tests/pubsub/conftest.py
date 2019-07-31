@@ -11,14 +11,11 @@ from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 
-from .configs import (
-    FLOODSUB_PROTOCOL_ID,
-    GOSSIPSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
-)
+from .configs import FLOODSUB_PROTOCOL_ID, GOSSIPSUB_PROTOCOL_ID, LISTEN_MADDR
 
 
 # pylint: disable=redefined-outer-name
+
 
 @pytest.fixture
 def num_hosts():
@@ -27,14 +24,12 @@ def num_hosts():
 
 @pytest.fixture
 async def hosts(num_hosts):
-    _hosts = await asyncio.gather(*[
-        new_node(transport_opt=[str(LISTEN_MADDR)])
-        for _ in range(num_hosts)
-    ])
-    await asyncio.gather(*[
-        _host.get_network().listen(LISTEN_MADDR)
-        for _host in _hosts
-    ])
+    _hosts = await asyncio.gather(
+        *[new_node(transport_opt=[str(LISTEN_MADDR)]) for _ in range(num_hosts)]
+    )
+    await asyncio.gather(
+        *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
+    )
     yield _hosts
     # Clean up
     listeners = []
@@ -42,18 +37,12 @@ async def hosts(num_hosts):
         for listener in _host.get_network().listeners.values():
             listener.server.close()
             listeners.append(listener)
-    await asyncio.gather(*[
-        listener.server.wait_closed()
-        for listener in listeners
-    ])
+    await asyncio.gather(*[listener.server.wait_closed() for listener in listeners])
 
 
 @pytest.fixture
 def floodsubs(num_hosts):
-    return tuple(
-        FloodSub(protocols=[FLOODSUB_PROTOCOL_ID])
-        for _ in range(num_hosts)
-    )
+    return tuple(FloodSub(protocols=[FLOODSUB_PROTOCOL_ID]) for _ in range(num_hosts))
 
 
 class GossipsubParams(NamedTuple):
@@ -74,10 +63,7 @@ def gossipsub_params():
 @pytest.fixture
 def gossipsubs(num_hosts, gossipsub_params):
     yield tuple(
-        GossipSub(
-            protocols=[GOSSIPSUB_PROTOCOL_ID],
-            **gossipsub_params._asdict(),
-        )
+        GossipSub(protocols=[GOSSIPSUB_PROTOCOL_ID], **gossipsub_params._asdict())
         for _ in range(num_hosts)
     )
     # TODO: Clean up
@@ -90,11 +76,7 @@ def _make_pubsubs(hosts, pubsub_routers):
             f"length of hosts={len(hosts)}"
         )
     return tuple(
-        Pubsub(
-            host=host,
-            router=router,
-            my_id=host.get_id(),
-        )
+        Pubsub(host=host, router=router, my_id=host.get_id())
         for host, router in zip(hosts, pubsub_routers)
     )
 

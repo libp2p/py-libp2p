@@ -1,9 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-    List,
-    Sequence,
-)
+from typing import Any, List, Sequence
 
 from multiaddr import Multiaddr
 
@@ -11,7 +7,6 @@ from .peermetadata_interface import IPeerMetadata
 
 
 class IPeerData(ABC):
-
     @abstractmethod
     def get_protocols(self) -> List[str]:
         """

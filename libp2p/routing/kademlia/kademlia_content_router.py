@@ -1,13 +1,10 @@
-from typing import (
-    Iterable,
-)
+from typing import Iterable
 
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.routing.interfaces import IContentRouting
 
 
 class KadmeliaContentRouter(IContentRouting):
-
     def provide(self, cid: bytes, announce: bool = True) -> None:
         """
         Provide adds the given cid to the content routing system. If announce is True,

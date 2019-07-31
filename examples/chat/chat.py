@@ -9,7 +9,7 @@ from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
-PROTOCOL_ID = '/chat/1.0.0'
+PROTOCOL_ID = "/chat/1.0.0"
 
 
 async def read_data(stream):
@@ -32,25 +32,27 @@ async def write_data(stream):
 
 
 async def run(port, destination):
-    external_ip = urllib.request.urlopen(
-        'https://v4.ident.me/').read().decode('utf8')
+    external_ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
     transport_opt = "/ip4/%s/tcp/%s" % (external_ip, port)
-    host = await new_node(
-        transport_opt=[transport_opt])
+    host = await new_node(transport_opt=[transport_opt])
 
     await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
 
     if not destination:  # its the server
+
         async def stream_handler(stream):
             asyncio.ensure_future(read_data(stream))
             asyncio.ensure_future(write_data(stream))
+
         host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
         if not port:
             raise RuntimeError("was not able to find the actual local port")
 
-        print("Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n" %
-              (int(port) + 1, external_ip, port, host.get_id().pretty()))
+        print(
+            "Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n"
+            % (int(port) + 1, external_ip, port, host.get_id().pretty())
+        )
         print("\nWaiting for incoming connection\n\n")
 
     else:  # its the client
@@ -75,19 +77,17 @@ def main():
     Then, run another host with 'python ./chat -p <ANOTHER_PORT> -d <DESTINATION>',
     where <DESTINATION> is the multiaddress of the previous listener host.
     """
-    example_maddr = "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    example_maddr = (
+        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--debug",
-        action='store_true',
-        help='generate the same node ID on every execution',
+        action="store_true",
+        help="generate the same node ID on every execution",
     )
     parser.add_argument(
-        "-p",
-        "--port",
-        default=8000,
-        type=int,
-        help="source port number",
+        "-p", "--port", default=8000, type=int, help="source port number"
     )
     parser.add_argument(
         "-d",
@@ -107,5 +107,5 @@ def main():
         loop.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

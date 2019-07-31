@@ -8,13 +8,14 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 
 
-PROTOCOL_ID = '/chat/1.0.0'
+PROTOCOL_ID = "/chat/1.0.0"
+
 
 async def hello_world(host_a, host_b):
     async def stream_handler(stream):
         read = await stream.read()
-        assert read == b'hello world from host b'
-        await stream.write(b'hello world from host a')
+        assert read == b"hello world from host b"
+        await stream.write(b"hello world from host a")
         await stream.close()
 
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
@@ -22,14 +23,14 @@ async def hello_world(host_a, host_b):
     # Start a stream with the destination.
     # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
     stream = await host_b.new_stream(host_a.get_id(), [PROTOCOL_ID])
-    await stream.write(b'hello world from host b')
+    await stream.write(b"hello world from host b")
     read = await stream.read()
-    assert read == b'hello world from host a'
+    assert read == b"hello world from host a"
     await stream.close()
 
 
 async def connect_write(host_a, host_b):
-    messages = ['data %d' % i for i in range(5)]
+    messages = ["data %d" % i for i in range(5)]
     received = []
 
     async def stream_handler(stream):
@@ -38,6 +39,7 @@ async def connect_write(host_a, host_b):
                 received.append((await stream.read()).decode())
             except Exception:  # exception is raised when other side close the stream ?
                 break
+
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
 
     # Start a stream with the destination.
@@ -54,7 +56,7 @@ async def connect_write(host_a, host_b):
 
 
 async def connect_read(host_a, host_b):
-    messages = [b'data %d' % i for i in range(5)]
+    messages = [b"data %d" % i for i in range(5)]
 
     async def stream_handler(stream):
         for message in messages:
@@ -78,7 +80,7 @@ async def connect_read(host_a, host_b):
 
 
 async def no_common_protocol(host_a, host_b):
-    messages = [b'data %d' % i for i in range(5)]
+    messages = [b"data %d" % i for i in range(5)]
 
     async def stream_handler(stream):
         for message in messages:
@@ -89,16 +91,13 @@ async def no_common_protocol(host_a, host_b):
 
     # try to creates a new new with a procotol not known by the other host
     with pytest.raises(MultiselectClientError):
-        _ = await host_b.new_stream(host_a.get_id(), ['/fakeproto/0.0.1'])
+        _ = await host_b.new_stream(host_a.get_id(), ["/fakeproto/0.0.1"])
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("test", [
-    (hello_world),
-    (connect_write),
-    (connect_read),
-    (no_common_protocol),
-])
+@pytest.mark.parametrize(
+    "test", [(hello_world), (connect_write), (connect_read), (no_common_protocol)]
+)
 async def test_chat(test):
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     (host_a, host_b) = await set_up_nodes_by_transport_opt(transport_opt_list)

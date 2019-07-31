@@ -6,15 +6,9 @@ from libp2p import new_node
 from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import Pubsub
 
-from tests.utils import (
-    cleanup,
-    connect,
-)
+from tests.utils import cleanup, connect
 
-from .configs import (
-    FLOODSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
-)
+from .configs import FLOODSUB_PROTOCOL_ID, LISTEN_MADDR
 
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
@@ -23,192 +17,84 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
     {
         "name": "simple_two_nodes",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "A": ["B"]
-        },
-        "topic_map": {
-            "topic1": ["B"]
-        },
-        "messages": [
-            {
-                "topics": ["topic1"],
-                "data": b"foo",
-                "node_id": "A"
-            }
-        ]
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
+        "messages": [{"topics": ["topic1"], "data": b"foo", "node_id": "A"}],
     },
     {
         "name": "three_nodes_two_topics",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "A": ["B"],
-            "B": ["C"],
-        },
-        "topic_map": {
-            "topic1": ["B", "C"],
-            "topic2": ["B", "C"],
-        },
+        "adj_list": {"A": ["B"], "B": ["C"]},
+        "topic_map": {"topic1": ["B", "C"], "topic2": ["B", "C"]},
         "messages": [
-            {
-                "topics": ["topic1"],
-                "data": b"foo",
-                "node_id": "A",
-            },
-            {
-                "topics": ["topic2"],
-                "data": b"Alex is tall",
-                "node_id": "A",
-            }
-        ]
+            {"topics": ["topic1"], "data": b"foo", "node_id": "A"},
+            {"topics": ["topic2"], "data": b"Alex is tall", "node_id": "A"},
+        ],
     },
     {
         "name": "two_nodes_one_topic_single_subscriber_is_sender",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "A": ["B"],
-        },
-        "topic_map": {
-            "topic1": ["B"],
-        },
-        "messages": [
-            {
-                "topics": ["topic1"],
-                "data": b"Alex is tall",
-                "node_id": "B",
-            }
-        ]
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
+        "messages": [{"topics": ["topic1"], "data": b"Alex is tall", "node_id": "B"}],
     },
     {
         "name": "two_nodes_one_topic_two_msgs",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "A": ["B"],
-        },
-        "topic_map": {
-            "topic1": ["B"],
-        },
+        "adj_list": {"A": ["B"]},
+        "topic_map": {"topic1": ["B"]},
         "messages": [
-            {
-                "topics": ["topic1"],
-                "data": b"Alex is tall",
-                "node_id": "B",
-            },
-            {
-                "topics": ["topic1"],
-                "data": b"foo",
-                "node_id": "A",
-            }
-        ]
+            {"topics": ["topic1"], "data": b"Alex is tall", "node_id": "B"},
+            {"topics": ["topic1"], "data": b"foo", "node_id": "A"},
+        ],
     },
     {
         "name": "seven_nodes_tree_one_topics",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"],
-        },
-        "topic_map": {
-            "astrophysics": ["2", "3", "4", "5", "6", "7"],
-        },
-        "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            }
-        ]
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
+        "topic_map": {"astrophysics": ["2", "3", "4", "5", "6", "7"]},
+        "messages": [{"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"}],
     },
     {
         "name": "seven_nodes_tree_three_topics",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"],
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
         "topic_map": {
             "astrophysics": ["2", "3", "4", "5", "6", "7"],
             "space": ["2", "3", "4", "5", "6", "7"],
             "onions": ["2", "3", "4", "5", "6", "7"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["space"],
-                "data": b"foobar",
-                "node_id": "1",
-            },
-            {
-                "topics": ["onions"],
-                "data": b"I am allergic",
-                "node_id": "1",
-            }
-        ]
+            {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
+            {"topics": ["space"], "data": b"foobar", "node_id": "1"},
+            {"topics": ["onions"], "data": b"I am allergic", "node_id": "1"},
+        ],
     },
     {
         "name": "seven_nodes_tree_three_topics_diff_origin",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["4", "5"],
-            "3": ["6", "7"],
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["4", "5"], "3": ["6", "7"]},
         "topic_map": {
             "astrophysics": ["1", "2", "3", "4", "5", "6", "7"],
             "space": ["1", "2", "3", "4", "5", "6", "7"],
             "onions": ["1", "2", "3", "4", "5", "6", "7"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["space"],
-                "data": b"foobar",
-                "node_id": "4",
-            },
-            {
-                "topics": ["onions"],
-                "data": b"I am allergic",
-                "node_id": "7",
-            }
-        ]
+            {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
+            {"topics": ["space"], "data": b"foobar", "node_id": "4"},
+            {"topics": ["onions"], "data": b"I am allergic", "node_id": "7"},
+        ],
     },
     {
         "name": "three_nodes_clique_two_topic_diff_origin",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "1": ["2", "3"],
-            "2": ["3"],
-        },
-        "topic_map": {
-            "astrophysics": ["1", "2", "3"],
-            "school": ["1", "2", "3"],
-        },
+        "adj_list": {"1": ["2", "3"], "2": ["3"]},
+        "topic_map": {"astrophysics": ["1", "2", "3"], "school": ["1", "2", "3"]},
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic",
-                "node_id": "1",
-            }
-        ]
+            {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic", "node_id": "1"},
+        ],
     },
     {
         "name": "four_nodes_clique_two_topic_diff_origin_many_msgs",
@@ -224,95 +110,33 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
             "school": ["1", "2", "3", "4"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar2",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar3",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic3",
-                "node_id": "1",
-            }
-        ]
+            {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar2", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic2", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar3", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic3", "node_id": "1"},
+        ],
     },
     {
         "name": "five_nodes_ring_two_topic_diff_origin_many_msgs",
         "supported_protocols": SUPPORTED_PROTOCOLS,
-        "adj_list": {
-            "1": ["2"],
-            "2": ["3"],
-            "3": ["4"],
-            "4": ["5"],
-            "5": ["1"],
-        },
+        "adj_list": {"1": ["2"], "2": ["3"], "3": ["4"], "4": ["5"], "5": ["1"]},
         "topic_map": {
             "astrophysics": ["1", "2", "3", "4", "5"],
             "school": ["1", "2", "3", "4", "5"],
         },
         "messages": [
-            {
-                "topics": ["astrophysics"],
-                "data": b"e=mc^2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar2",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic2",
-                "node_id": "1",
-            },
-            {
-                "topics": ["school"],
-                "data": b"foobar3",
-                "node_id": "2",
-            },
-            {
-                "topics": ["astrophysics"],
-                "data": b"I am allergic3",
-                "node_id": "1",
-            }
-        ]
-    }
+            {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar2", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic2", "node_id": "1"},
+            {"topics": ["school"], "data": b"foobar3", "node_id": "2"},
+            {"topics": ["astrophysics"], "data": b"I am allergic3", "node_id": "1"},
+        ],
+    },
 ]
 
 # pylint: disable=invalid-name
@@ -420,12 +244,7 @@ async def perform_test_from_obj(obj, router_factory):
         # Publish message
         # TODO: Should be single RPC package with several topics
         for topic in topics:
-            tasks_publish.append(
-                pubsub_map[node_id].publish(
-                    topic,
-                    data,
-                )
-            )
+            tasks_publish.append(pubsub_map[node_id].publish(topic, data))
 
         # For each topic in topics, add (topic, node_id, data) tuple to ordered test list
         for topic in topics:

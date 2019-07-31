@@ -1,13 +1,7 @@
 # pylint: disable=no-name-in-module
 import asyncio
 import time
-from typing import (
-    Any,
-    Dict,
-    List,
-    Tuple,
-    TYPE_CHECKING,
-)
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 from lru import LRU
 
@@ -34,18 +28,18 @@ class Pubsub:
     host: IHost
     my_id: ID
 
-    router: 'IPubsubRouter'
+    router: "IPubsubRouter"
 
-    peer_queue: 'asyncio.Queue[ID]'
+    peer_queue: "asyncio.Queue[ID]"
 
     protocols: List[str]
 
-    incoming_msgs_from_peers: 'asyncio.Queue[rpc_pb2.Message]'
-    outgoing_messages: 'asyncio.Queue[rpc_pb2.Message]'
+    incoming_msgs_from_peers: "asyncio.Queue[rpc_pb2.Message]"
+    outgoing_messages: "asyncio.Queue[rpc_pb2.Message]"
 
     seen_messages: LRU
 
-    my_topics: Dict[str, 'asyncio.Queue[rpc_pb2.Message]']
+    my_topics: Dict[str, "asyncio.Queue[rpc_pb2.Message]"]
 
     # FIXME: Should be changed to `Dict[str, List[ID]]`
     peer_topics: Dict[str, List[str]]
@@ -55,11 +49,9 @@ class Pubsub:
     # NOTE: Be sure it is increased atomically everytime.
     counter: int  # uint64
 
-    def __init__(self,
-                 host: IHost,
-                 router: 'IPubsubRouter',
-                 my_id: ID,
-                 cache_size: int = None) -> None:
+    def __init__(
+        self, host: IHost, router: "IPubsubRouter", my_id: ID, cache_size: int = None
+    ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
         Pubsub-related messages and relaying messages as appropriate to the
@@ -120,12 +112,9 @@ class Pubsub:
         """
         packet = rpc_pb2.RPC()
         for topic_id in self.my_topics:
-            packet.subscriptions.extend([
-                rpc_pb2.RPC.SubOpts(
-                    subscribe=True,
-                    topicid=topic_id,
-                )
-            ])
+            packet.subscriptions.extend(
+                [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
+            )
         return packet.SerializeToString()
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -262,7 +251,7 @@ class Pubsub:
                 # for each topic
                 await self.my_topics[topic].put(publish_message)
 
-    async def subscribe(self, topic_id: str) -> 'asyncio.Queue[rpc_pb2.Message]':
+    async def subscribe(self, topic_id: str) -> "asyncio.Queue[rpc_pb2.Message]":
         """
         Subscribe ourself to a topic
         :param topic_id: topic_id to subscribe to
@@ -277,10 +266,9 @@ class Pubsub:
 
         # Create subscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe=True,
-            topicid=topic_id.encode('utf-8')
-            )])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id.encode("utf-8"))]
+        )
 
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -305,10 +293,9 @@ class Pubsub:
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-            subscribe=False,
-            topicid=topic_id.encode('utf-8')
-            )])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id.encode("utf-8"))]
+        )
 
         # Send out unsubscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -371,7 +358,7 @@ class Pubsub:
         Make the next message sequence id.
         """
         self.counter += 1
-        return self.counter.to_bytes(8, 'big')
+        return self.counter.to_bytes(8, "big")
 
     def _is_msg_seen(self, msg: rpc_pb2.Message) -> bool:
         msg_id = get_msg_id(msg)

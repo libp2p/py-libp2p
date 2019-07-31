@@ -1,7 +1,5 @@
 import hashlib
-from typing import (
-    Union,
-)
+from typing import Union
 
 import base58
 
@@ -44,7 +42,7 @@ class ID:
     __repr__ = __str__
 
     def __eq__(self, other: object) -> bool:
-        #pylint: disable=protected-access
+        # pylint: disable=protected-access
         if not isinstance(other, ID):
             return NotImplemented
         return self._id_str == other._id_str
@@ -57,7 +55,7 @@ def id_b58_encode(peer_id: ID) -> str:
     """
     return a b58-encoded string
     """
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
     return base58.b58encode(peer_id.get_raw_id()).decode()
 
 
@@ -84,7 +82,8 @@ def id_from_public_key(key: RsaKey) -> ID:
 def id_from_private_key(key: RsaKey) -> ID:
     return id_from_public_key(key.publickey())
 
+
 def digest(data: Union[str, bytes]) -> bytes:
     if isinstance(data, str):
-        data = data.encode('utf8')
+        data = data.encode("utf8")
     return hashlib.sha1(data).digest()

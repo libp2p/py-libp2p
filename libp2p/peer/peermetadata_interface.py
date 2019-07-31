@@ -1,15 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-)
+from typing import Any
 
-from .id import (
-    ID,
-)
+from .id import ID
 
 
 class IPeerMetadata(ABC):
-
     def __init__(self) -> None:
         pass
 

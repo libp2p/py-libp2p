@@ -1,18 +1,9 @@
 import asyncio
-from typing import (
-    Awaitable,
-    Callable,
-    Dict,
-    List,
-    Sequence,
-)
+from typing import Awaitable, Callable, Dict, List, Sequence
 
 from multiaddr import Multiaddr
 
-from libp2p.peer.id import (
-    ID,
-    id_b58_decode,
-)
+from libp2p.peer.id import ID, id_b58_decode
 from libp2p.peer.peerstore import PeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
@@ -51,12 +42,14 @@ class Swarm(INetwork):
 
     notifees: List[INotifee]
 
-    def __init__(self,
-                 peer_id: ID,
-                 peerstore: PeerStore,
-                 upgrader: TransportUpgrader,
-                 transport: ITransport,
-                 router: IPeerRouting):
+    def __init__(
+        self,
+        peer_id: ID,
+        peerstore: PeerStore,
+        upgrader: TransportUpgrader,
+        transport: ITransport,
+        router: IPeerRouting,
+    ):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
@@ -79,7 +72,9 @@ class Swarm(INetwork):
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(
+        self, protocol_id: str, stream_handler: StreamHandlerFn
+    ) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -119,8 +114,9 @@ class Swarm(INetwork):
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
-            muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
-                self.generic_protocol_handler, peer_id)
+            muxed_conn = self.upgrader.upgrade_connection(
+                secured_conn, self.generic_protocol_handler, peer_id
+            )
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -154,8 +150,7 @@ class Swarm(INetwork):
 
         # Perform protocol muxing to determine protocol to use
         selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids),
-            muxed_stream,
+            list(protocol_ids), muxed_stream
         )
 
         # Create a net stream with the selected protocol
@@ -186,8 +181,9 @@ class Swarm(INetwork):
             if str(multiaddr) in self.listeners:
                 return True
 
-            async def conn_handler(reader: asyncio.StreamReader,
-                                   writer: asyncio.StreamWriter) -> None:
+            async def conn_handler(
+                reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+            ) -> None:
                 # Read in first message (should be peer_id of initiator) and ack
                 peer_id = id_b58_decode((await reader.read(1024)).decode())
 
@@ -196,14 +192,22 @@ class Swarm(INetwork):
 
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(multiaddr.value_for_protocol('ip4'),
-                                         multiaddr.value_for_protocol('tcp'), reader, writer, False)
+                raw_conn = RawConnection(
+                    multiaddr.value_for_protocol("ip4"),
+                    multiaddr.value_for_protocol("tcp"),
+                    reader,
+                    writer,
+                    False,
+                )
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
-                secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, False)
-                muxed_conn = self.upgrader.upgrade_connection(secured_conn, \
-                    self.generic_protocol_handler, peer_id)
+                secured_conn = await self.upgrader.upgrade_security(
+                    raw_conn, peer_id, False
+                )
+                muxed_conn = self.upgrader.upgrade_connection(
+                    secured_conn, self.generic_protocol_handler, peer_id
+                )
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn

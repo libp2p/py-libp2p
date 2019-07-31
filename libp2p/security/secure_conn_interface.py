@@ -8,8 +8,9 @@ involved in the secured connection
 
 Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
 """
-class ISecureConn(ABC):
 
+
+class ISecureConn(ABC):
     @abstractmethod
     def get_conn(self):
         """

@@ -1,12 +1,7 @@
 import ast
-from typing import (
-    Union,
-)
+from typing import Union
 
-from libp2p.kademlia.kad_peerinfo import (
-    KadPeerInfo,
-    create_kad_peerinfo,
-)
+from libp2p.kademlia.kad_peerinfo import KadPeerInfo, create_kad_peerinfo
 from libp2p.kademlia.network import KademliaServer
 from libp2p.peer.id import ID
 from libp2p.routing.interfaces import IPeerRouting
@@ -31,6 +26,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         value = await self.server.get(xor_id)
         return decode_peerinfo(value)
 
+
 def decode_peerinfo(encoded: Union[bytes, str]) -> KadPeerInfo:
     if isinstance(encoded, bytes):
         encoded = encoded.decode()
@@ -38,7 +34,7 @@ def decode_peerinfo(encoded: Union[bytes, str]) -> KadPeerInfo:
         lines = ast.literal_eval(encoded)
     except SyntaxError:
         return None
-    ip = lines[1] # pylint: disable=invalid-name
+    ip = lines[1]  # pylint: disable=invalid-name
     port = lines[2]
     peer_id = lines[3]
     peer_info = create_kad_peerinfo(peer_id, ip, port)

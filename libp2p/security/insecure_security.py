@@ -1,8 +1,8 @@
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
-class InsecureTransport(ISecureTransport):
 
+class InsecureTransport(ISecureTransport):
     def __init__(self, transport_id):
         self.transport_id = transport_id
 
@@ -24,8 +24,8 @@ class InsecureTransport(ISecureTransport):
         insecure_conn = InsecureConn(conn, self.transport_id)
         return insecure_conn
 
-class InsecureConn(ISecureConn):
 
+class InsecureConn(ISecureConn):
     def __init__(self, conn, conn_id):
         self.conn = conn
         self.details = {}

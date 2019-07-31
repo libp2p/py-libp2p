@@ -118,5 +118,6 @@ def validate_handshake(handshake_contents):
     # is added
     return handshake_contents == MULTISELECT_PROTOCOL_ID
 
+
 class MultiselectClientError(ValueError):
     """Raised when an error occurs in protocol selection process"""
