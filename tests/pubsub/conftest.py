@@ -86,8 +86,8 @@ def gossipsubs(num_hosts, gossipsub_params):
 def _make_pubsubs(hosts, pubsub_routers):
     if len(pubsub_routers) != len(hosts):
         raise ValueError(
-            f"lenght of pubsub_routers={pubsub_routers} should be equaled to "
-            f"hosts={hosts}"
+            f"lenght of pubsub_routers={pubsub_routers} should be equaled to the "
+            f"length of hosts={len(hosts)}"
         )
     return tuple(
         Pubsub(
