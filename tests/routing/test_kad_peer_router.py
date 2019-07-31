@@ -1,5 +1,6 @@
 import pytest
 
+from libp2p.peer.id import ID
 from libp2p.kademlia.network import KademliaServer
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 
@@ -17,7 +18,7 @@ async def test_simple_two_nodes():
     await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_b)
-    returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
     print(repr(returned_info))
     print(repr(node_a_kad_peerinfo))
     assert repr(returned_info) == repr(node_a_kad_peerinfo)
@@ -41,7 +42,7 @@ async def test_simple_three_nodes():
     await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_c)
-    returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
     assert str(returned_info) == str(node_a_kad_peerinfo)
 
 
@@ -69,5 +70,5 @@ async def test_simple_four_nodes():
     await node_b.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_d)
-    returned_info = await router.find_peer(node_a_kad_peerinfo.peer_id_obj)
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
     assert str(returned_info) == str(node_a_kad_peerinfo)

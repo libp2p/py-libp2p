@@ -19,7 +19,7 @@ MAX_INLINE_KEY_LENGTH = 42
 class ID:
 
     _bytes: bytes
-    _xor_id: int
+    _xor_id: int = None
 
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes
