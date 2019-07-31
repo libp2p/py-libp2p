@@ -30,7 +30,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
 
     # Create nodes
     dummy_nodes = []
-    for i in range(num_nodes):
+    for _ in range(num_nodes):
         dummy_nodes.append(await DummyAccountNode.create())
 
     # Create network

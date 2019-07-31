@@ -1,18 +1,16 @@
 import asyncio
 import uuid
 
-import multiaddr
-
-from libp2p import new_node
 from libp2p.host.host_interface import IHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 
-from .configs import FLOODSUB_PROTOCOL_ID
+from tests.configs import LISTEN_MADDR
+
+from .factories import FloodsubFactory, PubsubFactory
 from .utils import message_id_generator
 
 
-SUPPORTED_PUBSUB_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 CRYPTO_TOPIC = "ethereum"
 
 # Message format:
@@ -52,14 +50,9 @@ class DummyAccountNode:
         to use async await, unlike the init function
         """
 
-        libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-        await libp2p_node.get_network().listen(
-            multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
-        )
-
-        floodsub = FloodSub(SUPPORTED_PUBSUB_PROTOCOLS)
-        pubsub = Pubsub(libp2p_node, floodsub, "a")
-        return cls(libp2p_node=libp2p_node, pubsub=pubsub, floodsub=floodsub)
+        pubsub = PubsubFactory(router=FloodsubFactory())
+        await pubsub.host.get_network().listen(LISTEN_MADDR)
+        return cls(libp2p_node=pubsub.host, pubsub=pubsub, floodsub=pubsub.router)
 
     async def handle_incoming_msgs(self):
         """
