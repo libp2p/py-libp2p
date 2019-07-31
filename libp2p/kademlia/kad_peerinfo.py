@@ -16,9 +16,8 @@ class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
 
-        self.peer_id_obj = peer_id
-        self.peer_id = peer_id.get_raw_id()
-        self.xor_id = peer_id.get_xor_id()
+        self.peer_id = peer_id
+        self.xor_id = peer_id.xor_id
 
         self.addrs = peer_data.get_addrs() if peer_data else None
 
@@ -137,9 +136,8 @@ class KadPeerHeap:
     def get_uncontacted(self):
         return [n for n in self if n.peer_id not in self.contacted]
 
-
-def create_kad_peerinfo(raw_node_id=None, sender_ip=None, sender_port=None):
-    node_id = ID(raw_node_id) if raw_node_id else ID(digest(random.getrandbits(255)))
+def create_kad_peerinfo(node_id=None, sender_ip=None, sender_port=None):
+    node_id = node_id if node_id else ID(digest(random.getrandbits(255)))
     peer_data = None
     if sender_ip and sender_port:
         peer_data = PeerData()  # pylint: disable=no-value-for-parameter

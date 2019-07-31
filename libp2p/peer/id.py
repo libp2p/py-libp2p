@@ -18,52 +18,55 @@ MAX_INLINE_KEY_LENGTH = 42
 
 class ID:
 
-    _id_str: bytes
+    _bytes: bytes
+    _xor_id: int
 
-    def __init__(self, id_str: bytes) -> None:
-        self._id_str = id_str
+    def __init__(self, peer_id_bytes: bytes) -> None:
+        self._bytes = peer_id_bytes
+
+    @property
+    def xor_id(self) -> int:
+        if not self._xor_id:
+            self._xor_id = int(digest(self._bytes).hex(), 16)
+        return self._xor_id
 
     def to_bytes(self) -> bytes:
-        return self._id_str
-
-    def get_raw_id(self) -> bytes:
-        return self._id_str
+        return self._bytes
 
     def pretty(self) -> str:
-        return base58.b58encode(self._id_str).decode()
-
-    def get_xor_id(self) -> int:
-        return int(digest(self.get_raw_id()).hex(), 16)
+        return base58.b58encode(self._bytes).decode()
 
     def __str__(self) -> str:
-        pid = self.pretty()
-        return pid
+        return self.pretty()
 
     __repr__ = __str__
 
     def __eq__(self, other: object) -> bool:
-        # pylint: disable=protected-access
-        if not isinstance(other, ID):
+        #pylint: disable=protected-access, no-else-return
+        if isinstance(other, bytes):
+            return self._bytes == other
+        elif isinstance(other, ID):
+            return self._bytes == other._bytes
+        else:
             return NotImplemented
-        return self._id_str == other._id_str
 
     def __hash__(self) -> int:
-        return hash(self._id_str)
+        return hash(self._bytes)
 
 
 def id_b58_encode(peer_id: ID) -> str:
     """
     return a b58-encoded string
     """
-    # pylint: disable=protected-access
-    return base58.b58encode(peer_id.get_raw_id()).decode()
+    #pylint: disable=protected-access
+    return base58.b58encode(peer_id.to_bytes()).decode()
 
 
-def id_b58_decode(peer_id_str: str) -> ID:
+def id_b58_decode(b58_encoded_peer_id_str: str) -> ID:
     """
     return a base58-decoded peer ID
     """
-    return ID(base58.b58decode(peer_id_str))
+    return ID(base58.b58decode(b58_encoded_peer_id_str))
 
 
 def id_from_public_key(key: RsaKey) -> ID:

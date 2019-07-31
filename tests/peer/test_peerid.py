@@ -15,13 +15,14 @@ from libp2p.peer.id import (
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
-def test_init_():
+def test_init():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    peer_id = ID(random_id_string)
-    # pylint: disable=protected-access
-    assert peer_id._id_str == random_id_string
+    peer_id = ID(random_id_string.encode())
+    #pylint: disable=protected-access
+    assert peer_id == random_id_string.encode()
+
 
 
 def test_no_init_value():
@@ -34,9 +35,9 @@ def test_pretty():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    peer_id = ID(random_id_string)
+    peer_id = ID(random_id_string.encode())
     actual = peer_id.pretty()
-    expected = base58.b58encode(random_id_string).decode()
+    expected = base58.b58encode(random_id_string.encode()).decode()
 
     assert actual == expected
 
@@ -45,9 +46,9 @@ def test_str_less_than_10():
     random_id_string = ""
     for _ in range(5):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    pid = base58.b58encode(random_id_string).decode()
-    expected = pid
-    actual = ID(random_id_string).__str__()
+    peer_id = base58.b58encode(random_id_string.encode()).decode()
+    expected = peer_id
+    actual = ID(random_id_string.encode()).__str__()
 
     assert actual == expected
 
@@ -56,9 +57,9 @@ def test_str_more_than_10():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    pid = base58.b58encode(random_id_string).decode()
-    expected = pid
-    actual = ID(random_id_string).__str__()
+    peer_id = base58.b58encode(random_id_string.encode()).decode()
+    expected = peer_id
+    actual = ID(random_id_string.encode()).__str__()
 
     assert actual == expected
 
@@ -67,21 +68,17 @@ def test_eq_true():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    other = ID(random_id_string)
+    peer_id = ID(random_id_string.encode())
 
-    expected = True
-    actual = ID(random_id_string).__eq__(other)
-
-    assert actual == expected
+    assert peer_id == ID(random_id_string.encode())
+    assert peer_id.to_bytes() == random_id_string.encode()
 
 
 def test_eq_false():
-    other = ID("efgh")
+    peer_id = ID("efgh")
+    other = ID("abcd")
 
-    expected = False
-    actual = ID("abcd").__eq__(other)
-
-    assert actual == expected
+    assert peer_id != other
 
 
 def test_hash():
@@ -89,8 +86,8 @@ def test_hash():
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
 
-    expected = hash(random_id_string)
-    actual = ID(random_id_string).__hash__()
+    expected = hash(random_id_string.encode())
+    actual = ID(random_id_string.encode()).__hash__()
 
     assert actual == expected
 
@@ -99,8 +96,8 @@ def test_id_b58_encode():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    expected = base58.b58encode(random_id_string).decode()
-    actual = id_b58_encode(ID(random_id_string))
+    expected = base58.b58encode(random_id_string.encode()).decode()
+    actual = id_b58_encode(ID(random_id_string.encode()))
 
     assert actual == expected
 
@@ -109,8 +106,8 @@ def test_id_b58_decode():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    expected = ID(base58.b58decode(random_id_string))
-    actual = id_b58_decode(random_id_string)
+    expected = ID(base58.b58decode(random_id_string.encode()))
+    actual = id_b58_decode(random_id_string.encode())
 
     assert actual == expected
 

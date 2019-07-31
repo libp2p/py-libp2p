@@ -47,7 +47,7 @@ def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=N
     if not id_opt:
         id_opt = generate_id()
 
-    node_id = id_opt.get_raw_id()
+    node_id = id_opt
     server = KademliaServer(ksize=ksize, alpha=alpha, node_id=node_id, storage=storage)
     return KadmeliaPeerRouter(server)
 
