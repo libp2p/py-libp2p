@@ -28,4 +28,4 @@ async def test_example():
     first_providers = first_tuple[1]
     # [b'\xf9\xa1\xf5\x10a\xe5\xe0F']
     first_provider = first_providers[0]
-    assert node_b.node.peer_id == first_provider
+    assert node_b.node.peer_id_bytes == first_provider

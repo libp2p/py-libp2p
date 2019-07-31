@@ -130,7 +130,7 @@ class KademliaServer:
         return await spider.find()
 
     async def bootstrap_node(self, addr):
-        result = await self.protocol.ping(addr, self.node.peer_id)
+        result = await self.protocol.ping(addr, self.node.peer_id_bytes)
         return create_kad_peerinfo(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):
@@ -170,7 +170,7 @@ class KademliaServer:
         """
         neighbors = self.protocol.router.find_neighbors(self.node)
         return [
-            await self.protocol.call_add_provider(n, key, self.node.peer_id)
+            await self.protocol.call_add_provider(n, key, self.node.peer_id_bytes)
             for n in neighbors
         ]
 
@@ -212,10 +212,10 @@ class KademliaServer:
         """
         log.info("Saving state to %s", fname)
         data = {
-            "ksize": self.ksize,
-            "alpha": self.alpha,
-            "id": self.node.peer_id,
-            "neighbors": self.bootstrappable_neighbors(),
+            'ksize': self.ksize,
+            'alpha': self.alpha,
+            'id': self.node.peer_id_bytes,
+            'neighbors': self.bootstrappable_neighbors()
         }
         if not data["neighbors"]:
             log.warning("No known neighbors, so not writing to cache.")

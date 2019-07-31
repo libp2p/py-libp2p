@@ -18,7 +18,7 @@ async def test_simple_two_nodes():
     await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_b)
-    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
     print(repr(returned_info))
     print(repr(node_a_kad_peerinfo))
     assert repr(returned_info) == repr(node_a_kad_peerinfo)
@@ -42,7 +42,7 @@ async def test_simple_three_nodes():
     await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_c)
-    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
     assert str(returned_info) == str(node_a_kad_peerinfo)
 
 
@@ -70,5 +70,5 @@ async def test_simple_four_nodes():
     await node_b.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
 
     router = KadmeliaPeerRouter(node_d)
-    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id))
+    returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
     assert str(returned_info) == str(node_a_kad_peerinfo)

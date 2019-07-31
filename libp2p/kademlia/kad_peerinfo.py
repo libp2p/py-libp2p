@@ -16,7 +16,7 @@ class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
 
-        self.peer_id = peer_id.to_bytes()
+        self.peer_id_bytes = peer_id.to_bytes()
         self.xor_id = peer_id.xor_id
 
         self.addrs = peer_data.get_addrs() if peer_data else None
@@ -38,17 +38,17 @@ class KadPeerInfo(PeerInfo):
         """
         Enables use of Node as a tuple - i.e., tuple(node) works.
         """
-        return iter([self.peer_id, self.ip, self.port])
+        return iter([self.peer_id_bytes, self.ip, self.port])
 
     def __repr__(self):
-        return repr([self.xor_id, self.ip, self.port, self.peer_id])
+        return repr([self.xor_id, self.ip, self.port, self.peer_id_bytes])
 
     def __str__(self):
         return "%s:%s" % (self.ip, str(self.port))
 
     def encode(self):
         return (
-            str(self.peer_id)
+            str(self.peer_id_bytes)
             + "\n"
             + str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
         )
@@ -84,13 +84,13 @@ class KadPeerHeap:
             return
         nheap = []
         for distance, node in self.heap:
-            if node.peer_id not in peers:
+            if node.peer_id_bytes not in peers:
                 heapq.heappush(nheap, (distance, node))
         self.heap = nheap
 
     def get_node(self, node_id):
         for _, node in self.heap:
-            if node.peer_id == node_id:
+            if node.peer_id_bytes == node_id:
                 return node
         return None
 
@@ -98,10 +98,10 @@ class KadPeerHeap:
         return len(self.get_uncontacted()) == 0
 
     def get_ids(self):
-        return [n.peer_id for n in self]
+        return [n.peer_id_bytes for n in self]
 
     def mark_contacted(self, node):
-        self.contacted.add(node.peer_id)
+        self.contacted.add(node.peer_id_bytes)
 
     def popleft(self):
         return heapq.heappop(self.heap)[1] if self else None
@@ -129,12 +129,12 @@ class KadPeerHeap:
 
     def __contains__(self, node):
         for _, other in self.heap:
-            if node.peer_id == other.peer_id:
+            if node.peer_id_bytes == other.peer_id_bytes:
                 return True
         return False
 
     def get_uncontacted(self):
-        return [n for n in self if n.peer_id not in self.contacted]
+        return [n for n in self if n.peer_id_bytes not in self.contacted]
 
 def create_kad_peerinfo(node_id_bytes=None, sender_ip=None, sender_port=None):
     node_id = ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
