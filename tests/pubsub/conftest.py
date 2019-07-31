@@ -101,7 +101,7 @@ def _make_pubsubs(hosts, pubsub_routers):
 
 @pytest.fixture
 def pubsubs_fsub(hosts, floodsubs):
-    _pubsubs_gsub = _make_pubsubs(hosts, floodsubs)
+    _pubsubs_fsub = _make_pubsubs(hosts, floodsubs)
     yield _pubsubs_gsub
     # TODO: Clean up
 
