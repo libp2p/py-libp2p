@@ -4,6 +4,10 @@ General catchall for functions that don't make sense as methods.
 import hashlib
 import operator
 import asyncio
+from typing import (
+    Any,
+    Sequence,
+)
 
 
 async def gather_dict(dic):
@@ -24,7 +28,7 @@ class OrderedSet(list):
     :meth:`push` method.
     """
 
-    def push(self, thing):
+    def push(self, thing: Any) -> None:
         """
         1. If the item exists in the list, it's removed
         2. The item is pushed to the end of the list
@@ -34,7 +38,7 @@ class OrderedSet(list):
         self.append(thing)
 
 
-def shared_prefix(args):
+def shared_prefix(args: Sequence[str]) -> str:
     """
     Find the shared prefix between the strings.
 
@@ -52,6 +56,6 @@ def shared_prefix(args):
     return args[0][:i]
 
 
-def bytes_to_bit_string(bites):
+def bytes_to_bit_string(bites: bytes) -> str:
     bits = [bin(bite)[2:].rjust(8, "0") for bite in bites]
     return "".join(bits)

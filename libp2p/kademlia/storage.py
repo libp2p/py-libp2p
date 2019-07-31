@@ -7,7 +7,6 @@ from typing import (
     TypeVar,
     Iterator,
     Tuple,
-    Any,
 )
 
 TKey = TypeVar('TKey', bound='IStorage')
@@ -53,7 +52,7 @@ class IStorage(ABC):
 
 
 class ForgetfulStorage(IStorage):
-    data: OrderedDict[Any, Any]
+    data: 'OrderedDict[Any, Any]'
     ttl: int
 
     def __init__(self, ttl: int = 604800) -> None:
