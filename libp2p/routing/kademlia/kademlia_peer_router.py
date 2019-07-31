@@ -1,16 +1,26 @@
 import ast
+from typing import (
+    Union,
+)
 
+from libp2p.kademlia.kad_peerinfo import (
+    KadPeerInfo,
+    create_kad_peerinfo,
+)
+from libp2p.kademlia.network import KademliaServer
+from libp2p.peer.id import ID
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.kademlia.kad_peerinfo import create_kad_peerinfo
 
 
 class KadmeliaPeerRouter(IPeerRouting):
     # pylint: disable=too-few-public-methods
 
-    def __init__(self, dht_server):
+    server: KademliaServer
+
+    def __init__(self, dht_server: KademliaServer) -> None:
         self.server = dht_server
 
-    async def find_peer(self, peer_id):
+    async def find_peer(self, peer_id: ID) -> KadPeerInfo:
         """
         Find a specific peer
         :param peer_id: peer to search for
@@ -21,7 +31,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         value = await self.server.get(xor_id)
         return decode_peerinfo(value)
 
-def decode_peerinfo(encoded):
+def decode_peerinfo(encoded: Union[bytes, str]) -> KadPeerInfo:
     if isinstance(encoded, bytes):
         encoded = encoded.decode()
     try:

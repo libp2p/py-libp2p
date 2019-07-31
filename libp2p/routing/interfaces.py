@@ -1,11 +1,18 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import Iterable
+
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
 # pylint: disable=too-few-public-methods
 
 
 class IContentRouting(ABC):
 
     @abstractmethod
-    def provide(self, cid, announce=True):
+    def provide(self, cid: bytes, announce: bool = True) -> None:
         """
         Provide adds the given cid to the content routing system. If announce is True,
         it also announces it, otherwise it is just kept in the local
@@ -13,7 +20,7 @@ class IContentRouting(ABC):
         """
 
     @abstractmethod
-    def find_provider_iter(self, cid, count):
+    def find_provider_iter(self, cid: bytes, count: int) -> Iterable[PeerInfo]:
         """
         Search for peers who are able to provide a given key
         returns an iterator of peer.PeerInfo
@@ -23,7 +30,7 @@ class IContentRouting(ABC):
 class IPeerRouting(ABC):
 
     @abstractmethod
-    def find_peer(self, peer_id):
+    async def find_peer(self, peer_id: ID) -> PeerInfo:
         """
         Find specific Peer
         FindPeer searches for a peer with given peer_id, returns a peer.PeerInfo

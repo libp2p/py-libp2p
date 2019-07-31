@@ -1,7 +1,8 @@
 import asyncio
 
+from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+
 from .utils import get_flag
-from ..muxed_stream_interface import IMuxedStream
 
 
 class MplexStream(IMuxedStream):

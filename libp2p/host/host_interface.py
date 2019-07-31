@@ -1,34 +1,53 @@
 from abc import ABC, abstractmethod
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    List,
+    Sequence,
+)
+
+import multiaddr
+
+from libp2p.network.network_interface import INetwork
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+
+from libp2p.network.stream.net_stream_interface import INetStream
+
+
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class IHost(ABC):
 
     @abstractmethod
-    def get_id(self):
+    def get_id(self) -> ID:
         """
         :return: peer_id of host
         """
 
     @abstractmethod
-    def get_network(self):
+    def get_network(self) -> INetwork:
         """
         :return: network instance of host
         """
 
+    # FIXME: Replace with correct return type
     @abstractmethod
-    def get_mux(self):
+    def get_mux(self) -> Any:
         """
         :return: mux instance of host
         """
 
     @abstractmethod
-    def get_addrs(self):
+    def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening too
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id, stream_handler):
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -39,15 +58,17 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    def new_stream(self, peer_id, protocol_ids):
+    async def new_stream(self,
+                         peer_id: ID,
+                         protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on
-        :return: true if successful
+        :return: stream: new stream created
         """
 
     @abstractmethod
-    def connect(self, peer_info):
+    async def connect(self, peer_info: PeerInfo) -> None:
         """
         connect ensures there is a connection between this host and the peer with
         given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal

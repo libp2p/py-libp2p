@@ -1,8 +1,22 @@
+import asyncio
+
 from .raw_connection_interface import IRawConnection
 
 class RawConnection(IRawConnection):
 
-    def __init__(self, ip, port, reader, writer, initiator):
+    conn_ip: str
+    conn_port: str
+    reader: asyncio.StreamReader
+    writer: asyncio.StreamWriter
+    _next_id: int
+    initiator: bool
+
+    def __init__(self,
+                 ip: str,
+                 port: str,
+                 reader: asyncio.StreamReader,
+                 writer: asyncio.StreamWriter,
+                 initiator: bool) -> None:
         # pylint: disable=too-many-arguments
         self.conn_ip = ip
         self.conn_port = port
@@ -11,12 +25,12 @@ class RawConnection(IRawConnection):
         self._next_id = 0 if initiator else 1
         self.initiator = initiator
 
-    async def write(self, data):
+    async def write(self, data: bytes) -> None:
         self.writer.write(data)
         self.writer.write("\n".encode())
         await self.writer.drain()
 
-    async def read(self):
+    async def read(self) -> bytes:
         line = await self.reader.readline()
         adjusted_line = line.decode().rstrip('\n')
 
@@ -24,10 +38,10 @@ class RawConnection(IRawConnection):
         # encoding and decoding
         return adjusted_line.encode()
 
-    def close(self):
+    def close(self) -> None:
         self.writer.close()
 
-    def next_stream_id(self):
+    def next_stream_id(self) -> int:
         """
         Get next available stream id
         :return: next available stream id for the connection

@@ -1,23 +1,39 @@
+from typing import (
+    TYPE_CHECKING,
+)
+
+from multiaddr import Multiaddr
+
+from libp2p.network.network_interface import INetwork
 from libp2p.network.notifee_interface import INotifee
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
+from libp2p.network.stream.net_stream_interface import INetStream
+
+if TYPE_CHECKING:
+    import asyncio
+    from libp2p.peer.id import ID
 
 
 class PubsubNotifee(INotifee):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
+    # pylint: disable=too-many-instance-attributes, cell-var-from-loop, unsubscriptable-object
 
-    def __init__(self, initiator_peers_queue):
+    initiator_peers_queue: 'asyncio.Queue[ID]'
+
+    def __init__(self, initiator_peers_queue: 'asyncio.Queue[ID]') -> None:
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub
         can process new peers after we connect to them
         """
         self.initiator_peers_queue = initiator_peers_queue
 
-    async def opened_stream(self, network, stream):
+    async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
         pass
 
-    async def closed_stream(self, network, stream):
+    async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
         pass
 
-    async def connected(self, network, conn):
+    async def connected(self, network: INetwork, conn: IMuxedConn) -> None:
         """
         Add peer_id to initiator_peers_queue, so that this peer_id can be used to
         create a stream and we only want to have one pubsub stream with each peer.
@@ -30,11 +46,11 @@ class PubsubNotifee(INotifee):
         if conn.initiator:
             await self.initiator_peers_queue.put(conn.peer_id)
 
-    async def disconnected(self, network, conn):
+    async def disconnected(self, network: INetwork, conn: IMuxedConn) -> None:
         pass
 
-    async def listen(self, network, multiaddr):
+    async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         pass
 
-    async def listen_close(self, network, multiaddr):
+    async def listen_close(self, network: INetwork, multiaddr: Multiaddr) -> None:
         pass

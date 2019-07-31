@@ -1,16 +1,45 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    Sequence,
+    TYPE_CHECKING,
+)
+
+from multiaddr import Multiaddr
+
+from libp2p.peer.id import ID
+from libp2p.peer.peerstore import PeerStore
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.transport.listener_interface import IListener
+
+from .stream.net_stream_interface import INetStream
+
+if TYPE_CHECKING:
+    from .notifee_interface import INotifee
+
+
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class INetwork(ABC):
 
+    peerstore: PeerStore
+    connections: Dict[ID, IMuxedConn]
+    listeners: Dict[str, IListener]
+
     @abstractmethod
-    def get_peer_id(self):
+    def get_peer_id(self) -> ID:
         """
         :return: the peer id
         """
 
     @abstractmethod
-    def dial_peer(self, peer_id):
+    async def dial_peer(self, peer_id: ID) -> IMuxedConn:
         """
         dial_peer try to create a connection to peer_id
 
@@ -20,7 +49,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id, stream_handler):
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -28,7 +57,9 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def new_stream(self, peer_id, protocol_ids):
+    async def new_stream(self,
+                         peer_id: ID,
+                         protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream
@@ -36,14 +67,14 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def listen(self, *args):
+    async def listen(self, *args: Sequence[Multiaddr]) -> bool:
         """
         :param *args: one or many multiaddrs to start listening on
         :return: True if at least one success
         """
 
     @abstractmethod
-    def notify(self, notifee):
+    def notify(self, notifee: 'INotifee') -> bool:
         """
         :param notifee: object implementing Notifee interface
         :return: true if notifee registered successfully, false otherwise

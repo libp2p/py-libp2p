@@ -1,13 +1,20 @@
 from abc import ABC, abstractmethod
+from typing import (
+    Any,
+)
+
+from .id import (
+    ID,
+)
 
 
 class IPeerMetadata(ABC):
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @abstractmethod
-    def get(self, peer_id, key):
+    def get(self, peer_id: ID, key: str) -> Any:
         """
         :param peer_id: peer ID to lookup key for
         :param key: key to look up
@@ -16,7 +23,7 @@ class IPeerMetadata(ABC):
         """
 
     @abstractmethod
-    def put(self, peer_id, key, val):
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
         """
         :param peer_id: peer ID to lookup key for
         :param key: key to associate with peer
