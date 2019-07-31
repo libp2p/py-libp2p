@@ -25,7 +25,7 @@ async def gather_dict(dic: Dict[KT, Awaitable[VT]]) -> Dict[KT, VT]:
     return dict(zip(dic.keys(), results))
 
 
-def digest(string: Union[str, bytes]) -> bytes:
+def digest(string: Union[str, bytes, int]) -> bytes:
     if not isinstance(string, bytes):
         string = str(string).encode("utf8")
     return hashlib.sha1(string).digest()

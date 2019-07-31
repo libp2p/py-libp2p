@@ -4,10 +4,13 @@ import operator
 from collections import OrderedDict
 from abc import abstractmethod, ABC
 from typing import (
+    TYPE_CHECKING,
     TypeVar,
     Iterator,
     Tuple,
 )
+if TYPE_CHECKING:
+    from typing import Any
 
 TKey = TypeVar('TKey', bound='IStorage')
 TValue = TypeVar('TValue', bound='IStorage')
