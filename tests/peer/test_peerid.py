@@ -6,9 +6,6 @@ from Crypto.PublicKey import RSA
 from libp2p.peer.id import (
     ID,
     id_b58_encode,
-    id_b58_decode,
-    id_from_public_key,
-    id_from_private_key,
 )
 
 
@@ -107,7 +104,7 @@ def test_id_b58_decode():
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     expected = ID(base58.b58decode(random_id_string.encode()))
-    actual = id_b58_decode(random_id_string.encode())
+    actual = ID.from_base58(random_id_string.encode())
 
     assert actual == expected
 
@@ -119,13 +116,13 @@ def test_id_from_public_key():
     algo = multihash.Func.sha2_256
     mh_digest = multihash.digest(key_bin, algo)
     expected = ID(mh_digest.encode())
-    actual = id_from_public_key(key)
+    actual = ID.from_pubkey(key)
 
     assert actual == expected
 
 
 def test_id_from_private_key():
     key = RSA.generate(2048, e=65537)
-    id_from_pub = id_from_public_key(key.publickey())
-    id_from_priv = id_from_private_key(key)
+    id_from_pub = ID.from_pubkey(key.publickey())
+    id_from_priv = ID.from_privkey(key)
     assert id_from_pub == id_from_priv

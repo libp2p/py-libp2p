@@ -1,9 +1,16 @@
 from ast import literal_eval
 import asyncio
 import random
-from typing import Any, Dict, Iterable, List, Set, Sequence
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Set,
+    Sequence,
+)
 
-from libp2p.peer.id import ID, id_b58_decode
+from libp2p.peer.id import ID
 
 from .mcache import MessageCache
 from .pb import rpc_pb2
@@ -201,7 +208,7 @@ class GossipSub(IPubsubRouter):
                 # FIXME: `gossipsub.peers_floodsub` can be changed to `gossipsub.peers` in go.
                 #   This will improve the efficiency when searching for a peer's protocol id.
                 if peer_id_str in self.peers_floodsub:
-                    peer_id = id_b58_decode(peer_id_str)
+                    peer_id = ID.from_base58(peer_id_str)
                     send_to.add(peer_id)
 
             # gossipsub peers
@@ -223,7 +230,7 @@ class GossipSub(IPubsubRouter):
                     )
                 in_topic_gossipsub_peers = self.fanout[topic]
             for peer_id_str in in_topic_gossipsub_peers:
-                send_to.add(id_b58_decode(peer_id_str))
+                send_to.add(ID.from_base58(peer_id_str))
         # Excludes `msg_forwarder` and `origin`
         yield from send_to.difference([msg_forwarder, origin])
 

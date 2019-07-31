@@ -1,6 +1,6 @@
 from typing import Iterable, List, Sequence
 
-from libp2p.peer.id import ID, id_b58_decode
+from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 from .pubsub import Pubsub
@@ -106,7 +106,7 @@ class FloodSub(IPubsubRouter):
             if topic not in self.pubsub.peer_topics:
                 continue
             for peer_id_str in self.pubsub.peer_topics[topic]:
-                peer_id = id_b58_decode(peer_id_str)
+                peer_id = ID.from_base58(peer_id_str)
                 if peer_id in (msg_forwarder, origin):
                     continue
                 # FIXME: Should change `self.pubsub.peers` to Dict[PeerID, ...]

@@ -3,7 +3,7 @@ from typing import Awaitable, Callable, Dict, List, Sequence
 
 from multiaddr import Multiaddr
 
-from libp2p.peer.id import ID, id_b58_decode
+from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
@@ -185,7 +185,7 @@ class Swarm(INetwork):
                 reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             ) -> None:
                 # Read in first message (should be peer_id of initiator) and ack
-                peer_id = id_b58_decode((await reader.read(1024)).decode())
+                peer_id = ID.from_base58((await reader.read(1024)).decode())
 
                 writer.write("received peer id".encode())
                 await writer.drain()

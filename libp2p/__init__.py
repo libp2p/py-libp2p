@@ -4,7 +4,7 @@ from Crypto.PublicKey import RSA
 
 from .security.insecure_security import InsecureTransport
 from .peer.peerstore import PeerStore
-from .peer.id import id_from_public_key
+from .peer.id import ID
 from .network.swarm import Swarm
 from .host.basic_host import BasicHost
 from .transport.upgrader import TransportUpgrader
@@ -29,7 +29,7 @@ async def cleanup_done_tasks():
 
 def generate_id():
     new_key = RSA.generate(2048, e=65537)
-    new_id = id_from_public_key(new_key.publickey())
+    new_id = ID.from_pubkey(new_key.publickey())
     # private_key = new_key.exportKey("PEM")
     return new_id
 

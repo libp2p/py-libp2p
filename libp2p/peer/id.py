@@ -53,6 +53,29 @@ class ID:
     def __hash__(self) -> int:
         return hash(self._bytes)
 
+    @classmethod
+    def from_base58(cls, b58_encoded_peer_id_str: str) -> 'ID':
+        peer_id_bytes = base58.b58decode(b58_encoded_peer_id_str)
+        pid = ID(peer_id_bytes)
+        return pid
+
+    @classmethod
+    def from_pubkey(cls, key: RsaKey) -> 'ID':
+        # export into binary format
+        key_bin = key.exportKey("DER")
+
+        algo: int = multihash.Func.sha2_256
+        # TODO: seems identity is not yet supported in pymultihash
+        # if len(b) <= MAX_INLINE_KEY_LENGTH:
+        #     algo multihash.func.identity
+
+        mh_digest: multihash.Multihash = multihash.digest(key_bin, algo)
+        return cls(mh_digest.encode())
+
+    @classmethod
+    def from_privkey(cls, key: RsaKey) -> 'ID':
+        return cls.from_pubkey(key.publickey())
+
 
 def id_b58_encode(peer_id: ID) -> str:
     """
