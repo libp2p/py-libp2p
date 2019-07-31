@@ -130,7 +130,7 @@ class KademliaServer:
         return await spider.find()
 
     async def bootstrap_node(self, addr):
-        result = await self.protocol.ping(addr, self.node.peer_id)
+        result = await self.protocol.ping(addr, self.node.peer_id_raw)
         return create_kad_peerinfo(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):
