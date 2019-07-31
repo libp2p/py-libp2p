@@ -18,6 +18,7 @@ extras_require = {
     "lint": [
         "pylint>=2.3.1,<3.0.0",
         "mypy>=0.701,<1.0",
+        "black==19.3b0",
     ],
     "dev": [
         "tox>=3.13.2,<4.0.0",
