@@ -1,34 +1,43 @@
 """
 General catchall for functions that don't make sense as methods.
 """
+import asyncio
 import hashlib
 import operator
-import asyncio
 from typing import (
-    Any,
+    Awaitable,
+    Dict,
+    List,
     Sequence,
+    TypeVar,
+    Union,
 )
 
+ItemT = TypeVar('ItemT')
 
-async def gather_dict(dic):
+KT = TypeVar('KT')
+VT = TypeVar('VT')
+
+
+async def gather_dict(dic: Dict[KT, Awaitable[VT]]) -> Dict[KT, VT]:
     cors = list(dic.values())
     results = await asyncio.gather(*cors)
     return dict(zip(dic.keys(), results))
 
 
-def digest(string):
+def digest(string: Union[str, bytes]) -> bytes:
     if not isinstance(string, bytes):
         string = str(string).encode("utf8")
     return hashlib.sha1(string).digest()
 
 
-class OrderedSet(list):
+class OrderedSet(List[ItemT]):
     """
     Acts like a list in all ways, except in the behavior of the
     :meth:`push` method.
     """
 
-    def push(self, thing: Any) -> None:
+    def push(self, thing: ItemT) -> None:
         """
         1. If the item exists in the list, it's removed
         2. The item is pushed to the end of the list
