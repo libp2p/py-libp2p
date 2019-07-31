@@ -118,12 +118,14 @@ class Pubsub:
         Generate subscription message with all topics we are subscribed to
         only send hello packet if we have subscribed topics
         """
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        if self.my_topics:
-            for topic_id in self.my_topics:
-                packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(
-                    subscribe=True, topicid=topic_id)])
-
+        packet = rpc_pb2.RPC()
+        for topic_id in self.my_topics:
+            packet.subscriptions.extend([
+                rpc_pb2.RPC.SubOpts(
+                    subscribe=True,
+                    topicid=topic_id,
+                )
+            ])
         return packet.SerializeToString()
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -157,7 +159,11 @@ class Pubsub:
                 for message in rpc_incoming.subscriptions:
                     self.handle_subscription(peer_id, message)
 
-            if rpc_incoming.control:
+            # pylint: disable=line-too-long
+            # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
+            #   This is necessary because `control` is an optional field in pb2.
+            #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2
+            if rpc_incoming.HasField("control"):
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
@@ -182,6 +188,8 @@ class Pubsub:
         await stream.write(hello)
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continuously_read_stream(stream))
+        # Force context switch
+        await asyncio.sleep(0)
 
     async def handle_peer_queue(self) -> None:
         """
@@ -208,6 +216,9 @@ class Pubsub:
             hello: bytes = self.get_hello_packet()
             await stream.write(hello)
 
+            # pylint: disable=line-too-long
+            # TODO: Investigate whether this should be replaced by `handlePeerEOF`
+            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/49274b0e8aecdf6cad59d768e5702ff00aa48488/comm.go#L80  # noqa: E501
             # Pass stream off to stream reader
             asyncio.ensure_future(self.continuously_read_stream(stream))
 
@@ -312,7 +323,7 @@ class Pubsub:
         """
 
         # Broadcast message
-        for _, stream in self.peers.items():
+        for stream in self.peers.values():
             # Write message to stream
             await stream.write(raw_msg)
 
@@ -340,11 +351,11 @@ class Pubsub:
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message we are going to push out.
         """
-        # TODO: - Check if the `source` is in the blacklist. If yes, reject.
+        # TODO: Check if the `source` is in the blacklist. If yes, reject.
 
-        # TODO: - Check if the `from` is in the blacklist. If yes, reject.
+        # TODO: Check if the `from` is in the blacklist. If yes, reject.
 
-        # TODO: - Check if signing is required and if so signature should be attached.
+        # TODO: Check if signing is required and if so signature should be attached.
 
         if self._is_msg_seen(msg):
             return

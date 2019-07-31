@@ -3,8 +3,8 @@ import pytest
 from libp2p.pubsub.mcache import MessageCache
 
 
+# pylint: disable=too-few-public-methods
 class Msg:
-
     def __init__(self, topicIDs, seqno, from_id):
         # pylint: disable=invalid-name
         self.topicIDs = topicIDs
@@ -15,8 +15,7 @@ class Msg:
 @pytest.mark.asyncio
 async def test_mcache():
     # Ported from:
-    # https://github.com/libp2p/go-libp2p-pubsub
-    # /blob/51b7501433411b5096cac2b4994a36a68515fc03/mcache_test.go
+    # https://github.com/libp2p/go-libp2p-pubsub/blob/51b7501433411b5096cac2b4994a36a68515fc03/mcache_test.go
     mcache = MessageCache(3, 5)
     msgs = []
 
