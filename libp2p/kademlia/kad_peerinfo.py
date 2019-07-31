@@ -15,6 +15,7 @@ from typing import (
     Tuple,
     Set,
     Sequence,
+    Union,
 )
 if TYPE_CHECKING:
     from libp2p.host.host_interface import IHost
@@ -24,21 +25,14 @@ P_UDP = "udp"
 
 
 class KadPeerInfo(PeerInfo):
-    peer_id_obj: ID
-    peer_id: bytes
     xor_id: int
-    addrs: List[Multiaddr]
     ip: str
     port: int
 
-    def __init__(self, peer_id: ID, peer_data: 'IHost' = None) -> None:
-        super(KadPeerInfo, self).__init__(peer_id, peer_data)
+    def __init__(self, peer_id_obj: ID, peer_data: PeerData = None) -> None:
+        super().__init__(peer_id_obj, peer_data)
 
-        self.peer_id_obj = peer_id
-        self.peer_id = peer_id.get_raw_id()
-        self.xor_id = peer_id.get_xor_id()
-
-        self.addrs = peer_data.get_addrs() if peer_data else None
+        self.xor_id = peer_id_obj.get_xor_id()
 
         # pylint: disable=invalid-name
         self.ip = (
@@ -107,7 +101,7 @@ class KadPeerHeap:
         peers = set(peers)
         if not peers:
             return
-        nheap = []
+        nheap: List[Tuple[int, 'KadPeerInfo']] = []
         for distance, node in self.heap:
             if node.peer_id not in peers:
                 heapq.heappush(nheap, (distance, node))
@@ -131,16 +125,20 @@ class KadPeerHeap:
     def popleft(self) -> 'KadPeerInfo':
         return heapq.heappop(self.heap)[1] if self else None
 
-    def push(self, nodes: Sequence['KadPeerInfo']) -> None:
+    def push(self, nodes: Union['KadPeerInfo', Sequence['KadPeerInfo']]) -> None:
         """
         Push nodes onto heap.
 
         @param nodes: This can be a single item or a C{list}.
         """
+        nodes_list: Sequence['KadPeerInfo']
         if not isinstance(nodes, list):
-            nodes = [nodes]
+            # typing doesn't know nodes is already list
+            nodes_list = [nodes]  # type: ignore
+        else:
+            nodes_list = nodes
 
-        for node in nodes:
+        for node in nodes_list:
             if node not in self:
                 distance = self.node.distance_to(node)
                 heapq.heappush(self.heap, (distance, node))
@@ -148,9 +146,10 @@ class KadPeerHeap:
     def __len__(self) -> int:
         return min(len(self.heap), self.maxsize)
 
-    def __iter__(self) -> 'KadPeerInfo':
+    def __iter__(self) -> Iterator['KadPeerInfo']:
         nodes = heapq.nsmallest(self.maxsize, self.heap)
-        return iter(map(itemgetter(1), nodes))
+        for _, node in nodes:
+            yield node
 
     def __contains__(self, node: 'KadPeerInfo') -> bool:
         for _, other in self.heap:
