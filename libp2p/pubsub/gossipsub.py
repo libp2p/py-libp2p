@@ -1,14 +1,7 @@
 from ast import literal_eval
 import asyncio
 import random
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Set,
-    Sequence,
-)
+from typing import Any, Dict, Iterable, List, Set, Sequence
 
 from libp2p.peer.id import ID
 
@@ -287,11 +280,7 @@ class GossipSub(IPubsubRouter):
         return "unknown"
 
     async def deliver_messages_to_peers(
-        self,
-        peers: List[ID],
-        msg_sender: ID,
-        origin_id: ID,
-        serialized_packet: bytes,
+        self, peers: List[ID], msg_sender: ID, origin_id: ID, serialized_packet: bytes
     ) -> None:
         for peer_id_in_topic in peers:
             # Forward to all peers that are not the

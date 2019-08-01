@@ -42,7 +42,7 @@ class ID:
     __repr__ = __str__
 
     def __eq__(self, other: object) -> bool:
-        #pylint: disable=protected-access, no-else-return
+        # pylint: disable=protected-access, no-else-return
         if isinstance(other, bytes):
             return self._bytes == other
         elif isinstance(other, ID):
@@ -54,13 +54,13 @@ class ID:
         return hash(self._bytes)
 
     @classmethod
-    def from_base58(cls, b58_encoded_peer_id_str: str) -> 'ID':
+    def from_base58(cls, b58_encoded_peer_id_str: str) -> "ID":
         peer_id_bytes = base58.b58decode(b58_encoded_peer_id_str)
         pid = ID(peer_id_bytes)
         return pid
 
     @classmethod
-    def from_pubkey(cls, key: RsaKey) -> 'ID':
+    def from_pubkey(cls, key: RsaKey) -> "ID":
         # export into binary format
         key_bin = key.exportKey("DER")
 
@@ -73,7 +73,7 @@ class ID:
         return cls(mh_digest.encode())
 
     @classmethod
-    def from_privkey(cls, key: RsaKey) -> 'ID':
+    def from_privkey(cls, key: RsaKey) -> "ID":
         return cls.from_pubkey(key.publickey())
 
 
@@ -81,7 +81,7 @@ def id_b58_encode(peer_id: ID) -> str:
     """
     return a b58-encoded string
     """
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
     return base58.b58encode(peer_id.to_bytes()).decode()
 
 

@@ -3,10 +3,7 @@ import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
-from libp2p.peer.id import (
-    ID,
-    id_b58_encode,
-)
+from libp2p.peer.id import ID, id_b58_encode
 
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -17,9 +14,8 @@ def test_init():
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string.encode())
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
     assert peer_id == random_id_string.encode()
-
 
 
 def test_no_init_value():

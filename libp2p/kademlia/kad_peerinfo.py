@@ -136,8 +136,11 @@ class KadPeerHeap:
     def get_uncontacted(self):
         return [n for n in self if n.peer_id_bytes not in self.contacted]
 
+
 def create_kad_peerinfo(node_id_bytes=None, sender_ip=None, sender_port=None):
-    node_id = ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
+    node_id = (
+        ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
+    )
     peer_data = None
     if sender_ip and sender_port:
         peer_data = PeerData()  # pylint: disable=no-value-for-parameter

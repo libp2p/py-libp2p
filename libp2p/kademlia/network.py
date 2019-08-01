@@ -212,10 +212,10 @@ class KademliaServer:
         """
         log.info("Saving state to %s", fname)
         data = {
-            'ksize': self.ksize,
-            'alpha': self.alpha,
-            'id': self.node.peer_id_bytes,
-            'neighbors': self.bootstrappable_neighbors()
+            "ksize": self.ksize,
+            "alpha": self.alpha,
+            "id": self.node.peer_id_bytes,
+            "neighbors": self.bootstrappable_neighbors(),
         }
         if not data["neighbors"]:
             log.warning("No known neighbors, so not writing to cache.")
