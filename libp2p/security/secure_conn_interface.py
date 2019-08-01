@@ -1,5 +1,10 @@
 from abc import ABC, abstractmethod
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .typing import TSecurityDetails
+
 # pylint: disable=W0105
 
 """
@@ -12,13 +17,13 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 class ISecureConn(ABC):
     @abstractmethod
-    def get_conn(self):
+    def get_conn(self) -> "ISecureConn":
         """
         :return: connection object that has been made secure
         """
 
     @abstractmethod
-    def get_security_details(self):
+    def get_security_details(self) -> "TSecurityDetails":
         """
         :return: map containing details about the connections security
         """
