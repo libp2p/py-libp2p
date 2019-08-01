@@ -4,6 +4,16 @@ import logging
 from .kad_peerinfo import KadPeerHeap, create_kad_peerinfo
 from .utils import gather_dict
 
+from typing import TYPE_CHECKING, Sequence, List, TypeVar
+
+if TYPE_CHECKING:
+    from .protocol import KademliaProtocol
+    from .kad_peerinfo import KadPeerInfo
+
+TRPCMethod = TypeVar("TRPCMethod")
+TNodesFound = TypeVar("TNodesFound")
+TPeerID = TypeVar("TPeerID")
+TResponses = 'RPCFindResponse'
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -14,7 +24,21 @@ class SpiderCrawl:
     Crawl the network and look for given 160-bit keys.
     """
 
-    def __init__(self, protocol, node, peers, ksize, alpha):
+    protocol: "KademliaProtocol"
+    ksize: int
+    alpha: int
+    node: "KadPeerInfo"
+    nearest: "KadPeerHeap"
+    last_ids_crawled: List[bytes]
+
+    def __init__(
+        self,
+        protocol: "KademliaProtocol",
+        node: "KadPeerInfo",
+        peers: Sequence["KadPeerInfo"],
+        ksize: int,
+        alpha: int,
+    ) -> None:
         # pylint: disable=too-many-arguments
         """
         Create a new C{SpiderCrawl}er.
@@ -37,7 +61,7 @@ class SpiderCrawl:
         log.info("creating spider with peers: %s", peers)
         self.nearest.push(peers)
 
-    async def _find(self, rpcmethod):
+    async def _find(self, rpcmethod: TRPCMethod) -> TNodesFound:
         """
         Get either a value or list of nodes.
 
@@ -66,12 +90,19 @@ class SpiderCrawl:
         found = await gather_dict(dicts)
         return await self._nodes_found(found)
 
-    async def _nodes_found(self, responses):
+    async def _nodes_found(self, responses: TResponses) -> TNodesFound:
         raise NotImplementedError
 
 
 class ValueSpiderCrawl(SpiderCrawl):
-    def __init__(self, protocol, node, peers, ksize, alpha):
+    def __init__(
+        self,
+        protocol: "KademliaProtocol",
+        node: "KadPeerInfo",
+        peers: Sequence["KadPeerInfo"],
+        ksize: int,
+        alpha: int,
+    ):
         # pylint: disable=too-many-arguments
         SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)
         # keep track of the single nearest node without value - per
@@ -84,7 +115,7 @@ class ValueSpiderCrawl(SpiderCrawl):
         """
         return await self._find(self.protocol.call_find_value)
 
-    async def _nodes_found(self, responses):
+    async def _nodes_found(self, responses: TResponses) -> TNodesFound:
         """
         Handle the result of an iteration in _find.
         """

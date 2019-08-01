@@ -7,7 +7,7 @@ from .kad_peerinfo import create_kad_peerinfo
 from .routing import RoutingTable
 
 
-from typing import Dict, TYPE_CHECKING, List, TypeVar, Tuple, NewType
+from typing import Dict, TYPE_CHECKING, List, TypeVar, Tuple, NewType, Any
 
 if TYPE_CHECKING:
     from .storage import IStorage
@@ -81,7 +81,7 @@ class KademliaProtocol(RPCProtocol):
 
     def rpc_find_node(
         self, sender: Address, nodeid: TNodeID, key: TKey
-    ) -> List[Tuple[bytes, str, int]]:
+    ) -> List[Tuple[Any, ...]]:
         log.info("finding neighbors of %i in local table", int(nodeid.hex(), 16))
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
@@ -144,7 +144,7 @@ class KademliaProtocol(RPCProtocol):
         self, node_to_ask: "KadPeerInfo", node_to_find: "KadPeerInfo"
     ) -> TResult:
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.find_node(
+        result = await self.rpc_find_node(
             address, self.source_node.peer_id, node_to_find.peer_id
         )
         return self.handle_call_response(result, node_to_ask)
