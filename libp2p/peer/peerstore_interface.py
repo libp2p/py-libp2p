@@ -1,8 +1,5 @@
 from abc import abstractmethod
-from typing import (
-    List,
-    Sequence,
-)
+from typing import List, Sequence
 
 
 from .addrbook_interface import IAddrBook
@@ -12,7 +9,6 @@ from .peermetadata_interface import IPeerMetadata
 
 
 class IPeerStore(IAddrBook, IPeerMetadata):
-
     def __init__(self) -> None:
         IPeerMetadata.__init__(self)
         IAddrBook.__init__(self)

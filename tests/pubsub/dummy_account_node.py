@@ -29,15 +29,12 @@ class DummyAccountNode:
     a dummy crypto blockchain. There is no actual blockchain, just a simple
     map indicating how much crypto each user in the mappings holds
     """
+
     libp2p_node: IHost
     pubsub: Pubsub
     floodsub: FloodSub
 
-    def __init__(
-            self,
-            libp2p_node: IHost,
-            pubsub: Pubsub,
-            floodsub: FloodSub):
+    def __init__(self, libp2p_node: IHost, pubsub: Pubsub, floodsub: FloodSub):
         self.libp2p_node = libp2p_node
         self.pubsub = pubsub
         self.floodsub = floodsub
@@ -56,19 +53,13 @@ class DummyAccountNode:
         """
 
         libp2p_node = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-        await libp2p_node.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        await libp2p_node.get_network().listen(
+            multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+        )
 
         floodsub = FloodSub(SUPPORTED_PUBSUB_PROTOCOLS)
-        pubsub = Pubsub(
-            libp2p_node,
-            floodsub,
-            "a",
-        )
-        return cls(
-            libp2p_node=libp2p_node,
-            pubsub=pubsub,
-            floodsub=floodsub,
-        )
+        pubsub = Pubsub(libp2p_node, floodsub, "a")
+        return cls(libp2p_node=libp2p_node, pubsub=pubsub, floodsub=floodsub)
 
     async def handle_incoming_msgs(self):
         """
@@ -76,7 +67,7 @@ class DummyAccountNode:
         """
         while True:
             incoming = await self.q.get()
-            msg_comps = incoming.data.decode('utf-8').split(",")
+            msg_comps = incoming.data.decode("utf-8").split(",")
 
             if msg_comps[0] == "send":
                 self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))

@@ -11,6 +11,7 @@ from .utils import digest
 P_IP = "ip4"
 P_UDP = "udp"
 
+
 class KadPeerInfo(PeerInfo):
     def __init__(self, peer_id, peer_data=None):
         super(KadPeerInfo, self).__init__(peer_id, peer_data)
@@ -22,11 +23,8 @@ class KadPeerInfo(PeerInfo):
         self.addrs = peer_data.get_addrs() if peer_data else None
 
         # pylint: disable=invalid-name
-        self.ip = self.addrs[0].value_for_protocol(P_IP)\
-                  if peer_data else None
-        self.port = int(self.addrs[0].value_for_protocol(P_UDP))\
-                    if peer_data else None
-
+        self.ip = self.addrs[0].value_for_protocol(P_IP) if peer_data else None
+        self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if peer_data else None
 
     def same_home_as(self, node):
         return sorted(self.addrs) == sorted(node.addrs)
@@ -50,13 +48,18 @@ class KadPeerInfo(PeerInfo):
         return "%s:%s" % (self.ip, str(self.port))
 
     def encode(self):
-        return str(self.peer_id) + "\n" + \
-               str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
+        return (
+            str(self.peer_id)
+            + "\n"
+            + str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
+        )
+
 
 class KadPeerHeap:
     """
     A heap of peers ordered by distance to a given node.
     """
+
     def __init__(self, node, maxsize):
         """
         Constructor.
@@ -134,13 +137,17 @@ class KadPeerHeap:
     def get_uncontacted(self):
         return [n for n in self if n.peer_id not in self.contacted]
 
+
 def create_kad_peerinfo(raw_node_id=None, sender_ip=None, sender_port=None):
     node_id = ID(raw_node_id) if raw_node_id else ID(digest(random.getrandbits(255)))
     peer_data = None
     if sender_ip and sender_port:
-        peer_data = PeerData() #pylint: disable=no-value-for-parameter
-        addr = [Multiaddr("/"+ P_IP +"/" + str(sender_ip) + "/"\
-                + P_UDP + "/" + str(sender_port))]
+        peer_data = PeerData()  # pylint: disable=no-value-for-parameter
+        addr = [
+            Multiaddr(
+                "/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port)
+            )
+        ]
         peer_data.add_addrs(addr)
 
     return KadPeerInfo(node_id, peer_data)

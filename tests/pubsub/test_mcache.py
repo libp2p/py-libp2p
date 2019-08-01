@@ -33,7 +33,7 @@ async def test_mcache():
         # successful read
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 10
 
@@ -55,7 +55,7 @@ async def test_mcache():
 
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 20
 
@@ -108,7 +108,7 @@ async def test_mcache():
 
         assert get_msg == msg
 
-    gids = mcache.window('test')
+    gids = mcache.window("test")
 
     assert len(gids) == 30
 

@@ -1,10 +1,4 @@
-from typing import (
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-)
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .pb import rpc_pb2
 
@@ -18,6 +12,7 @@ class CacheEntry:
     """
     A logical representation of an entry in the mcache's _history_.
     """
+
     def __init__(self, mid: Tuple[bytes, bytes], topics: Sequence[str]) -> None:
         """
         Constructor.
@@ -29,7 +24,6 @@ class CacheEntry:
 
 
 class MessageCache:
-
 
     window_size: int
     history_size: int
@@ -53,10 +47,7 @@ class MessageCache:
 
         # max length of history_size. each item is a list of CacheEntry.
         # messages lost upon shift().
-        self.history = [
-            []
-            for _ in range(history_size)
-        ]
+        self.history = [[] for _ in range(history_size)]
 
     def put(self, msg: rpc_pb2.Message) -> None:
         """

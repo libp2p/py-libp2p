@@ -3,10 +3,7 @@ from threading import Thread
 
 import pytest
 
-from tests.utils import (
-    cleanup,
-    connect,
-)
+from tests.utils import cleanup, connect
 
 from .dummy_account_node import DummyAccountNode
 
@@ -16,6 +13,7 @@ from .dummy_account_node import DummyAccountNode
 def create_setup_in_new_thread_func(dummy_node):
     def setup_in_new_thread():
         asyncio.ensure_future(dummy_node.setup_crypto_networking())
+
     return setup_in_new_thread
 
 
@@ -39,8 +37,9 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     for source_num in adjacency_map:
         target_nums = adjacency_map[source_num]
         for target_num in target_nums:
-            await connect(dummy_nodes[source_num].libp2p_node, \
-                dummy_nodes[target_num].libp2p_node)
+            await connect(
+                dummy_nodes[source_num].libp2p_node, dummy_nodes[target_num].libp2p_node
+            )
 
     # Allow time for network creation to take place
     await asyncio.sleep(0.25)
@@ -142,6 +141,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
+
 @pytest.mark.asyncio
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
@@ -158,6 +158,7 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
+
 @pytest.mark.asyncio
 async def test_simple_five_nodes_ring_topography():
     num_nodes = 5
@@ -170,6 +171,7 @@ async def test_simple_five_nodes_ring_topography():
         assert dummy_node.get_balance("aspyn") == 20
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
 
 @pytest.mark.asyncio
 async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
@@ -186,6 +188,7 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
         assert dummy_node.get_balance("rob") == 12
 
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
+
 
 @pytest.mark.asyncio
 async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():

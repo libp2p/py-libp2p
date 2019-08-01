@@ -1,13 +1,6 @@
-from typing import (
-    Iterable,
-    List,
-    Sequence,
-)
+from typing import Iterable, List, Sequence
 
-from libp2p.peer.id import (
-    ID,
-    id_b58_decode,
-)
+from libp2p.peer.id import ID, id_b58_decode
 
 from .pb import rpc_pb2
 from .pubsub import Pubsub
@@ -78,9 +71,7 @@ class FloodSub(IPubsubRouter):
             msg_forwarder=msg_forwarder,
             origin=ID(pubsub_msg.from_id),
         )
-        rpc_msg = rpc_pb2.RPC(
-            publish=[pubsub_msg],
-        )
+        rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
         for peer_id in peers_gen:
             stream = self.pubsub.peers[str(peer_id)]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
@@ -103,10 +94,8 @@ class FloodSub(IPubsubRouter):
         """
 
     def _get_peers_to_send(
-            self,
-            topic_ids: Iterable[str],
-            msg_forwarder: ID,
-            origin: ID) -> Iterable[ID]:
+        self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
+    ) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
         :param msg_forwarder: peer ID of the peer who forwards the message to us.

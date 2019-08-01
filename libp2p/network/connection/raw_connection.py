@@ -2,6 +2,7 @@ import asyncio
 
 from .raw_connection_interface import IRawConnection
 
+
 class RawConnection(IRawConnection):
 
     conn_ip: str
@@ -11,12 +12,14 @@ class RawConnection(IRawConnection):
     _next_id: int
     initiator: bool
 
-    def __init__(self,
-                 ip: str,
-                 port: str,
-                 reader: asyncio.StreamReader,
-                 writer: asyncio.StreamWriter,
-                 initiator: bool) -> None:
+    def __init__(
+        self,
+        ip: str,
+        port: str,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        initiator: bool,
+    ) -> None:
         # pylint: disable=too-many-arguments
         self.conn_ip = ip
         self.conn_port = port
@@ -32,7 +35,7 @@ class RawConnection(IRawConnection):
 
     async def read(self) -> bytes:
         line = await self.reader.readline()
-        adjusted_line = line.decode().rstrip('\n')
+        adjusted_line = line.decode().rstrip("\n")
 
         # TODO: figure out a way to remove \n without going back and forth with
         # encoding and decoding

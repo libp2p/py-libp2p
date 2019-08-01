@@ -7,15 +7,9 @@ from libp2p.peer.id import ID
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 
-from tests.utils import (
-    cleanup,
-    connect,
-)
+from tests.utils import cleanup, connect
 
-from .configs import (
-    FLOODSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
-)
+from .configs import FLOODSUB_PROTOCOL_ID, LISTEN_MADDR
 from .floodsub_integration_test_settings import (
     perform_test_from_obj,
     floodsub_protocol_pytest_params,
@@ -85,7 +79,9 @@ async def test_lru_cache_two_nodes(monkeypatch):
     def get_msg_id(msg):
         # Originally it is `(msg.seqno, msg.from_id)`
         return (msg.data, msg.from_id)
+
     import libp2p.pubsub.pubsub
+
     monkeypatch.setattr(libp2p.pubsub.pubsub, "get_msg_id", get_msg_id)
 
     # Initialize Pubsub with a cache_size of 4
@@ -104,7 +100,7 @@ async def test_lru_cache_two_nodes(monkeypatch):
 
     def _make_testing_data(i: int) -> bytes:
         num_int_bytes = 4
-        if i >= 2**(num_int_bytes * 8):
+        if i >= 2 ** (num_int_bytes * 8):
             raise ValueError("integer is too large to be serialized")
         return b"data" + i.to_bytes(num_int_bytes, "big")
 
@@ -121,13 +117,7 @@ async def test_lru_cache_two_nodes(monkeypatch):
     await cleanup()
 
 
-@pytest.mark.parametrize(
-    "test_case_obj",
-    floodsub_protocol_pytest_params,
-)
+@pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)
 @pytest.mark.asyncio
 async def test_gossipsub_run_with_floodsub_tests(test_case_obj):
-    await perform_test_from_obj(
-        test_case_obj,
-        FloodSub,
-    )
+    await perform_test_from_obj(test_case_obj, FloodSub)

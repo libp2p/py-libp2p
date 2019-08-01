@@ -1,10 +1,4 @@
-from typing import (
-    Any,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-)
+from typing import Any, Dict, List, Optional, Sequence
 
 from multiaddr import Multiaddr
 

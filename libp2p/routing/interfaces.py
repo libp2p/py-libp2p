@@ -1,16 +1,13 @@
-from abc import (
-    ABC,
-    abstractmethod,
-)
+from abc import ABC, abstractmethod
 from typing import Iterable
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+
 # pylint: disable=too-few-public-methods
 
 
 class IContentRouting(ABC):
-
     @abstractmethod
     def provide(self, cid: bytes, announce: bool = True) -> None:
         """
@@ -28,7 +25,6 @@ class IContentRouting(ABC):
 
 
 class IPeerRouting(ABC):
-
     @abstractmethod
     async def find_peer(self, peer_id: ID) -> PeerInfo:
         """

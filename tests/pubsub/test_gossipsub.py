@@ -3,10 +3,7 @@ import random
 
 import pytest
 
-from tests.utils import (
-    cleanup,
-    connect,
-)
+from tests.utils import cleanup, connect
 
 from .configs import GOSSIPSUB_PROTOCOL_ID
 from .utils import (
@@ -28,9 +25,9 @@ async def test_join():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                4, 3, 5, 30, 3, 5, 0.5)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 4, 3, 5, 30, 3, 5, 0.5
+    )
 
     topic = "test_join"
     central_node_index = 0
@@ -69,10 +66,19 @@ async def test_join():
 
     for i in hosts_indices:
         if i in subscribed_peer_indices:
-            assert str(libp2p_hosts[i].get_id()) in gossipsubs[central_node_index].mesh[topic]
-            assert str(libp2p_hosts[central_node_index].get_id()) in gossipsubs[i].mesh[topic]
+            assert (
+                str(libp2p_hosts[i].get_id())
+                in gossipsubs[central_node_index].mesh[topic]
+            )
+            assert (
+                str(libp2p_hosts[central_node_index].get_id())
+                in gossipsubs[i].mesh[topic]
+            )
         else:
-            assert str(libp2p_hosts[i].get_id()) not in gossipsubs[central_node_index].mesh[topic]
+            assert (
+                str(libp2p_hosts[i].get_id())
+                not in gossipsubs[central_node_index].mesh[topic]
+            )
             assert topic not in gossipsubs[i].mesh
 
     await cleanup()
@@ -84,9 +90,9 @@ async def test_leave():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                          SUPPORTED_PROTOCOLS, \
-                                                          10, 9, 11, 30, 3, 5, 0.5)
+    _, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     gossipsub = gossipsubs[0]
     topic = "test_leave"
@@ -111,9 +117,9 @@ async def test_handle_graft(event_loop, monkeypatch):
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    _, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                          SUPPORTED_PROTOCOLS, \
-                                                          10, 9, 11, 30, 3, 5, 0.5)
+    _, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     index_alice = 0
     id_alice = str(libp2p_hosts[index_alice].get_id())
@@ -131,10 +137,11 @@ async def test_handle_graft(event_loop, monkeypatch):
     # Monkey patch bob's `emit_prune` function so we can
     # check if it is called in `handle_graft`
     event_emit_prune = asyncio.Event()
+
     async def emit_prune(topic, sender_peer_id):
         event_emit_prune.set()
 
-    monkeypatch.setattr(gossipsubs[index_bob], 'emit_prune', emit_prune)
+    monkeypatch.setattr(gossipsubs[index_bob], "emit_prune", emit_prune)
 
     # Check that alice is bob's peer but not his mesh peer
     assert id_alice in gossipsubs[index_bob].peers_gossipsub
@@ -143,11 +150,7 @@ async def test_handle_graft(event_loop, monkeypatch):
     await gossipsubs[index_alice].emit_graft(topic, id_bob)
 
     # Check that `emit_prune` is called
-    await asyncio.wait_for(
-        event_emit_prune.wait(),
-        timeout=1,
-        loop=event_loop,
-    )
+    await asyncio.wait_for(event_emit_prune.wait(), timeout=1, loop=event_loop)
     assert event_emit_prune.is_set()
 
     # Check that bob is alice's peer but not her mesh peer
@@ -171,9 +174,9 @@ async def test_handle_prune():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 3)
+    pubsubs, gossipsubs = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 3
+    )
 
     index_alice = 0
     id_alice = str(libp2p_hosts[index_alice].get_id())
@@ -217,9 +220,9 @@ async def test_dense():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, _ = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, _ = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar
     queues = []
@@ -236,7 +239,7 @@ async def test_dense():
     await asyncio.sleep(2)
 
     for i in range(num_msgs):
-        msg_content = b"foo " + i.to_bytes(1, 'big')
+        msg_content = b"foo " + i.to_bytes(1, "big")
 
         # randomly pick a message origin
         origin_idx = random.randint(0, num_hosts - 1)
@@ -260,9 +263,9 @@ async def test_fanout():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, _ = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, _ = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar except for `pubsubs[0]`
     queues = []
@@ -300,7 +303,7 @@ async def test_fanout():
 
     # Send messages again
     for i in range(num_msgs):
-        msg_content = b"bar " + i.to_bytes(1, 'big')
+        msg_content = b"bar " + i.to_bytes(1, "big")
 
         # Pick the message origin to the node that is not subscribed to 'foobar'
         origin_idx = 0
@@ -316,6 +319,7 @@ async def test_fanout():
 
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_fanout_maintenance():
     # Create libp2p hosts
@@ -324,9 +328,9 @@ async def test_fanout_maintenance():
     libp2p_hosts = await create_libp2p_hosts(num_hosts)
 
     # Create pubsub, gossipsub instances
-    pubsubs, _ = create_pubsub_and_gossipsub_instances(libp2p_hosts, \
-                                                                SUPPORTED_PROTOCOLS, \
-                                                                10, 9, 11, 30, 3, 5, 0.5)
+    pubsubs, _ = create_pubsub_and_gossipsub_instances(
+        libp2p_hosts, SUPPORTED_PROTOCOLS, 10, 9, 11, 30, 3, 5, 0.5
+    )
 
     # All pubsub subscribe to foobar
     queues = []
@@ -345,7 +349,7 @@ async def test_fanout_maintenance():
 
     # Send messages with origin not subscribed
     for i in range(num_msgs):
-        msg_content = b"foo " + i.to_bytes(1, 'big')
+        msg_content = b"foo " + i.to_bytes(1, "big")
 
         # Pick the message origin to the node that is not subscribed to 'foobar'
         origin_idx = 0
@@ -377,7 +381,7 @@ async def test_fanout_maintenance():
 
     # Check messages can still be sent
     for i in range(num_msgs):
-        msg_content = b"bar " + i.to_bytes(1, 'big')
+        msg_content = b"bar " + i.to_bytes(1, "big")
 
         # Pick the message origin to the node that is not subscribed to 'foobar'
         origin_idx = 0
@@ -402,22 +406,14 @@ async def test_gossip_propagation():
 
     # Create pubsub, gossipsub instances
     pubsubs, _ = create_pubsub_and_gossipsub_instances(
-        hosts,
-        SUPPORTED_PROTOCOLS,
-        1,
-        0,
-        2,
-        30,
-        50,
-        100,
-        0.5,
+        hosts, SUPPORTED_PROTOCOLS, 1, 0, 2, 30, 50, 100, 0.5
     )
 
     topic = "foo"
     await pubsubs[0].subscribe(topic)
 
     # node 0 publish to topic
-    msg_content = b'foo_msg'
+    msg_content = b"foo_msg"
 
     # publish from the randomly chosen host
     await pubsubs[0].publish(topic, msg_content)

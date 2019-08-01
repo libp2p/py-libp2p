@@ -1,10 +1,4 @@
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    List,
-    Sequence,
-)
+from typing import Any, Awaitable, Callable, List, Sequence
 
 import multiaddr
 
@@ -67,7 +61,7 @@ class BasicHost(IHost):
         """
         :return: all the multiaddr addresses this host is listening too
         """
-        p2p_part = multiaddr.Multiaddr('/p2p/{}'.format(self.get_id().pretty()))
+        p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_id().pretty()))
 
         addrs: List[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
@@ -75,7 +69,9 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(
+        self, protocol_id: str, stream_handler: StreamHandlerFn
+    ) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream

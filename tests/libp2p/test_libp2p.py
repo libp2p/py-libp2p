@@ -115,10 +115,13 @@ async def test_multiple_streams():
         response_a = (await stream_a.read()).decode()
         response_b = (await stream_b.read()).decode()
 
-        assert response_a == ("ack_b:" + a_message) and response_b == ("ack_a:" + b_message)
+        assert response_a == ("ack_b:" + a_message) and response_b == (
+            "ack_a:" + b_message
+        )
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_multiple_streams_same_initiator_different_protocols():
@@ -173,12 +176,15 @@ async def test_multiple_streams_same_initiator_different_protocols():
         response_a2 = (await stream_a2.read()).decode()
         response_a3 = (await stream_a3.read()).decode()
 
-        assert (response_a1 == ("ack_a1:" + a1_message)
-                and response_a2 == ("ack_a2:" + a2_message)
-                and response_a3 == ("ack_a3:" + a3_message))
+        assert (
+            response_a1 == ("ack_a1:" + a1_message)
+            and response_a2 == ("ack_a2:" + a2_message)
+            and response_a3 == ("ack_a3:" + a3_message)
+        )
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_multiple_streams_two_initiators():
@@ -250,18 +256,24 @@ async def test_multiple_streams_two_initiators():
         response_b1 = (await stream_b1.read()).decode()
         response_b2 = (await stream_b2.read()).decode()
 
-        assert (response_a1 == ("ack_a1:" + a1_message)
-                and response_a2 == ("ack_a2:" + a2_message)
-                and response_b1 == ("ack_b1:" + b1_message)
-                and response_b2 == ("ack_b2:" + b2_message))
+        assert (
+            response_a1 == ("ack_a1:" + a1_message)
+            and response_a2 == ("ack_a2:" + a2_message)
+            and response_b1 == ("ack_b1:" + b1_message)
+            and response_b2 == ("ack_b2:" + b2_message)
+        )
 
     # Success, terminate pending tasks.
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_triangle_nodes_connection():
-    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"],\
-                          ["/ip4/127.0.0.1/tcp/0"]]
+    transport_opt_list = [
+        ["/ip4/127.0.0.1/tcp/0"],
+        ["/ip4/127.0.0.1/tcp/0"],
+        ["/ip4/127.0.0.1/tcp/0"],
+    ]
     (node_a, node_b, node_c) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
     async def stream_handler(stream):
@@ -296,8 +308,14 @@ async def test_triangle_nodes_connection():
     stream_c_to_b = await node_c.new_stream(node_b.get_id(), ["/echo/1.0.0"])
 
     messages = ["hello" + str(x) for x in range(5)]
-    streams = [stream_a_to_b, stream_a_to_c, stream_b_to_a, stream_b_to_c,
-               stream_c_to_a, stream_c_to_b]
+    streams = [
+        stream_a_to_b,
+        stream_a_to_c,
+        stream_b_to_a,
+        stream_b_to_c,
+        stream_c_to_a,
+        stream_c_to_b,
+    ]
 
     for message in messages:
         for stream in streams:
@@ -330,7 +348,7 @@ async def test_host_connect():
     assert len(node_a.get_peerstore().peer_ids()) == 1
 
     assert node_b.get_id() in node_a.get_peerstore().peer_ids()
-    ma_node_b = multiaddr.Multiaddr('/p2p/%s' % node_b.get_id().pretty())
+    ma_node_b = multiaddr.Multiaddr("/p2p/%s" % node_b.get_id().pretty())
     for addr in node_a.get_peerstore().addrs(node_b.get_id()):
         assert addr.encapsulate(ma_node_b) in node_b.get_addrs()
 

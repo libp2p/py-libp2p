@@ -1,11 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    List,
-    Sequence,
-)
+from typing import Any, Awaitable, Callable, List, Sequence
 
 import multiaddr
 
@@ -20,7 +14,6 @@ StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class IHost(ABC):
-
     @abstractmethod
     def get_id(self) -> ID:
         """
@@ -47,7 +40,9 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(
+        self, protocol_id: str, stream_handler: StreamHandlerFn
+    ) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -58,9 +53,7 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    async def new_stream(self,
-                         peer_id: ID,
-                         protocol_ids: Sequence[str]) -> INetStream:
+    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on

@@ -36,12 +36,14 @@ async def set_up_nodes_by_transport_opt(transport_opt_list):
         nodes_list.append(node)
     return tuple(nodes_list)
 
+
 async def echo_stream_handler(stream):
     while True:
         read_string = (await stream.read()).decode()
 
         resp = "ack:" + read_string
         await stream.write(resp.encode())
+
 
 async def perform_two_host_set_up_custom_handler(handler):
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]

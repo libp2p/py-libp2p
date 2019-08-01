@@ -8,8 +8,9 @@ chosen by a security transport multistream module.
 
 Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
 """
-class ISecureTransport(ABC):
 
+
+class ISecureTransport(ABC):
     @abstractmethod
     async def secure_inbound(self, conn):
         """

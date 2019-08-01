@@ -1,8 +1,6 @@
 import asyncio
 import struct
-from typing import (
-    Sequence,
-)
+from typing import Sequence
 
 import multiaddr
 
@@ -33,21 +31,16 @@ def message_id_generator(start_val):
         val += 1
 
         # Convert val to big endian
-        return struct.pack('>Q', val)
+        return struct.pack(">Q", val)
 
     return generator
 
 
 def make_pubsub_msg(
-        origin_id: ID,
-        topic_ids: Sequence[str],
-        data: bytes,
-        seqno: bytes) -> rpc_pb2.Message:
+    origin_id: ID, topic_ids: Sequence[str], data: bytes, seqno: bytes
+) -> rpc_pb2.Message:
     return rpc_pb2.Message(
-        from_id=origin_id.to_bytes(),
-        seqno=seqno,
-        data=data,
-        topicIDs=list(topic_ids),
+        from_id=origin_id.to_bytes(), seqno=seqno, data=data, topicIDs=list(topic_ids)
     )
 
 
@@ -61,13 +54,13 @@ def generate_RPC_packet(origin_id, topics, msg_content, msg_id):
     """
     packet = rpc_pb2.RPC()
     message = rpc_pb2.Message(
-        from_id=origin_id.encode('utf-8'),
+        from_id=origin_id.encode("utf-8"),
         seqno=msg_id,
-        data=msg_content.encode('utf-8'),
+        data=msg_content.encode("utf-8"),
     )
 
     for topic in topics:
-        message.topicIDs.extend([topic.encode('utf-8')])
+        message.topicIDs.extend([topic.encode("utf-8")])
 
     packet.publish.extend([message])
     return packet
@@ -95,22 +88,29 @@ async def create_libp2p_hosts(num_hosts):
 
 
 def create_pubsub_and_gossipsub_instances(
-        libp2p_hosts,
-        supported_protocols,
-        degree,
-        degree_low,
-        degree_high,
-        time_to_live,
-        gossip_window,
-        gossip_history,
-        heartbeat_interval):
+    libp2p_hosts,
+    supported_protocols,
+    degree,
+    degree_low,
+    degree_high,
+    time_to_live,
+    gossip_window,
+    gossip_history,
+    heartbeat_interval,
+):
     pubsubs = []
     gossipsubs = []
     for node in libp2p_hosts:
-        gossipsub = GossipSub(supported_protocols, degree,
-                              degree_low, degree_high, time_to_live,
-                              gossip_window, gossip_history,
-                              heartbeat_interval)
+        gossipsub = GossipSub(
+            supported_protocols,
+            degree,
+            degree_low,
+            degree_high,
+            time_to_live,
+            gossip_window,
+            gossip_history,
+            heartbeat_interval,
+        )
         pubsub = Pubsub(node, gossipsub, node.get_id())
         pubsubs.append(pubsub)
         gossipsubs.append(gossipsub)
@@ -120,6 +120,7 @@ def create_pubsub_and_gossipsub_instances(
 
 # FIXME: There is no difference between `sparse_connect` and `dense_connect`,
 #   before `connect_some` is fixed.
+
 
 async def sparse_connect(hosts):
     await connect_some(hosts, 3)

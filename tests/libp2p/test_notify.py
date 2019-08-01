@@ -13,13 +13,17 @@ import pytest
 import multiaddr
 
 
-from tests.utils import cleanup, echo_stream_handler, \
-                        perform_two_host_set_up_custom_handler
+from tests.utils import (
+    cleanup,
+    echo_stream_handler,
+    perform_two_host_set_up_custom_handler,
+)
 from libp2p import new_node, initialize_default_swarm
 from libp2p.network.notifee_interface import INotifee
 from libp2p.host.basic_host import BasicHost
 
 # pylint: disable=too-many-locals
+
 
 class MyNotifee(INotifee):
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
@@ -29,28 +33,25 @@ class MyNotifee(INotifee):
         self.val_to_append_to_event = val_to_append_to_event
 
     async def opened_stream(self, network, stream):
-        self.events.append(["opened_stream" + \
-            self.val_to_append_to_event, stream])
+        self.events.append(["opened_stream" + self.val_to_append_to_event, stream])
 
     async def closed_stream(self, network, stream):
         pass
 
     async def connected(self, network, conn):
-        self.events.append(["connected" + self.val_to_append_to_event,\
-            conn])
+        self.events.append(["connected" + self.val_to_append_to_event, conn])
 
     async def disconnected(self, network, conn):
         pass
 
     async def listen(self, network, _multiaddr):
-        self.events.append(["listened" + self.val_to_append_to_event,\
-            _multiaddr])
+        self.events.append(["listened" + self.val_to_append_to_event, _multiaddr])
 
     async def listen_close(self, network, _multiaddr):
         pass
 
 
-class InvalidNotifee():
+class InvalidNotifee:
     # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
     def __init__(self):
@@ -114,8 +115,7 @@ async def test_one_notifier():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events == [["connected0", stream.mplex_conn], \
-        ["opened_stream0", stream]]
+    assert events == [["connected0", stream.mplex_conn], ["opened_stream0", stream]]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -128,6 +128,7 @@ async def test_one_notifier():
     # Success, terminate pending tasks.
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_one_notifier_on_two_nodes():
     events_b = []
@@ -136,8 +137,10 @@ async def test_one_notifier_on_two_nodes():
         # Ensure the connected and opened_stream events were hit in Notifee obj
         # and that the stream passed into opened_stream matches the stream created on
         # node_b
-        assert events_b == [["connectedb", stream.mplex_conn], \
-            ["opened_streamb", stream]]
+        assert events_b == [
+            ["connectedb", stream.mplex_conn],
+            ["opened_streamb", stream],
+        ]
         while True:
             read_string = (await stream.read()).decode()
 
@@ -158,8 +161,7 @@ async def test_one_notifier_on_two_nodes():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events_a == [["connecteda", stream.mplex_conn], \
-        ["opened_streama", stream]]
+    assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -171,6 +173,7 @@ async def test_one_notifier_on_two_nodes():
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_one_notifier_on_two_nodes_with_listen():
@@ -191,9 +194,9 @@ async def test_one_notifier_on_two_nodes_with_listen():
         # and that the stream passed into opened_stream matches the stream created on
         # node_b
         assert events_b == [
-            ["listenedb", node_b_multiaddr], \
-            ["connectedb", stream.mplex_conn], \
-            ["opened_streamb", stream]
+            ["listenedb", node_b_multiaddr],
+            ["connectedb", stream.mplex_conn],
+            ["opened_streamb", stream],
         ]
         while True:
             read_string = (await stream.read()).decode()
@@ -219,10 +222,7 @@ async def test_one_notifier_on_two_nodes_with_listen():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events_a == [
-        ["connecteda", stream.mplex_conn], \
-        ["opened_streama", stream]
-    ]
+    assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -234,6 +234,7 @@ async def test_one_notifier_on_two_nodes_with_listen():
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_two_notifiers():
@@ -254,7 +255,6 @@ async def test_two_notifiers():
     assert events0 == [["connected0", stream.mplex_conn], ["opened_stream0", stream]]
     assert events1 == [["connected1", stream.mplex_conn], ["opened_stream1", stream]]
 
-
     messages = ["hello", "hello"]
     for message in messages:
         await stream.write(message.encode())
@@ -265,6 +265,7 @@ async def test_two_notifiers():
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_ten_notifiers():
@@ -284,8 +285,10 @@ async def test_ten_notifiers():
     # and that the stream passed into opened_stream matches the stream created on
     # node_a
     for i in range(num_notifiers):
-        assert events_lst[i] == [["connected" + str(i), stream.mplex_conn], \
-            ["opened_stream" + str(i), stream]]
+        assert events_lst[i] == [
+            ["connected" + str(i), stream.mplex_conn],
+            ["opened_stream" + str(i), stream],
+        ]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -298,6 +301,7 @@ async def test_ten_notifiers():
     # Success, terminate pending tasks.
     await cleanup()
 
+
 @pytest.mark.asyncio
 async def test_ten_notifiers_on_two_nodes():
     num_notifiers = 10
@@ -308,8 +312,10 @@ async def test_ten_notifiers_on_two_nodes():
         # and that the stream passed into opened_stream matches the stream created on
         # node_b
         for i in range(num_notifiers):
-            assert events_lst_b[i] == [["connectedb" + str(i), stream.mplex_conn], \
-                ["opened_streamb" + str(i), stream]]
+            assert events_lst_b[i] == [
+                ["connectedb" + str(i), stream.mplex_conn],
+                ["opened_streamb" + str(i), stream],
+            ]
         while True:
             read_string = (await stream.read()).decode()
 
@@ -332,8 +338,10 @@ async def test_ten_notifiers_on_two_nodes():
     # and that the stream passed into opened_stream matches the stream created on
     # node_a
     for i in range(num_notifiers):
-        assert events_lst_a[i] == [["connecteda" + str(i), stream.mplex_conn], \
-            ["opened_streama" + str(i), stream]]
+        assert events_lst_a[i] == [
+            ["connecteda" + str(i), stream.mplex_conn],
+            ["opened_streama" + str(i), stream],
+        ]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -345,6 +353,7 @@ async def test_ten_notifiers_on_two_nodes():
 
     # Success, terminate pending tasks.
     await cleanup()
+
 
 @pytest.mark.asyncio
 async def test_invalid_notifee():

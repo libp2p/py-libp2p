@@ -1,8 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import (
-    List,
-    Sequence,
-)
+from typing import List, Sequence
 
 
 from multiaddr import Multiaddr
@@ -11,7 +8,6 @@ from .id import ID
 
 
 class IAddrBook(ABC):
-
     def __init__(self) -> None:
         pass
 
