@@ -8,7 +8,7 @@ classifiers = [f"Programming Language :: Python :: {version}" for version in ["3
 extras_require = {
     "test": [
         "codecov>=2.0.15,<3.0.0",
-        "factory-boy>=2.12.0,<3.0.0"
+        "factory-boy>=2.12.0,<3.0.0",
         "pytest>=4.6.3,<5.0.0",
         "pytest-cov>=2.7.1,<3.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
