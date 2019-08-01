@@ -2,13 +2,8 @@ from typing import List
 
 import multiaddr
 
-from .id import (
-    ID,
-    id_b58_decode,
-)
-from abc import (
-    ABC,
-)
+from .id import ID, id_b58_decode
+from abc import ABC
 
 from .peerdata import PeerData
 

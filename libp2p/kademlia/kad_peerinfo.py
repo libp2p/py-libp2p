@@ -7,16 +7,8 @@ from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData
 from .utils import digest
-from typing import (
-    List,
-    TYPE_CHECKING,
-    Iterator,
-    Any,
-    Tuple,
-    Set,
-    Sequence,
-    Union,
-)
+from typing import List, TYPE_CHECKING, Iterator, Any, Tuple, Set, Sequence, Union
+
 if TYPE_CHECKING:
     from libp2p.host.host_interface import IHost
 
@@ -35,19 +27,13 @@ class KadPeerInfo(PeerInfo):
         self.xor_id = peer_id.get_xor_id()
 
         # pylint: disable=invalid-name
-        self.ip = (
-            self.addrs[0].value_for_protocol(P_IP)
-            if peer_data else None
-        )
-        self.port = (
-            int(self.addrs[0].value_for_protocol(P_UDP))
-            if peer_data else None
-        )
+        self.ip = self.addrs[0].value_for_protocol(P_IP) if peer_data else None
+        self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if peer_data else None
 
-    def same_home_as(self, node: 'KadPeerInfo') -> bool:
+    def same_home_as(self, node: "KadPeerInfo") -> bool:
         return sorted(self.addrs) == sorted(node.addrs)
 
-    def distance_to(self, node: 'KadPeerInfo') -> int:
+    def distance_to(self, node: "KadPeerInfo") -> int:
         """
         Get the distance between this node and another.
         """
@@ -73,12 +59,13 @@ class KadPeerHeap:
     """
     A heap of peers ordered by distance to a given node.
     """
-    node: 'KadPeerInfo'
-    heap: List[Tuple[int, 'KadPeerInfo']]
+
+    node: "KadPeerInfo"
+    heap: List[Tuple[int, "KadPeerInfo"]]
     contacted: Set[bytes]
     maxsize: int
 
-    def __init__(self, node: 'KadPeerInfo', maxsize: int) -> None:
+    def __init__(self, node: "KadPeerInfo", maxsize: int) -> None:
         """
         Constructor.
 
@@ -90,7 +77,7 @@ class KadPeerHeap:
         self.contacted = set()
         self.maxsize = maxsize
 
-    def remove(self, peers: Set['KadPeerInfo']) -> None:
+    def remove(self, peers: Set["KadPeerInfo"]) -> None:
         """
         Remove a list of peer ids from this heap.  Note that while this
         heap retains a constant visible size (based on the iterator), it's
@@ -101,13 +88,13 @@ class KadPeerHeap:
         peers = set(peers)
         if not peers:
             return
-        nheap: List[Tuple[int, 'KadPeerInfo']] = []
+        nheap: List[Tuple[int, "KadPeerInfo"]] = []
         for distance, node in self.heap:
             if node not in peers:
                 heapq.heappush(nheap, (distance, node))
         self.heap = nheap
 
-    def get_node(self, node_id: bytes) -> 'KadPeerInfo':
+    def get_node(self, node_id: bytes) -> "KadPeerInfo":
         for _, node in self.heap:
             if node.peer_id_raw == node_id:
                 return node
@@ -119,19 +106,19 @@ class KadPeerHeap:
     def get_ids(self) -> List[bytes]:
         return [n.peer_id_raw for n in self]
 
-    def mark_contacted(self, node: 'KadPeerInfo') -> None:
+    def mark_contacted(self, node: "KadPeerInfo") -> None:
         self.contacted.add(node.peer_id_raw)
 
-    def popleft(self) -> 'KadPeerInfo':
+    def popleft(self) -> "KadPeerInfo":
         return heapq.heappop(self.heap)[1] if self else None
 
-    def push(self, nodes: Union['KadPeerInfo', Sequence['KadPeerInfo']]) -> None:
+    def push(self, nodes: Union["KadPeerInfo", Sequence["KadPeerInfo"]]) -> None:
         """
         Push nodes onto heap.
 
         @param nodes: This can be a single item or a C{list}.
         """
-        nodes_list: Sequence['KadPeerInfo']
+        nodes_list: Sequence["KadPeerInfo"]
         if not isinstance(nodes, list):
             # typing doesn't know nodes is already list
             nodes_list = [nodes]  # type: ignore
@@ -146,34 +133,29 @@ class KadPeerHeap:
     def __len__(self) -> int:
         return min(len(self.heap), self.maxsize)
 
-    def __iter__(self) -> Iterator['KadPeerInfo']:
+    def __iter__(self) -> Iterator["KadPeerInfo"]:
         nodes = heapq.nsmallest(self.maxsize, self.heap)
         for _, node in nodes:
             yield node
 
-    def __contains__(self, node: 'KadPeerInfo') -> bool:
+    def __contains__(self, node: "KadPeerInfo") -> bool:
         for _, other in self.heap:
             if node.peer_id_raw == other.peer_id_raw:
                 return True
         return False
 
-    def get_uncontacted(self) -> List['KadPeerInfo']:
+    def get_uncontacted(self) -> List["KadPeerInfo"]:
         return [n for n in self if n.peer_id_raw not in self.contacted]
 
 
-def create_kad_peerinfo(raw_node_id: bytes = None,
-                        sender_ip: str = None,
-                        sender_port: int = None) -> 'KadPeerInfo':
-    node_id = (
-        ID(raw_node_id)
-        if raw_node_id
-        else ID(digest(random.getrandbits(255)))
-    )
+def create_kad_peerinfo(
+    raw_node_id: bytes = None, sender_ip: str = None, sender_port: int = None
+) -> "KadPeerInfo":
+    node_id = ID(raw_node_id) if raw_node_id else ID(digest(random.getrandbits(255)))
     peer_data = None
     if sender_ip and sender_port:
         peer_data = PeerData()  # pylint: disable=no-value-for-parameter
-        addr = [
-            Multiaddr(f"/{P_IP}/{str(sender_ip)}/{P_UDP}/{str(sender_port)}")]
+        addr = [Multiaddr(f"/{P_IP}/{str(sender_ip)}/{P_UDP}/{str(sender_port)}")]
         peer_data.add_addrs(addr)
 
     return KadPeerInfo(node_id, peer_data)

@@ -3,17 +3,13 @@ from itertools import takewhile
 import operator
 from collections import OrderedDict
 from abc import abstractmethod, ABC
-from typing import (
-    TYPE_CHECKING,
-    TypeVar,
-    Iterator,
-    Tuple,
-)
+from typing import TYPE_CHECKING, TypeVar, Iterator, Tuple
+
 if TYPE_CHECKING:
     from typing import Any
 
-TKey = TypeVar('TKey')
-TValue = TypeVar('TValue')
+TKey = TypeVar("TKey")
+TValue = TypeVar("TValue")
 
 
 class IStorage(ABC):
@@ -35,27 +31,27 @@ class IStorage(ABC):
         """
 
     @abstractmethod
-    def get(self, key: TKey, default: TValue = None)-> TValue:
+    def get(self, key: TKey, default: TValue = None) -> TValue:
         """
         Get given key.  If not found, return default.
         """
 
     @abstractmethod
-    def iter_older_than(self, seconds_old: int)-> Iterator[Tuple[TKey, TValue]]:
+    def iter_older_than(self, seconds_old: int) -> Iterator[Tuple[TKey, TValue]]:
         """
         Return the an iterator over (key, value) tuples for items older
         than the given seconds_old.
         """
 
     @abstractmethod
-    def __iter__(self)-> Iterator[Tuple[TKey, TValue]]:
+    def __iter__(self) -> Iterator[Tuple[TKey, TValue]]:
         """
         Get the iterator for this storage, should yield tuple of (key, value)
         """
 
 
 class ForgetfulStorage(IStorage):
-    data: 'OrderedDict[Any, Any]'
+    data: "OrderedDict[Any, Any]"
     ttl: int
 
     def __init__(self, ttl: int = 604800) -> None:

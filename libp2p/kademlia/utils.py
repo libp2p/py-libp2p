@@ -4,19 +4,12 @@ General catchall for functions that don't make sense as methods.
 import asyncio
 import hashlib
 import operator
-from typing import (
-    Awaitable,
-    Dict,
-    List,
-    Sequence,
-    TypeVar,
-    Union,
-)
+from typing import Awaitable, Dict, List, Sequence, TypeVar, Union
 
-ItemT = TypeVar('ItemT')
+ItemT = TypeVar("ItemT")
 
-KT = TypeVar('KT')
-VT = TypeVar('VT')
+KT = TypeVar("KT")
+VT = TypeVar("VT")
 
 
 async def gather_dict(dic: Dict[KT, Awaitable[VT]]) -> Dict[KT, VT]:

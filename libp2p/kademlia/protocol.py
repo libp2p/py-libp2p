@@ -7,14 +7,8 @@ from .kad_peerinfo import create_kad_peerinfo
 from .routing import RoutingTable
 
 
-from typing import (
-    Dict,
-    TYPE_CHECKING,
-    List,
-    TypeVar,
-    Tuple,
-    NewType,
-)
+from typing import Dict, TYPE_CHECKING, List, TypeVar, Tuple, NewType
+
 if TYPE_CHECKING:
     from .storage import IStorage
     from .kad_peerinfo import KadPeerInfo
@@ -23,11 +17,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
-Address = NewType('Address', Tuple[str, int])
-TKey = NewType('TKey', bytes)
-TValue = TypeVar('TValue')
-TNodeID = NewType('TNodeID', bytes)
-TResult = TypeVar('TResult')
+Address = NewType("Address", Tuple[str, int])
+TKey = NewType("TKey", bytes)
+TValue = TypeVar("TValue")
+TNodeID = NewType("TNodeID", bytes)
+TResult = TypeVar("TResult")
 
 
 class KademliaProtocol(RPCProtocol):
@@ -40,11 +34,14 @@ class KademliaProtocol(RPCProtocol):
     (ip, udp_port, node_id) for k closest nodes to target
     FIND_VALUE behaves like FIND_NODE unless a value is stored
     """
-    router: RoutingTable
-    storage: 'IStorage'
-    source_node: 'KadPeerInfo'
 
-    def __init__(self, source_node: 'KadPeerInfo', storage: 'IStorage', ksize: int) -> None:
+    router: RoutingTable
+    storage: "IStorage"
+    source_node: "KadPeerInfo"
+
+    def __init__(
+        self, source_node: "KadPeerInfo", storage: "IStorage", ksize: int
+    ) -> None:
         RPCProtocol.__init__(self)
         self.router = RoutingTable(self, ksize, source_node)
         self.storage = storage
@@ -64,13 +61,15 @@ class KademliaProtocol(RPCProtocol):
     def rpc_stun(sender: Address) -> Address:
         return sender
 
-    def rpc_ping(self, sender: Address, nodeid: TNodeID) -> 'ID':
+    def rpc_ping(self, sender: Address, nodeid: TNodeID) -> "ID":
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
         return self.source_node.peer_id
 
-    def rpc_store(self, sender: Address, nodeid: TNodeID, key: TKey, value: TValue) -> bool:
+    def rpc_store(
+        self, sender: Address, nodeid: TNodeID, key: TKey, value: TValue
+    ) -> bool:
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
@@ -80,14 +79,10 @@ class KademliaProtocol(RPCProtocol):
         self.storage[key] = value
         return True
 
-    def rpc_find_node(self,
-                      sender: Address,
-                      nodeid: TNodeID,
-                      key: TKey) -> List[Tuple[bytes, str, int]]:
-        log.info(
-            "finding neighbors of %i in local table",
-            int(nodeid.hex(), 16),
-        )
+    def rpc_find_node(
+        self, sender: Address, nodeid: TNodeID, key: TKey
+    ) -> List[Tuple[bytes, str, int]]:
+        log.info("finding neighbors of %i in local table", int(nodeid.hex(), 16))
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
@@ -95,7 +90,9 @@ class KademliaProtocol(RPCProtocol):
         neighbors = self.router.find_neighbors(node, exclude=source)
         return list(map(tuple, neighbors))
 
-    def rpc_find_value(self, sender: Address, nodeid: TNodeID, key: TKey) -> Dict[str, TValue]:
+    def rpc_find_value(
+        self, sender: Address, nodeid: TNodeID, key: TKey
+    ) -> Dict[str, TValue]:
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
@@ -104,11 +101,9 @@ class KademliaProtocol(RPCProtocol):
             return self.rpc_find_node(sender, nodeid, key)
         return {"value": value}
 
-    def rpc_add_provider(self,
-                         sender: Address,
-                         nodeid: TNodeID,
-                         key: TKey,
-                         provider_id: TNodeID) -> bool:
+    def rpc_add_provider(
+        self, sender: Address, nodeid: TNodeID, key: TKey, provider_id: TNodeID
+    ) -> bool:
         # pylint: disable=unused-argument
         """
         rpc when receiving an add_provider call
@@ -118,9 +113,7 @@ class KademliaProtocol(RPCProtocol):
         """
         if nodeid == provider_id:
             log.info(
-                "adding provider %s for key %s in local table",
-                provider_id,
-                str(key),
+                "adding provider %s for key %s in local table", provider_id, str(key)
             )
             self.storage[key] = provider_id
             return True
@@ -147,58 +140,53 @@ class KademliaProtocol(RPCProtocol):
 
         return providers
 
-    async def call_find_node(self,
-                             node_to_ask: 'KadPeerInfo',
-                             node_to_find: 'KadPeerInfo') -> TResult:
+    async def call_find_node(
+        self, node_to_ask: "KadPeerInfo", node_to_find: "KadPeerInfo"
+    ) -> TResult:
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_node(
-            address,
-            self.source_node.peer_id,
-            node_to_find.peer_id,
-        )
-        return self.handle_call_response(result, node_to_ask)
-
-    async def call_find_value(self,
-                              node_to_ask: 'KadPeerInfo',
-                              node_to_find: 'KadPeerInfo') -> TResult:
-        address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.find_value(
             address, self.source_node.peer_id, node_to_find.peer_id
         )
         return self.handle_call_response(result, node_to_ask)
 
-    async def call_ping(self, node_to_ask: 'KadPeerInfo') -> TResult:
+    async def call_find_value(
+        self, node_to_ask: "KadPeerInfo", node_to_find: "KadPeerInfo"
+    ) -> TResult:
+        address = (node_to_ask.ip, node_to_ask.port)
+        result = await self.rpc_find_value(
+            address, self.source_node.peer_id, node_to_find.peer_id
+        )
+        return self.handle_call_response(result, node_to_ask)
+
+    async def call_ping(self, node_to_ask: "KadPeerInfo") -> TResult:
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.ping(address, self.source_node.peer_id)
         return self.handle_call_response(result, node_to_ask)
 
-    async def call_store(self,
-                         node_to_ask: 'KadPeerInfo',
-                         key: TKey,
-                         value: TValue) -> TResult:
+    async def call_store(
+        self, node_to_ask: "KadPeerInfo", key: TKey, value: TValue
+    ) -> TResult:
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.store(address, self.source_node.peer_id, key, value)
         return self.handle_call_response(result, node_to_ask)
 
-    async def call_add_provider(self,
-                                node_to_ask: 'KadPeerInfo',
-                                key: TKey,
-                                provider_id: TNodeID) -> TResult:
+    async def call_add_provider(
+        self, node_to_ask: "KadPeerInfo", key: TKey, provider_id: TNodeID
+    ) -> TResult:
         address = Address((node_to_ask.ip, node_to_ask.port))
         result = self.rpc_add_provider(
-            address,
-            self.source_node.peer_id,
-            key,
-            provider_id,
+            address, self.source_node.peer_id, key, provider_id
         )
         return self.handle_call_response(result, node_to_ask)
 
-    async def call_get_providers(self, node_to_ask: 'KadPeerInfo', key: TKey) -> TResult:
+    async def call_get_providers(
+        self, node_to_ask: "KadPeerInfo", key: TKey
+    ) -> TResult:
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.get_providers(address, key)
         return self.handle_call_response(result, node_to_ask)
 
-    def welcome_if_new(self, node: 'KadPeerInfo') -> None:
+    def welcome_if_new(self, node: "KadPeerInfo") -> None:
         """
         Given a new node, send it all the keys/values it should be storing,
         then add it to the routing table.
@@ -228,7 +216,7 @@ class KademliaProtocol(RPCProtocol):
                 asyncio.ensure_future(self.call_store(node, key, value))
         self.router.add_contact(node)
 
-    def handle_call_response(self, result: TResult, node: 'KadPeerInfo') -> TResult:
+    def handle_call_response(self, result: TResult, node: "KadPeerInfo") -> TResult:
         """
         If we get a response, add the node to the routing table.  If
         we get no response, make sure it's removed from the routing table.
