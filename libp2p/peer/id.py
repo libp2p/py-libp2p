@@ -20,6 +20,7 @@ class ID:
 
     _bytes: bytes
     _xor_id: int = None
+    _b58_str: str = None
 
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes
@@ -33,17 +34,21 @@ class ID:
     def to_bytes(self) -> bytes:
         return self._bytes
 
-    def pretty(self) -> str:
-        return base58.b58encode(self._bytes).decode()
+    def to_base58(self) -> str:
+        if not self._b58_str:
+            self._b58_str = base58.b58encode(self._bytes).decode()
+        return self._b58_str
 
-    def __str__(self) -> str:
-        return self.pretty()
+    def __bytes__(self) -> bytes:
+        return self._bytes
 
-    __repr__ = __str__
+    __repr__ = __str__ = pretty = to_string = to_base58
 
     def __eq__(self, other: object) -> bool:
         # pylint: disable=protected-access, no-else-return
-        if isinstance(other, bytes):
+        if isinstance(other, str):
+            return self.to_base58() == other
+        elif isinstance(other, bytes):
             return self._bytes == other
         elif isinstance(other, ID):
             return self._bytes == other._bytes
