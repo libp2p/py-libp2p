@@ -60,11 +60,11 @@ async def test_peers_subscribe(pubsubs_fsub):
     await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
     # Yield to let 0 notify 1
     await asyncio.sleep(0.1)
-    assert str(pubsubs_fsub[0].my_id) in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+    assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
     await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
     # Yield to let 0 notify 1
     await asyncio.sleep(0.1)
-    assert str(pubsubs_fsub[0].my_id) not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+    assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
 
 @pytest.mark.parametrize("num_hosts", (1,))
@@ -212,23 +212,23 @@ def test_handle_subscription(pubsubs_fsub):
         and TESTING_TOPIC in pubsubs_fsub[0].peer_topics
     )
     assert len(pubsubs_fsub[0].peer_topics[TESTING_TOPIC]) == 1
-    assert str(peer_ids[0]) in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
+    assert peer_ids[0] in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
     # Test: Another peer is subscribed
     pubsubs_fsub[0].handle_subscription(peer_ids[1], sub_msg_0)
     assert len(pubsubs_fsub[0].peer_topics) == 1
     assert len(pubsubs_fsub[0].peer_topics[TESTING_TOPIC]) == 2
-    assert str(peer_ids[1]) in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
+    assert peer_ids[1] in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
     # Test: Subscribe to another topic
     another_topic = "ANOTHER_TOPIC"
     sub_msg_1 = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=another_topic)
     pubsubs_fsub[0].handle_subscription(peer_ids[0], sub_msg_1)
     assert len(pubsubs_fsub[0].peer_topics) == 2
     assert another_topic in pubsubs_fsub[0].peer_topics
-    assert str(peer_ids[0]) in pubsubs_fsub[0].peer_topics[another_topic]
+    assert peer_ids[0] in pubsubs_fsub[0].peer_topics[another_topic]
     # Test: unsubscribe
     unsub_msg = rpc_pb2.RPC.SubOpts(subscribe=False, topicid=TESTING_TOPIC)
     pubsubs_fsub[0].handle_subscription(peer_ids[0], unsub_msg)
-    assert str(peer_ids[0]) not in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
+    assert peer_ids[0] not in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
 
 
 @pytest.mark.parametrize("num_hosts", (1,))
@@ -261,7 +261,7 @@ async def test_handle_talk(pubsubs_fsub):
 @pytest.mark.asyncio
 async def test_message_all_peers(pubsubs_fsub, monkeypatch):
     peer_ids = [ID(b"\x12\x20" + i.to_bytes(32, "big")) for i in range(10)]
-    mock_peers = {str(peer_id): FakeNetStream() for peer_id in peer_ids}
+    mock_peers = {peer_id: FakeNetStream() for peer_id in peer_ids}
     monkeypatch.setattr(pubsubs_fsub[0], "peers", mock_peers)
 
     empty_rpc = rpc_pb2.RPC()

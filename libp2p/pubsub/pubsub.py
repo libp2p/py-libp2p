@@ -41,10 +41,8 @@ class Pubsub:
 
     my_topics: Dict[str, "asyncio.Queue[rpc_pb2.Message]"]
 
-    # FIXME: Should be changed to `Dict[str, List[ID]]`
-    peer_topics: Dict[str, List[str]]
-    # FIXME: Should be changed to `Dict[ID, INetStream]`
-    peers: Dict[str, INetStream]
+    peer_topics: Dict[str, List[ID]]
+    peers: Dict[ID, INetStream]
 
     # NOTE: Be sure it is increased atomically everytime.
     counter: int  # uint64
@@ -93,11 +91,9 @@ class Pubsub:
         self.my_topics = {}
 
         # Map of topic to peers to keep track of what peers are subscribed to
-        # FIXME: Should be changed to `Dict[str, ID]`
         self.peer_topics = {}
 
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
-        # FIXME: Should be changed to `Dict[ID, INetStream]`
         self.peers = {}
 
         self.counter = time.time_ns()
@@ -168,7 +164,7 @@ class Pubsub:
         # Add peer
         # Map peer to stream
         peer_id: ID = stream.mplex_conn.peer_id
-        self.peers[str(peer_id)] = stream
+        self.peers[peer_id] = stream
         self.router.add_peer(peer_id, stream.get_protocol())
 
         # Send hello packet
@@ -198,7 +194,7 @@ class Pubsub:
 
             # Add Peer
             # Map peer to stream
-            self.peers[str(peer_id)] = stream
+            self.peers[peer_id] = stream
             self.router.add_peer(peer_id, stream.get_protocol())
 
             # Send hello packet
@@ -223,17 +219,16 @@ class Pubsub:
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
-        origin_id_str = str(origin_id)
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = [origin_id_str]
-            elif origin_id_str not in self.peer_topics[sub_message.topicid]:
+                self.peer_topics[sub_message.topicid] = [origin_id]
+            elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
-                self.peer_topics[sub_message.topicid].append(origin_id_str)
+                self.peer_topics[sub_message.topicid].append(origin_id)
         else:
             if sub_message.topicid in self.peer_topics:
-                if origin_id_str in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].remove(origin_id_str)
+                if origin_id in self.peer_topics[sub_message.topicid]:
+                    self.peer_topics[sub_message.topicid].remove(origin_id)
 
     # FIXME(mhchia): Change the function name?
     # FIXME(mhchia): `publish_message` can be further type hinted with mypy_protobuf
