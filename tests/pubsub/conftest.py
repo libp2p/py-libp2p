@@ -1,17 +1,11 @@
 import asyncio
-from typing import NamedTuple
 
 import pytest
 
-from multiaddr import Multiaddr
+from tests.configs import LISTEN_MADDR
 
-from libp2p import new_node
-
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.pubsub import Pubsub
-
-from .configs import FLOODSUB_PROTOCOL_ID, GOSSIPSUB_PROTOCOL_ID, LISTEN_MADDR
+from .configs import GOSSIPSUB_PARAMS
+from .factories import FloodsubFactory, GossipsubFactory, HostFactory, PubsubFactory
 
 
 # pylint: disable=redefined-outer-name
@@ -24,9 +18,7 @@ def num_hosts():
 
 @pytest.fixture
 async def hosts(num_hosts):
-    _hosts = await asyncio.gather(
-        *[new_node(transport_opt=[str(LISTEN_MADDR)]) for _ in range(num_hosts)]
-    )
+    _hosts = HostFactory.create_batch(num_hosts)
     await asyncio.gather(
         *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
     )
@@ -42,54 +34,46 @@ async def hosts(num_hosts):
 
 @pytest.fixture
 def floodsubs(num_hosts):
-    return tuple(FloodSub(protocols=[FLOODSUB_PROTOCOL_ID]) for _ in range(num_hosts))
-
-
-class GossipsubParams(NamedTuple):
-    degree: int = 10
-    degree_low: int = 9
-    degree_high: int = 11
-    fanout_ttl: int = 30
-    gossip_window: int = 3
-    gossip_history: int = 5
-    heartbeat_interval: float = 0.5
+    return FloodsubFactory.create_batch(num_hosts)
 
 
 @pytest.fixture
 def gossipsub_params():
-    return GossipsubParams()
+    return GOSSIPSUB_PARAMS
 
 
 @pytest.fixture
 def gossipsubs(num_hosts, gossipsub_params):
-    yield tuple(
-        GossipSub(protocols=[GOSSIPSUB_PROTOCOL_ID], **gossipsub_params._asdict())
-        for _ in range(num_hosts)
-    )
+    yield GossipsubFactory.create_batch(num_hosts, **gossipsub_params._asdict())
     # TODO: Clean up
 
 
-def _make_pubsubs(hosts, pubsub_routers):
+def _make_pubsubs(hosts, pubsub_routers, cache_size):
     if len(pubsub_routers) != len(hosts):
         raise ValueError(
             f"lenght of pubsub_routers={pubsub_routers} should be equaled to the "
             f"length of hosts={len(hosts)}"
         )
     return tuple(
-        Pubsub(host=host, router=router, my_id=host.get_id())
+        PubsubFactory(host=host, router=router, cache_size=cache_size)
         for host, router in zip(hosts, pubsub_routers)
     )
 
 
 @pytest.fixture
-def pubsubs_fsub(hosts, floodsubs):
-    _pubsubs_fsub = _make_pubsubs(hosts, floodsubs)
+def pubsub_cache_size():
+    return None  # default
+
+
+@pytest.fixture
+def pubsubs_fsub(hosts, floodsubs, pubsub_cache_size):
+    _pubsubs_fsub = _make_pubsubs(hosts, floodsubs, pubsub_cache_size)
     yield _pubsubs_fsub
     # TODO: Clean up
 
 
 @pytest.fixture
-def pubsubs_gsub(hosts, gossipsubs):
-    _pubsubs_gsub = _make_pubsubs(hosts, gossipsubs)
+def pubsubs_gsub(hosts, gossipsubs, pubsub_cache_size):
+    _pubsubs_gsub = _make_pubsubs(hosts, gossipsubs, pubsub_cache_size)
     yield _pubsubs_gsub
     # TODO: Clean up

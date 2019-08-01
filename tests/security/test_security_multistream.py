@@ -7,7 +7,9 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure_security import InsecureTransport
 from libp2p.security.simple_security import SimpleSecurityTransport
-from tests.utils import cleanup
+
+from tests.utils import cleanup, connect
+
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -17,15 +19,6 @@ def peer_id_for_node(node):
     addr = node.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     return info.peer_id
-
-
-async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
-    addr = node2.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await node1.connect(info)
 
 
 async def perform_simple_test(

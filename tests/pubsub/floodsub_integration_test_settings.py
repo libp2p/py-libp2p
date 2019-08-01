@@ -2,13 +2,11 @@ import asyncio
 
 import pytest
 
-from libp2p import new_node
-from libp2p.peer.id import ID
-from libp2p.pubsub.pubsub import Pubsub
-
+from tests.configs import LISTEN_MADDR
 from tests.utils import cleanup, connect
 
-from .configs import FLOODSUB_PROTOCOL_ID, LISTEN_MADDR
+from .configs import FLOODSUB_PROTOCOL_ID
+from .factories import PubsubFactory
 
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
@@ -182,11 +180,10 @@ async def perform_test_from_obj(obj, router_factory):
     pubsub_map = {}
 
     async def add_node(node_id: str) -> None:
-        node = await new_node(transport_opt=[str(LISTEN_MADDR)])
-        await node.get_network().listen(LISTEN_MADDR)
-        node_map[node_id] = node
         pubsub_router = router_factory(protocols=obj["supported_protocols"])
-        pubsub = Pubsub(node, pubsub_router, ID(node_id.encode()))
+        pubsub = PubsubFactory(router=pubsub_router)
+        await pubsub.host.get_network().listen(LISTEN_MADDR)
+        node_map[node_id] = pubsub.host
         pubsub_map[node_id] = pubsub
 
     tasks_connect = []
