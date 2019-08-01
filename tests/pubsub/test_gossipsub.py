@@ -11,20 +11,7 @@ from .utils import dense_connect, one_to_all_connect
 
 @pytest.mark.parametrize(
     "num_hosts, gossipsub_params",
-    (
-        (
-            4,
-            GossipsubParams(
-                degree=4,
-                degree_low=3,
-                degree_high=5,
-                time_to_live=30,
-                gossip_window=3,
-                gossip_history=5,
-                heartbeat_interval=0.5,
-            ),
-        ),
-    ),
+    ((4, GossipsubParams(degree=4, degree_low=3, degree_high=5)),),
 )
 @pytest.mark.asyncio
 async def test_join(num_hosts, hosts, gossipsubs, pubsubs_gsub):
@@ -149,21 +136,7 @@ async def test_handle_graft(pubsubs_gsub, hosts, gossipsubs, event_loop, monkeyp
 
 
 @pytest.mark.parametrize(
-    "num_hosts, gossipsub_params",
-    (
-        (
-            2,
-            GossipsubParams(
-                degree=10,
-                degree_low=9,
-                degree_high=11,
-                time_to_live=30,
-                gossip_window=3,
-                gossip_history=5,
-                heartbeat_interval=3,
-            ),
-        ),
-    ),
+    "num_hosts, gossipsub_params", ((2, GossipsubParams(heartbeat_interval=3)),)
 )
 @pytest.mark.asyncio
 async def test_handle_prune(pubsubs_gsub, hosts, gossipsubs):
@@ -375,10 +348,8 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
                 degree=1,
                 degree_low=0,
                 degree_high=2,
-                time_to_live=30,
                 gossip_window=50,
                 gossip_history=100,
-                heartbeat_interval=0.5,
             ),
         ),
     ),

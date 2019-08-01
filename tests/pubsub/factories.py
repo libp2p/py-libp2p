@@ -41,7 +41,7 @@ class GossipsubFactory(factory.Factory):
     degree_high = GOSSIPSUB_PARAMS.degree_high
     time_to_live = GOSSIPSUB_PARAMS.time_to_live
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
-    gossip_history = int(GOSSIPSUB_PARAMS.gossip_history)
+    gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
 
 
