@@ -7,7 +7,6 @@ import multihash
 
 
 class ID:
-
     _bytes: bytes
     _xor_id: int = None
     _b58_str: str = None

@@ -12,9 +12,6 @@ class MultiselectClient(IMultiselectClient):
     module in order to select a protocol id to communicate over
     """
 
-    def __init__(self):
-        pass
-
     async def handshake(self, communicator):
         """
         Ensure that the client and multiselect

@@ -30,7 +30,5 @@ class TransportUpgrader:
         """
         Upgrade raw connection to muxed connection
         """
-
-        # For PoC, no security, default to mplex
         # TODO do exchange to determine multiplexer
         return Mplex(conn, generic_protocol_handler, peer_id)
