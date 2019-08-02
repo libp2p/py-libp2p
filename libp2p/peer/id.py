@@ -45,7 +45,6 @@ class ID:
     __repr__ = __str__ = pretty = to_string = to_base58
 
     def __eq__(self, other: object) -> bool:
-        # pylint: disable=protected-access, no-else-return
         if isinstance(other, str):
             return self.to_base58() == other
         elif isinstance(other, bytes):

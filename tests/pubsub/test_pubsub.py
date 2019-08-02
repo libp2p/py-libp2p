@@ -75,7 +75,6 @@ async def test_get_hello_packet(pubsubs_fsub):
         packet.ParseFromString(pubsubs_fsub[0].get_hello_packet())
         return tuple(sub.topicid for sub in packet.subscriptions)
 
-    # pylint: disable=len-as-condition
     # Test: No subscription, so there should not be any topic ids in the hello packet.
     assert len(_get_hello_packet_topic_ids()) == 0
 
@@ -295,7 +294,6 @@ async def test_publish(pubsubs_fsub, monkeypatch):
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.asyncio
 async def test_push_msg(pubsubs_fsub, monkeypatch):
-    # pylint: disable=protected-access
     msg_0 = make_pubsub_msg(
         origin_id=pubsubs_fsub[0].my_id,
         topic_ids=[TESTING_TOPIC],

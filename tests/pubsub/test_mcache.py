@@ -3,10 +3,8 @@ import pytest
 from libp2p.pubsub.mcache import MessageCache
 
 
-# pylint: disable=too-few-public-methods
 class Msg:
     def __init__(self, topicIDs, seqno, from_id):
-        # pylint: disable=invalid-name
         self.topicIDs = topicIDs
         self.seqno = seqno
         self.from_id = from_id

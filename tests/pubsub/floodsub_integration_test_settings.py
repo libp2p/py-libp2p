@@ -137,14 +137,12 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
     },
 ]
 
-# pylint: disable=invalid-name
 floodsub_protocol_pytest_params = [
     pytest.param(test_case, id=test_case["name"])
     for test_case in FLOODSUB_PROTOCOL_TEST_CASES
 ]
 
 
-# pylint: disable=too-many-locals
 async def perform_test_from_obj(obj, router_factory):
     """
     Perform pubsub tests from a test obj.

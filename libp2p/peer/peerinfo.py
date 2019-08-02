@@ -7,7 +7,6 @@ from .peerdata import PeerData
 
 
 class PeerInfo:
-    # pylint: disable=too-few-public-methods
 
     peer_id: ID
     addrs: List[multiaddr.Multiaddr]

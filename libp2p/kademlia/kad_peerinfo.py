@@ -21,7 +21,6 @@ class KadPeerInfo(PeerInfo):
 
         self.addrs = peer_data.get_addrs() if peer_data else None
 
-        # pylint: disable=invalid-name
         self.ip = self.addrs[0].value_for_protocol(P_IP) if peer_data else None
         self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if peer_data else None
 
@@ -143,7 +142,7 @@ def create_kad_peerinfo(node_id_bytes=None, sender_ip=None, sender_port=None):
     )
     peer_data = None
     if sender_ip and sender_port:
-        peer_data = PeerData()  # pylint: disable=no-value-for-parameter
+        peer_data = PeerData()
         addr = [
             Multiaddr(
                 "/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port)

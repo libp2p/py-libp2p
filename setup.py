@@ -4,7 +4,6 @@ import setuptools
 classifiers = [f"Programming Language :: Python :: {version}" for version in ["3.7"]]
 
 
-# pylint: disable=invalid-name
 extras_require = {
     "test": [
         "codecov>=2.0.15,<3.0.0",

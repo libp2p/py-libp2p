@@ -5,17 +5,15 @@ from .kad_peerinfo import KadPeerHeap, create_kad_peerinfo
 from .utils import gather_dict
 
 
-log = logging.getLogger(__name__)  # pylint: disable=invalid-name
+log = logging.getLogger(__name__)
 
 
-# pylint: disable=too-few-public-methods
 class SpiderCrawl:
     """
     Crawl the network and look for given 160-bit keys.
     """
 
     def __init__(self, protocol, node, peers, ksize, alpha):
-        # pylint: disable=too-many-arguments
         """
         Create a new C{SpiderCrawl}er.
 
@@ -72,7 +70,6 @@ class SpiderCrawl:
 
 class ValueSpiderCrawl(SpiderCrawl):
     def __init__(self, protocol, node, peers, ksize, alpha):
-        # pylint: disable=too-many-arguments
         SpiderCrawl.__init__(self, protocol, node, peers, ksize, alpha)
         # keep track of the single nearest node without value - per
         # section 2.3 so we can set the key there if found

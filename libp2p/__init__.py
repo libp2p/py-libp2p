@@ -70,7 +70,6 @@ def initialize_default_swarm(
     :param disc_opt: optional discovery
     :return: return a default swarm instance
     """
-    # pylint: disable=too-many-arguments, unused-argument
 
     if not id_opt:
         id_opt = generate_id()
@@ -112,7 +111,6 @@ async def new_node(
     :param disc_opt: optional discovery
     :return: return a host instance
     """
-    # pylint: disable=too-many-arguments
 
     if not id_opt:
         id_opt = generate_id()

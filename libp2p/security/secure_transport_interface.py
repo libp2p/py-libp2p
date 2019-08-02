@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from libp2p.network.connection.raw_connection_interface import IRawConnection
     from libp2p.peer.id import ID
 
-# pylint: disable=W0105
 
 """
 Transport that is used to secure a connection. This transport is

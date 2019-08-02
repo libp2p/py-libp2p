@@ -28,7 +28,6 @@ def test_init_():
 
 def test_init_no_value():
     with pytest.raises(Exception) as _:
-        # pylint: disable=no-value-for-parameter
         PeerInfo()
 
 
@@ -50,7 +49,6 @@ def test_info_from_p2p_addr_invalid(addr):
 
 
 def test_info_from_p2p_addr_valid():
-    # pylint: disable=line-too-long
     m_addr = multiaddr.Multiaddr(
         "/ip4/127.0.0.1/tcp/8000/p2p/3YgLAeMKSAPcGqZkAt8mREqhQXmJT8SN8VCMN4T6ih4GNX9wvK8mWJnWZ1qA2mLdCQ"
     )

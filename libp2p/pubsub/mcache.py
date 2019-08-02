@@ -4,7 +4,6 @@ from .pb import rpc_pb2
 
 
 class CacheEntry:
-    # pylint: disable=too-few-public-methods
 
     mid: Tuple[bytes, bytes]
     topics: List[str]
