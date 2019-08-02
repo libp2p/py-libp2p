@@ -12,7 +12,7 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from libp2p.security.insecure_security import InsecureTransport
+from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
