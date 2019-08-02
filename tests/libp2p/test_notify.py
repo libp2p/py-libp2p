@@ -23,9 +23,7 @@ from libp2p.network.notifee_interface import INotifee
 from libp2p.host.basic_host import BasicHost
 
 
-
 class MyNotifee(INotifee):
-
     def __init__(self, events, val_to_append_to_event):
         self.events = events
         self.val_to_append_to_event = val_to_append_to_event
@@ -50,7 +48,6 @@ class MyNotifee(INotifee):
 
 
 class InvalidNotifee:
-
     def __init__(self):
         pass
 

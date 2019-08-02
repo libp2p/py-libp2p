@@ -8,7 +8,6 @@ from tests.utils import cleanup, connect
 from .dummy_account_node import DummyAccountNode
 
 
-
 def create_setup_in_new_thread_func(dummy_node):
     def setup_in_new_thread():
         asyncio.ensure_future(dummy_node.setup_crypto_networking())

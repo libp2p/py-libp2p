@@ -13,8 +13,6 @@ from .floodsub_integration_test_settings import (
 )
 
 
-
-
 @pytest.mark.parametrize("num_hosts", (2,))
 @pytest.mark.asyncio
 async def test_simple_two_nodes(pubsubs_fsub):
