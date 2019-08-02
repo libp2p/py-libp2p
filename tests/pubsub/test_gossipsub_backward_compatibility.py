@@ -17,6 +17,7 @@ async def test_gossipsub_initialize_with_floodsub_protocol():
 
 @pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_gossipsub_run_with_floodsub_tests(test_case_obj):
     await perform_test_from_obj(
         test_case_obj,
