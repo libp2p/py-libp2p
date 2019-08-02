@@ -268,6 +268,7 @@ async def test_fanout(hosts, pubsubs_gsub):
 
 @pytest.mark.parametrize("num_hosts", (10,))
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_fanout_maintenance(hosts, pubsubs_gsub):
     num_msgs = 5
 
