@@ -57,9 +57,7 @@ async def test_join(num_hosts, hosts, gossipsubs, pubsubs_gsub):
             assert hosts[i].get_id() in gossipsubs[central_node_index].mesh[topic]
             assert hosts[central_node_index].get_id() in gossipsubs[i].mesh[topic]
         else:
-            assert (
-                hosts[i].get_id() not in gossipsubs[central_node_index].mesh[topic]
-            )
+            assert hosts[i].get_id() not in gossipsubs[central_node_index].mesh[topic]
             assert topic not in gossipsubs[i].mesh
 
     await cleanup()

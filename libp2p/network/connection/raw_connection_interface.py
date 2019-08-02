@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 
 
-
 class IRawConnection(ABC):
     """
     A Raw Connection provides a Reader and a Writer

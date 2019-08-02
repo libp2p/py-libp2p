@@ -8,8 +8,6 @@ from .configs import GOSSIPSUB_PARAMS
 from .factories import FloodsubFactory, GossipsubFactory, HostFactory, PubsubFactory
 
 
-
-
 @pytest.fixture
 def num_hosts():
     return 3

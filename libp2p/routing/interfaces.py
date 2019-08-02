@@ -5,7 +5,6 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
 
-
 class IContentRouting(ABC):
     @abstractmethod
     def provide(self, cid: bytes, announce: bool = True) -> None:
