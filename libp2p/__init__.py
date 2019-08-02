@@ -7,6 +7,7 @@ from libp2p.network.network_interface import INetwork
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.secure_transport_interface import ISecureTransport
 
 from .host.basic_host import BasicHost
 from .kademlia.network import KademliaServer
@@ -91,8 +92,10 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or {TProtocol("insecure/1.0.0"): InsecureTransport("insecure")}
-    upgrader = TransportUpgrader(sec, muxer)
+    security_transports_by_protocol = sec_opt or {
+        TProtocol("insecure/1.0.0"): InsecureTransport()
+    }
+    upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
