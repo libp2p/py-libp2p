@@ -4,7 +4,7 @@ import struct
 from typing import Tuple
 
 
-def encode_uvarint(number: int) -> bytearray:
+def encode_uvarint(number: int) -> bytes:
     """Pack `number` into varint bytes"""
     buf = b""
     while True:
@@ -18,7 +18,7 @@ def encode_uvarint(number: int) -> bytearray:
     return buf
 
 
-def decode_uvarint(buff: bytearray, index: int) -> Tuple[int, int]:
+def decode_uvarint(buff: bytes, index: int) -> Tuple[int, int]:
     shift = 0
     result = 0
     while True:

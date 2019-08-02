@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from libp2p.network.swarm import GenericProtocolHandlerFn
     from libp2p.peer.id import ID
     from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+    from libp2p.stream_muxer.mplex.constants import HeaderTags
 
 
 class IMuxedConn(ABC):
@@ -47,6 +48,14 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
+    async def read_buffer(self, stream_id: int) -> bytes:
+        """
+        Read a message from stream_id's buffer, check raw connection for new messages
+        :param stream_id: stream id of stream to read from
+        :return: message read
+        """
+
+    @abstractmethod
     async def open_stream(
         self, protocol_id: str, multi_addr: "Multiaddr"
     ) -> "IMuxedStream":
@@ -61,4 +70,13 @@ class IMuxedConn(ABC):
     async def accept_stream(self) -> None:
         """
         accepts a muxed stream opened by the other end
+        """
+
+    @abstractmethod
+    async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
+        """
+        sends a message over the connection
+        :param header: header to use
+        :param data: data to send in the message
+        :param stream_id: stream the message is in
         """

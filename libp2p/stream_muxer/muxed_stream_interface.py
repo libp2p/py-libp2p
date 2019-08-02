@@ -8,36 +8,36 @@ class IMuxedStream(ABC):
     mplex_conn: IMuxedConn
 
     @abstractmethod
-    def read(self):
+    async def read(self) -> bytes:
         """
         reads from the underlying muxed_conn
         :return: bytes of input
         """
 
     @abstractmethod
-    def write(self, _bytes):
+    async def write(self, data: bytes) -> int:
         """
         writes to the underlying muxed_conn
         :return: number of bytes written
         """
 
     @abstractmethod
-    def close(self):
+    async def close(self) -> bool:
         """
         close the underlying muxed_conn
         :return: true if successful
         """
 
     @abstractmethod
-    def reset(self):
+    async def reset(self) -> bool:
         """
         closes both ends of the stream
         tells this remote side to hang up
-        :return: error/exception
+        :return: true if successful
         """
 
     @abstractmethod
-    def set_deadline(self, ttl):
+    def set_deadline(self, ttl: float) -> bool:
         """
         set deadline for muxed stream
         :return: a new stream
