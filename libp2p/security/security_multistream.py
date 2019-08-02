@@ -1,15 +1,12 @@
 from abc import ABC
+from typing import NewType, Dict
+
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect import Multiselect
-
-from typing import TYPE_CHECKING, NewType, Dict
-
-if TYPE_CHECKING:
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
-    from libp2p.peer.id import ID
-    from .typing import TSecurityDetails
-    from .secure_conn_interface import ISecureConn
-    from .secure_transport_interface import ISecureTransport
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_transport_interface import ISecureTransport
 
 
 TProtocol = NewType("TProtocol", str)
@@ -24,9 +21,9 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 
 class SecurityMultistream(ABC):
-    transports: Dict[TProtocol, "ISecureTransport"]
-    multiselect: "Multiselect"
-    multiselect_client: "MultiselectClient"
+    transports: Dict[TProtocol, ISecureTransport]
+    multiselect: Multiselect
+    multiselect_client: MultiselectClient
 
     def __init__(self) -> None:
         # Map protocol to secure transport
@@ -38,7 +35,7 @@ class SecurityMultistream(ABC):
         # Create multiselect client
         self.multiselect_client = MultiselectClient()
 
-    def add_transport(self, protocol: TProtocol, transport: "ISecureTransport") -> None:
+    def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
         # Associate protocol with transport
         self.transports[protocol] = transport
 
@@ -47,7 +44,7 @@ class SecurityMultistream(ABC):
         # we only care about selecting the protocol, not any handler function
         self.multiselect.add_handler(protocol, None)
 
-    async def secure_inbound(self, conn: "IRawConnection") -> "ISecureConn":
+    async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are not the initiator)
@@ -62,9 +59,7 @@ class SecurityMultistream(ABC):
 
         return secure_conn
 
-    async def secure_outbound(
-        self, conn: "IRawConnection", peer_id: "ID"
-    ) -> "ISecureConn":
+    async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)
@@ -80,8 +75,8 @@ class SecurityMultistream(ABC):
         return secure_conn
 
     async def select_transport(
-        self, conn: "IRawConnection", initiator: bool
-    ) -> "ISecureTransport":
+        self, conn: IRawConnection, initiator: bool
+    ) -> ISecureTransport:
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on

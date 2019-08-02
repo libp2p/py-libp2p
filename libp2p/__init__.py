@@ -2,7 +2,7 @@ import asyncio
 
 from Crypto.PublicKey import RSA
 
-from .security.insecure_security import InsecureTransport
+from libp2p.security.insecure.transport import InsecureTransport
 from .peer.peerstore import PeerStore
 from .peer.id import ID
 from .network.swarm import Swarm

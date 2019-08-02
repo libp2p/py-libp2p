@@ -1,4 +1,4 @@
-from typing import TypeVar, Dict, Any, NewType
+from typing import Dict, NewType
 
 
 TSecurityDetails = NewType("TSecurityDetails", Dict[str, str])
