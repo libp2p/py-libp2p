@@ -3,7 +3,7 @@ import multihash
 import pytest
 import base58
 from Crypto.PublicKey import RSA
-from libp2p.peer.id import ID, id_b58_encode
+from libp2p.peer.id import ID
 
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -30,7 +30,7 @@ def test_pretty():
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string.encode())
     actual = peer_id.pretty()
-    expected = base58.b58encode(random_id_string.encode()).decode()
+    expected = base58.b58encode(random_id_string).decode()
 
     assert actual == expected
 
@@ -39,7 +39,7 @@ def test_str_less_than_10():
     random_id_string = ""
     for _ in range(5):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    peer_id = base58.b58encode(random_id_string.encode()).decode()
+    peer_id = base58.b58encode(random_id_string).decode()
     expected = peer_id
     actual = ID(random_id_string.encode()).__str__()
 
@@ -50,7 +50,7 @@ def test_str_more_than_10():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    peer_id = base58.b58encode(random_id_string.encode()).decode()
+    peer_id = base58.b58encode(random_id_string).decode()
     expected = peer_id
     actual = ID(random_id_string.encode()).__str__()
 
@@ -63,8 +63,9 @@ def test_eq_true():
         random_id_string += random.SystemRandom().choice(ALPHABETS)
     peer_id = ID(random_id_string.encode())
 
+    assert peer_id == base58.b58encode(random_id_string).decode()
+    assert peer_id == random_id_string.encode()
     assert peer_id == ID(random_id_string.encode())
-    assert peer_id.to_bytes() == random_id_string.encode()
 
 
 def test_eq_false():
@@ -85,21 +86,21 @@ def test_hash():
     assert actual == expected
 
 
-def test_id_b58_encode():
+def test_id_to_base58():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    expected = base58.b58encode(random_id_string.encode()).decode()
-    actual = id_b58_encode(ID(random_id_string.encode()))
+    expected = base58.b58encode(random_id_string).decode()
+    actual = ID(random_id_string.encode()).to_base58()
 
     assert actual == expected
 
 
-def test_id_b58_decode():
+def test_id_from_base58():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
-    expected = ID(base58.b58decode(random_id_string.encode()))
+    expected = ID(base58.b58decode(random_id_string))
     actual = ID.from_base58(random_id_string.encode())
 
     assert actual == expected
