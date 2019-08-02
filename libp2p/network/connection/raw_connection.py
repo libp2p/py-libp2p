@@ -20,7 +20,6 @@ class RawConnection(IRawConnection):
         writer: asyncio.StreamWriter,
         initiator: bool,
     ) -> None:
-        # pylint: disable=too-many-arguments
         self.conn_ip = ip
         self.conn_port = port
         self.reader = reader

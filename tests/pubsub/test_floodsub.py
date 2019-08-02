@@ -13,7 +13,6 @@ from .floodsub_integration_test_settings import (
 )
 
 
-# pylint: disable=too-many-locals
 
 
 @pytest.mark.parametrize("num_hosts", (2,))

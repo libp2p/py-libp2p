@@ -8,7 +8,6 @@ from .pubsub_router_interface import IPubsubRouter
 
 
 class FloodSub(IPubsubRouter):
-    # pylint: disable=no-member
 
     protocols: List[str]
 

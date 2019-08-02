@@ -6,7 +6,6 @@ if TYPE_CHECKING:
     from libp2p.network.connection.raw_connection_interface import IRawConnection
     from .typing import TSecurityDetails
 
-# pylint: disable=W0105
 
 """
 Represents a secured connection object, which includes a connection and details about the security

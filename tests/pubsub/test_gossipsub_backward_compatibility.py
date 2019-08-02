@@ -10,7 +10,6 @@ from .floodsub_integration_test_settings import (
 )
 
 
-# pylint: disable=too-many-locals
 @pytest.mark.asyncio
 async def test_gossipsub_initialize_with_floodsub_protocol():
     GossipsubFactory(protocols=[FLOODSUB_PROTOCOL_ID])

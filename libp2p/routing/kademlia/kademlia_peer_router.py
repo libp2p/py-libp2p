@@ -8,7 +8,6 @@ from libp2p.routing.interfaces import IPeerRouting
 
 
 class KadmeliaPeerRouter(IPeerRouting):
-    # pylint: disable=too-few-public-methods
 
     server: KademliaServer
 
@@ -34,7 +33,7 @@ def decode_peerinfo(encoded: Union[bytes, str]) -> KadPeerInfo:
         lines = ast.literal_eval(encoded)
     except SyntaxError:
         return None
-    ip = lines[1]  # pylint: disable=invalid-name
+    ip = lines[1]
     port = lines[2]
     peer_id = lines[3]
     peer_info = create_kad_peerinfo(peer_id, ip, port)

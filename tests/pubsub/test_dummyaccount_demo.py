@@ -7,7 +7,6 @@ from tests.utils import cleanup, connect
 
 from .dummy_account_node import DummyAccountNode
 
-# pylint: disable=too-many-locals
 
 
 def create_setup_in_new_thread_func(dummy_node):

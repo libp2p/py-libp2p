@@ -12,10 +12,9 @@ from .kad_peerinfo import create_kad_peerinfo
 from .crawling import ValueSpiderCrawl
 from .crawling import NodeSpiderCrawl
 
-log = logging.getLogger(__name__)  # pylint: disable=invalid-name
+log = logging.getLogger(__name__)
 
 
-# pylint: disable=too-many-instance-attributes
 class KademliaServer:
     """
     High level view of a node instance.  This is the object that should be
@@ -260,4 +259,4 @@ def check_dht_value_type(value):
     placing in the dht.
     """
     typeset = [int, float, bool, str, bytes]
-    return type(value) in typeset  # pylint: disable=unidiomatic-typecheck
+    return type(value) in typeset

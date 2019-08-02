@@ -5,7 +5,6 @@ from tests.utils import cleanup, set_up_nodes_by_transport_opt
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 
-# pylint: disable=too-many-locals
 @pytest.mark.asyncio
 async def test_simple_messages():
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]

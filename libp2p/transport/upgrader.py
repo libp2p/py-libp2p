@@ -3,7 +3,6 @@ from libp2p.security.security_multistream import SecurityMultistream
 
 
 class TransportUpgrader:
-    # pylint: disable=no-self-use
 
     def __init__(self, secOpt, muxerOpt):
         # Store security option

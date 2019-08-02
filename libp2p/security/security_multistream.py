@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 TProtocol = NewType("TProtocol", str)
 
-# pylint: disable=W0105
 
 """
 Represents a secured connection object, which includes a connection and details about the security

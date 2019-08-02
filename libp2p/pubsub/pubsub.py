@@ -1,4 +1,3 @@
-# pylint: disable=no-name-in-module
 import asyncio
 import time
 from typing import Any, Dict, List, Tuple, TYPE_CHECKING
@@ -23,7 +22,6 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
 
 
 class Pubsub:
-    # pylint: disable=too-many-instance-attributes, no-member, unsubscriptable-object
 
     host: IHost
     my_id: ID
@@ -144,7 +142,6 @@ class Pubsub:
                 for message in rpc_incoming.subscriptions:
                     self.handle_subscription(peer_id, message)
 
-            # pylint: disable=line-too-long
             # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
             #   This is necessary because `control` is an optional field in pb2.
             #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2
@@ -201,7 +198,6 @@ class Pubsub:
             hello: bytes = self.get_hello_packet()
             await stream.write(hello)
 
-            # pylint: disable=line-too-long
             # TODO: Investigate whether this should be replaced by `handlePeerEOF`
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/49274b0e8aecdf6cad59d768e5702ff00aa48488/comm.go#L80  # noqa: E501
             # Pass stream off to stream reader

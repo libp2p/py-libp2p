@@ -6,7 +6,6 @@ from ..muxed_connection_interface import IMuxedConn
 
 
 class Mplex(IMuxedConn):
-    # pylint: disable=too-many-instance-attributes
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """

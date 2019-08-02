@@ -22,11 +22,9 @@ from libp2p import new_node, initialize_default_swarm
 from libp2p.network.notifee_interface import INotifee
 from libp2p.host.basic_host import BasicHost
 
-# pylint: disable=too-many-locals
 
 
 class MyNotifee(INotifee):
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
     def __init__(self, events, val_to_append_to_event):
         self.events = events
@@ -52,7 +50,6 @@ class MyNotifee(INotifee):
 
 
 class InvalidNotifee:
-    # pylint: disable=too-many-instance-attributes, cell-var-from-loop
 
     def __init__(self):
         pass

@@ -4,7 +4,6 @@ from typing import Iterable
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
-# pylint: disable=too-few-public-methods
 
 
 class IContentRouting(ABC):

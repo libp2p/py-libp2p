@@ -7,7 +7,7 @@ from .kad_peerinfo import create_kad_peerinfo
 from .routing import RoutingTable
 
 
-log = logging.getLogger(__name__)  # pylint: disable=invalid-name
+log = logging.getLogger(__name__)
 
 
 class KademliaProtocol(RPCProtocol):
@@ -37,7 +37,7 @@ class KademliaProtocol(RPCProtocol):
             ids.append(rid)
         return ids
 
-    def rpc_stun(self, sender):  # pylint: disable=no-self-use
+    def rpc_stun(self, sender):
         return sender
 
     def rpc_ping(self, sender, nodeid):
@@ -75,7 +75,6 @@ class KademliaProtocol(RPCProtocol):
         return {"value": value}
 
     def rpc_add_provider(self, sender, nodeid, key, provider_id):
-        # pylint: disable=unused-argument
         """
         rpc when receiving an add_provider call
         should validate received PeerInfo matches sender nodeid
@@ -91,7 +90,6 @@ class KademliaProtocol(RPCProtocol):
         return False
 
     def rpc_get_providers(self, sender, key):
-        # pylint: disable=unused-argument
         """
         rpc when receiving a get_providers call
         should look up key in data store and respond with records

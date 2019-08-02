@@ -12,9 +12,6 @@ from .pubsub_router_interface import IPubsubRouter
 
 
 class GossipSub(IPubsubRouter):
-    # pylint: disable=no-member
-    # pylint: disable=too-many-instance-attributes
-    # pylint: disable=too-many-public-methods
 
     protocols: List[str]
     pubsub: Pubsub
@@ -50,7 +47,6 @@ class GossipSub(IPubsubRouter):
         gossip_history: int = 5,
         heartbeat_interval: int = 120,
     ) -> None:
-        # pylint: disable=too-many-arguments
         self.protocols = list(protocols)
         self.pubsub = None
 
@@ -154,7 +150,6 @@ class GossipSub(IPubsubRouter):
                 await self.handle_prune(prune, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
-        # pylint: disable=too-many-locals
         """
         Invoked to forward a new message that has been validated.
         """
@@ -182,7 +177,6 @@ class GossipSub(IPubsubRouter):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
-        # pylint: disable=len-as-condition
         send_to: Set[ID] = set()
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
@@ -367,7 +361,6 @@ class GossipSub(IPubsubRouter):
                     self.fanout[topic].extend(selected_peers)
 
     async def gossip_heartbeat(self) -> None:
-        # pylint: disable=too-many-nested-blocks
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
