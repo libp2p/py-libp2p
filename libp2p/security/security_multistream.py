@@ -24,20 +24,13 @@ class SecurityMultistream(ABC):
     multiselect_client: MultiselectClient
 
     def __init__(self) -> None:
-        # Map protocol to secure transport
         self.transports = {}
-
-        # Create multiselect
         self.multiselect = Multiselect()
-
-        # Create multiselect client
         self.multiselect_client = MultiselectClient()
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
-        # Associate protocol with transport
         self.transports[protocol] = transport
 
-        # Add protocol and handler to multiselect
         # Note: None is added as the handler for the given protocol since
         # we only care about selecting the protocol, not any handler function
         self.multiselect.add_handler(protocol, None)
@@ -48,13 +41,8 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-
-        # Select a secure transport
         transport = await self.select_transport(conn, False)
-
-        # Create secured connection
         secure_conn = await transport.secure_inbound(conn)
-
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -63,13 +51,8 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-
-        # Select a secure transport
         transport = await self.select_transport(conn, True)
-
-        # Create secured connection
         secure_conn = await transport.secure_outbound(conn, peer_id)
-
         return secure_conn
 
     async def select_transport(
