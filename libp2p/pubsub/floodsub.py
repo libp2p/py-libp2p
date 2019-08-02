@@ -1,6 +1,6 @@
 from typing import Iterable, List, Sequence
 
-from libp2p.peer.id import ID, id_b58_decode
+from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 from .pubsub import Pubsub
@@ -73,7 +73,7 @@ class FloodSub(IPubsubRouter):
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
         for peer_id in peers_gen:
-            stream = self.pubsub.peers[str(peer_id)]
+            stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             await stream.write(rpc_msg.SerializeToString())
@@ -105,11 +105,9 @@ class FloodSub(IPubsubRouter):
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
                 continue
-            for peer_id_str in self.pubsub.peer_topics[topic]:
-                peer_id = id_b58_decode(peer_id_str)
+            for peer_id in self.pubsub.peer_topics[topic]:
                 if peer_id in (msg_forwarder, origin):
                     continue
-                # FIXME: Should change `self.pubsub.peers` to Dict[PeerID, ...]
-                if str(peer_id) not in self.pubsub.peers:
+                if peer_id not in self.pubsub.peers:
                     continue
                 yield peer_id

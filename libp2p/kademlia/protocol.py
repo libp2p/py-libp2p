@@ -44,7 +44,7 @@ class KademliaProtocol(RPCProtocol):
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
-        return self.source_node.peer_id
+        return self.source_node.peer_id_bytes
 
     def rpc_store(self, sender, nodeid, key, value):
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
@@ -106,39 +106,39 @@ class KademliaProtocol(RPCProtocol):
         keynode = create_kad_peerinfo(key)
         neighbors = self.router.find_neighbors(keynode)
         for neighbor in neighbors:
-            if neighbor.peer_id != record:
-                providers.append(neighbor.peer_id)
+            if neighbor.peer_id_bytes != record:
+                providers.append(neighbor.peer_id_bytes)
 
         return providers
 
     async def call_find_node(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_node(
-            address, self.source_node.peer_id, node_to_find.peer_id
+            address, self.source_node.peer_id_bytes, node_to_find.peer_id_bytes
         )
         return self.handle_call_response(result, node_to_ask)
 
     async def call_find_value(self, node_to_ask, node_to_find):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.find_value(
-            address, self.source_node.peer_id, node_to_find.peer_id
+            address, self.source_node.peer_id_bytes, node_to_find.peer_id_bytes
         )
         return self.handle_call_response(result, node_to_ask)
 
     async def call_ping(self, node_to_ask):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.ping(address, self.source_node.peer_id)
+        result = await self.ping(address, self.source_node.peer_id_bytes)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_store(self, node_to_ask, key, value):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.store(address, self.source_node.peer_id, key, value)
+        result = await self.store(address, self.source_node.peer_id_bytes, key, value)
         return self.handle_call_response(result, node_to_ask)
 
     async def call_add_provider(self, node_to_ask, key, provider_id):
         address = (node_to_ask.ip, node_to_ask.port)
         result = await self.add_provider(
-            address, self.source_node.peer_id, key, provider_id
+            address, self.source_node.peer_id_bytes, key, provider_id
         )
 
         return self.handle_call_response(result, node_to_ask)

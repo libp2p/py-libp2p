@@ -22,7 +22,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         :return: KadPeerInfo of specified peer
         """
         # switching peer_id to xor_id used by kademlia as node_id
-        xor_id = peer_id.get_xor_id()
+        xor_id = peer_id.xor_id
         value = await self.server.get(xor_id)
         return decode_peerinfo(value)
 

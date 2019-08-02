@@ -54,11 +54,11 @@ async def test_join(num_hosts, hosts, gossipsubs, pubsubs_gsub):
 
     for i in hosts_indices:
         if i in subscribed_peer_indices:
-            assert str(hosts[i].get_id()) in gossipsubs[central_node_index].mesh[topic]
-            assert str(hosts[central_node_index].get_id()) in gossipsubs[i].mesh[topic]
+            assert hosts[i].get_id() in gossipsubs[central_node_index].mesh[topic]
+            assert hosts[central_node_index].get_id() in gossipsubs[i].mesh[topic]
         else:
             assert (
-                str(hosts[i].get_id()) not in gossipsubs[central_node_index].mesh[topic]
+                hosts[i].get_id() not in gossipsubs[central_node_index].mesh[topic]
             )
             assert topic not in gossipsubs[i].mesh
 
@@ -89,9 +89,9 @@ async def test_leave(pubsubs_gsub):
 @pytest.mark.asyncio
 async def test_handle_graft(pubsubs_gsub, hosts, gossipsubs, event_loop, monkeypatch):
     index_alice = 0
-    id_alice = str(hosts[index_alice].get_id())
+    id_alice = hosts[index_alice].get_id()
     index_bob = 1
-    id_bob = str(hosts[index_bob].get_id())
+    id_bob = hosts[index_bob].get_id()
     await connect(hosts[index_alice], hosts[index_bob])
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
@@ -141,9 +141,9 @@ async def test_handle_graft(pubsubs_gsub, hosts, gossipsubs, event_loop, monkeyp
 @pytest.mark.asyncio
 async def test_handle_prune(pubsubs_gsub, hosts, gossipsubs):
     index_alice = 0
-    id_alice = str(hosts[index_alice].get_id())
+    id_alice = hosts[index_alice].get_id()
     index_bob = 1
-    id_bob = str(hosts[index_bob].get_id())
+    id_bob = hosts[index_bob].get_id()
 
     topic = "test_handle_prune"
     for pubsub in pubsubs_gsub:

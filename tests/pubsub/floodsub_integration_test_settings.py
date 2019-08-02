@@ -179,12 +179,12 @@ async def perform_test_from_obj(obj, router_factory):
     node_map = {}
     pubsub_map = {}
 
-    async def add_node(node_id: str) -> None:
+    async def add_node(node_id_str: str) -> None:
         pubsub_router = router_factory(protocols=obj["supported_protocols"])
         pubsub = PubsubFactory(router=pubsub_router)
         await pubsub.host.get_network().listen(LISTEN_MADDR)
-        node_map[node_id] = pubsub.host
-        pubsub_map[node_id] = pubsub
+        node_map[node_id_str] = pubsub.host
+        pubsub_map[node_id_str] = pubsub
 
     tasks_connect = []
     for start_node_id in adj_list:

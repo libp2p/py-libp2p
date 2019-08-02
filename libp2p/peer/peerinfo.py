@@ -2,7 +2,7 @@ from typing import List
 
 import multiaddr
 
-from .id import ID, id_b58_decode
+from .id import ID
 from .peerdata import PeerData
 
 
@@ -39,7 +39,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
 
     # make sure the /p2p value parses as a peer.ID
     peer_id_str: str = p2p_part.value_for_protocol(multiaddr.protocols.P_P2P)
-    peer_id: ID = id_b58_decode(peer_id_str)
+    peer_id: ID = ID.from_base58(peer_id_str)
 
     # we might have received just an / p2p part, which means there's no addr.
     if len(parts) > 1:
