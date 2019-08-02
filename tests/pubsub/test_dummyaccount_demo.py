@@ -189,6 +189,7 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
