@@ -3,7 +3,7 @@ import asyncio
 import multiaddr
 
 from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.peer.id import id_b58_encode
+from libp2p.peer.id import ID
 
 from ..listener_interface import IListener
 from ..transport_interface import ITransport
@@ -74,7 +74,7 @@ class TCP(ITransport):
         reader, writer = await asyncio.open_connection(host, port)
 
         # First: send our peer ID so receiver knows it
-        writer.write(id_b58_encode(self_id).encode())
+        writer.write(self_id.to_base58().encode())
         await writer.drain()
 
         # Await ack for peer id

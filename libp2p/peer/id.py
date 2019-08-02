@@ -82,38 +82,6 @@ class ID:
         return cls.from_pubkey(key.publickey())
 
 
-def id_b58_encode(peer_id: ID) -> str:
-    """
-    return a b58-encoded string
-    """
-    # pylint: disable=protected-access
-    return base58.b58encode(peer_id.to_bytes()).decode()
-
-
-def id_b58_decode(b58_encoded_peer_id_str: str) -> ID:
-    """
-    return a base58-decoded peer ID
-    """
-    return ID(base58.b58decode(b58_encoded_peer_id_str))
-
-
-def id_from_public_key(key: RsaKey) -> ID:
-    # export into binary format
-    key_bin = key.exportKey("DER")
-
-    algo: int = multihash.Func.sha2_256
-    # TODO: seems identity is not yet supported in pymultihash
-    # if len(b) <= MAX_INLINE_KEY_LENGTH:
-    #     algo multihash.func.identity
-
-    mh_digest: multihash.Multihash = multihash.digest(key_bin, algo)
-    return ID(mh_digest.encode())
-
-
-def id_from_private_key(key: RsaKey) -> ID:
-    return id_from_public_key(key.publickey())
-
-
 def digest(data: Union[str, bytes]) -> bytes:
     if isinstance(data, str):
         data = data.encode("utf8")
