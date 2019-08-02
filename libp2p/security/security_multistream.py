@@ -23,10 +23,13 @@ class SecurityMultistream(ABC):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self) -> None:
+    def __init__(self, secure_transports_by_protocol) -> None:
         self.transports = {}
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
+
+        for protocol, transport in secure_transports_by_protocol.items():
+            self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
         self.transports[protocol] = transport

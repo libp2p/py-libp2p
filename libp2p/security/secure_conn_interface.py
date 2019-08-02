@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
+from libp2p.peer.id import ID
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.security.typing import TSecurityDetails
 
 
 """
@@ -12,15 +12,23 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 """
 
 
-class ISecureConn(ABC):
+class AbstractSecureConn(ABC):
     @abstractmethod
-    def get_conn(self) -> IRawConnection:
-        """
-        :return: the underlying raw connection
-        """
+    def get_local_peer(self) -> ID:
+        pass
 
     @abstractmethod
-    def get_security_details(self) -> TSecurityDetails:
-        """
-        :return: map containing details about the connections security
-        """
+    def get_local_private_key(self) -> bytes:
+        pass
+
+    @abstractmethod
+    def get_remote_peer(self) -> ID:
+        pass
+
+    @abstractmethod
+    def get_remote_public_key(self) -> bytes:
+        pass
+
+
+class ISecureConn(AbstractSecureConn, IRawConnection):
+    pass

@@ -1,13 +1,12 @@
 import asyncio
 from typing import Dict, Tuple
 
-from multiaddr import Multiaddr
-
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from multiaddr import Multiaddr
 
 from .constants import HeaderTags
 from .mplex_stream import MplexStream
@@ -39,11 +38,8 @@ class Mplex(IMuxedConn):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
-        super().__init__(secured_conn, generic_protocol_handler, peer_id)
-
-        self.secured_conn = secured_conn
-        self.raw_conn = secured_conn.get_conn()
-        self.initiator = self.raw_conn.initiator
+        self.conn = secured_conn
+        self.initiator = self.conn.initiator
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
@@ -63,7 +59,7 @@ class Mplex(IMuxedConn):
         """
         close the stream muxer and underlying raw connection
         """
-        self.raw_conn.close()
+        self.conn.close()
 
     def is_closed(self) -> bool:
         """
@@ -99,7 +95,7 @@ class Mplex(IMuxedConn):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
-        stream_id = self.raw_conn.next_stream_id()
+        stream_id = self.conn.next_stream_id()
         stream = MplexStream(stream_id, multi_addr, self)
         self.buffers[stream_id] = asyncio.Queue()
         await self.send_message(HeaderTags.NewStream, None, stream_id)
@@ -139,8 +135,8 @@ class Mplex(IMuxedConn):
         :param _bytes: byte array to write
         :return: length written
         """
-        self.raw_conn.writer.write(_bytes)
-        await self.raw_conn.writer.drain()
+        self.conn.writer.write(_bytes)
+        await self.conn.writer.drain()
         return len(_bytes)
 
     async def handle_incoming(self) -> None:
@@ -177,10 +173,10 @@ class Mplex(IMuxedConn):
         #  loop in handle_incoming
         timeout = 0.1
         try:
-            header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
-            length = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
+            header = await decode_uvarint_from_stream(self.conn.reader, timeout)
+            length = await decode_uvarint_from_stream(self.conn.reader, timeout)
             message = await asyncio.wait_for(
-                self.raw_conn.reader.read(length), timeout=timeout
+                self.conn.reader.read(length), timeout=timeout
             )
         except asyncio.TimeoutError:
             return None, None, None
