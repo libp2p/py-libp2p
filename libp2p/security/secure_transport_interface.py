@@ -1,5 +1,12 @@
 from abc import ABC, abstractmethod
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .secure_conn_interface import ISecureConn
+    from libp2p.network.connection.raw_connection_interface import IRawConnection
+    from libp2p.peer.id import ID
+
 # pylint: disable=W0105
 
 """
@@ -12,7 +19,7 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 class ISecureTransport(ABC):
     @abstractmethod
-    async def secure_inbound(self, conn):
+    async def secure_inbound(self, conn: "IRawConnection") -> "ISecureConn":
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are not the initiator)
@@ -20,7 +27,9 @@ class ISecureTransport(ABC):
         """
 
     @abstractmethod
-    async def secure_outbound(self, conn, peer_id):
+    async def secure_outbound(
+        self, conn: "IRawConnection", peer_id: "ID"
+    ) -> "ISecureConn":
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)
