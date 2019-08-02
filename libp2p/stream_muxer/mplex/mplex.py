@@ -42,7 +42,7 @@ class Mplex(IMuxedConn):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
-        super(Mplex, self).__init__(secured_conn, generic_protocol_handler, peer_id)
+        super().__init__(secured_conn, generic_protocol_handler, peer_id)
 
         self.secured_conn = secured_conn
         self.raw_conn = secured_conn.get_conn()
@@ -111,7 +111,6 @@ class Mplex(IMuxedConn):
     async def accept_stream(self) -> None:
         """
         accepts a muxed stream opened by the other end
-        :return: the accepted stream
         """
         stream_id = await self.stream_queue.get()
         stream = MplexStream(stream_id, False, self)
