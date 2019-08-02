@@ -3,15 +3,13 @@ import asyncio
 import pytest
 
 from libp2p.peer.id import ID
-
 from tests.utils import cleanup, connect
 
 from .factories import FloodsubFactory
 from .floodsub_integration_test_settings import (
-    perform_test_from_obj,
     floodsub_protocol_pytest_params,
+    perform_test_from_obj,
 )
-
 
 # pylint: disable=too-many-locals
 

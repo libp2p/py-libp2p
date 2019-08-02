@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Awaitable, Callable, Dict, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Sequence
 
 from multiaddr import Multiaddr
 

@@ -2,9 +2,7 @@ import hashlib
 from typing import Union
 
 import base58
-
 import multihash
-
 from Crypto.PublicKey.RSA import RsaKey
 
 # MaxInlineKeyLength is the maximum length a key can be for it to be inlined in

@@ -1,9 +1,8 @@
-from collections import Counter
 import logging
+from collections import Counter
 
 from .kad_peerinfo import KadPeerHeap, create_kad_peerinfo
 from .utils import gather_dict
-
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 

@@ -1,11 +1,11 @@
-import random
 import asyncio
 import logging
+import random
 
 from rpcudp.protocol import RPCProtocol
+
 from .kad_peerinfo import create_kad_peerinfo
 from .routing import RoutingTable
-
 
 log = logging.getLogger(__name__)  # pylint: disable=invalid-name
 

@@ -4,11 +4,9 @@ from typing import Any, Awaitable, Callable, List, Sequence
 import multiaddr
 
 from libp2p.network.network_interface import INetwork
+from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-
-from libp2p.network.stream.net_stream_interface import INetStream
-
 
 StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 

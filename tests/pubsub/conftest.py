@@ -7,7 +7,6 @@ from tests.configs import LISTEN_MADDR
 from .configs import GOSSIPSUB_PARAMS
 from .factories import FloodsubFactory, GossipsubFactory, HostFactory, PubsubFactory
 
-
 # pylint: disable=redefined-outer-name
 
 

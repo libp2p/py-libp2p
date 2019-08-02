@@ -2,15 +2,15 @@ import asyncio
 
 from Crypto.PublicKey import RSA
 
-from .security.insecure_security import InsecureTransport
-from .peer.peerstore import PeerStore
-from .peer.id import id_from_public_key
-from .network.swarm import Swarm
 from .host.basic_host import BasicHost
-from .transport.upgrader import TransportUpgrader
-from .transport.tcp.tcp import TCP
 from .kademlia.network import KademliaServer
+from .network.swarm import Swarm
+from .peer.id import id_from_public_key
+from .peer.peerstore import PeerStore
 from .routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
+from .security.insecure_security import InsecureTransport
+from .transport.tcp.tcp import TCP
+from .transport.upgrader import TransportUpgrader
 
 
 async def cleanup_done_tasks():
