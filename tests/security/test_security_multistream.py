@@ -5,8 +5,8 @@ import pytest
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
-from libp2p.security.insecure_security import InsecureTransport
-from libp2p.security.simple_security import SimpleSecurityTransport
+from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.simple.transport import SimpleSecurityTransport
 
 from tests.utils import cleanup, connect
 
