@@ -10,7 +10,7 @@ class MplexStream(IMuxedStream):
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
     """
 
-    def __init__(self, stream_id, initiator, mplex_conn):
+    def __init__(self, stream_id, initiator: bool, mplex_conn):
         """
         create new MuxedStream in muxer
         :param stream_id: stream stream id
