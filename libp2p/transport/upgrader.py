@@ -3,13 +3,8 @@ from libp2p.security.security_multistream import SecurityMultistream
 
 
 class TransportUpgrader:
-    def __init__(self, secOpt, muxerOpt):
-        # Store security option
-        self.security_multistream = SecurityMultistream()
-        for key in secOpt:
-            self.security_multistream.add_transport(key, secOpt[key])
-
-        # Store muxer option
+    def __init__(self, secure_transports_by_protocol, muxerOpt):
+        self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
         self.muxer = muxerOpt
 
     def upgrade_listener(self, transport, listeners):

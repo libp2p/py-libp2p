@@ -80,8 +80,8 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or {"insecure/1.0.0": InsecureTransport("insecure")}
-    upgrader = TransportUpgrader(sec, muxer)
+    security_transports_by_protocol = sec_opt or {"insecure/1.0.0": InsecureTransport()}
+    upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
