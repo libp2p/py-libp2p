@@ -11,6 +11,11 @@ if TYPE_CHECKING:
 
 
 class InsecureTransport(ISecureTransport):
+    """
+    ``InsecureTransport`` provides the "identity" upgrader for a ``IRawConnection``,
+    i.e. the upgraded transport does not add any additional security.
+    """
+
     transport_id: str
 
     def __init__(self, transport_id: str) -> None:
