@@ -4,16 +4,16 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from typing import TYPE_CHECKING, Dict, Any, cast
 
 if TYPE_CHECKING:
-    from .secure_conn_interface import ISecureConn
     from libp2p.network.connection.raw_connection_interface import IRawConnection
     from libp2p.peer.id import ID
+    from .secure_conn_interface import ISecureConn
     from .typing import TSecurityDetails
 
 
 class InsecureTransport(ISecureTransport):
-    transport_id: int
+    transport_id: str
 
-    def __init__(self, transport_id: int) -> None:
+    def __init__(self, transport_id: str) -> None:
         self.transport_id = transport_id
 
     async def secure_inbound(self, conn: "IRawConnection") -> ISecureConn:
@@ -41,16 +41,16 @@ class InsecureConn(ISecureConn):
     conn: "IRawConnection"
     details: "TSecurityDetails"
 
-    def __init__(self, conn: "IRawConnection", conn_id: int) -> None:
+    def __init__(self, conn: "IRawConnection", conn_id: str) -> None:
         self.conn = conn
         self.details = cast("TSecurityDetails", {})
         self.details["id"] = conn_id
 
-    def get_conn(self) -> "ISecureConn":
+    def get_conn(self) -> "IRawConnection":
         """
         :return: connection object that has been made secure
         """
-        return cast("ISecureConn", self.conn)
+        return self.conn
 
     def get_security_details(self) -> "TSecurityDetails":
         """

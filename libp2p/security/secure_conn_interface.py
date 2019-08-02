@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from libp2p.network.connection.raw_connection_interface import IRawConnection
     from .typing import TSecurityDetails
 
 # pylint: disable=W0105
@@ -17,9 +18,9 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 class ISecureConn(ABC):
     @abstractmethod
-    def get_conn(self) -> "ISecureConn":
+    def get_conn(self) -> "IRawConnection":
         """
-        :return: connection object that has been made secure
+        :return: the underlying raw connection
         """
 
     @abstractmethod

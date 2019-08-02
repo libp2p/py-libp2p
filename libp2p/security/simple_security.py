@@ -67,11 +67,11 @@ class SimpleSecureConn(ISecureConn):
         self.details = cast("TSecurityDetails", {})
         self.details["key_phrase"] = key_phrase
 
-    def get_conn(self) -> "ISecureConn":
+    def get_conn(self) -> "IRawConnection":
         """
         :return: connection object that has been made secure
         """
-        return cast("ISecureConn", self.conn)
+        return self.conn
 
     def get_security_details(self) -> "TSecurityDetails":
         """
