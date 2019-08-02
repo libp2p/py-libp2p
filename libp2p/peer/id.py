@@ -5,16 +5,6 @@ import base58
 
 import multihash
 
-from Crypto.PublicKey.RSA import RsaKey
-
-# MaxInlineKeyLength is the maximum length a key can be for it to be inlined in
-# the peer ID.
-# * When `len(pubKey.Bytes()) <= MaxInlineKeyLength`, the peer ID is the
-#   identity multihash hash of the public key.
-# * When `len(pubKey.Bytes()) > MaxInlineKeyLength`, the peer ID is the
-#   sha2-256 multihash of the public key.
-MAX_INLINE_KEY_LENGTH = 42
-
 
 class ID:
 
@@ -64,21 +54,10 @@ class ID:
         return pid
 
     @classmethod
-    def from_pubkey(cls, key: RsaKey) -> "ID":
-        # export into binary format
-        key_bin = key.exportKey("DER")
-
-        algo: int = multihash.Func.sha2_256
-        # TODO: seems identity is not yet supported in pymultihash
-        # if len(b) <= MAX_INLINE_KEY_LENGTH:
-        #     algo multihash.func.identity
-
-        mh_digest: multihash.Multihash = multihash.digest(key_bin, algo)
+    def from_pubkey(cls, key: bytes) -> "ID":
+        algo = multihash.Func.sha2_256
+        mh_digest = multihash.digest(key, algo)
         return cls(mh_digest.encode())
-
-    @classmethod
-    def from_privkey(cls, key: RsaKey) -> "ID":
-        return cls.from_pubkey(key.publickey())
 
 
 def digest(data: Union[str, bytes]) -> bytes:
