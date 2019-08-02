@@ -46,8 +46,6 @@ async def run(port, destination):
 
         host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
-        if not port:
-            raise RuntimeError("was not able to find the actual local port")
 
         print(
             "Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n"
@@ -96,6 +94,9 @@ def main():
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
     args = parser.parse_args()
+
+    if not args.port:
+        raise RuntimeError("was not able to determine a local port")
 
     loop = asyncio.get_event_loop()
     try:
