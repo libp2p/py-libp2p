@@ -163,7 +163,7 @@ class Swarm(INetwork):
 
         return net_stream
 
-    async def listen(self, multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
         """
         :param multiaddrs: one or many multiaddrs to start listening on
         :return: true if at least one success
