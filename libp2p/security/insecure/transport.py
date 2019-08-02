@@ -1,10 +1,24 @@
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
+from libp2p.security.base_session import BaseSession
+from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.secure_transport_interface import ISecureTransport
 
 
-class InsecureTransport(ISecureTransport):
+class InsecureSession(BaseSession):
+    def __init__(
+        self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
+    ) -> None:
+        super(InsecureSession, self).__init__(transport, conn, peer_id)
+
+    async def write(self, data: bytes) -> None:
+        await self.insecure_conn.write(data)
+
+    async def read(self) -> bytes:
+        return await self.insecure_conn.read()
+
+
+class InsecureTransport(BaseSecureTransport):
     """
     ``InsecureTransport`` provides the "identity" upgrader for a ``IRawConnection``,
     i.e. the upgraded transport does not add any additional security.
@@ -16,7 +30,7 @@ class InsecureTransport(ISecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return conn
+        return InsecureSession(self, conn, ID(b""))
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
@@ -24,4 +38,4 @@ class InsecureTransport(ISecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return conn
+        return InsecureSession(self, conn, peer_id)
