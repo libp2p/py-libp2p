@@ -2,7 +2,7 @@ import asyncio
 
 from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
 
-from .utils import get_flag
+from .constants import HeaderTags
 
 
 class MplexStream(IMuxedStream):
@@ -38,9 +38,12 @@ class MplexStream(IMuxedStream):
         write to stream
         :return: number of bytes written
         """
-        return await self.mplex_conn.send_message(
-            get_flag(self.initiator, "MESSAGE"), data, self.stream_id
+        flag = (
+            HeaderTags.MessageInitiator
+            if self.initiator
+            else HeaderTags.MessageReceiver
         )
+        return await self.mplex_conn.send_message(flag, data, self.stream_id)
 
     async def close(self):
         """
@@ -50,7 +53,8 @@ class MplexStream(IMuxedStream):
         """
         # TODO error handling with timeout
         # TODO understand better how mutexes are used from go repo
-        await self.mplex_conn.send_message(get_flag(self.initiator, "CLOSE"), None, self.stream_id)
+        flag = HeaderTags.CloseInitiator if self.initiator else HeaderTags.CloseReceiver
+        await self.mplex_conn.send_message(flag, None, self.stream_id)
 
         remote_lock = ""
         async with self.stream_lock:
@@ -78,9 +82,12 @@ class MplexStream(IMuxedStream):
                 return True
 
             if not self.remote_closed:
-                await self.mplex_conn.send_message(
-                    get_flag(self.initiator, "RESET"), None, self.stream_id
+                flag = (
+                    HeaderTags.ResetInitiator
+                    if self.initiator
+                    else HeaderTags.ResetInitiator
                 )
+                await self.mplex_conn.send_message(flag, None, self.stream_id)
 
             self.local_closed = True
             self.remote_closed = True
