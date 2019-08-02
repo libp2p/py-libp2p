@@ -1,8 +1,10 @@
 import asyncio
 import struct
 
+from typing import Tuple
 
-def encode_uvarint(number):
+
+def encode_uvarint(number: int) -> bytearray:
     """Pack `number` into varint bytes"""
     buf = b""
     while True:
@@ -16,7 +18,7 @@ def encode_uvarint(number):
     return buf
 
 
-def decode_uvarint(buff, index):
+def decode_uvarint(buff: bytearray, index: int) -> Tuple[int, int]:
     shift = 0
     result = 0
     while True:
@@ -30,7 +32,9 @@ def decode_uvarint(buff, index):
     return result, index + 1
 
 
-async def decode_uvarint_from_stream(reader, timeout):
+async def decode_uvarint_from_stream(
+    reader: asyncio.StreamReader, timeout: float
+) -> int:
     shift = 0
     result = 0
     while True:
