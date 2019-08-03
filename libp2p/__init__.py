@@ -27,9 +27,14 @@ async def cleanup_done_tasks():
         await asyncio.sleep(3)
 
 
-def generate_id():
-    new_key = RSA.generate(2048, e=65537).publickey().export_key("DER")
-    new_id = ID.from_pubkey(new_key)
+def generate_new_private_key():
+    new_key = RSA.generate(2048, e=65537)
+    return new_key
+
+
+def generate_id(private_key):
+    public_key_bytes = private_key.publickey().export_key("DER")
+    new_id = ID.from_pubkey(public_key_bytes)
     return new_id
 
 
@@ -44,7 +49,7 @@ def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=N
     :return: return a default kademlia instance
     """
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_id(generate_new_private_key())
 
     node_id = id_opt.to_bytes()
     server = KademliaServer(ksize=ksize, alpha=alpha, node_id=node_id, storage=storage)
@@ -52,6 +57,7 @@ def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=N
 
 
 def initialize_default_swarm(
+    private_key,
     id_opt=None,
     transport_opt=None,
     muxer_opt=None,
@@ -71,7 +77,7 @@ def initialize_default_swarm(
     """
 
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_id(private_key)
 
     # TODO parse transport_opt to determine transport
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
@@ -80,7 +86,10 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    security_transports_by_protocol = sec_opt or {"insecure/1.0.0": InsecureTransport()}
+    private_key_bytes = private_key.export_key("DER")
+    security_transports_by_protocol = sec_opt or {
+        "insecure/1.0.0": InsecureTransport(private_key_bytes)
+    }
     upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
     peerstore = peerstore_opt or PeerStore()
@@ -91,6 +100,7 @@ def initialize_default_swarm(
 
 
 async def new_node(
+    private_key=None,
     swarm_opt=None,
     id_opt=None,
     transport_opt=None,
@@ -111,11 +121,15 @@ async def new_node(
     :return: return a host instance
     """
 
+    if not private_key:
+        private_key = generate_new_private_key()
+
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_id(private_key)
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
+            private_key=private_key,
             id_opt=id_opt,
             transport_opt=transport_opt,
             muxer_opt=muxer_opt,
