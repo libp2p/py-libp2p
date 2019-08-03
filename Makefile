@@ -7,7 +7,6 @@ format:
 lintroll:
 	# NOTE: disabling `mypy` until we get typing sorted in this repo
 	# mypy -p libp2p -p examples --config-file {toxinidir}/mypy.ini
-	# TODO: add flake8
 	black --check $(FILES_TO_LINT)
 	isort --recursive --check-only $(FILES_TO_LINT)
 	flake8 $(FILES_TO_LINT)
