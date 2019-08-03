@@ -1,6 +1,7 @@
 import asyncio
+from collections import namedtuple
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Tuple, Union, TYPE_CHECKING
 
 from lru import LRU
 
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
     # NOTE: `string(from, seqno)` in Go
     return (msg.seqno, msg.from_id)
+
+
+TopicValidator = namedtuple("TopicValidator", ["validator", "is_async"])
 
 
 class Pubsub:
@@ -40,6 +44,8 @@ class Pubsub:
 
     peer_topics: Dict[str, List[ID]]
     peers: Dict[ID, INetStream]
+
+    topic_validators: Dict[str, TopicValidator]
 
     # NOTE: Be sure it is increased atomically everytime.
     counter: int  # uint64
@@ -92,6 +98,9 @@ class Pubsub:
 
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
+
+        # Map of topic to topic validator
+        self.topic_validators = {}
 
         self.counter = time.time_ns()
 
