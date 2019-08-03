@@ -13,4 +13,3 @@ lintroll:
 
 protobufs:
 	cd libp2p/pubsub/pb && protoc --python_out=. rpc.proto
-	cd libp2p/pubsub/pb && python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. rpc.proto

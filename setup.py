@@ -38,8 +38,6 @@ setuptools.setup(
         "pymultihash>=0.8.2",
         "multiaddr>=0.0.8,<0.1.0",
         "rpcudp>=3.0.0,<4.0.0",
-        "grpcio>=1.21.1,<2.0.0",
-        "grpcio-tools>=1.21.1,<2.0.0",
         "lru-dict>=1.1.6",
     ],
     extras_require=extras_require,
