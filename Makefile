@@ -10,6 +10,7 @@ lintroll:
 	# TODO: add flake8
 	black --check $(FILES_TO_LINT)
 	isort --recursive --check-only $(FILES_TO_LINT)
+	flake8 $(FILES_TO_LINT)
 
 protobufs:
 	cd libp2p/pubsub/pb && protoc --python_out=. rpc.proto
