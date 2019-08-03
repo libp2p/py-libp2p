@@ -2,6 +2,8 @@ from contextlib import suppress
 import asyncio
 import multiaddr
 
+from Crypto.PublicKey import RSA
+
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
@@ -52,3 +54,8 @@ async def perform_two_host_set_up_custom_handler(handler):
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
     return node_a, node_b
+
+
+def generate_new_private_key():
+    new_key = RSA.generate(2048, e=65537)
+    return new_key
