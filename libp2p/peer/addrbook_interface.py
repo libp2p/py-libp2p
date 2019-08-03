@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Sequence
 
-
 from multiaddr import Multiaddr
 
 from .id import ID

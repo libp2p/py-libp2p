@@ -1,8 +1,8 @@
 from abc import ABC
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect import Multiselect
+from typing import TYPE_CHECKING, Dict, NewType
 
-from typing import TYPE_CHECKING, NewType, Dict
+from libp2p.protocol_muxer.multiselect import Multiselect
+from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 
 if TYPE_CHECKING:
     from libp2p.network.connection.raw_connection_interface import IRawConnection

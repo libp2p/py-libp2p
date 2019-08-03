@@ -8,7 +8,6 @@ from tests.utils import cleanup, connect
 from .configs import FLOODSUB_PROTOCOL_ID
 from .factories import PubsubFactory
 
-
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 
 FLOODSUB_PROTOCOL_TEST_CASES = [

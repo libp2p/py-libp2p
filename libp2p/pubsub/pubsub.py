@@ -1,13 +1,12 @@
 import asyncio
 import time
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from lru import LRU
 
 from libp2p.host.host_interface import IHost
-from libp2p.peer.id import ID
-
 from libp2p.network.stream.net_stream_interface import INetStream
+from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee

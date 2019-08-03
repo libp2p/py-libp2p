@@ -1,16 +1,15 @@
 """
 Package for interacting on the network at a high level.
 """
-import pickle
 import asyncio
 import logging
+import pickle
 
-from .protocol import KademliaProtocol
-from .utils import digest
-from .storage import ForgetfulStorage
+from .crawling import NodeSpiderCrawl, ValueSpiderCrawl
 from .kad_peerinfo import create_kad_peerinfo
-from .crawling import ValueSpiderCrawl
-from .crawling import NodeSpiderCrawl
+from .protocol import KademliaProtocol
+from .storage import ForgetfulStorage
+from .utils import digest
 
 log = logging.getLogger(__name__)
 

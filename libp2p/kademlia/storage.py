@@ -1,8 +1,8 @@
-import time
+from abc import ABC, abstractmethod
+from collections import OrderedDict
 from itertools import takewhile
 import operator
-from collections import OrderedDict
-from abc import abstractmethod, ABC
+import time
 
 
 class IStorage(ABC):

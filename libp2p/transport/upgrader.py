@@ -1,5 +1,5 @@
-from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.security.security_multistream import SecurityMultistream
+from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
 class TransportUpgrader:

@@ -1,11 +1,13 @@
 import heapq
+from operator import itemgetter
 import random
 
-from operator import itemgetter
 from multiaddr import Multiaddr
-from libp2p.peer.peerinfo import PeerInfo
+
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData
+from libp2p.peer.peerinfo import PeerInfo
+
 from .utils import digest
 
 P_IP = "ip4"

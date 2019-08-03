@@ -4,7 +4,6 @@ import logging
 from .kad_peerinfo import KadPeerHeap, create_kad_peerinfo
 from .utils import gather_dict
 
-
 log = logging.getLogger(__name__)
 
 
