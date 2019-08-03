@@ -12,7 +12,6 @@ features are implemented in swarm
 import pytest
 import multiaddr
 
-
 from tests.utils import (
     cleanup,
     echo_stream_handler,

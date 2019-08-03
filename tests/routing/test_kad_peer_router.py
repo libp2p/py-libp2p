@@ -19,8 +19,6 @@ async def test_simple_two_nodes():
 
     router = KadmeliaPeerRouter(node_b)
     returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
-    print(repr(returned_info))
-    print(repr(node_a_kad_peerinfo))
     assert repr(returned_info) == repr(node_a_kad_peerinfo)
 
 

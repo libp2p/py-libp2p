@@ -21,10 +21,7 @@ async def perform_simple_test(
     async def stream_handler(stream):
         while True:
             read_string = (await stream.read()).decode()
-            print("host B received:" + read_string)
-
             response = "ack:" + read_string
-            print("sending response:" + response)
             await stream.write(response.encode())
 
     for protocol in protocols_with_handlers:
@@ -40,7 +37,6 @@ async def perform_simple_test(
 
         response = (await stream.read()).decode()
 
-        print("res: " + response)
         assert response == ("ack:" + message)
 
     assert expected_selected_protocol == stream.get_protocol()

@@ -17,8 +17,6 @@ async def test_example():
     await node_b.provide("hello")
 
     providers = await node_b.get_providers("hello")
-    # print ("providers")
-    # print (providers)
 
     # bmuller's handle_call_response wraps
     # every rpc call result in a list of tuples
