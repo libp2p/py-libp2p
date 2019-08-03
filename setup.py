@@ -39,6 +39,7 @@ setuptools.setup(
         "multiaddr>=0.0.8,<0.1.0",
         "rpcudp>=3.0.0,<4.0.0",
         "lru-dict>=1.1.6",
+        "protobuf==3.9.0",
     ],
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
