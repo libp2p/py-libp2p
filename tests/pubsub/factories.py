@@ -1,5 +1,3 @@
-import functools
-
 import factory
 
 from libp2p import initialize_default_swarm
