@@ -10,7 +10,10 @@ from libp2p.security.secure_conn_interface import ISecureConn
 class SimpleSecurityTransport(BaseSecureTransport):
     key_phrase: str
 
-    def __init__(self, key_phrase: str) -> None:
+    def __init__(
+        self, local_private_key: bytes, local_public_key: bytes, key_phrase: str
+    ) -> None:
+        super().__init__(local_private_key, local_public_key)
         self.key_phrase = key_phrase
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:

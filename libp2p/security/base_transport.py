@@ -8,6 +8,6 @@ class BaseSecureTransport(ISecureTransport):
     is only meant to be used in clases that derive from it.
     """
 
-    def __init__(self, local_private_key: bytes) -> None:
+    def __init__(self, local_private_key: bytes, local_public_key: bytes) -> None:
         self.local_private_key = local_private_key
-        self.local_peer = ID.from_privkey(local_private_key)
+        self.local_peer = ID.from_pubkey(local_public_key)
