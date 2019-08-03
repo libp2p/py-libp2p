@@ -143,7 +143,7 @@ class Pubsub:
 
             # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
             #   This is necessary because `control` is an optional field in pb2.
-            #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2
+            #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
             if rpc_incoming.HasField("control"):
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)

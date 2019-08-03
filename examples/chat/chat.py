@@ -53,9 +53,10 @@ async def run(port, destination, localhost):
         print(
             f"Run 'python ./examples/chat/chat.py"
             + localhost_opt
-            + f" -p {int(port) + 1} -d /ip4/{ip}/tcp/{port}/p2p/{host.get_id().pretty()}' on another console.\n"
+            + f" -p {int(port) + 1} -d /ip4/{ip}/tcp/{port}/p2p/{host.get_id().pretty()}'"
+            + " on another console."
         )
-        print("\nWaiting for incoming connection\n\n")
+        print("Waiting for incoming connection...")
 
     else:  # its the client
         maddr = multiaddr.Multiaddr(destination)
