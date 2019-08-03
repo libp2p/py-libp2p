@@ -69,9 +69,7 @@ class Swarm(INetwork):
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(
-        self, protocol_id: str, stream_handler: StreamHandlerFn
-    ) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -199,9 +197,7 @@ class Swarm(INetwork):
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
-                secured_conn = await self.upgrader.upgrade_security(
-                    raw_conn, peer_id, False
-                )
+                secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, False)
                 muxed_conn = self.upgrader.upgrade_connection(
                     secured_conn, self.generic_protocol_handler, peer_id
                 )

@@ -114,9 +114,7 @@ class ValueSpiderCrawl(SpiderCrawl):
         """
         value_counts = Counter(values)
         if len(value_counts) != 1:
-            log.warning(
-                "Got multiple values for key %i: %s", self.node.xor_id, str(values)
-            )
+            log.warning("Got multiple values for key %i: %s", self.node.xor_id, str(values))
         value = value_counts.most_common(1)[0][0]
 
         peer = self.nearest_without_value.popleft()

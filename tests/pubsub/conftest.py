@@ -16,9 +16,7 @@ def num_hosts():
 @pytest.fixture
 async def hosts(num_hosts):
     _hosts = HostFactory.create_batch(num_hosts)
-    await asyncio.gather(
-        *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
-    )
+    await asyncio.gather(*[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts])
     yield _hosts
     # Clean up
     listeners = []

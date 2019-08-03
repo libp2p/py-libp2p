@@ -102,10 +102,7 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
             "3": ["1", "2", "4"],
             "4": ["1", "2", "3"],
         },
-        "topic_map": {
-            "astrophysics": ["1", "2", "3", "4"],
-            "school": ["1", "2", "3", "4"],
-        },
+        "topic_map": {"astrophysics": ["1", "2", "3", "4"], "school": ["1", "2", "3", "4"]},
         "messages": [
             {"topics": ["astrophysics"], "data": b"e=mc^2", "node_id": "1"},
             {"topics": ["school"], "data": b"foobar", "node_id": "2"},
@@ -137,8 +134,7 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
 ]
 
 floodsub_protocol_pytest_params = [
-    pytest.param(test_case, id=test_case["name"])
-    for test_case in FLOODSUB_PROTOCOL_TEST_CASES
+    pytest.param(test_case, id=test_case["name"]) for test_case in FLOODSUB_PROTOCOL_TEST_CASES
 ]
 
 
@@ -195,9 +191,7 @@ async def perform_test_from_obj(obj, router_factory):
             # Create neighbor if neighbor does not yet exist
             if neighbor_id not in node_map:
                 await add_node(neighbor_id)
-            tasks_connect.append(
-                connect(node_map[start_node_id], node_map[neighbor_id])
-            )
+            tasks_connect.append(connect(node_map[start_node_id], node_map[neighbor_id]))
     # Connect nodes and wait at least for 2 seconds
     await asyncio.gather(*tasks_connect, asyncio.sleep(2))
 

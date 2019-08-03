@@ -68,9 +68,7 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(
-        self, protocol_id: str, stream_handler: StreamHandlerFn
-    ) -> bool:
+    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream

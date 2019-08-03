@@ -26,16 +26,12 @@ class SimpleSecurityTransport(ISecureTransport):
         incoming = (await conn.read()).decode()
 
         if incoming != self.key_phrase:
-            raise Exception(
-                "Key phrase differed between nodes. Expected " + self.key_phrase
-            )
+            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
 
-    async def secure_outbound(
-        self, conn: "IRawConnection", peer_id: "ID"
-    ) -> "ISecureConn":
+    async def secure_outbound(self, conn: "IRawConnection", peer_id: "ID") -> "ISecureConn":
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)
@@ -49,9 +45,7 @@ class SimpleSecurityTransport(ISecureTransport):
         await asyncio.sleep(0)
 
         if incoming != self.key_phrase:
-            raise Exception(
-                "Key phrase differed between nodes. Expected " + self.key_phrase
-            )
+            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn

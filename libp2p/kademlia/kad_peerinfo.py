@@ -49,9 +49,7 @@ class KadPeerInfo(PeerInfo):
 
     def encode(self):
         return (
-            str(self.peer_id_bytes)
-            + "\n"
-            + str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
+            str(self.peer_id_bytes) + "\n" + str("/ip4/" + str(self.ip) + "/udp/" + str(self.port))
         )
 
 
@@ -139,17 +137,11 @@ class KadPeerHeap:
 
 
 def create_kad_peerinfo(node_id_bytes=None, sender_ip=None, sender_port=None):
-    node_id = (
-        ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
-    )
+    node_id = ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
     peer_data = None
     if sender_ip and sender_port:
         peer_data = PeerData()
-        addr = [
-            Multiaddr(
-                "/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port)
-            )
-        ]
+        addr = [Multiaddr("/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port))]
         peer_data.add_addrs(addr)
 
     return KadPeerInfo(node_id, peer_data)
