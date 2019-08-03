@@ -1,6 +1,5 @@
 from typing import NamedTuple
 
-
 FLOODSUB_PROTOCOL_ID = "/floodsub/1.0.0"
 GOSSIPSUB_PROTOCOL_ID = "/gossipsub/1.0.0"
 

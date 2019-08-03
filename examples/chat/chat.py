@@ -8,7 +8,6 @@ import multiaddr
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
-
 PROTOCOL_ID = "/chat/1.0.0"
 
 

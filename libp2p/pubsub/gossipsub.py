@@ -1,7 +1,7 @@
 from ast import literal_eval
 import asyncio
 import random
-from typing import Any, Dict, Iterable, List, Set, Sequence
+from typing import Any, Dict, Iterable, List, Sequence, Set
 
 from libp2p.peer.id import ID
 

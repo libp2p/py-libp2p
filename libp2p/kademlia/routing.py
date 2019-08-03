@@ -1,10 +1,10 @@
-import heapq
-import time
-import operator
 import asyncio
-
 from collections import OrderedDict
-from .utils import OrderedSet, shared_prefix, bytes_to_bit_string
+import heapq
+import operator
+import time
+
+from .utils import OrderedSet, bytes_to_bit_string, shared_prefix
 
 
 class KBucket:

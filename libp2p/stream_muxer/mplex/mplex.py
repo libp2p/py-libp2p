@@ -1,8 +1,8 @@
 import asyncio
 
-from .utils import encode_uvarint, decode_uvarint_from_stream, get_flag
-from .mplex_stream import MplexStream
 from ..muxed_connection_interface import IMuxedConn
+from .mplex_stream import MplexStream
+from .utils import decode_uvarint_from_stream, encode_uvarint, get_flag
 
 
 class Mplex(IMuxedConn):

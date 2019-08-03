@@ -1,6 +1,5 @@
-from .multiselect_muxer_interface import IMultiselectMuxer
 from .multiselect_communicator import MultiselectCommunicator
-
+from .multiselect_muxer_interface import IMultiselectMuxer
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"

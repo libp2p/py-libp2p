@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from typing import List, Sequence
 
-
 from .addrbook_interface import IAddrBook
 from .id import ID
 from .peerinfo import PeerInfo

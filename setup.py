@@ -1,6 +1,5 @@
 import setuptools
 
-
 classifiers = [f"Programming Language :: Python :: {version}" for version in ["3.7"]]
 
 

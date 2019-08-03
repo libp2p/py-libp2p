@@ -1,5 +1,6 @@
-from contextlib import suppress
 import asyncio
+from contextlib import suppress
+
 import multiaddr
 
 from libp2p import new_node

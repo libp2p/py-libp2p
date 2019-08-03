@@ -1,7 +1,7 @@
 import pytest
 
-from libp2p.peer.id import ID
 from libp2p.kademlia.network import KademliaServer
+from libp2p.peer.id import ID
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 
 

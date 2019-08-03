@@ -6,11 +6,9 @@ import pytest
 
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
-
 from tests.utils import connect
 
 from .utils import make_pubsub_msg
-
 
 TESTING_TOPIC = "TEST_SUBSCRIBE"
 TESTING_DATA = b"data"

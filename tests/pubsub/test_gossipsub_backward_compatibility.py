@@ -5,8 +5,8 @@ import pytest
 from .configs import FLOODSUB_PROTOCOL_ID
 from .factories import GossipsubFactory
 from .floodsub_integration_test_settings import (
-    perform_test_from_obj,
     floodsub_protocol_pytest_params,
+    perform_test_from_obj,
 )
 
 

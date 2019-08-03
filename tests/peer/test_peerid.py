@@ -1,10 +1,11 @@
 import random
+
+from Crypto.PublicKey import RSA
+import base58
 import multihash
 import pytest
-import base58
-from Crypto.PublicKey import RSA
-from libp2p.peer.id import ID
 
+from libp2p.peer.id import ID
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 

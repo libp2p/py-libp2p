@@ -2,7 +2,6 @@ import hashlib
 from typing import Union
 
 import base58
-
 import multihash
 
 

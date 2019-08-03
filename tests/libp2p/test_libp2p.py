@@ -1,8 +1,8 @@
 import multiaddr
 import pytest
 
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from tests.utils import cleanup, set_up_nodes_by_transport_opt
 
 
 @pytest.mark.asyncio

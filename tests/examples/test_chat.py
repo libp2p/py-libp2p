@@ -1,12 +1,12 @@
-import pytest
 import asyncio
-import multiaddr
 
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
+import multiaddr
+import pytest
+
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
-
+from tests.utils import cleanup, set_up_nodes_by_transport_opt
 
 PROTOCOL_ID = "/chat/1.0.0"
 
