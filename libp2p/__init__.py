@@ -87,8 +87,9 @@ def initialize_default_swarm(
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
     private_key_bytes = private_key.export_key("DER")
+    public_key_bytes = private_key.publickey().export_key("DER")
     security_transports_by_protocol = sec_opt or {
-        "insecure/1.0.0": InsecureTransport(private_key_bytes)
+        "insecure/1.0.0": InsecureTransport(private_key_bytes, public_key_bytes)
     }
     upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
