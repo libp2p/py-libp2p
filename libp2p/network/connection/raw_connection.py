@@ -34,11 +34,7 @@ class RawConnection(IRawConnection):
 
     async def read(self) -> bytes:
         line = await self.reader.readline()
-        adjusted_line = line.decode().rstrip("\n")
-
-        # TODO: figure out a way to remove \n without going back and forth with
-        # encoding and decoding
-        return adjusted_line.encode()
+        return line.rstrip(b"\n")
 
     def close(self) -> None:
         self.writer.close()
