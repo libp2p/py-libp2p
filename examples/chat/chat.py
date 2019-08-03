@@ -30,9 +30,12 @@ async def write_data(stream):
         await stream.write(line.encode())
 
 
-async def run(port, destination):
-    external_ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
-    transport_opt = "/ip4/%s/tcp/%s" % (external_ip, port)
+async def run(port, destination, localhost):
+    if localhost:
+        ip = "127.0.0.1"
+    else:
+        ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
+    transport_opt = f"/ip4/{ip}/tcp/{port}"
     host = await new_node(transport_opt=[transport_opt])
 
     await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
@@ -45,12 +48,12 @@ async def run(port, destination):
 
         host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
-        if not port:
-            raise RuntimeError("was not able to find the actual local port")
+        localhost_opt = " --localhost" if localhost else ""
 
         print(
-            "Run './examples/chat/chat.py -p %s -d /ip4/%s/tcp/%s/p2p/%s' on another console.\n"
-            % (int(port) + 1, external_ip, port, host.get_id().pretty())
+            f"Run 'python ./examples/chat/chat.py"
+            + localhost_opt
+            + f" -p {int(port) + 1} -d /ip4/{ip}/tcp/{port}/p2p/{host.get_id().pretty()}' on another console.\n"
         )
         print("\nWaiting for incoming connection\n\n")
 
@@ -94,11 +97,21 @@ def main():
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
+    parser.add_argument(
+        "-l",
+        "--localhost",
+        dest="localhost",
+        action="store_true",
+        help="flag indicating if localhost should be used or an external IP",
+    )
     args = parser.parse_args()
+
+    if not args.port:
+        raise RuntimeError("was not able to determine a local port")
 
     loop = asyncio.get_event_loop()
     try:
-        asyncio.ensure_future(run(args.port, args.destination))
+        asyncio.ensure_future(run(args.port, args.destination, args.localhost))
         loop.run_forever()
     except KeyboardInterrupt:
         pass
