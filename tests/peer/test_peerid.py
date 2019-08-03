@@ -111,13 +111,6 @@ def test_id_from_public_key():
     algo = multihash.Func.sha2_256
     mh_digest = multihash.digest(key_bin, algo)
     expected = ID(mh_digest.encode())
-    actual = ID.from_pubkey(key)
+    actual = ID.from_pubkey(key_bin)
 
     assert actual == expected
-
-
-def test_id_from_private_key():
-    key = RSA.generate(2048, e=65537)
-    id_from_pub = ID.from_pubkey(key.publickey())
-    id_from_priv = ID.from_privkey(key)
-    assert id_from_pub == id_from_priv

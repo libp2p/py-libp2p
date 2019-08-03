@@ -28,9 +28,8 @@ async def cleanup_done_tasks():
 
 
 def generate_id():
-    new_key = RSA.generate(2048, e=65537)
-    new_id = ID.from_pubkey(new_key.publickey())
-    # private_key = new_key.exportKey("PEM")
+    new_key = RSA.generate(2048, e=65537).publickey().export_key("DER")
+    new_id = ID.from_pubkey(new_key)
     return new_id
 
 
