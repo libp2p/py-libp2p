@@ -12,7 +12,7 @@ extras_require = {
         "pytest-cov>=2.7.1,<3.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
     ],
-    "lint": ["mypy>=0.701,<1.0", "black==19.3b0"],
+    "lint": ["mypy>=0.701,<1.0", "black==19.3b0", "isort==4.3.21"],
     "dev": ["tox>=3.13.2,<4.0.0"],
 }
 
