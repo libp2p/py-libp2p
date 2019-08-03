@@ -4,9 +4,11 @@ from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.insecure.transport import InsecureSession
+from libp2p.security.base_transport import BaseSecureTransport
 
 
-class SimpleSecurityTransport(ISecureTransport):
+class SimpleSecurityTransport(BaseSecureTransport):
     key_phrase: str
 
     def __init__(self, key_phrase: str) -> None:
@@ -26,7 +28,12 @@ class SimpleSecurityTransport(ISecureTransport):
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
-        return conn
+        session = InsecureSession(self, conn, ID(b""))
+        # NOTE: this is abusing the abstraction we have here
+        # but this code may be deprecated soon and this exists
+        # mainly to satisfy a test that will go along w/ it
+        session.key_phrase = self.key_phrase
+        return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
@@ -46,4 +53,9 @@ class SimpleSecurityTransport(ISecureTransport):
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
-        return conn
+        session = InsecureSession(self, conn, peer_id)
+        # NOTE: this is abusing the abstraction we have here
+        # but this code may be deprecated soon and this exists
+        # mainly to satisfy a test that will go along w/ it
+        session.key_phrase = self.key_phrase
+        return session

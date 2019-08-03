@@ -19,7 +19,7 @@ class Mplex(IMuxedConn):
         :param peer_id: peer_id of peer the connection is to
         """
         self.conn = secured_conn
-        self.initiator = self.conn.initiator
+        self.initiator = secured_conn.initiator
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
