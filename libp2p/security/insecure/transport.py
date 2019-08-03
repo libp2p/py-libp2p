@@ -6,10 +6,13 @@ from libp2p.security.secure_conn_interface import ISecureConn
 
 
 class InsecureSession(BaseSession):
-    def __init__(
-        self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
-    ) -> None:
-        super(InsecureSession, self).__init__(transport, conn, peer_id)
+    @property
+    def writer(self):
+        return self.insecure_conn.writer
+
+    @property
+    def reader(self):
+        return self.insecure_conn.reader
 
     async def write(self, data: bytes) -> None:
         await self.insecure_conn.write(data)
