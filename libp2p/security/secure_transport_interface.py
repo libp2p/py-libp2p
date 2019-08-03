@@ -25,9 +25,7 @@ class ISecureTransport(ABC):
         """
 
     @abstractmethod
-    async def secure_outbound(
-        self, conn: "IRawConnection", peer_id: "ID"
-    ) -> "ISecureConn":
+    async def secure_outbound(self, conn: "IRawConnection", peer_id: "ID") -> "ISecureConn":
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)

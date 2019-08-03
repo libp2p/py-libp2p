@@ -52,12 +52,7 @@ def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=N
 
 
 def initialize_default_swarm(
-    id_opt=None,
-    transport_opt=None,
-    muxer_opt=None,
-    sec_opt=None,
-    peerstore_opt=None,
-    disc_opt=None,
+    id_opt=None, transport_opt=None, muxer_opt=None, sec_opt=None, peerstore_opt=None, disc_opt=None
 ):
     """
     initialize swarm when no swarm is passed in

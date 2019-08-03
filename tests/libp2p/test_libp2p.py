@@ -114,9 +114,7 @@ async def test_multiple_streams():
         response_a = (await stream_a.read()).decode()
         response_b = (await stream_b.read()).decode()
 
-        assert response_a == ("ack_b:" + a_message) and response_b == (
-            "ack_a:" + b_message
-        )
+        assert response_a == ("ack_b:" + a_message) and response_b == ("ack_a:" + b_message)
 
     # Success, terminate pending tasks.
     await cleanup()

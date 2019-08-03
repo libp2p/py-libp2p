@@ -15,11 +15,7 @@ import pytest
 from libp2p import initialize_default_swarm, new_node
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
-from tests.utils import (
-    cleanup,
-    echo_stream_handler,
-    perform_two_host_set_up_custom_handler,
-)
+from tests.utils import cleanup, echo_stream_handler, perform_two_host_set_up_custom_handler
 
 
 class MyNotifee(INotifee):
@@ -130,10 +126,7 @@ async def test_one_notifier_on_two_nodes():
         # Ensure the connected and opened_stream events were hit in Notifee obj
         # and that the stream passed into opened_stream matches the stream created on
         # node_b
-        assert events_b == [
-            ["connectedb", stream.mplex_conn],
-            ["opened_streamb", stream],
-        ]
+        assert events_b == [["connectedb", stream.mplex_conn], ["opened_streamb", stream]]
         while True:
             read_string = (await stream.read()).decode()
 

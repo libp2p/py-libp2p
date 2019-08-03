@@ -37,8 +37,7 @@ def test_init_no_value():
         pytest.param(random.randint(0, 255), id="random integer"),
         pytest.param(multiaddr.Multiaddr("/"), id="empty multiaddr"),
         pytest.param(
-            multiaddr.Multiaddr("/ip4/127.0.0.1"),
-            id="multiaddr without peer_id(p2p protocol)",
+            multiaddr.Multiaddr("/ip4/127.0.0.1"), id="multiaddr without peer_id(p2p protocol)"
         ),
     ),
 )

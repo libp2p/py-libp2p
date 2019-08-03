@@ -61,9 +61,7 @@ class SecurityMultistream(ABC):
 
         return secure_conn
 
-    async def secure_outbound(
-        self, conn: "IRawConnection", peer_id: "ID"
-    ) -> "ISecureConn":
+    async def secure_outbound(self, conn: "IRawConnection", peer_id: "ID") -> "ISecureConn":
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)
@@ -78,9 +76,7 @@ class SecurityMultistream(ABC):
 
         return secure_conn
 
-    async def select_transport(
-        self, conn: "IRawConnection", initiator: bool
-    ) -> "ISecureTransport":
+    async def select_transport(self, conn: "IRawConnection", initiator: bool) -> "ISecureTransport":
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on

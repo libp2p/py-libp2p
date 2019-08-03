@@ -105,9 +105,7 @@ class Pubsub:
         """
         packet = rpc_pb2.RPC()
         for topic_id in self.my_topics:
-            packet.subscriptions.extend(
-                [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
-            )
+            packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)])
         return packet.SerializeToString()
 
     async def continuously_read_stream(self, stream: INetStream) -> None:

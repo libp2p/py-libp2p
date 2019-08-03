@@ -157,9 +157,7 @@ class Mplex(IMuxedConn):
         try:
             header = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
             length = await decode_uvarint_from_stream(self.raw_conn.reader, timeout)
-            message = await asyncio.wait_for(
-                self.raw_conn.reader.read(length), timeout=timeout
-            )
+            message = await asyncio.wait_for(self.raw_conn.reader.read(length), timeout=timeout)
         except asyncio.TimeoutError:
             return None, None, None
 

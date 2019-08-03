@@ -50,9 +50,7 @@ class MplexStream(IMuxedStream):
         """
         # TODO error handling with timeout
         # TODO understand better how mutexes are used from go repo
-        await self.mplex_conn.send_message(
-            get_flag(self.initiator, "CLOSE"), None, self.stream_id
-        )
+        await self.mplex_conn.send_message(get_flag(self.initiator, "CLOSE"), None, self.stream_id)
 
         remote_lock = ""
         async with self.stream_lock:
