@@ -13,11 +13,20 @@ class BaseSession(ISecureConn, IRawConnection):
     def __init__(
         self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
     ) -> None:
-        self.local_peer = self.transport.local_peer
-        self.local_private_key = self.transport.local_private_key
+        self.local_peer = transport.local_peer
+        self.local_private_key = transport.local_private_key
         self.insecure_conn = conn
         self.remote_peer_id = peer_id
         self.remote_permanent_pubkey = b""
+
+    # TODO clean up how this is passed around?
+    @property
+    def initiator(self) -> bool:
+        return self.insecure_conn.initiator
+
+    # TODO clean up how this is passed around?
+    def next_stream_id(self) -> int:
+        return self.insecure_conn.next_stream_id()
 
     def get_local_peer(self) -> ID:
         return self.local_peer
