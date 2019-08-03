@@ -7,7 +7,6 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 if TYPE_CHECKING:
     from libp2p.network.connection.raw_connection_interface import IRawConnection
     from libp2p.peer.id import ID
-    from .typing import TSecurityDetails
     from .secure_conn_interface import ISecureConn
     from .secure_transport_interface import ISecureTransport
 

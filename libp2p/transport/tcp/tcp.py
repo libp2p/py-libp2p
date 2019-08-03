@@ -3,7 +3,6 @@ import asyncio
 import multiaddr
 
 from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.peer.id import ID
 
 from ..listener_interface import IListener
 from ..transport_interface import ITransport

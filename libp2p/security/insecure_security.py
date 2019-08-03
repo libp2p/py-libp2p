@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Dict, cast
+from typing import TYPE_CHECKING, cast
 
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
@@ -6,7 +6,6 @@ from libp2p.security.secure_transport_interface import ISecureTransport
 if TYPE_CHECKING:
     from libp2p.network.connection.raw_connection_interface import IRawConnection
     from libp2p.peer.id import ID
-    from .secure_conn_interface import ISecureConn
     from .typing import TSecurityDetails
 
 
