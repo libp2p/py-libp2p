@@ -1,7 +1,17 @@
 import asyncio
 from collections import namedtuple
 import time
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Tuple, Union, TYPE_CHECKING
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Tuple,
+    Union,
+    TYPE_CHECKING,
+)
 
 from lru import LRU
 
@@ -166,12 +176,16 @@ class Pubsub:
     ) -> None:
         """
         Register a validator under the given topic. One topic can only have one validtor.
+        :param topic: the topic to register validator under
+        :param validator: the validator used to validate messages published to the topic
+        :param is_async_validator: indicate if the validator is an asynchronous validator
         """
         self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
 
     def remove_topic_validator(self, topic: str) -> None:
         """
         Remove the validator from the given topic.
+        :param topic: the topic to remove validator from
         """
         if topic in self.topic_validators:
             del self.topic_validators[topic]
@@ -179,6 +193,7 @@ class Pubsub:
     def get_msg_validators(self, msg: rpc_pb2.Message) -> Iterable[TopicValidator]:
         """
         Get all validators corresponding to the topics in the message.
+        :param msg: the message published to the topic
         """
         for topic in msg.topicIDs:
             if topic in self.topic_validators:
@@ -356,6 +371,11 @@ class Pubsub:
         await self.push_msg(self.host.get_id(), msg)
 
     async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> bool:
+        """
+        Validate the received message
+        :param msg_forwarder: the peer who forward us the message.
+        :param msg: the message.
+        """
         sync_topic_validators = []
         async_topic_validator_futures = []
         for topic_validator in self.get_msg_validators(msg):
