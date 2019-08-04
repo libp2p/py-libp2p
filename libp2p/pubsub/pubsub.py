@@ -24,7 +24,7 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
 TopicValidator = namedtuple("TopicValidator", ["validator", "is_async"])
 
 
-ValidatorFn = Union[Callable[[ID, rpc_pb2.Message], bool], Awaitable[None]]
+ValidatorFn = Union[Callable[[ID, rpc_pb2.Message], bool], Awaitable[bool]]
 
 
 class Pubsub:
@@ -164,13 +164,22 @@ class Pubsub:
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
     ) -> None:
+        """
+        Register a validator under the given topic. One topic can only have one validtor.
+        """
         self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
 
     def remove_topic_validator(self, topic: str) -> None:
+        """
+        Remove the validator from the given topic.
+        """
         if topic in self.topic_validators:
             del self.topic_validators[topic]
 
     def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
+        """
+        Get all validators corresponding to the topics in the message.
+        """
         return (
             self.topic_validators[topic]
             for topic in msg.topicIDs
