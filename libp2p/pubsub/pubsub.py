@@ -170,6 +170,13 @@ class Pubsub:
         if topic in self.topic_validators:
             del self.topic_validators[topic]
 
+    def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
+        return (
+            self.topic_validators[topic]
+            for topic in msg.topicIDs
+            if topic in self.topic_validators
+        )
+
     async def stream_handler(self, stream: INetStream) -> None:
         """
         Stream handler for pubsub. Gets invoked whenever a new stream is created
