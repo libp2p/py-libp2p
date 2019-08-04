@@ -86,7 +86,7 @@ async def test_get_hello_packet(pubsubs_fsub):
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.asyncio
-async def test_add_topic_validator(pubsubs_fsub):
+async def test_set_and_remove_topic_validator(pubsubs_fsub):
 
     is_sync_validator_called = False
 
@@ -130,6 +130,10 @@ async def test_add_topic_validator(pubsubs_fsub):
 
     assert is_async_validator_called
     assert not is_sync_validator_called
+
+    # Remove validator
+    pubsubs_fsub[0].remove_topic_validator(topic)
+    assert topic not in pubsubs_fsub[0].topic_validators
 
 
 class FakeNetStream:
