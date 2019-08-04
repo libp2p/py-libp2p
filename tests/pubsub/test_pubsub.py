@@ -160,13 +160,8 @@ async def test_get_msg_validators(pubsubs_fsub):
     pubsubs_fsub[0].set_topic_validator(topic_1, sync_validator, False)
     pubsubs_fsub[0].set_topic_validator(topic_2, sync_validator, False)
 
-    assert topic_1 in pubsubs_fsub[0].topic_validators
-    assert topic_2 in pubsubs_fsub[0].topic_validators
-
     # Register async validator for topic 3
     pubsubs_fsub[0].set_topic_validator(topic_3, async_validator, True)
-
-    assert topic_3 in pubsubs_fsub[0].topic_validators
 
     msg = make_pubsub_msg(
         origin_id=pubsubs_fsub[0].my_id,
@@ -184,6 +179,58 @@ async def test_get_msg_validators(pubsubs_fsub):
 
     assert times_sync_validator_called == 2
     assert times_async_validator_called == 1
+
+
+@pytest.mark.parametrize("num_hosts", (1,))
+@pytest.mark.parametrize(
+    "is_topic_1_val_passed, is_topic_2_val_passed",
+    (
+        (False, True),
+        (True, False),
+        (True, True),
+    )
+)
+@pytest.mark.asyncio
+async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_passed):
+
+    def passed_sync_validator(peer_id, msg):
+        return True
+
+    def failed_sync_validator(peer_id, msg):
+        return False
+
+    async def passed_async_validator(peer_id, msg):
+        return True
+
+    async def failed_async_validator(peer_id, msg):
+        return False
+
+    topic_1 = "TEST_SYNC_VALIDATOR"
+    topic_2 = "TEST_ASYNC_VALIDATOR"
+
+    if is_topic_1_val_passed:
+        pubsubs_fsub[0].set_topic_validator(topic_1, passed_sync_validator, False)
+    else:
+        pubsubs_fsub[0].set_topic_validator(topic_1, failed_sync_validator, False)
+
+    if is_topic_2_val_passed:
+        pubsubs_fsub[0].set_topic_validator(topic_2, passed_async_validator, True)
+    else:
+        pubsubs_fsub[0].set_topic_validator(topic_2, failed_async_validator, True)
+
+    msg = make_pubsub_msg(
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[topic_1, topic_2],
+        data=b"1234",
+        seqno=b"\x00" * 8,
+    )
+
+    is_validation_passed = await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
+
+    if is_topic_1_val_passed and is_topic_2_val_passed:
+        assert is_validation_passed
+    else:
+        assert not is_validation_passed
 
 
 class FakeNetStream:

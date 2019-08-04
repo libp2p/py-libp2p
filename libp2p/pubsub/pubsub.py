@@ -1,7 +1,7 @@
 import asyncio
 from collections import namedtuple
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Tuple, Union, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Tuple, Union, TYPE_CHECKING
 
 from lru import LRU
 
@@ -176,15 +176,13 @@ class Pubsub:
         if topic in self.topic_validators:
             del self.topic_validators[topic]
 
-    def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
+    def get_msg_validators(self, msg: rpc_pb2.Message) -> Iterable[TopicValidator]:
         """
         Get all validators corresponding to the topics in the message.
         """
-        return (
-            self.topic_validators[topic]
-            for topic in msg.topicIDs
-            if topic in self.topic_validators
-        )
+        for topic in msg.topicIDs:
+            if topic in self.topic_validators:
+                yield self.topic_validators[topic]
 
     async def stream_handler(self, stream: INetStream) -> None:
         """
@@ -356,6 +354,26 @@ class Pubsub:
         # TODO: Sign with our signing key
 
         await self.push_msg(self.host.get_id(), msg)
+
+    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> bool:
+        sync_topic_validators = []
+        async_topic_validator_futures = []
+        for topic_validator in self.get_msg_validators(msg):
+            if topic_validator.is_async:
+                async_topic_validator_futures.append(
+                    topic_validator.validator(msg_forwarder, msg)
+                )
+            else:
+                sync_topic_validators.append(topic_validator.validator)
+
+        for validator in sync_topic_validators:
+            if not validator(msg_forwarder, msg):
+                return False
+
+        # TODO: Implement throttle on async validators
+
+        results = await asyncio.gather(*async_topic_validator_futures)
+        return all(results)
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
