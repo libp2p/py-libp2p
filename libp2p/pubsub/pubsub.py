@@ -161,7 +161,7 @@ class Pubsub:
             # Force context switch
             await asyncio.sleep(0)
 
-    def add_topic_validator(
+    def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
     ) -> None:
         self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
