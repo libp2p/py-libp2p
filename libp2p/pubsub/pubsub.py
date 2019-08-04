@@ -21,6 +21,7 @@ from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
+from .validators import signature_validator
 
 if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter
@@ -392,8 +393,11 @@ class Pubsub:
 
         # TODO: Implement throttle on async validators
 
-        results = await asyncio.gather(*async_topic_validator_futures)
-        return all(results)
+        if len(async_topic_validator_futures) > 0:
+            results = await asyncio.gather(*async_topic_validator_futures)
+            return all(results)
+        else:
+            return True
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
@@ -411,6 +415,14 @@ class Pubsub:
             return
 
         # TODO: - Validate the message. If failed, reject it.
+        # Validate the signature of the message
+        # FIXME: `signature_validator` is currently a stub.
+        if not signature_validator(msg.key, msg.SerializeToString()):
+            return
+        # Validate the message with registered topic validators
+        is_validation_passed = await self.validate_msg(msg_forwarder, msg)
+        if not is_validation_passed:
+            return
 
         self._mark_msg_seen(msg)
         await self.handle_talk(msg)
