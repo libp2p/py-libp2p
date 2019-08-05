@@ -61,9 +61,6 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
-    def __init__(self) -> None:
-        self.listener = TCPListener()
-
     async def dial(self, maddr: Multiaddr, self_id: ID) -> IRawConnection:
         """
         dial a transport to peer listening on multiaddr
