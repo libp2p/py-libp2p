@@ -8,8 +8,7 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
-from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
@@ -19,6 +18,7 @@ from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .stream.net_stream_interface import INetStream
+from .typing import GenericProtocolHandlerFn
 
 StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
@@ -246,9 +246,6 @@ class Swarm(INetwork):
         pass
 
     # TODO: `disconnect`?
-
-
-GenericProtocolHandlerFn = Callable[[IMuxedStream], Awaitable[None]]
 
 
 def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:

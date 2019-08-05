@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.stream_muxer.abc import IMuxedConn
 
 
 class INetStream(ABC):

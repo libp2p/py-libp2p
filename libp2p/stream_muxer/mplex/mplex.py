@@ -1,8 +1,17 @@
 import asyncio
+from typing import Dict, Tuple
 
-from ..muxed_connection_interface import IMuxedConn
+from multiaddr import Multiaddr
+
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.network.typing import GenericProtocolHandlerFn
+from libp2p.peer.id import ID
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+
+from .constants import HeaderTags
 from .mplex_stream import MplexStream
-from .utils import decode_uvarint_from_stream, encode_uvarint, get_flag
+from .utils import decode_uvarint_from_stream, encode_uvarint
 
 
 class Mplex(IMuxedConn):
@@ -10,7 +19,20 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    def __init__(self, secured_conn, generic_protocol_handler, peer_id):
+    secured_conn: ISecureConn
+    raw_conn: IRawConnection
+    initiator: bool
+    generic_protocol_handler = None
+    peer_id: ID
+    buffers: Dict[int, "asyncio.Queue[bytes]"]
+    stream_queue: "asyncio.Queue[int]"
+
+    def __init__(
+        self,
+        secured_conn: ISecureConn,
+        generic_protocol_handler: GenericProtocolHandlerFn,
+        peer_id: ID,
+    ) -> None:
         """
         create a new muxed connection
         :param conn: an instance of raw connection
@@ -18,7 +40,7 @@ class Mplex(IMuxedConn):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
-        super(Mplex, self).__init__(secured_conn, generic_protocol_handler, peer_id)
+        super().__init__(secured_conn, generic_protocol_handler, peer_id)
 
         self.secured_conn = secured_conn
         self.raw_conn = secured_conn.get_conn()
@@ -38,19 +60,20 @@ class Mplex(IMuxedConn):
         # Kick off reading
         asyncio.ensure_future(self.handle_incoming())
 
-    def close(self):
+    def close(self) -> None:
         """
         close the stream muxer and underlying raw connection
         """
         self.raw_conn.close()
 
-    def is_closed(self):
+    def is_closed(self) -> bool:
         """
         check connection is fully closed
         :return: true if successful
         """
+        raise NotImplementedError()
 
-    async def read_buffer(self, stream_id):
+    async def read_buffer(self, stream_id: int) -> bytes:
         """
         Read a message from stream_id's buffer, check raw connection for new messages
         :param stream_id: stream id of stream to read from
@@ -68,7 +91,7 @@ class Mplex(IMuxedConn):
         # Stream not created yet
         return None
 
-    async def open_stream(self, protocol_id, multi_addr):
+    async def open_stream(self, protocol_id: str, multi_addr: Multiaddr) -> IMuxedStream:
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream
@@ -78,28 +101,26 @@ class Mplex(IMuxedConn):
         stream_id = self.raw_conn.next_stream_id()
         stream = MplexStream(stream_id, multi_addr, self)
         self.buffers[stream_id] = asyncio.Queue()
-        await self.send_message(get_flag(self.initiator, "NEW_STREAM"), None, stream_id)
+        await self.send_message(HeaderTags.NewStream, None, stream_id)
         return stream
 
-    async def accept_stream(self):
+    async def accept_stream(self) -> None:
         """
         accepts a muxed stream opened by the other end
-        :return: the accepted stream
         """
         stream_id = await self.stream_queue.get()
         stream = MplexStream(stream_id, False, self)
         asyncio.ensure_future(self.generic_protocol_handler(stream))
 
-    async def send_message(self, flag, data, stream_id):
+    async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
         """
         sends a message over the connection
         :param header: header to use
         :param data: data to send in the message
         :param stream_id: stream the message is in
-        :return: True if success
         """
         # << by 3, then or with flag
-        header = (stream_id << 3) | flag
+        header = (stream_id << 3) | flag.value
         header = encode_uvarint(header)
 
         if data is None:
@@ -111,7 +132,7 @@ class Mplex(IMuxedConn):
 
         return await self.write_to_stream(_bytes)
 
-    async def write_to_stream(self, _bytes):
+    async def write_to_stream(self, _bytes: bytearray) -> int:
         """
         writes a byte array to a raw connection
         :param _bytes: byte array to write
@@ -121,7 +142,7 @@ class Mplex(IMuxedConn):
         await self.raw_conn.writer.drain()
         return len(_bytes)
 
-    async def handle_incoming(self):
+    async def handle_incoming(self) -> None:
         """
         Read a message off of the raw connection and add it to the corresponding message buffer
         """
@@ -135,7 +156,7 @@ class Mplex(IMuxedConn):
                     self.buffers[stream_id] = asyncio.Queue()
                     await self.stream_queue.put(stream_id)
 
-                if flag is get_flag(True, "NEW_STREAM"):
+                if flag == HeaderTags.NewStream.value:
                     # new stream detected on connection
                     await self.accept_stream()
 
@@ -145,7 +166,7 @@ class Mplex(IMuxedConn):
             # Force context switch
             await asyncio.sleep(0)
 
-    async def read_message(self):
+    async def read_message(self) -> Tuple[int, int, bytes]:
         """
         Read a single message off of the raw connection
         :return: stream_id, flag, message contents

@@ -1,10 +1,9 @@
 import asyncio
 import struct
+from typing import Tuple
 
-from .constants import HEADER_TAGS
 
-
-def encode_uvarint(number):
+def encode_uvarint(number: int) -> bytes:
     """Pack `number` into varint bytes"""
     buf = b""
     while True:
@@ -18,7 +17,7 @@ def encode_uvarint(number):
     return buf
 
 
-def decode_uvarint(buff, index):
+def decode_uvarint(buff: bytes, index: int) -> Tuple[int, int]:
     shift = 0
     result = 0
     while True:
@@ -32,7 +31,7 @@ def decode_uvarint(buff, index):
     return result, index + 1
 
 
-async def decode_uvarint_from_stream(reader, timeout):
+async def decode_uvarint_from_stream(reader: asyncio.StreamReader, timeout: float) -> int:
     shift = 0
     result = 0
     while True:
@@ -44,15 +43,3 @@ async def decode_uvarint_from_stream(reader, timeout):
             break
 
     return result
-
-
-def get_flag(initiator, action):
-    """
-    get header flag based on action for mplex
-    :param action: action type in str
-    :return: int flag
-    """
-    if initiator or HEADER_TAGS[action] == 0:
-        return HEADER_TAGS[action]
-
-    return HEADER_TAGS[action] - 1

@@ -1,8 +1,8 @@
 import asyncio
 
-from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
-from .utils import get_flag
+from .constants import HeaderTags
 
 
 class MplexStream(IMuxedStream):
@@ -10,7 +10,16 @@ class MplexStream(IMuxedStream):
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
     """
 
-    def __init__(self, stream_id, initiator, mplex_conn):
+    stream_id: int
+    initiator: bool
+    mplex_conn: IMuxedConn
+    read_deadline: int
+    write_deadline: int
+    local_closed: bool
+    remote_closed: bool
+    stream_lock: asyncio.Lock
+
+    def __init__(self, stream_id: int, initiator: bool, mplex_conn: IMuxedConn) -> None:
         """
         create new MuxedStream in muxer
         :param stream_id: stream stream id
@@ -26,23 +35,22 @@ class MplexStream(IMuxedStream):
         self.remote_closed = False
         self.stream_lock = asyncio.Lock()
 
-    async def read(self):
+    async def read(self) -> bytes:
         """
         read messages associated with stream from buffer til end of file
         :return: bytes of input
         """
         return await self.mplex_conn.read_buffer(self.stream_id)
 
-    async def write(self, data):
+    async def write(self, data: bytes) -> int:
         """
         write to stream
         :return: number of bytes written
         """
-        return await self.mplex_conn.send_message(
-            get_flag(self.initiator, "MESSAGE"), data, self.stream_id
-        )
+        flag = HeaderTags.MessageInitiator if self.initiator else HeaderTags.MessageReceiver
+        return await self.mplex_conn.send_message(flag, data, self.stream_id)
 
-    async def close(self):
+    async def close(self) -> bool:
         """
         Closing a stream closes it for writing and closes the remote end for reading
         but allows writing in the other direction.
@@ -50,9 +58,10 @@ class MplexStream(IMuxedStream):
         """
         # TODO error handling with timeout
         # TODO understand better how mutexes are used from go repo
-        await self.mplex_conn.send_message(get_flag(self.initiator, "CLOSE"), None, self.stream_id)
+        flag = HeaderTags.CloseInitiator if self.initiator else HeaderTags.CloseReceiver
+        await self.mplex_conn.send_message(flag, None, self.stream_id)
 
-        remote_lock = ""
+        remote_lock = False
         async with self.stream_lock:
             if self.local_closed:
                 return True
@@ -60,12 +69,14 @@ class MplexStream(IMuxedStream):
             remote_lock = self.remote_closed
 
         if remote_lock:
-            async with self.mplex_conn.conn_lock:
-                self.mplex_conn.buffers.pop(self.stream_id)
+            # FIXME: mplex_conn has no conn_lock!
+            async with self.mplex_conn.conn_lock:  # type: ignore
+                # FIXME: Don't access to buffers directly
+                self.mplex_conn.buffers.pop(self.stream_id)  # type: ignore
 
         return True
 
-    async def reset(self):
+    async def reset(self) -> bool:
         """
         closes both ends of the stream
         tells this remote side to hang up
@@ -78,20 +89,21 @@ class MplexStream(IMuxedStream):
                 return True
 
             if not self.remote_closed:
-                await self.mplex_conn.send_message(
-                    get_flag(self.initiator, "RESET"), None, self.stream_id
-                )
+                flag = HeaderTags.ResetInitiator if self.initiator else HeaderTags.ResetInitiator
+                await self.mplex_conn.send_message(flag, None, self.stream_id)
 
             self.local_closed = True
             self.remote_closed = True
 
-        async with self.mplex_conn.conn_lock:
-            self.mplex_conn.buffers.pop(self.stream_id, None)
+        # FIXME: mplex_conn has no conn_lock!
+        async with self.mplex_conn.conn_lock:  # type: ignore
+            # FIXME: Don't access to buffers directly
+            self.mplex_conn.buffers.pop(self.stream_id, None)  # type: ignore
 
         return True
 
     # TODO deadline not in use
-    def set_deadline(self, ttl):
+    def set_deadline(self, ttl: int) -> bool:
         """
         set deadline for muxed stream
         :return: True if successful
@@ -100,7 +112,7 @@ class MplexStream(IMuxedStream):
         self.write_deadline = ttl
         return True
 
-    def set_read_deadline(self, ttl):
+    def set_read_deadline(self, ttl: int) -> bool:
         """
         set read deadline for muxed stream
         :return: True if successful
@@ -108,7 +120,7 @@ class MplexStream(IMuxedStream):
         self.read_deadline = ttl
         return True
 
-    def set_write_deadline(self, ttl):
+    def set_write_deadline(self, ttl: int) -> bool:
         """
         set write deadline for muxed stream
         :return: True if successful
