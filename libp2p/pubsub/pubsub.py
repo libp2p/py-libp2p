@@ -151,7 +151,7 @@ class Pubsub:
                         continue
                     # TODO(mhchia): This will block this read_stream loop until all data are pushed.
                     #   Should investigate further if this is an issue.
-                    await self.push_msg(msg_forwarder=peer_id, msg=msg)
+                    asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
