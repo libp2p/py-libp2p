@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
+if TYPE_CHECKING:
+    from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
 
 class IMuxedStream(ABC):
 
-    mplex_conn: IMuxedConn
+    mplex_conn: "IMuxedConn"
 
     @abstractmethod
     async def read(self) -> bytes:

@@ -19,6 +19,7 @@ from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .stream.net_stream_interface import INetStream
+from .typing import GenericProtocolHandlerFn
 
 StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
@@ -246,9 +247,6 @@ class Swarm(INetwork):
         pass
 
     # TODO: `disconnect`?
-
-
-GenericProtocolHandlerFn = Callable[[IMuxedStream], Awaitable[None]]
 
 
 def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:

@@ -3,7 +3,7 @@ from typing import Dict, Sequence
 from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.security.security_multistream import SecurityMultistream, TProtocol
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.network.swarm import GenericProtocolHandlerFn
+from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
