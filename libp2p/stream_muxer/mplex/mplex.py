@@ -1,20 +1,17 @@
 import asyncio
-from typing import TYPE_CHECKING, Tuple, Dict
+from typing import Tuple, Dict
 
+from multiaddr import Multiaddr
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.network.swarm import GenericProtocolHandlerFn
+from libp2p.peer.id import ID
 from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
 
 from .constants import HeaderTags
 from .utils import encode_uvarint, decode_uvarint_from_stream
 from .mplex_stream import MplexStream
-
-
-if TYPE_CHECKING:
-    from multiaddr import Multiaddr
-    from libp2p.security.secure_conn_interface import ISecureConn
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
-    from libp2p.network.swarm import GenericProtocolHandlerFn
-    from libp2p.peer.id import ID
-    from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
 
 
 class Mplex(IMuxedConn):
@@ -22,19 +19,19 @@ class Mplex(IMuxedConn):
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
 
-    secured_conn: "ISecureConn"
-    raw_conn: "IRawConnection"
+    secured_conn: ISecureConn
+    raw_conn: IRawConnection
     initiator: bool
     generic_protocol_handler = None
-    peer_id: "ID"
+    peer_id: ID
     buffers: Dict[int, asyncio.Queue[bytes]]
     stream_queue: asyncio.Queue[int]
 
     def __init__(
         self,
-        secured_conn: "ISecureConn",
-        generic_protocol_handler: "GenericProtocolHandlerFn",
-        peer_id: "ID",
+        secured_conn: ISecureConn,
+        generic_protocol_handler: GenericProtocolHandlerFn,
+        peer_id: ID,
     ) -> None:
         """
         create a new muxed connection
@@ -95,8 +92,8 @@ class Mplex(IMuxedConn):
         return None
 
     async def open_stream(
-        self, protocol_id: str, multi_addr: "Multiaddr"
-    ) -> "IMuxedStream":
+        self, protocol_id: str, multi_addr: Multiaddr
+    ) -> IMuxedStream:
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream

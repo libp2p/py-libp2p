@@ -1,14 +1,11 @@
 from abc import ABC, abstractmethod
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from multiaddr import Multiaddr
-    from libp2p.security.secure_conn_interface import ISecureConn
-    from libp2p.network.swarm import GenericProtocolHandlerFn
-    from libp2p.peer.id import ID
-    from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
-    from libp2p.stream_muxer.mplex.constants import HeaderTags
+from multiaddr import Multiaddr
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.network.swarm import GenericProtocolHandlerFn
+from libp2p.peer.id import ID
+from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+from libp2p.stream_muxer.mplex.constants import HeaderTags
 
 
 class IMuxedConn(ABC):
@@ -17,14 +14,14 @@ class IMuxedConn(ABC):
     """
 
     initiator: bool
-    peer_id: "ID"
+    peer_id: ID
 
     @abstractmethod
     def __init__(
         self,
-        conn: "ISecureConn",
-        generic_protocol_handler: "GenericProtocolHandlerFn",
-        peer_id: "ID",
+        conn: ISecureConn,
+        generic_protocol_handler: GenericProtocolHandlerFn,
+        peer_id: ID,
     ) -> None:
         """
         create a new muxed connection
@@ -57,8 +54,8 @@ class IMuxedConn(ABC):
 
     @abstractmethod
     async def open_stream(
-        self, protocol_id: str, multi_addr: "Multiaddr"
-    ) -> "IMuxedStream":
+        self, protocol_id: str, multi_addr: Multiaddr
+    ) -> IMuxedStream:
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream

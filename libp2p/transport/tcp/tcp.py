@@ -1,18 +1,15 @@
 import asyncio
 
+from typing import List, Callable
 from multiaddr import Multiaddr
 
+from socket import socket
+from libp2p.transport.typing import THandler
+from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.connection.raw_connection import RawConnection
 
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
-
-from typing import TYPE_CHECKING, List, Callable
-
-if TYPE_CHECKING:
-    from socket import socket
-    from libp2p.transport.typing import THandler
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
 
 
 class TCPListener(IListener):
@@ -20,7 +17,7 @@ class TCPListener(IListener):
     server = None
     handler = None
 
-    def __init__(self, handler_function: "THandler" = None) -> None:
+    def __init__(self, handler_function: THandler = None) -> None:
         self.multiaddrs = []
         self.server = None
         self.handler = handler_function
@@ -69,7 +66,7 @@ class TCP(ITransport):
     def __init__(self) -> None:
         self.listener = TCPListener()
 
-    async def dial(self, maddr: Multiaddr, self_id: ID) -> "IRawConnection":
+    async def dial(self, maddr: Multiaddr, self_id: ID) -> IRawConnection:
         """
         dial a transport to peer listening on multiaddr
         :param maddr: multiaddr of peer
@@ -94,7 +91,7 @@ class TCP(ITransport):
 
         return RawConnection(host, str(port), reader, writer, True)
 
-    def create_listener(self, handler_function: "THandler") -> TCPListener:
+    def create_listener(self, handler_function: THandler) -> TCPListener:
         """
         create listener on transport
         :param handler_function: a function called when a new connection is received
@@ -104,5 +101,5 @@ class TCP(ITransport):
         return TCPListener(handler_function)
 
 
-def _multiaddr_from_socket(socket: "socket") -> Multiaddr:
+def _multiaddr_from_socket(socket: socket) -> Multiaddr:
     return Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())

@@ -1,12 +1,9 @@
 import asyncio
-from typing import TYPE_CHECKING
 from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+
 
 from .constants import HeaderTags
-
-
-if TYPE_CHECKING:
-    from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
 
 
 class MplexStream(IMuxedStream):
@@ -16,16 +13,14 @@ class MplexStream(IMuxedStream):
 
     stream_id: int
     initiator: bool
-    mplex_conn: "IMuxedConn"
+    mplex_conn: IMuxedConn
     read_deadline: float
     write_deadline: float
     local_closed: bool
     remote_closed: bool
     stream_lock: asyncio.Lock
 
-    def __init__(
-        self, stream_id: int, initiator: bool, mplex_conn: "IMuxedConn"
-    ) -> None:
+    def __init__(self, stream_id: int, initiator: bool, mplex_conn: IMuxedConn) -> None:
         """
         create new MuxedStream in muxer
         :param stream_id: stream stream id

@@ -1,27 +1,23 @@
-from libp2p.security.security_multistream import SecurityMultistream
+from typing import Dict, Sequence
+
 from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.security.security_multistream import SecurityMultistream, TProtocol
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.network.swarm import GenericProtocolHandlerFn
+from libp2p.peer.id import ID
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_transport_interface import ISecureTransport
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-
-    from typing import Dict, Sequence
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
-    from libp2p.network.swarm import GenericProtocolHandlerFn
-    from libp2p.peer.id import ID
-    from libp2p.security.secure_conn_interface import ISecureConn
-    from libp2p.security.secure_transport_interface import ISecureTransport
-    from libp2p.security.security_multistream import TProtocol
-    from .transport_interface import ITransport
-    from .listener_interface import IListener
+from .transport_interface import ITransport
+from .listener_interface import IListener
 
 
 class TransportUpgrader:
     security_multistream: SecurityMultistream
-    muxer: "Sequence[str]"
+    muxer: Sequence[str]
 
     def __init__(
-        self, secOpt: "Dict[TProtocol, ISecureTransport]", muxerOpt: "Sequence[str]"
+        self, secOpt: Dict[TProtocol, ISecureTransport], muxerOpt: Sequence[str]
     ) -> None:
         # Store security option
         self.security_multistream = SecurityMultistream()
@@ -31,15 +27,15 @@ class TransportUpgrader:
         # Store muxer option
         self.muxer = muxerOpt
 
-    def upgrade_listener(self, transport: "ITransport", listeners: "IListener") -> None:
+    def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
         """
         Upgrade multiaddr listeners to libp2p-transport listeners
         """
         pass
 
     async def upgrade_security(
-        self, raw_conn: "IRawConnection", peer_id: "ID", initiator: bool
-    ) -> "ISecureConn":
+        self, raw_conn: IRawConnection, peer_id: ID, initiator: bool
+    ) -> ISecureConn:
         """
         Upgrade conn to be a secured connection
         """
@@ -50,10 +46,10 @@ class TransportUpgrader:
 
     @staticmethod
     def upgrade_connection(
-        conn: "IRawConnection",
-        generic_protocol_handler: "GenericProtocolHandlerFn",
-        peer_id: "ID",
-    ) -> "Mplex":
+        conn: IRawConnection,
+        generic_protocol_handler: GenericProtocolHandlerFn,
+        peer_id: ID,
+    ) -> Mplex:
         """
         Upgrade raw connection to muxed connection
         """
