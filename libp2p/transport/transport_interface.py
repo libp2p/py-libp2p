@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 
 from multiaddr import Multiaddr
-from libp2p.peer.id import ID
+
 from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
+
 from .listener_interface import IListener
 from .typing import THandler
 

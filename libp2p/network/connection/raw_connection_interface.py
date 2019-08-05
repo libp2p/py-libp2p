@@ -1,5 +1,5 @@
-import asyncio
 from abc import ABC, abstractmethod
+import asyncio
 
 
 class IRawConnection(ABC):

@@ -1,6 +1,6 @@
 import asyncio
-from libp2p.stream_muxer.abc import IMuxedStream, IMuxedConn
 
+from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
 from .constants import HeaderTags
 

@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.mplex.constants import HeaderTags
-from multiaddr import Multiaddr
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Prevent GenericProtocolHandlerFn introducing circular dependencies
