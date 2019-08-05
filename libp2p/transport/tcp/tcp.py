@@ -69,9 +69,9 @@ class TCP(ITransport):
         :return: True if successful
         """
         host = maddr.value_for_protocol("ip4")
-        port = int(maddr.value_for_protocol("tcp"))
+        port = maddr.value_for_protocol("tcp")
 
-        reader, writer = await asyncio.open_connection(host, port)
+        reader, writer = await asyncio.open_connection(host, int(port))
 
         # First: send our peer ID so receiver knows it
         writer.write(self_id.to_base58().encode())
@@ -84,7 +84,7 @@ class TCP(ITransport):
         if ack != expected_ack_str:
             raise Exception("Receiver did not receive peer id")
 
-        return RawConnection(host, str(port), reader, writer, True)
+        return RawConnection(host, port, reader, writer, True)
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """
