@@ -30,9 +30,7 @@ class TCPListener(IListener):
         :return: return True if successful
         """
         self.server = await asyncio.start_server(
-            self.handler,
-            maddr.value_for_protocol("ip4"),
-            maddr.value_for_protocol("tcp"),
+            self.handler, maddr.value_for_protocol("ip4"), maddr.value_for_protocol("tcp")
         )
         socket = self.server.sockets[0]
         self.multiaddrs.append(_multiaddr_from_socket(socket))

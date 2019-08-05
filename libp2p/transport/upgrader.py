@@ -16,9 +16,7 @@ class TransportUpgrader:
     security_multistream: SecurityMultistream
     muxer: Sequence[str]
 
-    def __init__(
-        self, secOpt: Dict[TProtocol, ISecureTransport], muxerOpt: Sequence[str]
-    ) -> None:
+    def __init__(self, secOpt: Dict[TProtocol, ISecureTransport], muxerOpt: Sequence[str]) -> None:
         # Store security option
         self.security_multistream = SecurityMultistream()
         for key in secOpt:
@@ -46,9 +44,7 @@ class TransportUpgrader:
 
     @staticmethod
     def upgrade_connection(
-        conn: IRawConnection,
-        generic_protocol_handler: GenericProtocolHandlerFn,
-        peer_id: ID,
+        conn: IRawConnection, generic_protocol_handler: GenericProtocolHandlerFn, peer_id: ID
     ) -> Mplex:
         """
         Upgrade raw connection to muxed connection

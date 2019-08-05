@@ -90,9 +90,7 @@ class Mplex(IMuxedConn):
         # Stream not created yet
         return None
 
-    async def open_stream(
-        self, protocol_id: str, multi_addr: Multiaddr
-    ) -> IMuxedStream:
+    async def open_stream(self, protocol_id: str, multi_addr: Multiaddr) -> IMuxedStream:
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream
