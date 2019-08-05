@@ -1,17 +1,7 @@
 import asyncio
 from collections import namedtuple
 import time
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Tuple,
-    Union,
-    TYPE_CHECKING,
-)
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Iterable, List, Tuple, Union
 
 from lru import LRU
 
@@ -381,9 +371,7 @@ class Pubsub:
         async_topic_validator_futures = []
         for topic_validator in self.get_msg_validators(msg):
             if topic_validator.is_async:
-                async_topic_validator_futures.append(
-                    topic_validator.validator(msg_forwarder, msg)
-                )
+                async_topic_validator_futures.append(topic_validator.validator(msg_forwarder, msg))
             else:
                 sync_topic_validators.append(topic_validator.validator)
 
@@ -448,4 +436,4 @@ class Pubsub:
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         if not self.my_topics:
             return False
-        return all([topic in self.my_topics for topic in msg.topicIDs])
+        return any([topic in self.my_topics for topic in msg.topicIDs])

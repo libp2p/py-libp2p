@@ -183,16 +183,10 @@ async def test_get_msg_validators(pubsubs_fsub):
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.parametrize(
-    "is_topic_1_val_passed, is_topic_2_val_passed",
-    (
-        (False, True),
-        (True, False),
-        (True, True),
-    )
+    "is_topic_1_val_passed, is_topic_2_val_passed", ((False, True), (True, False), (True, True))
 )
 @pytest.mark.asyncio
 async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_passed):
-
     def passed_sync_validator(peer_id, msg):
         return True
 
