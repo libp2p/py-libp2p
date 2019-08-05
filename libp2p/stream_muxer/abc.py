@@ -1,16 +1,15 @@
 from abc import ABC, abstractmethod
 
-from multiaddr import Multiaddr
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
+from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.mplex.constants import HeaderTags
+from multiaddr import Multiaddr
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
-
+    # Prevent GenericProtocolHandlerFn introducing circular dependencies
+    from libp2p.network.typing import GenericProtocolHandlerFn  # noqa: F401
 
 
 class IMuxedConn(ABC):
@@ -23,10 +22,7 @@ class IMuxedConn(ABC):
 
     @abstractmethod
     def __init__(
-        self,
-        conn: ISecureConn,
-        generic_protocol_handler: GenericProtocolHandlerFn,
-        peer_id: ID,
+        self, conn: ISecureConn, generic_protocol_handler: "GenericProtocolHandlerFn", peer_id: ID
     ) -> None:
         """
         create a new muxed connection
@@ -58,9 +54,7 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def open_stream(
-        self, protocol_id: str, multi_addr: Multiaddr
-    ) -> "IMuxedStream":
+    async def open_stream(self, protocol_id: str, multi_addr: Multiaddr) -> "IMuxedStream":
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream
@@ -81,4 +75,45 @@ class IMuxedConn(ABC):
         :param header: header to use
         :param data: data to send in the message
         :param stream_id: stream the message is in
+        """
+
+
+class IMuxedStream(ABC):
+
+    mplex_conn: IMuxedConn
+
+    @abstractmethod
+    async def read(self) -> bytes:
+        """
+        reads from the underlying muxed_conn
+        :return: bytes of input
+        """
+
+    @abstractmethod
+    async def write(self, data: bytes) -> int:
+        """
+        writes to the underlying muxed_conn
+        :return: number of bytes written
+        """
+
+    @abstractmethod
+    async def close(self) -> bool:
+        """
+        close the underlying muxed_conn
+        :return: true if successful
+        """
+
+    @abstractmethod
+    async def reset(self) -> bool:
+        """
+        closes both ends of the stream
+        tells this remote side to hang up
+        :return: true if successful
+        """
+
+    @abstractmethod
+    def set_deadline(self, ttl: float) -> bool:
+        """
+        set deadline for muxed stream
+        :return: a new stream
         """

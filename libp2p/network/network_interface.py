@@ -5,7 +5,7 @@ from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.listener_interface import IListener
 
 from .stream.net_stream_interface import INetStream

@@ -6,8 +6,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
-from libp2p.stream_muxer.muxed_stream_interface import IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
 from .constants import HeaderTags
 from .utils import encode_uvarint, decode_uvarint_from_stream

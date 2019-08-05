@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from multiaddr import Multiaddr
 
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.stream_muxer.muxed_connection_interface import IMuxedConn
+from libp2p.stream_muxer.abc import IMuxedConn
 
 if TYPE_CHECKING:
     from .network_interface import INetwork
