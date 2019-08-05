@@ -112,7 +112,7 @@ class IMuxedStream(ABC):
         """
 
     @abstractmethod
-    def set_deadline(self, ttl: float) -> bool:
+    def set_deadline(self, ttl: int) -> bool:
         """
         set deadline for muxed stream
         :return: a new stream

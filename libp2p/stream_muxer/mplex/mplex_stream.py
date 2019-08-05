@@ -13,8 +13,8 @@ class MplexStream(IMuxedStream):
     stream_id: int
     initiator: bool
     mplex_conn: IMuxedConn
-    read_deadline: float
-    write_deadline: float
+    read_deadline: int
+    write_deadline: int
     local_closed: bool
     remote_closed: bool
     stream_lock: asyncio.Lock
@@ -103,7 +103,7 @@ class MplexStream(IMuxedStream):
         return True
 
     # TODO deadline not in use
-    def set_deadline(self, ttl: float) -> bool:
+    def set_deadline(self, ttl: int) -> bool:
         """
         set deadline for muxed stream
         :return: True if successful
@@ -112,7 +112,7 @@ class MplexStream(IMuxedStream):
         self.write_deadline = ttl
         return True
 
-    def set_read_deadline(self, ttl: float) -> bool:
+    def set_read_deadline(self, ttl: int) -> bool:
         """
         set read deadline for muxed stream
         :return: True if successful
@@ -120,7 +120,7 @@ class MplexStream(IMuxedStream):
         self.read_deadline = ttl
         return True
 
-    def set_write_deadline(self, ttl: float) -> bool:
+    def set_write_deadline(self, ttl: int) -> bool:
         """
         set write deadline for muxed stream
         :return: True if successful
