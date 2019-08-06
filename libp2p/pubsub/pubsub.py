@@ -409,7 +409,7 @@ class Pubsub:
         # TODO: - Validate the message. If failed, reject it.
         # Validate the signature of the message
         # FIXME: `signature_validator` is currently a stub.
-        if not signature_validator(msg.key, msg.SerializeToString(), msg.singature):
+        if not signature_validator(msg.key, msg.SerializeToString()):
             log.debug(f"Signature validation failed for msg={msg}")
             return
         # Validate the message with registered topic validators.
