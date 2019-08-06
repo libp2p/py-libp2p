@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, NamedTup
 
 from lru import LRU
 
+from libp2p.exceptions import ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
@@ -364,7 +365,7 @@ class Pubsub:
 
         await self.push_msg(self.host.get_id(), msg)
 
-    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> bool:
+    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
         Validate the received message
         :param msg_forwarder: the peer who forward us the message.
@@ -380,15 +381,14 @@ class Pubsub:
 
         for validator in sync_topic_validators:
             if not validator(msg_forwarder, msg):
-                return False
+                raise ValidationError(f"Validation failed for msg={msg}")
 
         # TODO: Implement throttle on async validators
 
         if len(async_topic_validator_futures) > 0:
             results = await asyncio.gather(*async_topic_validator_futures)
-            return all(results)
-        else:
-            return True
+            if not all(results):
+                raise ValidationError(f"Validation failed for msg={msg}")
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
@@ -414,8 +414,10 @@ class Pubsub:
             return
         # Validate the message with registered topic validators.
         # If the validation failed, return(i.e., don't further process the message).
-        is_validation_passed = await self.validate_msg(msg_forwarder, msg)
-        if not is_validation_passed:
+        try:
+            await self.validate_msg(msg_forwarder, msg)
+        except ValidationError:
+            log.debug(f"Topic validation failed for msg={msg}")
             return
 
         self._mark_msg_seen(msg)

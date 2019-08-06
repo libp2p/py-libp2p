@@ -4,6 +4,7 @@ from typing import NamedTuple
 
 import pytest
 
+from libp2p.exceptions import ValidationError
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
 from tests.utils import connect
@@ -191,13 +192,13 @@ async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_
         return True
 
     def failed_sync_validator(peer_id, msg):
-        return False
+        raise ValidationError()
 
     async def passed_async_validator(peer_id, msg):
         return True
 
     async def failed_async_validator(peer_id, msg):
-        return False
+        raise ValidationError()
 
     topic_1 = "TEST_SYNC_VALIDATOR"
     topic_2 = "TEST_ASYNC_VALIDATOR"
@@ -219,12 +220,11 @@ async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_
         seqno=b"\x00" * 8,
     )
 
-    is_validation_passed = await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
-
     if is_topic_1_val_passed and is_topic_2_val_passed:
-        assert is_validation_passed
+        await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
     else:
-        assert not is_validation_passed
+        with pytest.raises(ValidationError):
+            await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
 
 
 class FakeNetStream:
