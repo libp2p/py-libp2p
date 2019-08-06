@@ -1,5 +1,5 @@
 # FIXME: Replace the type of `pubkey` with a custom type `Pubkey`
-def signature_validator(pubkey: bytes, msg: bytes) -> bool:
+def signature_validator(pubkey: bytes, msg: bytes, sig: bytes) -> bool:
     """
     Verify the message against the given public key.
     :param pubkey: the public key which signs the message.
