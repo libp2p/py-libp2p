@@ -192,13 +192,13 @@ async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_
         return True
 
     def failed_sync_validator(peer_id, msg):
-        raise ValidationError()
+        return False
 
     async def passed_async_validator(peer_id, msg):
         return True
 
     async def failed_async_validator(peer_id, msg):
-        raise ValidationError()
+        return False
 
     topic_1 = "TEST_SYNC_VALIDATOR"
     topic_2 = "TEST_ASYNC_VALIDATOR"
@@ -462,3 +462,23 @@ async def test_push_msg(pubsubs_fsub, monkeypatch):
     await asyncio.wait_for(event.wait(), timeout=0.1)
     # Test: Subscribers are notified when `push_msg` new messages.
     assert (await sub.get()) == msg_1
+
+    # Test: add a topic validator and `push_msg` the message that
+    # does not pass the validation.
+    # `router_publish` is not called then.
+    def failed_sync_validator(peer_id, msg):
+        return False
+
+    pubsubs_fsub[0].set_topic_validator(TESTING_TOPIC, failed_sync_validator, False)
+
+    msg_2 = make_pubsub_msg(
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[TESTING_TOPIC],
+        data=TESTING_DATA,
+        seqno=b"\x22" * 8,
+    )
+
+    event.clear()
+    await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg_2)
+    await asyncio.sleep(0.01)
+    assert not event.is_set()
