@@ -1,4 +1,8 @@
 from abc import ABC, abstractmethod
+from typing import Dict, Tuple, TypeVar
+
+from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.typing import StreamHandlerFn, TProtocol
 
 
 class IMultiselectMuxer(ABC):
@@ -8,8 +12,10 @@ class IMultiselectMuxer(ABC):
     a specific protocol and handler pair to use for communication
     """
 
+    handlers: Dict[TProtocol, StreamHandlerFn]
+
     @abstractmethod
-    def add_handler(self, protocol, handler):
+    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
         """
         Store the handler with the given protocol
         :param protocol: protocol name
@@ -17,7 +23,7 @@ class IMultiselectMuxer(ABC):
         """
 
     @abstractmethod
-    def negotiate(self, stream):
+    async def negotiate(self, stream: IMuxedStream) -> Tuple[TProtocol, StreamHandlerFn]:
         """
         Negotiate performs protocol selection
         :param stream: stream to negotiate on

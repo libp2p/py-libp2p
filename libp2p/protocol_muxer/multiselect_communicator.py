@@ -1,3 +1,5 @@
+from libp2p.stream_muxer.abc import IMuxedStream
+
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
 
@@ -8,7 +10,9 @@ class MultiselectCommunicator(IMultiselectCommunicator):
     which is necessary for them to work
     """
 
-    def __init__(self, reader_writer):
+    reader_writer: IMuxedStream
+
+    def __init__(self, reader_writer: IMuxedStream) -> None:
         """
         MultistreamCommunicator expects a reader_writer object that has
         an async read and an async write function (this could be a stream,
@@ -16,14 +20,14 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         """
         self.reader_writer = reader_writer
 
-    async def write(self, msg_str):
+    async def write(self, msg_str: str) -> None:
         """
         Write message to reader_writer
         :param msg_str: message to write
         """
         await self.reader_writer.write(msg_str.encode())
 
-    async def read_stream_until_eof(self):
+    async def read_stream_until_eof(self) -> str:
         """
         Reads message from reader_writer until EOF
         """

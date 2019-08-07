@@ -12,6 +12,7 @@ from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.typing import StreamHandlerFn
 
 from .connection.raw_connection import RawConnection
 from .network_interface import INetwork
@@ -19,8 +20,6 @@ from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .stream.net_stream_interface import INetStream
 from .typing import GenericProtocolHandlerFn
-
-StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class Swarm(INetwork):
