@@ -8,6 +8,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
+from libp2p.typing import StreamHandlerFn
 
 from .host_interface import IHost
 
@@ -15,9 +16,6 @@ from .host_interface import IHost
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
-
-
-StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class BasicHost(IHost):

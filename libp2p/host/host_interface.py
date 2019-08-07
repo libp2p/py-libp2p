@@ -7,8 +7,7 @@ from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-
-StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
+from libp2p.typing import StreamHandlerFn
 
 
 class IHost(ABC):

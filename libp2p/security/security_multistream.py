@@ -1,17 +1,14 @@
 from abc import ABC
-from typing import TYPE_CHECKING, Dict, NewType
+from typing import Dict, NewType
 
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
+from libp2p.typing import TProtocol
 
-if TYPE_CHECKING:
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
-    from libp2p.peer.id import ID
-    from .secure_conn_interface import ISecureConn
-    from .secure_transport_interface import ISecureTransport
-
-
-TProtocol = NewType("TProtocol", str)
+from .secure_conn_interface import ISecureConn
+from .secure_transport_interface import ISecureTransport
 
 
 """

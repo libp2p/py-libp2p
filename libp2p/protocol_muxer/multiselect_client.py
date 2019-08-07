@@ -1,5 +1,11 @@
+from typing import Sequence
+
+from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.typing import TProtocol
+
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator import MultiselectCommunicator
+from .multiselect_communicator_interface import IMultiselectCommunicator
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
@@ -11,10 +17,7 @@ class MultiselectClient(IMultiselectClient):
     module in order to select a protocol id to communicate over
     """
 
-    def __init__(self):
-        pass
-
-    async def handshake(self, communicator):
+    async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Ensure that the client and multiselect
         are both using the same multiselect protocol
@@ -36,7 +39,7 @@ class MultiselectClient(IMultiselectClient):
 
         # Handshake succeeded if this point is reached
 
-    async def select_protocol_or_fail(self, protocol, stream):
+    async def select_protocol_or_fail(self, protocol: TProtocol, stream: IMuxedStream) -> TProtocol:
         """
         Send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol
@@ -55,7 +58,9 @@ class MultiselectClient(IMultiselectClient):
 
         return selected_protocol
 
-    async def select_one_of(self, protocols, stream):
+    async def select_one_of(
+        self, protocols: Sequence[TProtocol], stream: IMuxedStream
+    ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol. Returns first
@@ -83,7 +88,9 @@ class MultiselectClient(IMultiselectClient):
         # No protocols were found, so return no protocols supported error
         raise MultiselectClientError("protocols not supported")
 
-    async def try_select(self, communicator, protocol):
+    async def try_select(
+        self, communicator: IMultiselectCommunicator, protocol: TProtocol
+    ) -> TProtocol:
         """
         Try to select the given protocol or raise exception if fails
         :param communicator: communicator to use to communicate with counterparty
@@ -106,7 +113,7 @@ class MultiselectClient(IMultiselectClient):
         raise MultiselectClientError("unrecognized response: " + response)
 
 
-def validate_handshake(handshake_contents):
+def validate_handshake(handshake_contents: str) -> bool:
     """
     Determine if handshake is valid and should be confirmed
     :param handshake_contents: contents of handshake message

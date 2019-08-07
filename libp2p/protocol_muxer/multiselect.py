@@ -1,4 +1,10 @@
+from typing import Dict, Tuple, TypeVar
+
+from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.typing import StreamHandlerFn, TProtocol
+
 from .multiselect_communicator import MultiselectCommunicator
+from .multiselect_communicator_interface import IMultiselectCommunicator
 from .multiselect_muxer_interface import IMultiselectMuxer
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
@@ -12,10 +18,12 @@ class Multiselect(IMultiselectMuxer):
     a specific protocol and handler pair to use for communication
     """
 
-    def __init__(self):
+    handlers: Dict[TProtocol, StreamHandlerFn]
+
+    def __init__(self) -> None:
         self.handlers = {}
 
-    def add_handler(self, protocol, handler):
+    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
         """
         Store the handler with the given protocol
         :param protocol: protocol name
@@ -23,7 +31,7 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    async def negotiate(self, stream):
+    async def negotiate(self, stream: IMuxedStream) -> Tuple[TProtocol, StreamHandlerFn]:
         """
         Negotiate performs protocol selection
         :param stream: stream to negotiate on
@@ -46,7 +54,7 @@ class Multiselect(IMultiselectMuxer):
                 # TODO: handle ls command
                 pass
             else:
-                protocol = command
+                protocol = TProtocol(command)
                 if protocol in self.handlers:
                     # Tell counterparty we have decided on a protocol
                     await communicator.write(protocol)
@@ -56,7 +64,7 @@ class Multiselect(IMultiselectMuxer):
                 # Tell counterparty this protocol was not found
                 await communicator.write(PROTOCOL_NOT_FOUND_MSG)
 
-    async def handshake(self, communicator):
+    async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Perform handshake to agree on multiselect protocol
         :param communicator: communicator to use
@@ -78,7 +86,7 @@ class Multiselect(IMultiselectMuxer):
         # Handshake succeeded if this point is reached
 
 
-def validate_handshake(handshake_contents):
+def validate_handshake(handshake_contents: str) -> bool:
     """
     Determine if handshake is valid and should be confirmed
     :param handshake_contents: contents of handshake message

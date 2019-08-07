@@ -9,14 +9,14 @@ class IMultiselectCommunicator(ABC):
     """
 
     @abstractmethod
-    def write(self, msg_str):
+    async def write(self, msg_str: str) -> None:
         """
         Write message to stream
         :param msg_str: message to write
         """
 
     @abstractmethod
-    def read_stream_until_eof(self):
+    async def read_stream_until_eof(self) -> str:
         """
         Reads message from stream until EOF
         """

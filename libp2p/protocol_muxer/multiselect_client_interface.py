@@ -1,4 +1,8 @@
 from abc import ABC, abstractmethod
+from typing import Sequence
+
+from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.typing import TProtocol
 
 
 class IMultiselectClient(ABC):
@@ -8,7 +12,7 @@ class IMultiselectClient(ABC):
     """
 
     @abstractmethod
-    def select_protocol_or_fail(self, protocol, stream):
+    async def select_protocol_or_fail(self, protocol: TProtocol, stream: IMuxedStream) -> TProtocol:
         """
         Send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol
@@ -18,7 +22,9 @@ class IMultiselectClient(ABC):
         """
 
     @abstractmethod
-    def select_one_of(self, protocols, stream):
+    async def select_one_of(
+        self, protocols: Sequence[TProtocol], stream: IMuxedStream
+    ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol. Returns first

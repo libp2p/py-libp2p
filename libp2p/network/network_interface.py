@@ -7,14 +7,12 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.listener_interface import IListener
+from libp2p.typing import StreamHandlerFn
 
 from .stream.net_stream_interface import INetStream
 
 if TYPE_CHECKING:
     from .notifee_interface import INotifee
-
-
-StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 
 
 class INetwork(ABC):
