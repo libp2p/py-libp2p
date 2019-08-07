@@ -28,12 +28,13 @@ class NetStream(INetStream):
         """
         self.protocol_id = protocol_id
 
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         """
-        read from stream
-        :return: bytes of input until EOF
+        reads from stream
+        :param n: number of bytes to read
+        :return: bytes of input
         """
-        return await self.muxed_stream.read()
+        return await self.muxed_stream.read(n)
 
     async def write(self, data: bytes) -> int:
         """
