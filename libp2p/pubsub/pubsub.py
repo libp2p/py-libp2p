@@ -26,7 +26,9 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
     return (msg.seqno, msg.from_id)
 
 
-ValidatorFn = Union[Callable[[ID, rpc_pb2.Message], bool], Awaitable[bool]]
+SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
+AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
+ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 
 
 TopicValidator = NamedTuple("TopicValidator", (("validator", ValidatorFn), ("is_async", bool)))
