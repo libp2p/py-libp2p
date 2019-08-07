@@ -4,6 +4,7 @@ from typing import NamedTuple
 
 import pytest
 
+from libp2p.exceptions import ValidationError
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
 from tests.utils import connect
@@ -82,6 +83,148 @@ async def test_get_hello_packet(pubsubs_fsub):
     topic_ids_in_hello = _get_hello_packet_topic_ids()
     for topic in topic_ids:
         assert topic in topic_ids_in_hello
+
+
+@pytest.mark.parametrize("num_hosts", (1,))
+@pytest.mark.asyncio
+async def test_set_and_remove_topic_validator(pubsubs_fsub):
+
+    is_sync_validator_called = False
+
+    def sync_validator(peer_id, msg):
+        nonlocal is_sync_validator_called
+        is_sync_validator_called = True
+
+    is_async_validator_called = False
+
+    async def async_validator(peer_id, msg):
+        nonlocal is_async_validator_called
+        is_async_validator_called = True
+
+    topic = "TEST_VALIDATOR"
+
+    assert topic not in pubsubs_fsub[0].topic_validators
+
+    # Register sync validator
+    pubsubs_fsub[0].set_topic_validator(topic, sync_validator, False)
+
+    assert topic in pubsubs_fsub[0].topic_validators
+    topic_validator = pubsubs_fsub[0].topic_validators[topic]
+    assert not topic_validator.is_async
+
+    # Validate with sync validator
+    topic_validator.validator(peer_id=ID(b"peer"), msg="msg")
+
+    assert is_sync_validator_called
+    assert not is_async_validator_called
+
+    # Register with async validator
+    pubsubs_fsub[0].set_topic_validator(topic, async_validator, True)
+
+    is_sync_validator_called = False
+    assert topic in pubsubs_fsub[0].topic_validators
+    topic_validator = pubsubs_fsub[0].topic_validators[topic]
+    assert topic_validator.is_async
+
+    # Validate with async validator
+    await topic_validator.validator(peer_id=ID(b"peer"), msg="msg")
+
+    assert is_async_validator_called
+    assert not is_sync_validator_called
+
+    # Remove validator
+    pubsubs_fsub[0].remove_topic_validator(topic)
+    assert topic not in pubsubs_fsub[0].topic_validators
+
+
+@pytest.mark.parametrize("num_hosts", (1,))
+@pytest.mark.asyncio
+async def test_get_msg_validators(pubsubs_fsub):
+
+    times_sync_validator_called = 0
+
+    def sync_validator(peer_id, msg):
+        nonlocal times_sync_validator_called
+        times_sync_validator_called += 1
+
+    times_async_validator_called = 0
+
+    async def async_validator(peer_id, msg):
+        nonlocal times_async_validator_called
+        times_async_validator_called += 1
+
+    topic_1 = "TEST_VALIDATOR_1"
+    topic_2 = "TEST_VALIDATOR_2"
+    topic_3 = "TEST_VALIDATOR_3"
+
+    # Register sync validator for topic 1 and 2
+    pubsubs_fsub[0].set_topic_validator(topic_1, sync_validator, False)
+    pubsubs_fsub[0].set_topic_validator(topic_2, sync_validator, False)
+
+    # Register async validator for topic 3
+    pubsubs_fsub[0].set_topic_validator(topic_3, async_validator, True)
+
+    msg = make_pubsub_msg(
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[topic_1, topic_2, topic_3],
+        data=b"1234",
+        seqno=b"\x00" * 8,
+    )
+
+    topic_validators = pubsubs_fsub[0].get_msg_validators(msg)
+    for topic_validator in topic_validators:
+        if topic_validator.is_async:
+            await topic_validator.validator(peer_id=ID(b"peer"), msg="msg")
+        else:
+            topic_validator.validator(peer_id=ID(b"peer"), msg="msg")
+
+    assert times_sync_validator_called == 2
+    assert times_async_validator_called == 1
+
+
+@pytest.mark.parametrize("num_hosts", (1,))
+@pytest.mark.parametrize(
+    "is_topic_1_val_passed, is_topic_2_val_passed", ((False, True), (True, False), (True, True))
+)
+@pytest.mark.asyncio
+async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_passed):
+    def passed_sync_validator(peer_id, msg):
+        return True
+
+    def failed_sync_validator(peer_id, msg):
+        return False
+
+    async def passed_async_validator(peer_id, msg):
+        return True
+
+    async def failed_async_validator(peer_id, msg):
+        return False
+
+    topic_1 = "TEST_SYNC_VALIDATOR"
+    topic_2 = "TEST_ASYNC_VALIDATOR"
+
+    if is_topic_1_val_passed:
+        pubsubs_fsub[0].set_topic_validator(topic_1, passed_sync_validator, False)
+    else:
+        pubsubs_fsub[0].set_topic_validator(topic_1, failed_sync_validator, False)
+
+    if is_topic_2_val_passed:
+        pubsubs_fsub[0].set_topic_validator(topic_2, passed_async_validator, True)
+    else:
+        pubsubs_fsub[0].set_topic_validator(topic_2, failed_async_validator, True)
+
+    msg = make_pubsub_msg(
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[topic_1, topic_2],
+        data=b"1234",
+        seqno=b"\x00" * 8,
+    )
+
+    if is_topic_1_val_passed and is_topic_2_val_passed:
+        await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
+    else:
+        with pytest.raises(ValidationError):
+            await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
 
 
 class FakeNetStream:
@@ -319,3 +462,23 @@ async def test_push_msg(pubsubs_fsub, monkeypatch):
     await asyncio.wait_for(event.wait(), timeout=0.1)
     # Test: Subscribers are notified when `push_msg` new messages.
     assert (await sub.get()) == msg_1
+
+    # Test: add a topic validator and `push_msg` the message that
+    # does not pass the validation.
+    # `router_publish` is not called then.
+    def failed_sync_validator(peer_id, msg):
+        return False
+
+    pubsubs_fsub[0].set_topic_validator(TESTING_TOPIC, failed_sync_validator, False)
+
+    msg_2 = make_pubsub_msg(
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[TESTING_TOPIC],
+        data=TESTING_DATA,
+        seqno=b"\x22" * 8,
+    )
+
+    event.clear()
+    await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg_2)
+    await asyncio.sleep(0.01)
+    assert not event.is_set()

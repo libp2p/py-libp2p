@@ -208,7 +208,7 @@ async def perform_test_from_obj(obj, router_factory):
     tasks_topic.append(asyncio.sleep(2))
 
     # Gather is like Promise.all
-    responses = await asyncio.gather(*tasks_topic, return_exceptions=True)
+    responses = await asyncio.gather(*tasks_topic)
     for i in range(len(responses) - 1):
         node_id, topic = tasks_topic_data[i]
         if node_id not in queues_map:

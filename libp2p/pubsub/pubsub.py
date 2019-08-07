@@ -1,23 +1,37 @@
 import asyncio
+import logging
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, NamedTuple, Tuple, Union
 
 from lru import LRU
 
+from libp2p.exceptions import ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
+from .validators import signature_validator
 
 if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter
 
 
+log = logging.getLogger(__name__)
+
+
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
     # NOTE: `string(from, seqno)` in Go
     return (msg.seqno, msg.from_id)
+
+
+SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
+AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
+ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
+
+
+TopicValidator = NamedTuple("TopicValidator", (("validator", ValidatorFn), ("is_async", bool)))
 
 
 class Pubsub:
@@ -40,6 +54,8 @@ class Pubsub:
 
     peer_topics: Dict[str, List[ID]]
     peers: Dict[ID, INetStream]
+
+    topic_validators: Dict[str, TopicValidator]
 
     # NOTE: Be sure it is increased atomically everytime.
     counter: int  # uint64
@@ -93,6 +109,9 @@ class Pubsub:
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
+        # Map of topic to topic validator
+        self.topic_validators = {}
+
         self.counter = time.time_ns()
 
         # Call handle peer to keep waiting for updates to peer queue
@@ -128,7 +147,7 @@ class Pubsub:
                         continue
                     # TODO(mhchia): This will block this read_stream loop until all data are pushed.
                     #   Should investigate further if this is an issue.
-                    await self.push_msg(msg_forwarder=peer_id, msg=msg)
+                    asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -148,6 +167,34 @@ class Pubsub:
 
             # Force context switch
             await asyncio.sleep(0)
+
+    def set_topic_validator(
+        self, topic: str, validator: ValidatorFn, is_async_validator: bool
+    ) -> None:
+        """
+        Register a validator under the given topic. One topic can only have one validtor.
+        :param topic: the topic to register validator under
+        :param validator: the validator used to validate messages published to the topic
+        :param is_async_validator: indicate if the validator is an asynchronous validator
+        """
+        self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
+
+    def remove_topic_validator(self, topic: str) -> None:
+        """
+        Remove the validator from the given topic.
+        :param topic: the topic to remove validator from
+        """
+        if topic in self.topic_validators:
+            del self.topic_validators[topic]
+
+    def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
+        """
+        Get all validators corresponding to the topics in the message.
+        :param msg: the message published to the topic
+        """
+        return (
+            self.topic_validators[topic] for topic in msg.topicIDs if topic in self.topic_validators
+        )
 
     async def stream_handler(self, stream: INetStream) -> None:
         """
@@ -320,6 +367,31 @@ class Pubsub:
 
         await self.push_msg(self.host.get_id(), msg)
 
+    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
+        """
+        Validate the received message
+        :param msg_forwarder: the peer who forward us the message.
+        :param msg: the message.
+        """
+        sync_topic_validators = []
+        async_topic_validator_futures = []
+        for topic_validator in self.get_msg_validators(msg):
+            if topic_validator.is_async:
+                async_topic_validator_futures.append(topic_validator.validator(msg_forwarder, msg))
+            else:
+                sync_topic_validators.append(topic_validator.validator)
+
+        for validator in sync_topic_validators:
+            if not validator(msg_forwarder, msg):
+                raise ValidationError(f"Validation failed for msg={msg}")
+
+        # TODO: Implement throttle on async validators
+
+        if len(async_topic_validator_futures) > 0:
+            results = await asyncio.gather(*async_topic_validator_futures)
+            if not all(results):
+                raise ValidationError(f"Validation failed for msg={msg}")
+
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
         Push a pubsub message to others.
@@ -332,10 +404,23 @@ class Pubsub:
 
         # TODO: Check if signing is required and if so signature should be attached.
 
+        # If the message is processed before, return(i.e., don't further process the message).
         if self._is_msg_seen(msg):
             return
 
         # TODO: - Validate the message. If failed, reject it.
+        # Validate the signature of the message
+        # FIXME: `signature_validator` is currently a stub.
+        if not signature_validator(msg.key, msg.SerializeToString()):
+            log.debug(f"Signature validation failed for msg={msg}")
+            return
+        # Validate the message with registered topic validators.
+        # If the validation failed, return(i.e., don't further process the message).
+        try:
+            await self.validate_msg(msg_forwarder, msg)
+        except ValidationError:
+            log.debug(f"Topic validation failed for msg={msg}")
+            return
 
         self._mark_msg_seen(msg)
         await self.handle_talk(msg)
@@ -361,4 +446,4 @@ class Pubsub:
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         if not self.my_topics:
             return False
-        return all([topic in self.my_topics for topic in msg.topicIDs])
+        return any(topic in self.my_topics for topic in msg.topicIDs)
