@@ -22,9 +22,10 @@ class INetStream(ABC):
         """
 
     @abstractmethod
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         """
         reads from the underlying muxed_stream
+        :param n: number of bytes to read
         :return: bytes of input
         """
 

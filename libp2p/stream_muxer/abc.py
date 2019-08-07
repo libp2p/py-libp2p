@@ -88,9 +88,10 @@ class IMuxedStream(ABC):
     mplex_conn: IMuxedConn
 
     @abstractmethod
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         """
         reads from the underlying muxed_conn
+        :param n: number of bytes to read
         :return: bytes of input
         """
 
