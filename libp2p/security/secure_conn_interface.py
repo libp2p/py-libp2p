@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
+
 from .typing import TSecurityDetails
 
 

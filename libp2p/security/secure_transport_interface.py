@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 
-from .secure_conn_interface import ISecureConn
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
+
+from .secure_conn_interface import ISecureConn
 
 
 """
