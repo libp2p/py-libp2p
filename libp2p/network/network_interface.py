@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Sequence
+from typing import TYPE_CHECKING, Dict, Sequence
 
 from multiaddr import Multiaddr
 
@@ -12,7 +12,7 @@ from libp2p.typing import StreamHandlerFn
 from .stream.net_stream_interface import INetStream
 
 if TYPE_CHECKING:
-    from .notifee_interface import INotifee
+    from .notifee_interface import INotifee  # noqa: F401
 
 
 class INetwork(ABC):

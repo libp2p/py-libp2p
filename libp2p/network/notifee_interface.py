@@ -7,7 +7,7 @@ from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.stream_muxer.abc import IMuxedConn
 
 if TYPE_CHECKING:
-    from .network_interface import INetwork
+    from .network_interface import INetwork  # noqa: F401
 
 
 class INotifee(ABC):

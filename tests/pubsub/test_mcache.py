@@ -4,6 +4,8 @@ from libp2p.pubsub.mcache import MessageCache
 
 
 class Msg:
+    __slots__ = ["topicIDs", "seqno", "from_id"]
+
     def __init__(self, topicIDs, seqno, from_id):
         self.topicIDs = topicIDs
         self.seqno = seqno

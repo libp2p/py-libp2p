@@ -19,7 +19,7 @@ def test_init():
 
 
 def test_no_init_value():
-    with pytest.raises(Exception) as _:
+    with pytest.raises(Exception):
         ID()
 
 

@@ -1,5 +1,5 @@
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Sequence
+from typing import Callable, Dict, List, Sequence
 
 from multiaddr import Multiaddr
 

@@ -89,7 +89,7 @@ async def no_common_protocol(host_a, host_b):
 
     # try to creates a new new with a procotol not known by the other host
     with pytest.raises(MultiselectClientError):
-        _ = await host_b.new_stream(host_a.get_id(), ["/fakeproto/0.0.1"])
+        await host_b.new_stream(host_a.get_id(), ["/fakeproto/0.0.1"])
 
 
 @pytest.mark.asyncio

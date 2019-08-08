@@ -6,7 +6,7 @@ from libp2p.peer.id import ID
 from .pb import rpc_pb2
 
 if TYPE_CHECKING:
-    from .pubsub import Pubsub
+    from .pubsub import Pubsub  # noqa: F401
 
 
 class IPubsubRouter(ABC):
