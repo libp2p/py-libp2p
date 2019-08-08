@@ -28,7 +28,7 @@ def test_init_():
 
 
 def test_init_no_value():
-    with pytest.raises(Exception) as _:
+    with pytest.raises(Exception):
         PeerInfo()
 
 

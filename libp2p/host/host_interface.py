@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, List, Sequence
+from typing import Any, List, Sequence
 
 import multiaddr
 

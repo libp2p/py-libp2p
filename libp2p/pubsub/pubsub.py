@@ -15,7 +15,7 @@ from .pubsub_notifee import PubsubNotifee
 from .validators import signature_validator
 
 if TYPE_CHECKING:
-    from .pubsub_router_interface import IPubsubRouter
+    from .pubsub_router_interface import IPubsubRouter  # noqa: F401
 
 
 log = logging.getLogger(__name__)

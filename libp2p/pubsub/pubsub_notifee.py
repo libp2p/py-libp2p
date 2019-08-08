@@ -8,8 +8,8 @@ from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.stream_muxer.abc import IMuxedConn
 
 if TYPE_CHECKING:
-    import asyncio
-    from libp2p.peer.id import ID
+    import asyncio  # noqa: F401
+    from libp2p.peer.id import ID  # noqa: F401
 
 
 class PubsubNotifee(INotifee):

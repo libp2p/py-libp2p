@@ -1,13 +1,12 @@
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
 
-if TYPE_CHECKING:
-    from libp2p.network.connection.raw_connection_interface import IRawConnection
-    from libp2p.peer.id import ID
-    from .typing import TSecurityDetails
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
+from .typing import TSecurityDetails
 
 
 class SimpleSecurityTransport(ISecureTransport):
@@ -16,7 +15,7 @@ class SimpleSecurityTransport(ISecureTransport):
     def __init__(self, key_phrase: str) -> None:
         self.key_phrase = key_phrase
 
-    async def secure_inbound(self, conn: "IRawConnection") -> "ISecureConn":
+    async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are not the initiator)
@@ -31,7 +30,7 @@ class SimpleSecurityTransport(ISecureTransport):
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
 
-    async def secure_outbound(self, conn: "IRawConnection", peer_id: "ID") -> "ISecureConn":
+    async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing node via conn,
         for an inbound connection (i.e. we are the initiator)
@@ -52,22 +51,22 @@ class SimpleSecurityTransport(ISecureTransport):
 
 
 class SimpleSecureConn(ISecureConn):
-    conn: "IRawConnection"
+    conn: IRawConnection
     key_phrase: str
-    details: "TSecurityDetails"
+    details: TSecurityDetails
 
-    def __init__(self, conn: "IRawConnection", key_phrase: str) -> None:
+    def __init__(self, conn: IRawConnection, key_phrase: str) -> None:
         self.conn = conn
-        self.details = cast("TSecurityDetails", {})
+        self.details = cast(TSecurityDetails, {})
         self.details["key_phrase"] = key_phrase
 
-    def get_conn(self) -> "IRawConnection":
+    def get_conn(self) -> IRawConnection:
         """
         :return: connection object that has been made secure
         """
         return self.conn
 
-    def get_security_details(self) -> "TSecurityDetails":
+    def get_security_details(self) -> TSecurityDetails:
         """
         :return: map containing details about the connections security
         """

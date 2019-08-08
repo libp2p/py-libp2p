@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, TypeVar
+from typing import Dict, Tuple
 
 from libp2p.stream_muxer.abc import IMuxedStream
 from libp2p.typing import StreamHandlerFn, TProtocol
