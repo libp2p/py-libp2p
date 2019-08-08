@@ -1,11 +1,11 @@
 import asyncio
 from typing import cast
 
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
 
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
 from .typing import TSecurityDetails
 
 
