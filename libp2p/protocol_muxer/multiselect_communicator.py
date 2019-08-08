@@ -1,4 +1,4 @@
-from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.typing import NegotiableTransport
 
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
@@ -10,9 +10,9 @@ class MultiselectCommunicator(IMultiselectCommunicator):
     which is necessary for them to work
     """
 
-    reader_writer: IMuxedStream
+    reader_writer: NegotiableTransport
 
-    def __init__(self, reader_writer: IMuxedStream) -> None:
+    def __init__(self, reader_writer: NegotiableTransport) -> None:
         """
         MultistreamCommunicator expects a reader_writer object that has
         an async read and an async write function (this could be a stream,

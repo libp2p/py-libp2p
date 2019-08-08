@@ -1,7 +1,7 @@
 from typing import Sequence
 
 from libp2p.stream_muxer.abc import IMuxedStream
-from libp2p.typing import TProtocol
+from libp2p.typing import NegotiableTransport, TProtocol
 
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator import MultiselectCommunicator
@@ -59,7 +59,7 @@ class MultiselectClient(IMultiselectClient):
         return selected_protocol
 
     async def select_one_of(
-        self, protocols: Sequence[TProtocol], stream: IMuxedStream
+        self, protocols: Sequence[TProtocol], stream: NegotiableTransport
     ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol
