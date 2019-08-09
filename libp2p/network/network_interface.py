@@ -7,7 +7,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.listener_interface import IListener
-from libp2p.typing import StreamHandlerFn
+from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .stream.net_stream_interface import INetStream
 
@@ -38,7 +38,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(self, protocol_id: TProtocol, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -46,7 +46,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> INetStream:
+    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream

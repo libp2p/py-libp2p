@@ -1,4 +1,4 @@
 from asyncio import StreamReader, StreamWriter
 from typing import Callable
 
-THandler = Callable[[StreamReader, StreamWriter], None]
+THandler = Callable[[StreamReader, StreamWriter], Awaitable[None]]

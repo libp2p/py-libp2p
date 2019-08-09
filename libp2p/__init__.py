@@ -1,6 +1,12 @@
 import asyncio
+from typing import Mapping, Sequence
 
 from Crypto.PublicKey import RSA
+
+from libp2p.network.network_interface import INetwork
+from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.routing.interfaces import IPeerRouting
+from libp2p.security.secure_transport_interface import ISecureTransport
 
 from .host.basic_host import BasicHost
 from .kademlia.network import KademliaServer
@@ -27,13 +33,13 @@ async def cleanup_done_tasks():
         await asyncio.sleep(3)
 
 
-def generate_id():
+def generate_id() -> ID:
     new_key = RSA.generate(2048, e=65537).publickey().export_key("DER")
     new_id = ID.from_pubkey(new_key)
     return new_id
 
 
-def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=None):
+def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt: ID = None, storage=None):
     """
     initialize kadmelia router when no kademlia router is passed in
     :param ksize: The k parameter from the paper
@@ -52,8 +58,13 @@ def initialize_default_kademlia_router(ksize=20, alpha=3, id_opt=None, storage=N
 
 
 def initialize_default_swarm(
-    id_opt=None, transport_opt=None, muxer_opt=None, sec_opt=None, peerstore_opt=None, disc_opt=None
-):
+    id_opt: ID = None,
+    transport_opt: Sequence[str] = None,
+    muxer_opt: Sequence[str] = None,
+    sec_opt: Mapping[str, ISecureTransport] = None,
+    peerstore_opt: IPeerStore = None,
+    disc_opt: IPeerRouting = None,
+) -> INetwork:
     """
     initialize swarm when no swarm is passed in
     :param id_opt: optional id for host

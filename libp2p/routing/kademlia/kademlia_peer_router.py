@@ -23,7 +23,7 @@ class KadmeliaPeerRouter(IPeerRouting):
         # switching peer_id to xor_id used by kademlia as node_id
         xor_id = peer_id.xor_id
         # ignore type for kad
-        value = await self.server.get(xor_id) # type: ignore
+        value = await self.server.get(xor_id)  # type: ignore
         return decode_peerinfo(value)
 
 
@@ -38,5 +38,5 @@ def decode_peerinfo(encoded: Union[bytes, str]) -> KadPeerInfo:
     port = lines[2]
     peer_id = lines[3]
     # ignore typing for kad
-    peer_info = create_kad_peerinfo(peer_id, ip, port) # type: ignore
+    peer_info = create_kad_peerinfo(peer_id, ip, port)  # type: ignore
     return peer_info

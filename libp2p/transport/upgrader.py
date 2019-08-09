@@ -45,7 +45,7 @@ class TransportUpgrader:
 
     @staticmethod
     def upgrade_connection(
-        conn: IRawConnection, generic_protocol_handler: GenericProtocolHandlerFn, peer_id: ID
+        conn: ISecureConn, generic_protocol_handler: GenericProtocolHandlerFn, peer_id: ID
     ) -> Mplex:
         """
         Upgrade raw connection to muxed connection
