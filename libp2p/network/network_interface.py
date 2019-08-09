@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Dict, Sequence
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
-from libp2p.peer.peerstore import PeerStore
+from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.listener_interface import IListener
 from libp2p.typing import StreamHandlerFn, TProtocol
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class INetwork(ABC):
 
-    peerstore: PeerStore
+    peerstore: IPeerStore
     connections: Dict[ID, IMuxedConn]
     listeners: Dict[str, IListener]
 

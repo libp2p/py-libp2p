@@ -1,4 +1,4 @@
-from typing import Dict, Sequence
+from typing import Mapping, Sequence
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
@@ -17,7 +17,9 @@ class TransportUpgrader:
     security_multistream: SecurityMultistream
     muxer: Sequence[str]
 
-    def __init__(self, secOpt: Dict[TProtocol, ISecureTransport], muxerOpt: Sequence[str]) -> None:
+    def __init__(
+        self, secOpt: Mapping[TProtocol, ISecureTransport], muxerOpt: Sequence[str]
+    ) -> None:
         # Store security option
         self.security_multistream = SecurityMultistream()
         for key in secOpt:

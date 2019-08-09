@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Sequence
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
-from libp2p.peer.peerstore import PeerStore
+from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.routing.interfaces import IPeerRouting
@@ -25,7 +25,7 @@ from .typing import GenericProtocolHandlerFn
 class Swarm(INetwork):
 
     self_id: ID
-    peerstore: PeerStore
+    peerstore: IPeerStore
     upgrader: TransportUpgrader
     transport: ITransport
     router: IPeerRouting
@@ -41,7 +41,7 @@ class Swarm(INetwork):
     def __init__(
         self,
         peer_id: ID,
-        peerstore: PeerStore,
+        peerstore: IPeerStore,
         upgrader: TransportUpgrader,
         transport: ITransport,
         router: IPeerRouting,
