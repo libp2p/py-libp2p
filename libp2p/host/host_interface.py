@@ -7,7 +7,7 @@ from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.typing import StreamHandlerFn
+from libp2p.typing import StreamHandlerFn, TProtocol
 
 
 class IHost(ABC):
@@ -37,7 +37,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(self, protocol_id: TProtocol, stream_handler: StreamHandlerFn) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -48,7 +48,7 @@ class IHost(ABC):
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
     @abstractmethod
-    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> INetStream:
+    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_ids: protocol ids that stream can run on
