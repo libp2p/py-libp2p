@@ -15,9 +15,8 @@ from libp2p.transport.typing import THandler
 class TCPListener(IListener):
     multiaddrs: List[Multiaddr]
     server = None
-    handler = None
 
-    def __init__(self, handler_function: THandler = None) -> None:
+    def __init__(self, handler_function: THandler) -> None:
         self.multiaddrs = []
         self.server = None
         self.handler = handler_function
