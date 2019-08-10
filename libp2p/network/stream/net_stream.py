@@ -1,4 +1,5 @@
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.typing import TProtocol
 
 from .net_stream_interface import INetStream
 
@@ -7,20 +8,20 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     mplex_conn: IMuxedConn
-    protocol_id: str
+    protocol_id: TProtocol
 
     def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream
         self.mplex_conn = muxed_stream.mplex_conn
         self.protocol_id = None
 
-    def get_protocol(self) -> str:
+    def get_protocol(self) -> TProtocol:
         """
         :return: protocol id that stream runs on
         """
         return self.protocol_id
 
-    def set_protocol(self, protocol_id: str) -> None:
+    def set_protocol(self, protocol_id: TProtocol) -> None:
         """
         :param protocol_id: protocol id that stream runs on
         :return: true if successful
