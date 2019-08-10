@@ -6,16 +6,18 @@ import urllib.request
 import multiaddr
 
 from libp2p import new_node
+from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.typing import TProtocol
 
-PROTOCOL_ID = "/chat/1.0.0"
+PROTOCOL_ID = TProtocol("/chat/1.0.0")
 
 
-async def read_data(stream):
+async def read_data(stream: INetStream) -> None:
     while True:
-        read_string = await stream.read()
-        if read_string is not None:
-            read_string = read_string.decode()
+        read_bytes = await stream.read()
+        if read_bytes is not None:
+            read_string = read_bytes.decode()
             if read_string != "\n":
                 # Green console colour: 	\x1b[32m
                 # Reset console colour: 	\x1b[0m
@@ -23,14 +25,14 @@ async def read_data(stream):
 
 
 # FIXME(mhchia): Reconsider whether we should use a thread pool here.
-async def write_data(stream):
+async def write_data(stream: INetStream) -> None:
     loop = asyncio.get_event_loop()
     while True:
         line = await loop.run_in_executor(None, sys.stdin.readline)
         await stream.write(line.encode())
 
 
-async def run(port, destination, localhost):
+async def run(port: int, destination: str, localhost: bool) -> None:
     if localhost:
         ip = "127.0.0.1"
     else:
@@ -42,7 +44,7 @@ async def run(port, destination, localhost):
 
     if not destination:  # its the server
 
-        async def stream_handler(stream):
+        async def stream_handler(stream: INetStream) -> None:
             asyncio.ensure_future(read_data(stream))
             asyncio.ensure_future(write_data(stream))
 
@@ -73,7 +75,7 @@ async def run(port, destination, localhost):
         print("Connected to peer %s" % info.addrs[0])
 
 
-def main():
+def main() -> None:
     description = """
     This program demonstrates a simple p2p chat application using libp2p.
     To use it, first run 'python ./chat -p <PORT>', where <PORT> is the port number.
