@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 from multiaddr import Multiaddr
 
@@ -10,6 +10,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
 from .constants import HeaderTags
+from .exceptions import StreamNotFound
 from .mplex_stream import MplexStream
 from .utils import decode_uvarint_from_stream, encode_uvarint
 
@@ -23,6 +24,9 @@ class Mplex(IMuxedConn):
     raw_conn: IRawConnection
     initiator: bool
     peer_id: ID
+    # TODO: `dataIn` in go implementation. Should be size of 8.
+    # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
+    #   to let the `MplexStream`s know that EOF arrived (#235).
     buffers: Dict[int, "asyncio.Queue[bytes]"]
     stream_queue: "asyncio.Queue[int]"
 
@@ -75,17 +79,19 @@ class Mplex(IMuxedConn):
         :param stream_id: stream id of stream to read from
         :return: message read
         """
-        # TODO: propagate up timeout exception and catch
-        # TODO: pass down timeout from user and use that
-        if stream_id in self.buffers:
-            try:
-                data = await asyncio.wait_for(self.buffers[stream_id].get(), timeout=8)
-                return data
-            except asyncio.TimeoutError:
-                return None
+        if stream_id not in self.buffers:
+            raise StreamNotFound(f"stream {stream_id} is not found")
+        return await self.buffers[stream_id].get()
 
-        # Stream not created yet
-        return None
+    async def read_buffer_nonblocking(self, stream_id: int) -> Optional[bytes]:
+        """
+        Read a message from `stream_id`'s buffer, non-blockingly.
+        """
+        if stream_id not in self.buffers:
+            raise StreamNotFound(f"stream {stream_id} is not found")
+        if self.buffers[stream_id].empty():
+            return None
+        return await self.buffers[stream_id].get()
 
     async def open_stream(
         self, protocol_id: str, multi_addr: Multiaddr
@@ -170,6 +176,7 @@ class Mplex(IMuxedConn):
         :return: stream_id, flag, message contents
         """
 
+        # FIXME: No timeout is used in Go implementation.
         # Timeout is set to a relatively small value to alleviate wait time to exit
         #  loop in handle_incoming
         timeout = 0.1
