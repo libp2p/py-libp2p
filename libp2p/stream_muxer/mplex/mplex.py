@@ -22,7 +22,6 @@ class Mplex(IMuxedConn):
     secured_conn: ISecureConn
     raw_conn: IRawConnection
     initiator: bool
-    generic_protocol_handler = None
     peer_id: ID
     buffers: Dict[int, "asyncio.Queue[bytes]"]
     stream_queue: "asyncio.Queue[int]"

@@ -1,6 +1,7 @@
 from typing import Iterable, List, Sequence
 
 from libp2p.peer.id import ID
+from libp2p.typing import TProtocol
 
 from .pb import rpc_pb2
 from .pubsub import Pubsub
@@ -9,15 +10,15 @@ from .pubsub_router_interface import IPubsubRouter
 
 class FloodSub(IPubsubRouter):
 
-    protocols: List[str]
+    protocols: List[TProtocol]
 
     pubsub: Pubsub
 
-    def __init__(self, protocols: Sequence[str]) -> None:
+    def __init__(self, protocols: Sequence[TProtocol]) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
 
-    def get_protocols(self) -> List[str]:
+    def get_protocols(self) -> List[TProtocol]:
         """
         :return: the list of protocols supported by the router
         """
@@ -31,7 +32,7 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id: ID, protocol_id: str) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
@@ -43,7 +44,7 @@ class FloodSub(IPubsubRouter):
         :param peer_id: id of peer to remove
         """
 
-    async def handle_rpc(self, rpc: rpc_pb2.ControlMessage, sender_peer_id: ID) -> None:
+    async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed

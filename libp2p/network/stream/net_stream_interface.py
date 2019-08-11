@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from libp2p.stream_muxer.abc import IMuxedConn
+from libp2p.typing import TProtocol
 
 
 class INetStream(ABC):
@@ -8,13 +9,13 @@ class INetStream(ABC):
     mplex_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> str:
+    def get_protocol(self) -> TProtocol:
         """
         :return: protocol id that stream runs on
         """
 
     @abstractmethod
-    def set_protocol(self, protocol_id: str) -> bool:
+    def set_protocol(self, protocol_id: TProtocol) -> bool:
         """
         :param protocol_id: protocol id that stream runs on
         :return: true if successful

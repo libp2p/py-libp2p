@@ -1,7 +1,18 @@
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, NamedTuple, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Tuple,
+    Union,
+    cast,
+)
 
 from lru import LRU
 
@@ -9,6 +20,7 @@ from libp2p.exceptions import ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
+from libp2p.typing import TProtocol
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
@@ -31,7 +43,9 @@ AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
 ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 
 
-TopicValidator = NamedTuple("TopicValidator", (("validator", ValidatorFn), ("is_async", bool)))
+class TopicValidator(NamedTuple):
+    validator: ValidatorFn
+    is_async: bool
 
 
 class Pubsub:
@@ -43,7 +57,7 @@ class Pubsub:
 
     peer_queue: "asyncio.Queue[ID]"
 
-    protocols: List[str]
+    protocols: List[TProtocol]
 
     incoming_msgs_from_peers: "asyncio.Queue[rpc_pb2.Message]"
     outgoing_messages: "asyncio.Queue[rpc_pb2.Message]"
@@ -192,7 +206,7 @@ class Pubsub:
         Get all validators corresponding to the topics in the message.
         :param msg: the message published to the topic
         """
-        return (
+        return tuple(
             self.topic_validators[topic] for topic in msg.topicIDs if topic in self.topic_validators
         )
 
@@ -301,9 +315,7 @@ class Pubsub:
 
         # Create subscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id.encode("utf-8"))]
-        )
+        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)])
 
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -328,9 +340,7 @@ class Pubsub:
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id.encode("utf-8"))]
-        )
+        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)])
 
         # Send out unsubscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -374,12 +384,14 @@ class Pubsub:
         :param msg: the message.
         """
         sync_topic_validators = []
-        async_topic_validator_futures = []
+        async_topic_validator_futures: List[Awaitable[bool]] = []
         for topic_validator in self.get_msg_validators(msg):
             if topic_validator.is_async:
-                async_topic_validator_futures.append(topic_validator.validator(msg_forwarder, msg))
+                async_topic_validator_futures.append(
+                    cast(Awaitable[bool], topic_validator.validator(msg_forwarder, msg))
+                )
             else:
-                sync_topic_validators.append(topic_validator.validator)
+                sync_topic_validators.append(cast(SyncValidatorFn, topic_validator.validator))
 
         for validator in sync_topic_validators:
             if not validator(msg_forwarder, msg):

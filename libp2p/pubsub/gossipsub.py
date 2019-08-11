@@ -4,6 +4,7 @@ import random
 from typing import Any, Dict, Iterable, List, Sequence, Set
 
 from libp2p.peer.id import ID
+from libp2p.typing import TProtocol
 
 from .mcache import MessageCache
 from .pb import rpc_pb2
@@ -13,7 +14,7 @@ from .pubsub_router_interface import IPubsubRouter
 
 class GossipSub(IPubsubRouter):
 
-    protocols: List[str]
+    protocols: List[TProtocol]
     pubsub: Pubsub
 
     degree: int
@@ -38,7 +39,7 @@ class GossipSub(IPubsubRouter):
 
     def __init__(
         self,
-        protocols: Sequence[str],
+        protocols: Sequence[TProtocol],
         degree: int,
         degree_low: int,
         degree_high: int,
@@ -79,7 +80,7 @@ class GossipSub(IPubsubRouter):
 
     # Interface functions
 
-    def get_protocols(self) -> List[str]:
+    def get_protocols(self) -> List[TProtocol]:
         """
         :return: the list of protocols supported by the router
         """
@@ -97,7 +98,7 @@ class GossipSub(IPubsubRouter):
         # TODO: Start after delay
         asyncio.ensure_future(self.heartbeat())
 
-    def add_peer(self, peer_id: ID, protocol_id: str) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
         Notifies the router that a new peer has been connected
         :param peer_id: id of peer to add
@@ -126,7 +127,7 @@ class GossipSub(IPubsubRouter):
         if peer_id in self.peers_gossipsub:
             self.peers_floodsub.remove(peer_id)
 
-    async def handle_rpc(self, rpc: rpc_pb2.Message, sender_peer_id: ID) -> None:
+    async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
@@ -436,7 +437,7 @@ class GossipSub(IPubsubRouter):
 
     # RPC handlers
 
-    async def handle_ihave(self, ihave_msg: rpc_pb2.Message, sender_peer_id: ID) -> None:
+    async def handle_ihave(self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID) -> None:
         """
         Checks the seen set and requests unknown messages with an IWANT message.
         """
@@ -460,7 +461,7 @@ class GossipSub(IPubsubRouter):
         if msg_ids_wanted:
             await self.emit_iwant(msg_ids_wanted, sender_peer_id)
 
-    async def handle_iwant(self, iwant_msg: rpc_pb2.Message, sender_peer_id: ID) -> None:
+    async def handle_iwant(self, iwant_msg: rpc_pb2.ControlIWant, sender_peer_id: ID) -> None:
         """
         Forwards all request messages that are present in mcache to the requesting peer.
         """
@@ -495,7 +496,7 @@ class GossipSub(IPubsubRouter):
         # 4) And write the packet to the stream
         await peer_stream.write(rpc_msg)
 
-    async def handle_graft(self, graft_msg: rpc_pb2.Message, sender_peer_id: ID) -> None:
+    async def handle_graft(self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID) -> None:
         topic: str = graft_msg.topicID
 
         # Add peer to mesh for topic
@@ -506,7 +507,7 @@ class GossipSub(IPubsubRouter):
             # Respond with PRUNE if not subscribed to the topic
             await self.emit_prune(topic, sender_peer_id)
 
-    async def handle_prune(self, prune_msg: rpc_pb2.Message, sender_peer_id: ID) -> None:
+    async def handle_prune(self, prune_msg: rpc_pb2.ControlPrune, sender_peer_id: ID) -> None:
         topic: str = prune_msg.topicID
 
         # Remove peer from mesh for topic, if peer is in topic

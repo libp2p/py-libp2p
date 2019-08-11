@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Sequence
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
-from libp2p.peer.peerstore import PeerStore
+from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.routing.interfaces import IPeerRouting
@@ -12,7 +12,7 @@ from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.typing import StreamHandlerFn
+from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .connection.raw_connection import RawConnection
 from .network_interface import INetwork
@@ -25,7 +25,7 @@ from .typing import GenericProtocolHandlerFn
 class Swarm(INetwork):
 
     self_id: ID
-    peerstore: PeerStore
+    peerstore: IPeerStore
     upgrader: TransportUpgrader
     transport: ITransport
     router: IPeerRouting
@@ -41,7 +41,7 @@ class Swarm(INetwork):
     def __init__(
         self,
         peer_id: ID,
-        peerstore: PeerStore,
+        peerstore: IPeerStore,
         upgrader: TransportUpgrader,
         transport: ITransport,
         router: IPeerRouting,
@@ -68,7 +68,7 @@ class Swarm(INetwork):
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(self, protocol_id: str, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(self, protocol_id: TProtocol, stream_handler: StreamHandlerFn) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -121,7 +121,7 @@ class Swarm(INetwork):
 
         return muxed_conn
 
-    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[str]) -> NetStream:
+    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> NetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
@@ -157,7 +157,7 @@ class Swarm(INetwork):
 
         return net_stream
 
-    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         :param multiaddrs: one or many multiaddrs to start listening on
         :return: true if at least one success
