@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional, Tuple
 
 from multiaddr import Multiaddr
 
