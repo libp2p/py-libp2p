@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from multiaddr import Multiaddr
 
@@ -54,6 +54,12 @@ class IMuxedConn(ABC):
         Read a message from stream_id's buffer, check raw connection for new messages
         :param stream_id: stream id of stream to read from
         :return: message read
+        """
+
+    @abstractmethod
+    async def read_buffer_nonblocking(self, stream_id: int) -> Optional[bytes]:
+        """
+        Read a message from `stream_id`'s buffer, non-blockingly.
         """
 
     @abstractmethod
