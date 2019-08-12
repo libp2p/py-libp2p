@@ -1,0 +1,2 @@
+class StreamNotFound(Exception):
+    pass
