@@ -1,5 +1,4 @@
 import asyncio
-from io import BytesIO
 
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
