@@ -15,18 +15,35 @@ class BaseSession(ISecureConn, IRawConnection):
     ) -> None:
         self.local_peer = transport.local_peer
         self.local_private_key = transport.local_private_key
-        self.insecure_conn = conn
+        self.conn = conn
         self.remote_peer_id = peer_id
         self.remote_permanent_pubkey = b""
 
     # TODO clean up how this is passed around?
     @property
     def initiator(self) -> bool:
-        return self.insecure_conn.initiator
+        return self.conn.initiator
 
     # TODO clean up how this is passed around?
     def next_stream_id(self) -> int:
-        return self.insecure_conn.next_stream_id()
+        return self.conn.next_stream_id()
+
+    @property
+    def writer(self):
+        return self.conn.writer
+
+    @property
+    def reader(self):
+        return self.conn.reader
+
+    async def write(self, data: bytes) -> None:
+        await self.conn.write(data)
+
+    async def read(self) -> bytes:
+        return await self.conn.read()
+
+    def close(self) -> None:
+        self.conn.close()
 
     def get_local_peer(self) -> ID:
         return self.local_peer
