@@ -38,7 +38,9 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def set_stream_handler(self, protocol_id: TProtocol, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(
+        self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
+    ) -> bool:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
@@ -46,7 +48,9 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> INetStream:
+    async def new_stream(
+        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+    ) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream

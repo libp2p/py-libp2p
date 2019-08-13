@@ -62,7 +62,9 @@ class KademliaServer:
         Provide interface="::" to accept ipv6 address
         """
         loop = asyncio.get_event_loop()
-        listen = loop.create_datagram_endpoint(self._create_protocol, local_addr=(interface, port))
+        listen = loop.create_datagram_endpoint(
+            self._create_protocol, local_addr=(interface, port)
+        )
         log.info("Node %i listening on %s:%i", self.node.xor_id, interface, port)
         self.transport, self.protocol = await listen
         # finally, schedule refreshing table
@@ -83,7 +85,9 @@ class KademliaServer:
         for node_id in self.protocol.get_refresh_ids():
             node = create_kad_peerinfo(node_id)
             nearest = self.protocol.router.find_neighbors(node, self.alpha)
-            spider = NodeSpiderCrawl(self.protocol, node, nearest, self.ksize, self.alpha)
+            spider = NodeSpiderCrawl(
+                self.protocol, node, nearest, self.ksize, self.alpha
+            )
             results.append(spider.find())
 
         # do our crawling
@@ -118,7 +122,9 @@ class KademliaServer:
         cos = list(map(self.bootstrap_node, addrs))
         gathered = await asyncio.gather(*cos)
         nodes = [node for node in gathered if node is not None]
-        spider = NodeSpiderCrawl(self.protocol, self.node, nodes, self.ksize, self.alpha)
+        spider = NodeSpiderCrawl(
+            self.protocol, self.node, nodes, self.ksize, self.alpha
+        )
         return await spider.find()
 
     async def bootstrap_node(self, addr):

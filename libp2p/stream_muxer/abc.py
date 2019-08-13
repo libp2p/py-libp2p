@@ -22,7 +22,10 @@ class IMuxedConn(ABC):
 
     @abstractmethod
     def __init__(
-        self, conn: ISecureConn, generic_protocol_handler: "GenericProtocolHandlerFn", peer_id: ID
+        self,
+        conn: ISecureConn,
+        generic_protocol_handler: "GenericProtocolHandlerFn",
+        peer_id: ID,
     ) -> None:
         """
         create a new muxed connection
@@ -54,7 +57,9 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def open_stream(self, protocol_id: str, multi_addr: Multiaddr) -> "IMuxedStream":
+    async def open_stream(
+        self, protocol_id: str, multi_addr: Multiaddr
+    ) -> "IMuxedStream":
         """
         creates a new muxed_stream
         :param protocol_id: protocol_id of stream

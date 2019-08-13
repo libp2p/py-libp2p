@@ -138,7 +138,9 @@ class Pubsub:
         """
         packet = rpc_pb2.RPC()
         for topic_id in self.my_topics:
-            packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)])
+            packet.subscriptions.extend(
+                [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
+            )
         return packet.SerializeToString()
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -207,7 +209,9 @@ class Pubsub:
         :param msg: the message published to the topic
         """
         return tuple(
-            self.topic_validators[topic] for topic in msg.topicIDs if topic in self.topic_validators
+            self.topic_validators[topic]
+            for topic in msg.topicIDs
+            if topic in self.topic_validators
         )
 
     async def stream_handler(self, stream: INetStream) -> None:
@@ -315,7 +319,9 @@ class Pubsub:
 
         # Create subscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
+        )
 
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -340,7 +346,9 @@ class Pubsub:
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend([rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)])
+        packet.subscriptions.extend(
+            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)]
+        )
 
         # Send out unsubscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
@@ -391,7 +399,9 @@ class Pubsub:
                     cast(Awaitable[bool], topic_validator.validator(msg_forwarder, msg))
                 )
             else:
-                sync_topic_validators.append(cast(SyncValidatorFn, topic_validator.validator))
+                sync_topic_validators.append(
+                    cast(SyncValidatorFn, topic_validator.validator)
+                )
 
         for validator in sync_topic_validators:
             if not validator(msg_forwarder, msg):

@@ -66,7 +66,9 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def set_stream_handler(self, protocol_id: TProtocol, stream_handler: StreamHandlerFn) -> bool:
+    def set_stream_handler(
+        self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
+    ) -> bool:
         """
         set stream handler for host
         :param protocol_id: protocol id used on stream
@@ -77,7 +79,9 @@ class BasicHost(IHost):
 
     # protocol_id can be a list of protocol_ids
     # stream will decide which protocol_id to run on
-    async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> INetStream:
+    async def new_stream(
+        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+    ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
         :param protocol_id: protocol id that stream runs on

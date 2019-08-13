@@ -8,9 +8,7 @@ from libp2p.peer.peerdata import PeerData
 from libp2p.peer.peerinfo import InvalidAddrError, PeerInfo, info_from_p2p_addr
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-VALID_MULTI_ADDR_STR = (
-    "/ip4/127.0.0.1/tcp/8000/p2p/3YgLAeMKSAPcGqZkAt8mREqhQXmJT8SN8VCMN4T6ih4GNX9wvK8mWJnWZ1qA2mLdCQ"
-)  # noqa: E501
+VALID_MULTI_ADDR_STR = "/ip4/127.0.0.1/tcp/8000/p2p/3YgLAeMKSAPcGqZkAt8mREqhQXmJT8SN8VCMN4T6ih4GNX9wvK8mWJnWZ1qA2mLdCQ"  # noqa: E501
 
 
 def test_init_():
@@ -39,7 +37,8 @@ def test_init_no_value():
         pytest.param(random.randint(0, 255), id="random integer"),
         pytest.param(multiaddr.Multiaddr("/"), id="empty multiaddr"),
         pytest.param(
-            multiaddr.Multiaddr("/ip4/127.0.0.1"), id="multiaddr without peer_id(p2p protocol)"
+            multiaddr.Multiaddr("/ip4/127.0.0.1"),
+            id="multiaddr without peer_id(p2p protocol)",
         ),
     ),
 )

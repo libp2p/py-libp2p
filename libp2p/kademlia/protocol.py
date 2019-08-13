@@ -50,7 +50,9 @@ class KademliaProtocol(RPCProtocol):
         source = create_kad_peerinfo(nodeid, sender[0], sender[1])
 
         self.welcome_if_new(source)
-        log.debug("got a store request from %s, storing '%s'='%s'", sender, key.hex(), value)
+        log.debug(
+            "got a store request from %s, storing '%s'='%s'", sender, key.hex(), value
+        )
         self.storage[key] = value
         return True
 
@@ -80,7 +82,9 @@ class KademliaProtocol(RPCProtocol):
         we store a map of content_id to peer_id (non xor)
         """
         if nodeid == provider_id:
-            log.info("adding provider %s for key %s in local table", provider_id, str(key))
+            log.info(
+                "adding provider %s for key %s in local table", provider_id, str(key)
+            )
             self.storage[key] = provider_id
             return True
         return False
@@ -131,7 +135,9 @@ class KademliaProtocol(RPCProtocol):
 
     async def call_add_provider(self, node_to_ask, key, provider_id):
         address = (node_to_ask.ip, node_to_ask.port)
-        result = await self.add_provider(address, self.source_node.peer_id_bytes, key, provider_id)
+        result = await self.add_provider(
+            address, self.source_node.peer_id_bytes, key, provider_id
+        )
 
         return self.handle_call_response(result, node_to_ask)
 

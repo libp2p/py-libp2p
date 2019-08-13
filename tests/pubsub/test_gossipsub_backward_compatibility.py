@@ -20,5 +20,7 @@ async def test_gossipsub_initialize_with_floodsub_protocol():
 async def test_gossipsub_run_with_floodsub_tests(test_case_obj):
     await perform_test_from_obj(
         test_case_obj,
-        functools.partial(GossipsubFactory, degree=3, degree_low=2, degree_high=4, time_to_live=30),
+        functools.partial(
+            GossipsubFactory, degree=3, degree_low=2, degree_high=4, time_to_live=30
+        ),
     )

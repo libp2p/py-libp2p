@@ -157,7 +157,9 @@ class GossipSub(IPubsubRouter):
         self.mcache.put(pubsub_msg)
 
         peers_gen = self._get_peers_to_send(
-            pubsub_msg.topicIDs, msg_forwarder=msg_forwarder, origin=ID(pubsub_msg.from_id)
+            pubsub_msg.topicIDs,
+            msg_forwarder=msg_forwarder,
+            origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
         for peer_id in peers_gen:
@@ -352,7 +354,9 @@ class GossipSub(IPubsubRouter):
                 if num_fanout_peers_in_topic < self.degree:
                     # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]
                     selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree - num_fanout_peers_in_topic, self.fanout[topic]
+                        topic,
+                        self.degree - num_fanout_peers_in_topic,
+                        self.fanout[topic],
                     )
                     # Add the peers to fanout[topic]
                     self.fanout[topic].extend(selected_peers)
@@ -371,7 +375,9 @@ class GossipSub(IPubsubRouter):
 
                     for peer in peers_to_emit_ihave_to:
                         # TODO: this line is a monster, can hopefully be simplified
-                        if (topic not in self.mesh or (peer not in self.mesh[topic])) and (
+                        if (
+                            topic not in self.mesh or (peer not in self.mesh[topic])
+                        ) and (
                             topic not in self.fanout or (peer not in self.fanout[topic])
                         ):
                             msg_id_strs = [str(msg_id) for msg_id in msg_ids]
@@ -391,7 +397,10 @@ class GossipSub(IPubsubRouter):
                             topic, self.degree, []
                         )
                         for peer in peers_to_emit_ihave_to:
-                            if peer not in self.mesh[topic] and peer not in self.fanout[topic]:
+                            if (
+                                peer not in self.mesh[topic]
+                                and peer not in self.fanout[topic]
+                            ):
 
                                 msg_id_strs = [str(msg) for msg in msg_ids]
                                 await self.emit_ihave(topic, msg_id_strs, peer)
@@ -431,13 +440,19 @@ class GossipSub(IPubsubRouter):
         self, topic: str, num_to_select: int, minus: Sequence[ID]
     ) -> List[ID]:
         gossipsub_peers_in_topic = [
-            peer_id for peer_id in self.pubsub.peer_topics[topic] if peer_id in self.peers_gossipsub
+            peer_id
+            for peer_id in self.pubsub.peer_topics[topic]
+            if peer_id in self.peers_gossipsub
         ]
-        return self.select_from_minus(num_to_select, gossipsub_peers_in_topic, list(minus))
+        return self.select_from_minus(
+            num_to_select, gossipsub_peers_in_topic, list(minus)
+        )
 
     # RPC handlers
 
-    async def handle_ihave(self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID) -> None:
+    async def handle_ihave(
+        self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
+    ) -> None:
         """
         Checks the seen set and requests unknown messages with an IWANT message.
         """
@@ -461,7 +476,9 @@ class GossipSub(IPubsubRouter):
         if msg_ids_wanted:
             await self.emit_iwant(msg_ids_wanted, sender_peer_id)
 
-    async def handle_iwant(self, iwant_msg: rpc_pb2.ControlIWant, sender_peer_id: ID) -> None:
+    async def handle_iwant(
+        self, iwant_msg: rpc_pb2.ControlIWant, sender_peer_id: ID
+    ) -> None:
         """
         Forwards all request messages that are present in mcache to the requesting peer.
         """
@@ -496,7 +513,9 @@ class GossipSub(IPubsubRouter):
         # 4) And write the packet to the stream
         await peer_stream.write(rpc_msg)
 
-    async def handle_graft(self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID) -> None:
+    async def handle_graft(
+        self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
+    ) -> None:
         topic: str = graft_msg.topicID
 
         # Add peer to mesh for topic
@@ -507,7 +526,9 @@ class GossipSub(IPubsubRouter):
             # Respond with PRUNE if not subscribed to the topic
             await self.emit_prune(topic, sender_peer_id)
 
-    async def handle_prune(self, prune_msg: rpc_pb2.ControlPrune, sender_peer_id: ID) -> None:
+    async def handle_prune(
+        self, prune_msg: rpc_pb2.ControlPrune, sender_peer_id: ID
+    ) -> None:
         topic: str = prune_msg.topicID
 
         # Remove peer from mesh for topic, if peer is in topic
@@ -569,7 +590,9 @@ class GossipSub(IPubsubRouter):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_control_message(self, control_msg: rpc_pb2.ControlMessage, to_peer: ID) -> None:
+    async def emit_control_message(
+        self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
+    ) -> None:
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)

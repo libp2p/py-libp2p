@@ -73,7 +73,9 @@ class SecurityMultistream(ABC):
 
         return secure_conn
 
-    async def select_transport(self, conn: IRawConnection, initiator: bool) -> ISecureTransport:
+    async def select_transport(
+        self, conn: IRawConnection, initiator: bool
+    ) -> ISecureTransport:
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on

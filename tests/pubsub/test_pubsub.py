@@ -184,7 +184,8 @@ async def test_get_msg_validators(pubsubs_fsub):
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.parametrize(
-    "is_topic_1_val_passed, is_topic_2_val_passed", ((False, True), (True, False), (True, True))
+    "is_topic_1_val_passed, is_topic_2_val_passed",
+    ((False, True), (True, False), (True, True)),
 )
 @pytest.mark.asyncio
 async def test_validate_msg(pubsubs_fsub, is_topic_1_val_passed, is_topic_2_val_passed):
@@ -271,7 +272,9 @@ async def test_continuously_read_stream(pubsubs_fsub, monkeypatch):
         event_handle_rpc.set()
 
     monkeypatch.setattr(pubsubs_fsub[0], "push_msg", mock_push_msg)
-    monkeypatch.setattr(pubsubs_fsub[0], "handle_subscription", mock_handle_subscription)
+    monkeypatch.setattr(
+        pubsubs_fsub[0], "handle_subscription", mock_handle_subscription
+    )
     monkeypatch.setattr(pubsubs_fsub[0].router, "handle_rpc", mock_handle_rpc)
 
     async def wait_for_event_occurring(event):
@@ -290,7 +293,9 @@ async def test_continuously_read_stream(pubsubs_fsub, monkeypatch):
     task = asyncio.ensure_future(pubsubs_fsub[0].continuously_read_stream(stream))
 
     # Test: `push_msg` is called when publishing to a subscribed topic.
-    publish_subscribed_topic = rpc_pb2.RPC(publish=[rpc_pb2.Message(topicIDs=[TESTING_TOPIC])])
+    publish_subscribed_topic = rpc_pb2.RPC(
+        publish=[rpc_pb2.Message(topicIDs=[TESTING_TOPIC])]
+    )
     await stream.write(publish_subscribed_topic.SerializeToString())
     await wait_for_event_occurring(event_push_msg)
     # Make sure the other events are not emitted.
@@ -343,7 +348,10 @@ def test_handle_subscription(pubsubs_fsub):
     peer_ids = [ID(b"\x12\x20" + i.to_bytes(32, "big")) for i in range(2)]
     # Test: One peer is subscribed
     pubsubs_fsub[0].handle_subscription(peer_ids[0], sub_msg_0)
-    assert len(pubsubs_fsub[0].peer_topics) == 1 and TESTING_TOPIC in pubsubs_fsub[0].peer_topics
+    assert (
+        len(pubsubs_fsub[0].peer_topics) == 1
+        and TESTING_TOPIC in pubsubs_fsub[0].peer_topics
+    )
     assert len(pubsubs_fsub[0].peer_topics[TESTING_TOPIC]) == 1
     assert peer_ids[0] in pubsubs_fsub[0].peer_topics[TESTING_TOPIC]
     # Test: Another peer is subscribed
@@ -369,7 +377,10 @@ def test_handle_subscription(pubsubs_fsub):
 async def test_handle_talk(pubsubs_fsub):
     sub = await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
     msg_0 = make_pubsub_msg(
-        origin_id=pubsubs_fsub[0].my_id, topic_ids=[TESTING_TOPIC], data=b"1234", seqno=b"\x00" * 8
+        origin_id=pubsubs_fsub[0].my_id,
+        topic_ids=[TESTING_TOPIC],
+        data=b"1234",
+        seqno=b"\x00" * 8,
     )
     await pubsubs_fsub[0].handle_talk(msg_0)
     msg_1 = make_pubsub_msg(
@@ -379,7 +390,10 @@ async def test_handle_talk(pubsubs_fsub):
         seqno=b"\x11" * 8,
     )
     await pubsubs_fsub[0].handle_talk(msg_1)
-    assert len(pubsubs_fsub[0].my_topics) == 1 and sub == pubsubs_fsub[0].my_topics[TESTING_TOPIC]
+    assert (
+        len(pubsubs_fsub[0].my_topics) == 1
+        and sub == pubsubs_fsub[0].my_topics[TESTING_TOPIC]
+    )
     assert sub.qsize() == 1
     assert (await sub.get()) == msg_0
 
@@ -413,7 +427,9 @@ async def test_publish(pubsubs_fsub, monkeypatch):
     await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
 
     assert len(msgs) == 2, "`push_msg` should be called every time `publish` is called"
-    assert (msg_forwarders[0] == msg_forwarders[1]) and (msg_forwarders[1] == pubsubs_fsub[0].my_id)
+    assert (msg_forwarders[0] == msg_forwarders[1]) and (
+        msg_forwarders[1] == pubsubs_fsub[0].my_id
+    )
     assert msgs[0].seqno != msgs[1].seqno, "`seqno` should be different every time"
 
 

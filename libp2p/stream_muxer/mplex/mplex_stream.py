@@ -47,7 +47,11 @@ class MplexStream(IMuxedStream):
         write to stream
         :return: number of bytes written
         """
-        flag = HeaderTags.MessageInitiator if self.initiator else HeaderTags.MessageReceiver
+        flag = (
+            HeaderTags.MessageInitiator
+            if self.initiator
+            else HeaderTags.MessageReceiver
+        )
         return await self.mplex_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> bool:
@@ -89,7 +93,11 @@ class MplexStream(IMuxedStream):
                 return True
 
             if not self.remote_closed:
-                flag = HeaderTags.ResetInitiator if self.initiator else HeaderTags.ResetInitiator
+                flag = (
+                    HeaderTags.ResetInitiator
+                    if self.initiator
+                    else HeaderTags.ResetInitiator
+                )
                 await self.mplex_conn.send_message(flag, None, self.stream_id)
 
             self.local_closed = True

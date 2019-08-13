@@ -82,14 +82,23 @@ def main() -> None:
     Then, run another host with 'python ./chat -p <ANOTHER_PORT> -d <DESTINATION>',
     where <DESTINATION> is the multiaddress of the previous listener host.
     """
-    example_maddr = "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    example_maddr = (
+        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--debug", action="store_true", help="generate the same node ID on every execution"
+        "--debug",
+        action="store_true",
+        help="generate the same node ID on every execution",
     )
-    parser.add_argument("-p", "--port", default=8000, type=int, help="source port number")
     parser.add_argument(
-        "-d", "--destination", type=str, help=f"destination multiaddr string, e.g. {example_maddr}"
+        "-p", "--port", default=8000, type=int, help="source port number"
+    )
+    parser.add_argument(
+        "-d",
+        "--destination",
+        type=str,
+        help=f"destination multiaddr string, e.g. {example_maddr}",
     )
     parser.add_argument(
         "-l",

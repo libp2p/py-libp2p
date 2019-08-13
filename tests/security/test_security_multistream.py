@@ -65,7 +65,9 @@ async def test_single_insecure_security_transport_succeeds():
     def assertion_func(details):
         assert details["id"] == "foo"
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )
 
 
 @pytest.mark.asyncio
@@ -76,7 +78,9 @@ async def test_single_simple_test_security_transport_succeeds():
     def assertion_func(details):
         assert details["key_phrase"] == "tacos"
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )
 
 
 @pytest.mark.asyncio
@@ -90,7 +94,9 @@ async def test_two_simple_test_security_transport_for_initiator_succeeds():
     def assertion_func(details):
         assert details["key_phrase"] == "shleep"
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )
 
 
 @pytest.mark.asyncio
@@ -104,7 +110,9 @@ async def test_two_simple_test_security_transport_for_noninitiator_succeeds():
     def assertion_func(details):
         assert details["key_phrase"] == "tacos"
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )
 
 
 @pytest.mark.asyncio
@@ -121,7 +129,9 @@ async def test_two_simple_test_security_transport_for_both_succeeds():
     def assertion_func(details):
         assert details["key_phrase"] == "b"
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )
 
 
 @pytest.mark.asyncio
@@ -164,4 +174,6 @@ async def test_default_insecure_security():
         else:
             assert details1 == details2
 
-    await perform_simple_test(assertion_func, transports_for_initiator, transports_for_noninitiator)
+    await perform_simple_test(
+        assertion_func, transports_for_initiator, transports_for_noninitiator
+    )

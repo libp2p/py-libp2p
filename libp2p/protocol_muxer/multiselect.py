@@ -30,7 +30,9 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    async def negotiate(self, stream: NegotiableTransport) -> Tuple[TProtocol, StreamHandlerFn]:
+    async def negotiate(
+        self, stream: NegotiableTransport
+    ) -> Tuple[TProtocol, StreamHandlerFn]:
         """
         Negotiate performs protocol selection
         :param stream: stream to negotiate on

@@ -48,7 +48,9 @@ async def perform_simple_test(
 @pytest.mark.asyncio
 async def test_single_protocol_succeeds():
     expected_selected_protocol = "/echo/1.0.0"
-    await perform_simple_test(expected_selected_protocol, ["/echo/1.0.0"], ["/echo/1.0.0"])
+    await perform_simple_test(
+        expected_selected_protocol, ["/echo/1.0.0"], ["/echo/1.0.0"]
+    )
 
 
 @pytest.mark.asyncio

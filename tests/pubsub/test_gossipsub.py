@@ -10,7 +10,8 @@ from .utils import dense_connect, one_to_all_connect
 
 
 @pytest.mark.parametrize(
-    "num_hosts, gossipsub_params", ((4, GossipsubParams(degree=4, degree_low=3, degree_high=5)),)
+    "num_hosts, gossipsub_params",
+    ((4, GossipsubParams(degree=4, degree_low=3, degree_high=5)),),
 )
 @pytest.mark.asyncio
 async def test_join(num_hosts, hosts, gossipsubs, pubsubs_gsub):
@@ -342,7 +343,11 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
         (
             2,
             GossipsubParams(
-                degree=1, degree_low=0, degree_high=2, gossip_window=50, gossip_history=100
+                degree=1,
+                degree_low=0,
+                degree_high=2,
+                gossip_window=50,
+                gossip_history=100,
             ),
         ),
     ),

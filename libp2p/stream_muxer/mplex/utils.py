@@ -31,7 +31,9 @@ def decode_uvarint(buff: bytes, index: int) -> Tuple[int, int]:
     return result, index + 1
 
 
-async def decode_uvarint_from_stream(reader: asyncio.StreamReader, timeout: float) -> int:
+async def decode_uvarint_from_stream(
+    reader: asyncio.StreamReader, timeout: float
+) -> int:
     shift = 0
     result = 0
     while True:

@@ -39,7 +39,9 @@ class MultiselectClient(IMultiselectClient):
 
         # Handshake succeeded if this point is reached
 
-    async def select_protocol_or_fail(self, protocol: TProtocol, stream: IMuxedStream) -> TProtocol:
+    async def select_protocol_or_fail(
+        self, protocol: TProtocol, stream: IMuxedStream
+    ) -> TProtocol:
         """
         Send message to multiselect selecting protocol
         and fail if multiselect does not return same protocol

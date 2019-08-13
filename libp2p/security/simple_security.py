@@ -25,7 +25,9 @@ class SimpleSecurityTransport(ISecureTransport):
         incoming = (await conn.read()).decode()
 
         if incoming != self.key_phrase:
-            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
+            raise Exception(
+                "Key phrase differed between nodes. Expected " + self.key_phrase
+            )
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
@@ -44,7 +46,9 @@ class SimpleSecurityTransport(ISecureTransport):
         await asyncio.sleep(0)
 
         if incoming != self.key_phrase:
-            raise Exception("Key phrase differed between nodes. Expected " + self.key_phrase)
+            raise Exception(
+                "Key phrase differed between nodes. Expected " + self.key_phrase
+            )
 
         secure_conn = SimpleSecureConn(conn, self.key_phrase)
         return secure_conn
