@@ -6,19 +6,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 
 
 class InsecureSession(BaseSession):
-    @property
-    def writer(self):
-        return self.insecure_conn.writer
-
-    @property
-    def reader(self):
-        return self.insecure_conn.reader
-
-    async def write(self, data: bytes) -> None:
-        await self.insecure_conn.write(data)
-
-    async def read(self) -> bytes:
-        return await self.insecure_conn.read()
+    pass
 
 
 class InsecureTransport(BaseSecureTransport):
