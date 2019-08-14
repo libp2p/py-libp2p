@@ -13,7 +13,7 @@ class KeyType(Enum):
     ECDSA = 3
 
 
-class Key:
+class Key(ABC):
     """
     A ``Key`` represents a cryptographic key.
     """
