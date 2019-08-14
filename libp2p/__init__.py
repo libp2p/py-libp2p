@@ -1,8 +1,7 @@
 import asyncio
 from typing import Mapping, Sequence
 
-from Crypto.PublicKey import RSA
-
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.kademlia.network import KademliaServer
 from libp2p.kademlia.storage import IStorage
@@ -34,9 +33,9 @@ async def cleanup_done_tasks() -> None:
         await asyncio.sleep(3)
 
 
-def generate_id() -> ID:
-    new_key = RSA.generate(2048, e=65537).publickey().export_key("DER")
-    new_id = ID.from_pubkey(new_key)
+def generate_peer_id_from_rsa_identity() -> ID:
+    _, new_public_key = create_new_key_pair()
+    new_id = ID.from_pubkey(new_public_key)
     return new_id
 
 
@@ -53,7 +52,7 @@ def initialize_default_kademlia_router(
     :return: return a default kademlia instance
     """
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_peer_id_from_rsa_identity()
 
     node_id = id_opt.to_bytes()
     # ignore type for Kademlia module
@@ -83,7 +82,7 @@ def initialize_default_swarm(
     """
 
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_peer_id_from_rsa_identity()
 
     # TODO parse transport_opt to determine transport
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
@@ -124,7 +123,7 @@ async def new_node(
     """
 
     if not id_opt:
-        id_opt = generate_id()
+        id_opt = generate_peer_id_from_rsa_identity()
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
