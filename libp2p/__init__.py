@@ -3,22 +3,21 @@ from typing import Mapping, Sequence
 
 from Crypto.PublicKey import RSA
 
+from libp2p.host.basic_host import BasicHost
+from libp2p.kademlia.network import KademliaServer
 from libp2p.kademlia.storage import IStorage
 from libp2p.network.network_interface import INetwork
+from libp2p.network.swarm import Swarm
+from libp2p.peer.id import ID
+from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
+from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
+from libp2p.security.insecure_security import InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
-
-from .host.basic_host import BasicHost
-from .kademlia.network import KademliaServer
-from .network.swarm import Swarm
-from .peer.id import ID
-from .peer.peerstore import PeerStore
-from .routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from .security.insecure_security import InsecureTransport
-from .transport.tcp.tcp import TCP
-from .transport.upgrader import TransportUpgrader
-from .typing import TProtocol
+from libp2p.transport.tcp.tcp import TCP
+from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.typing import TProtocol
 
 
 async def cleanup_done_tasks() -> None:
