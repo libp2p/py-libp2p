@@ -23,7 +23,7 @@ class Secp256k1PrivateKey(PrivateKey):
 
     @classmethod
     def new(cls, secret: bytes = None) -> "Secp256k1PrivateKey":
-        private_key_impl = coincurve.PrivateKey()
+        private_key_impl = coincurve.PrivateKey(secret)
         return cls(private_key_impl)
 
     def to_bytes(self) -> bytes:
