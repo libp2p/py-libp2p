@@ -33,7 +33,7 @@ class Key(ABC):
         ...
 
 
-class PublicKey(ABC, Key):
+class PublicKey(Key):
     """
     A ``PublicKey`` represents a cryptographic public key.
     """
@@ -54,7 +54,7 @@ class PublicKey(ABC, Key):
         return protobuf_key
 
 
-class PrivateKey(ABC, Key):
+class PrivateKey(Key):
     """
     A ``PrivateKey`` represents a cryptographic private key.
     """
