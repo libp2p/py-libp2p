@@ -4,6 +4,15 @@ from typing import Union
 import base58
 import multihash
 
+from libp2p.crypto.keys import PublicKey
+
+
+def _serialize_public_key(key: PublicKey) -> bytes:
+    """
+    Serializes ``key`` in the way expected to form valid peer ids.
+    """
+    return key.serialize_to_protobuf().SerializeToString()
+
 
 class ID:
 
@@ -28,10 +37,10 @@ class ID:
             self._b58_str = base58.b58encode(self._bytes).decode()
         return self._b58_str
 
-    def __bytes__(self) -> bytes:
-        return self._bytes
+    def __repr__(self) -> str:
+        return "<libp2p.peer.id.ID 0x" + self._bytes.hex() + ">"
 
-    __repr__ = __str__ = pretty = to_string = to_base58
+    __str__ = pretty = to_string = to_base58
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):
@@ -53,9 +62,10 @@ class ID:
         return pid
 
     @classmethod
-    def from_pubkey(cls, key: bytes) -> "ID":
+    def from_pubkey(cls, key: PublicKey) -> "ID":
+        serialized_key = _serialize_public_key(key)
         algo = multihash.Func.sha2_256
-        mh_digest = multihash.digest(key, algo)
+        mh_digest = multihash.digest(serialized_key, algo)
         return cls(mh_digest.encode())
 
 
