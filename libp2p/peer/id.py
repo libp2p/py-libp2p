@@ -28,10 +28,10 @@ class ID:
             self._b58_str = base58.b58encode(self._bytes).decode()
         return self._b58_str
 
-    def __bytes__(self) -> bytes:
-        return self._bytes
+    def __repr__(self) -> str:
+        return "<libp2p.peer.id.ID 0x" + self._bytes.hex() + ">"
 
-    __repr__ = __str__ = pretty = to_string = to_base58
+    __str__ = pretty = to_string = to_base58
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):
