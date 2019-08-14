@@ -89,7 +89,8 @@ def test_id_from_base58():
 
 
 def test_id_from_public_key():
-    _, public_key = create_new_key_pair()
+    key_pair = create_new_key_pair()
+    public_key = key_pair.public_key
 
     key_bin = public_key.serialize_to_protobuf().SerializeToString()
     algo = multihash.Func.sha2_256

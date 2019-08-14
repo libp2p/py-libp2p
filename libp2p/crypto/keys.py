@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum, unique
 
 from .pb import crypto_pb2 as protobuf
@@ -73,3 +74,9 @@ class PrivateKey(ABC, Key):
         protobuf_key.key_type = _type.value
         protobuf_key.data = data
         return protobuf_key
+
+
+@dataclass(frozen=True)
+class KeyPair:
+    private_key: PrivateKey
+    public_key: PublicKey

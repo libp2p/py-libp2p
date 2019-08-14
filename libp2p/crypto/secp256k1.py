@@ -1,8 +1,6 @@
-from typing import Tuple
-
 import coincurve
 
-from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
+from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
 
 
 class Secp256k1PublicKey(PublicKey):
@@ -42,7 +40,7 @@ class Secp256k1PrivateKey(PrivateKey):
         return Secp256k1PublicKey(public_key_impl)
 
 
-def create_new_key_pair(secret: bytes = None) -> Tuple[PrivateKey, PublicKey]:
+def create_new_key_pair(secret: bytes = None) -> KeyPair:
     """
     Returns a new Secp256k1 keypair derived from the provided ``secret``,
     a sequence of bytes corresponding to some integer between 0 and the group order.
@@ -51,4 +49,4 @@ def create_new_key_pair(secret: bytes = None) -> Tuple[PrivateKey, PublicKey]:
     """
     private_key = Secp256k1PrivateKey.new()
     public_key = private_key.get_public_key()
-    return private_key, public_key
+    return KeyPair(private_key, public_key)

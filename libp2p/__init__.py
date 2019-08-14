@@ -34,7 +34,8 @@ async def cleanup_done_tasks() -> None:
 
 
 def generate_peer_id_from_rsa_identity() -> ID:
-    _, new_public_key = create_new_key_pair()
+    new_key_pair = create_new_key_pair()
+    new_public_key = new_key_pair.public_key
     new_id = ID.from_pubkey(new_public_key)
     return new_id
 
