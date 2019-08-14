@@ -47,6 +47,6 @@ def create_new_key_pair(secret: bytes = None) -> KeyPair:
 
     A valid secret is created if ``None`` is passed.
     """
-    private_key = Secp256k1PrivateKey.new()
+    private_key = Secp256k1PrivateKey.new(secret)
     public_key = private_key.get_public_key()
     return KeyPair(private_key, public_key)
