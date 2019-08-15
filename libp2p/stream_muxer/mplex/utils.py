@@ -2,6 +2,8 @@ import asyncio
 import struct
 from typing import Tuple
 
+from libp2p.typing import StreamReader
+
 
 def encode_uvarint(number: int) -> bytes:
     """Pack `number` into varint bytes"""
@@ -31,9 +33,7 @@ def decode_uvarint(buff: bytes, index: int) -> Tuple[int, int]:
     return result, index + 1
 
 
-async def decode_uvarint_from_stream(
-    reader: asyncio.StreamReader, timeout: float
-) -> int:
+async def decode_uvarint_from_stream(reader: StreamReader, timeout: float) -> int:
     shift = 0
     result = 0
     while True:

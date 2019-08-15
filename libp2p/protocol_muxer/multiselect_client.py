@@ -1,10 +1,8 @@
 from typing import Sequence
 
-from libp2p.stream_muxer.abc import IMuxedStream
-from libp2p.typing import NegotiableTransport, TProtocol
+from libp2p.typing import TProtocol
 
 from .multiselect_client_interface import IMultiselectClient
-from .multiselect_communicator import MultiselectCommunicator
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
@@ -31,7 +29,7 @@ class MultiselectClient(IMultiselectClient):
         await communicator.write(MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read_stream_until_eof()
+        handshake_contents = await communicator.read()
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
@@ -40,7 +38,7 @@ class MultiselectClient(IMultiselectClient):
         # Handshake succeeded if this point is reached
 
     async def select_protocol_or_fail(
-        self, protocol: TProtocol, stream: IMuxedStream
+        self, protocol: TProtocol, communicator: IMultiselectCommunicator
     ) -> TProtocol:
         """
         Send message to multiselect selecting protocol
@@ -49,9 +47,6 @@ class MultiselectClient(IMultiselectClient):
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
         """
-        # Create a communicator to handle all communication across the stream
-        communicator = MultiselectCommunicator(stream)
-
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
 
@@ -61,7 +56,7 @@ class MultiselectClient(IMultiselectClient):
         return selected_protocol
 
     async def select_one_of(
-        self, protocols: Sequence[TProtocol], stream: NegotiableTransport
+        self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
     ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol
@@ -71,10 +66,6 @@ class MultiselectClient(IMultiselectClient):
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
         """
-
-        # Create a communicator to handle all communication across the stream
-        communicator = MultiselectCommunicator(stream)
-
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
 
@@ -105,7 +96,7 @@ class MultiselectClient(IMultiselectClient):
         await communicator.write(protocol)
 
         # Get what counterparty says in response
-        response = await communicator.read_stream_until_eof()
+        response = await communicator.read()
 
         # Return protocol if response is equal to protocol or raise error
         if response == protocol:

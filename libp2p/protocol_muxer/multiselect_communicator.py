@@ -1,35 +1,47 @@
-from libp2p.typing import NegotiableTransport
+from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.stream_muxer.mplex.utils import decode_uvarint_from_stream, encode_uvarint
+from libp2p.typing import StreamReader
 
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
 
-class MultiselectCommunicator(IMultiselectCommunicator):
-    """
-    Communicator helper class that ensures both the client
-    and multistream module will follow the same multistream protocol,
-    which is necessary for them to work
-    """
+def delim_encode(msg_str: str) -> bytes:
+    msg_bytes = msg_str.encode()
+    varint_len_msg = encode_uvarint(len(msg_bytes) + 1)
+    return varint_len_msg + msg_bytes + b"\n"
 
-    reader_writer: NegotiableTransport
 
-    def __init__(self, reader_writer: NegotiableTransport) -> None:
-        """
-        MultistreamCommunicator expects a reader_writer object that has
-        an async read and an async write function (this could be a stream,
-        raw connection, or other object implementing those functions)
-        """
-        self.reader_writer = reader_writer
+async def delim_read(reader: StreamReader, timeout: int = 10) -> str:
+    len_msg = await decode_uvarint_from_stream(reader, timeout)
+    msg_bytes = await reader.read(len_msg)
+    return msg_bytes.decode().rstrip()
+
+
+class RawConnectionCommunicator(IMultiselectCommunicator):
+    conn: IRawConnection
+
+    def __init__(self, conn: IRawConnection) -> None:
+        self.conn = conn
 
     async def write(self, msg_str: str) -> None:
-        """
-        Write message to reader_writer
-        :param msg_str: message to write
-        """
-        await self.reader_writer.write(msg_str.encode())
+        msg_bytes = delim_encode(msg_str)
+        self.conn.writer.write(msg_bytes)
+        await self.conn.writer.drain()
 
-    async def read_stream_until_eof(self) -> str:
-        """
-        Reads message from reader_writer until EOF
-        """
-        read_str = (await self.reader_writer.read()).decode()
-        return read_str
+    async def read(self) -> str:
+        return await delim_read(self.conn.reader)
+
+
+class StreamCommunicator(IMultiselectCommunicator):
+    stream: IMuxedStream
+
+    def __init__(self, stream: IMuxedStream) -> None:
+        self.stream = stream
+
+    async def write(self, msg_str: str) -> None:
+        msg_bytes = delim_encode(msg_str)
+        await self.stream.write(msg_bytes)
+
+    async def read(self) -> str:
+        return await delim_read(self.stream)
