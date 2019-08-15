@@ -5,11 +5,11 @@ from libp2p.host.basic_host import BasicHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
-from tests.configs import (
+from tests.configs import LISTEN_MADDR
+from tests.pubsub.configs import (
     FLOODSUB_PROTOCOL_ID,
     GOSSIPSUB_PARAMS,
     GOSSIPSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
 )
 from tests.utils import generate_new_private_key
 
