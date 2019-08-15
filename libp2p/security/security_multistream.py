@@ -7,6 +7,7 @@ from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.protocol_muxer.multiselect_communicator import RawConnectionCommunicator
 from libp2p.typing import TProtocol
 
 
@@ -74,14 +75,15 @@ class SecurityMultistream(ABC):
         # instead of stream? In go repo, they pass in a raw conn
         # (https://raw.githubusercontent.com/libp2p/go-conn-security-multistream/master/ssms.go)
 
-        protocol = None
+        protocol: TProtocol
+        communicator = RawConnectionCommunicator(conn)
         if initiator:
             # Select protocol if initiator
             protocol = await self.multiselect_client.select_one_of(
-                list(self.transports.keys()), conn
+                list(self.transports.keys()), communicator
             )
         else:
             # Select protocol if non-initiator
-            protocol, _ = await self.multiselect.negotiate(conn)
+            protocol, _ = await self.multiselect.negotiate(communicator)
         # Return transport from protocol
         return self.transports[protocol]

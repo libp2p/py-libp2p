@@ -16,7 +16,7 @@ class IMultiselectCommunicator(ABC):
         """
 
     @abstractmethod
-    async def read_stream_until_eof(self) -> str:
+    async def read(self) -> str:
         """
         Reads message from stream until EOF
         """
