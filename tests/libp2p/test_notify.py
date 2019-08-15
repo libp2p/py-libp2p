@@ -18,8 +18,8 @@ from libp2p.network.notifee_interface import INotifee
 from tests.utils import (
     cleanup,
     echo_stream_handler,
-    perform_two_host_set_up_custom_handler,
     generate_new_private_key,
+    perform_two_host_set_up_custom_handler,
 )
 
 

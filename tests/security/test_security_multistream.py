@@ -1,12 +1,13 @@
 import asyncio
 
+import multiaddr
+import pytest
+
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.security.simple.transport import SimpleSecurityTransport
-import multiaddr
-import pytest
 from tests.utils import cleanup, connect, generate_new_private_key
 
 # TODO: Add tests for multiple streams being opened on different

@@ -1,9 +1,8 @@
 import asyncio
 from contextlib import suppress
 
-import multiaddr
-
 from Crypto.PublicKey import RSA
+import multiaddr
 
 from libp2p import new_node
 from libp2p.peer.peerinfo import info_from_p2p_addr

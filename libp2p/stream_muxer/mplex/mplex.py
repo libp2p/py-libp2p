@@ -1,12 +1,13 @@
 import asyncio
 from typing import Dict, Tuple
 
+from multiaddr import Multiaddr
+
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
-from multiaddr import Multiaddr
 
 from .constants import HeaderTags
 from .mplex_stream import MplexStream
