@@ -555,82 +555,82 @@ DESCRIPTOR.message_types_by_name['ControlPrune'] = _CONTROLPRUNE
 DESCRIPTOR.message_types_by_name['TopicDescriptor'] = _TOPICDESCRIPTOR
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
-RPC = _reflection.GeneratedProtocolMessageType('RPC', (_message.Message,), {
+RPC = _reflection.GeneratedProtocolMessageType('RPC', (_message.Message,), dict(
 
-  'SubOpts' : _reflection.GeneratedProtocolMessageType('SubOpts', (_message.Message,), {
-    'DESCRIPTOR' : _RPC_SUBOPTS,
-    '__module__' : 'rpc_pb2'
+  SubOpts = _reflection.GeneratedProtocolMessageType('SubOpts', (_message.Message,), dict(
+    DESCRIPTOR = _RPC_SUBOPTS,
+    __module__ = 'rpc_pb2'
     # @@protoc_insertion_point(class_scope:pubsub.pb.RPC.SubOpts)
-    })
+    ))
   ,
-  'DESCRIPTOR' : _RPC,
-  '__module__' : 'rpc_pb2'
+  DESCRIPTOR = _RPC,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.RPC)
-  })
+  ))
 _sym_db.RegisterMessage(RPC)
 _sym_db.RegisterMessage(RPC.SubOpts)
 
-Message = _reflection.GeneratedProtocolMessageType('Message', (_message.Message,), {
-  'DESCRIPTOR' : _MESSAGE,
-  '__module__' : 'rpc_pb2'
+Message = _reflection.GeneratedProtocolMessageType('Message', (_message.Message,), dict(
+  DESCRIPTOR = _MESSAGE,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.Message)
-  })
+  ))
 _sym_db.RegisterMessage(Message)
 
-ControlMessage = _reflection.GeneratedProtocolMessageType('ControlMessage', (_message.Message,), {
-  'DESCRIPTOR' : _CONTROLMESSAGE,
-  '__module__' : 'rpc_pb2'
+ControlMessage = _reflection.GeneratedProtocolMessageType('ControlMessage', (_message.Message,), dict(
+  DESCRIPTOR = _CONTROLMESSAGE,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.ControlMessage)
-  })
+  ))
 _sym_db.RegisterMessage(ControlMessage)
 
-ControlIHave = _reflection.GeneratedProtocolMessageType('ControlIHave', (_message.Message,), {
-  'DESCRIPTOR' : _CONTROLIHAVE,
-  '__module__' : 'rpc_pb2'
+ControlIHave = _reflection.GeneratedProtocolMessageType('ControlIHave', (_message.Message,), dict(
+  DESCRIPTOR = _CONTROLIHAVE,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.ControlIHave)
-  })
+  ))
 _sym_db.RegisterMessage(ControlIHave)
 
-ControlIWant = _reflection.GeneratedProtocolMessageType('ControlIWant', (_message.Message,), {
-  'DESCRIPTOR' : _CONTROLIWANT,
-  '__module__' : 'rpc_pb2'
+ControlIWant = _reflection.GeneratedProtocolMessageType('ControlIWant', (_message.Message,), dict(
+  DESCRIPTOR = _CONTROLIWANT,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.ControlIWant)
-  })
+  ))
 _sym_db.RegisterMessage(ControlIWant)
 
-ControlGraft = _reflection.GeneratedProtocolMessageType('ControlGraft', (_message.Message,), {
-  'DESCRIPTOR' : _CONTROLGRAFT,
-  '__module__' : 'rpc_pb2'
+ControlGraft = _reflection.GeneratedProtocolMessageType('ControlGraft', (_message.Message,), dict(
+  DESCRIPTOR = _CONTROLGRAFT,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.ControlGraft)
-  })
+  ))
 _sym_db.RegisterMessage(ControlGraft)
 
-ControlPrune = _reflection.GeneratedProtocolMessageType('ControlPrune', (_message.Message,), {
-  'DESCRIPTOR' : _CONTROLPRUNE,
-  '__module__' : 'rpc_pb2'
+ControlPrune = _reflection.GeneratedProtocolMessageType('ControlPrune', (_message.Message,), dict(
+  DESCRIPTOR = _CONTROLPRUNE,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.ControlPrune)
-  })
+  ))
 _sym_db.RegisterMessage(ControlPrune)
 
-TopicDescriptor = _reflection.GeneratedProtocolMessageType('TopicDescriptor', (_message.Message,), {
+TopicDescriptor = _reflection.GeneratedProtocolMessageType('TopicDescriptor', (_message.Message,), dict(
 
-  'AuthOpts' : _reflection.GeneratedProtocolMessageType('AuthOpts', (_message.Message,), {
-    'DESCRIPTOR' : _TOPICDESCRIPTOR_AUTHOPTS,
-    '__module__' : 'rpc_pb2'
+  AuthOpts = _reflection.GeneratedProtocolMessageType('AuthOpts', (_message.Message,), dict(
+    DESCRIPTOR = _TOPICDESCRIPTOR_AUTHOPTS,
+    __module__ = 'rpc_pb2'
     # @@protoc_insertion_point(class_scope:pubsub.pb.TopicDescriptor.AuthOpts)
-    })
+    ))
   ,
 
-  'EncOpts' : _reflection.GeneratedProtocolMessageType('EncOpts', (_message.Message,), {
-    'DESCRIPTOR' : _TOPICDESCRIPTOR_ENCOPTS,
-    '__module__' : 'rpc_pb2'
+  EncOpts = _reflection.GeneratedProtocolMessageType('EncOpts', (_message.Message,), dict(
+    DESCRIPTOR = _TOPICDESCRIPTOR_ENCOPTS,
+    __module__ = 'rpc_pb2'
     # @@protoc_insertion_point(class_scope:pubsub.pb.TopicDescriptor.EncOpts)
-    })
+    ))
   ,
-  'DESCRIPTOR' : _TOPICDESCRIPTOR,
-  '__module__' : 'rpc_pb2'
+  DESCRIPTOR = _TOPICDESCRIPTOR,
+  __module__ = 'rpc_pb2'
   # @@protoc_insertion_point(class_scope:pubsub.pb.TopicDescriptor)
-  })
+  ))
 _sym_db.RegisterMessage(TopicDescriptor)
 _sym_db.RegisterMessage(TopicDescriptor.AuthOpts)
 _sym_db.RegisterMessage(TopicDescriptor.EncOpts)
