@@ -11,6 +11,7 @@ extras_require = {
     ],
     "lint": [
         "mypy>=0.701,<1.0",
+        "mypy-protobuf==1.15",
         "black==19.3b0",
         "isort==4.3.21",
         "flake8>=3.7.7,<4.0.0",
