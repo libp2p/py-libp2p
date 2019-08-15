@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 
-from libp2p.peer.id import ID
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.peer.id import ID
 
 
 """
@@ -18,7 +19,7 @@ class AbstractSecureConn(ABC):
         pass
 
     @abstractmethod
-    def get_local_private_key(self) -> bytes:
+    def get_local_private_key(self) -> PrivateKey:
         pass
 
     @abstractmethod
@@ -26,7 +27,7 @@ class AbstractSecureConn(ABC):
         pass
 
     @abstractmethod
-    def get_remote_public_key(self) -> bytes:
+    def get_remote_public_key(self) -> PublicKey:
         pass
 
 

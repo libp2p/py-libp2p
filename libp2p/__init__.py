@@ -1,7 +1,7 @@
 import asyncio
 from typing import Mapping, Sequence
 
-from libp2p.crypto.keys import KeyPair
+from libp2p.crypto.keys import KeyPair, PrivateKey
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.kademlia.network import KademliaServer
@@ -38,7 +38,7 @@ def generate_new_rsa_identity() -> KeyPair:
     return create_new_key_pair()
 
 
-def generate_peer_id_from_rsa_identity(key_pair=None) -> ID:
+def generate_peer_id_from_rsa_identity(key_pair: KeyPair = None) -> ID:
     if not key_pair:
         key_pair = generate_new_rsa_identity()
     public_key = key_pair.public_key
@@ -69,7 +69,7 @@ def initialize_default_kademlia_router(
 
 
 def initialize_default_swarm(
-    private_key: bytes,
+    private_key: PrivateKey,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
     muxer_opt: Sequence[str] = None,
@@ -98,11 +98,9 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    private_key_bytes = private_key.export_key("DER")
-    public_key_bytes = private_key.publickey().export_key("DER")
     security_transports_by_protocol = sec_opt or {
         TProtocol("insecure/1.0.0"): InsecureTransport(
-            private_key_bytes, public_key_bytes
+            private_key, private_key.get_public_key()
         )
     }
     upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
@@ -115,7 +113,7 @@ def initialize_default_swarm(
 
 
 async def new_node(
-    private_key=None,
+    private_key: PrivateKey = None,
     swarm_opt: INetwork = None,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,

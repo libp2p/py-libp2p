@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Dict
+from typing import Dict, Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -23,7 +23,9 @@ class SecurityMultistream(ABC):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self, secure_transports_by_protocol) -> None:
+    def __init__(
+        self, secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport]
+    ) -> None:
         self.transports = {}
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()

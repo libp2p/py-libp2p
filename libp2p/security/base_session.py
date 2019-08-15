@@ -1,3 +1,6 @@
+from typing import Optional
+
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_transport import BaseSecureTransport
@@ -17,24 +20,15 @@ class BaseSession(ISecureConn, IRawConnection):
         self.local_private_key = transport.local_private_key
         self.conn = conn
         self.remote_peer_id = peer_id
-        self.remote_permanent_pubkey = b""
+        self.remote_permanent_pubkey = None
 
-    # TODO clean up how this is passed around?
-    @property
-    def initiator(self) -> bool:
-        return self.conn.initiator
+        self.initiator = self.conn.initiator
+        self.writer = self.conn.writer
+        self.reader = self.conn.reader
 
     # TODO clean up how this is passed around?
     def next_stream_id(self) -> int:
         return self.conn.next_stream_id()
-
-    @property
-    def writer(self):
-        return self.conn.writer
-
-    @property
-    def reader(self):
-        return self.conn.reader
 
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
@@ -48,11 +42,11 @@ class BaseSession(ISecureConn, IRawConnection):
     def get_local_peer(self) -> ID:
         return self.local_peer
 
-    def get_local_private_key(self) -> bytes:
+    def get_local_private_key(self) -> PrivateKey:
         return self.local_private_key
 
     def get_remote_peer(self) -> ID:
         return self.remote_peer_id
 
-    def get_remote_public_key(self) -> bytes:
+    def get_remote_public_key(self) -> Optional[PublicKey]:
         return self.remote_permanent_pubkey
