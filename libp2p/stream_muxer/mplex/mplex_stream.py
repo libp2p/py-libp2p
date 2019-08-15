@@ -19,7 +19,7 @@ class MplexStream(IMuxedStream):
     remote_closed: bool
     stream_lock: asyncio.Lock
 
-    _buf: bytes
+    _buf: bytearray
 
     def __init__(self, stream_id: int, initiator: bool, mplex_conn: IMuxedConn) -> None:
         """
@@ -36,7 +36,7 @@ class MplexStream(IMuxedStream):
         self.local_closed = False
         self.remote_closed = False
         self.stream_lock = asyncio.Lock()
-        self._buf = b""
+        self._buf = bytearray()
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -50,7 +50,7 @@ class MplexStream(IMuxedStream):
             raise ValueError("`n` can only be -1 if it is negative")
         # If the buffer is empty at first, blocking wait for data.
         if len(self._buf) == 0:
-            self._buf = await self.mplex_conn.read_buffer(self.stream_id)
+            self._buf.extend(await self.mplex_conn.read_buffer(self.stream_id))
         # Sanity check: `self._buf` should never be empty here.
         if self._buf is None or len(self._buf) == 0:
             raise Exception("`self._buf` should never be empty here")
@@ -64,14 +64,14 @@ class MplexStream(IMuxedStream):
             if new_bytes is None:
                 # Nothing to read in the `MplexConn` buffer
                 break
-            self._buf += new_bytes
-        payload: bytes
+            self._buf.extend(new_bytes)
+        payload: bytearray
         if n == -1:
             payload = self._buf
         else:
             payload = self._buf[:n]
         self._buf = self._buf[len(payload) :]
-        return payload
+        return bytes(payload)
 
     async def write(self, data: bytes) -> int:
         """
