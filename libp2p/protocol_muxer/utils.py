@@ -1,7 +1,4 @@
-from libp2p.stream_muxer.mplex.utils import (
-    decode_uvarint_from_stream,
-    encode_uvarint,
-)
+from libp2p.stream_muxer.mplex.utils import decode_uvarint_from_stream, encode_uvarint
 
 
 def encode_delim(msg: str) -> bytes:

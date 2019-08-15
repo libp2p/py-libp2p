@@ -7,13 +7,11 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.security.security_multistream import SecurityMultistream
 from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.stream_muxer.muxed_multistream import MuxedMultistream
 from libp2p.typing import TProtocol
 
 from .listener_interface import IListener
 from .transport_interface import ITransport
-from libp2p.stream_muxer.muxed_multistream import (
-    MuxedMultistream,
-)
 
 
 class TransportUpgrader:
@@ -52,7 +50,7 @@ class TransportUpgrader:
 
         return await self.security_multistream.secure_inbound(raw_conn)
 
-    def upgrade_connection(
+    async def upgrade_connection(
         self,
         conn: ISecureConn,
         generic_protocol_handler: GenericProtocolHandlerFn,
@@ -63,8 +61,5 @@ class TransportUpgrader:
         Upgrade conn to be a muxed connection
         """
         return await self.muxed_multistream.new_conn(
-            conn,
-            generic_protocol_handler,
-            peer_id,
-            initiator,
+            conn, generic_protocol_handler, peer_id, initiator
         )

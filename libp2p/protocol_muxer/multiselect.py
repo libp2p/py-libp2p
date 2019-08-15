@@ -7,7 +7,6 @@ from .multiselect_communicator_interface import IMultiselectCommunicator
 from .multiselect_muxer_interface import IMultiselectMuxer
 from .utils import delim_read, encode_delim
 
-
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 

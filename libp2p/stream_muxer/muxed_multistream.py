@@ -1,20 +1,11 @@
-from typing import (
-    Dict,
-    List,
-    Type,
-)
+from typing import Dict, List, Type
 
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
+from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.security.secure_conn_interface import ISecureConn
 
-from .muxed_connection_interface import (
-    IMuxedConn,
-)
-
+from .abc import IMuxedConn
 
 MuxerClassType = Type[IMuxedConn]
 
@@ -44,7 +35,9 @@ class MuxedMultistream:
         self.multiselect.add_handler(protocol, None)
         self.order_preference.append(protocol)
 
-    async def select_transport(self, conn: IRawConnection, initiator: bool) -> MuxerClassType:
+    async def select_transport(
+        self, conn: IRawConnection, initiator: bool
+    ) -> MuxerClassType:
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on
@@ -55,18 +48,14 @@ class MuxedMultistream:
         protocol = None
         if initiator:
             protocol = await self.multiselect_client.select_one_of(
-                self.order_preference,
-                conn,
+                self.order_preference, conn
             )
         else:
             protocol, _ = await self.multiselect.negotiate(conn)
         return self.transports[protocol]
 
     async def new_conn(
-            self,
-            conn: ISecureConn,
-            generic_protocol_handler,
-            peer_id,
-            initiator: bool) -> IMuxedConn:
+        self, conn: ISecureConn, generic_protocol_handler, peer_id, initiator: bool
+    ) -> IMuxedConn:
         transport_class = await self.select_transport(conn.conn, initiator)
         return transport_class(conn, generic_protocol_handler, peer_id)

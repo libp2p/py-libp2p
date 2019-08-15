@@ -6,11 +6,11 @@ from multiaddr import Multiaddr
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
+from libp2p.protocol_muxer.utils import delim_read
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 
 from .constants import HeaderTags
-from libp2p.protocol_muxer.utils import delim_read
 from .mplex_stream import MplexStream
 from .utils import decode_uvarint_from_stream, encode_uvarint
 

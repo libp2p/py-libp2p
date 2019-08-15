@@ -1,5 +1,4 @@
 import coincurve
-
 from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
 
 

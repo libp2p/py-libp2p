@@ -14,10 +14,10 @@ from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.security.insecure_security import InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
-from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
 async def cleanup_done_tasks() -> None:
