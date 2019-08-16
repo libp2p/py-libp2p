@@ -1,7 +1,7 @@
 import asyncio
 from typing import Mapping, Sequence
 
-from libp2p.crypto.keys import KeyPair, PrivateKey
+from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.kademlia.network import KademliaServer
@@ -69,7 +69,7 @@ def initialize_default_kademlia_router(
 
 
 def initialize_default_swarm(
-    private_key: PrivateKey,
+    key_pair: KeyPair,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
     muxer_opt: Sequence[str] = None,
@@ -89,7 +89,7 @@ def initialize_default_swarm(
     """
 
     if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity()
+        id_opt = generate_peer_id_from_rsa_identity(key_pair)
 
     # TODO parse transport_opt to determine transport
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
@@ -99,9 +99,7 @@ def initialize_default_swarm(
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
     security_transports_by_protocol = sec_opt or {
-        TProtocol("insecure/1.0.0"): InsecureTransport(
-            private_key, private_key.get_public_key()
-        )
+        TProtocol("insecure/1.0.0"): InsecureTransport(key_pair)
     }
     upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
@@ -113,7 +111,7 @@ def initialize_default_swarm(
 
 
 async def new_node(
-    private_key: PrivateKey = None,
+    key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
@@ -124,6 +122,7 @@ async def new_node(
 ) -> BasicHost:
     """
     create new libp2p node
+    :param key_pair: key pair for deriving an identity
     :param swarm_opt: optional swarm
     :param id_opt: optional id for host
     :param transport_opt: optional choice of transport upgrade
@@ -134,16 +133,15 @@ async def new_node(
     :return: return a host instance
     """
 
-    if not private_key:
+    if not key_pair:
         key_pair = generate_new_rsa_identity()
-        private_key = key_pair.private_key
 
     if not id_opt:
         id_opt = generate_peer_id_from_rsa_identity(key_pair)
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
-            private_key=private_key,
+            key_pair=key_pair,
             id_opt=id_opt,
             transport_opt=transport_opt,
             muxer_opt=muxer_opt,

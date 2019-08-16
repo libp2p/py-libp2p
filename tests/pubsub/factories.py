@@ -1,6 +1,7 @@
 import factory
 
 from libp2p import initialize_default_swarm
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
@@ -11,11 +12,10 @@ from tests.pubsub.configs import (
     GOSSIPSUB_PARAMS,
     GOSSIPSUB_PROTOCOL_ID,
 )
-from tests.utils import generate_new_private_key
 
 
 def swarm_factory():
-    private_key = generate_new_private_key()
+    private_key = create_new_key_pair()
     return initialize_default_swarm(private_key, transport_opt=[str(LISTEN_MADDR)])
 
 

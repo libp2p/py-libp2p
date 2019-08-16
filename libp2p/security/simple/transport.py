@@ -1,5 +1,6 @@
 import asyncio
 
+from libp2p.crypto.keys import KeyPair
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_transport import BaseSecureTransport
@@ -10,10 +11,8 @@ from libp2p.security.secure_conn_interface import ISecureConn
 class SimpleSecurityTransport(BaseSecureTransport):
     key_phrase: str
 
-    def __init__(
-        self, local_private_key: bytes, local_public_key: bytes, key_phrase: str
-    ) -> None:
-        super().__init__(local_private_key, local_public_key)
+    def __init__(self, local_key_pair: KeyPair, key_phrase: str) -> None:
+        super().__init__(local_key_pair)
         self.key_phrase = key_phrase
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
