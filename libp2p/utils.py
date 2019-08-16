@@ -5,6 +5,9 @@ from typing import Tuple
 from libp2p.typing import StreamReader
 
 
+TIMEOUT = 10
+
+
 def encode_uvarint(number: int) -> bytes:
     """Pack `number` into varint bytes"""
     buf = b""
@@ -45,3 +48,31 @@ async def decode_uvarint_from_stream(reader: StreamReader, timeout: float) -> in
             break
 
     return result
+
+
+# Varint-prefixed read/write
+
+
+def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
+    varint_len = encode_uvarint(len(msg_bytes))
+    return varint_len + msg_bytes
+
+
+async def read_varint_prefixed_bytes(
+    reader: StreamReader, timeout: int = TIMEOUT
+) -> bytes:
+    len_msg = await decode_uvarint_from_stream(reader, timeout)
+    return await reader.read(len_msg)
+
+
+# Delimited read/write
+
+
+def encode_delim(msg_str: str) -> bytes:
+    delimited_msg = msg_str + "\n"
+    return encode_varint_prefixed(delimited_msg.encode())
+
+
+async def read_delim(reader: StreamReader, timeout: int = TIMEOUT) -> str:
+    msg_bytes = await read_varint_prefixed_bytes(reader, timeout)
+    return msg_bytes.decode().rstrip()

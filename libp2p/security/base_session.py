@@ -7,7 +7,7 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
 
-class BaseSession(ISecureConn, IRawConnection):
+class BaseSession(ISecureConn):
     """
     ``BaseSession`` is not fully instantiated from its abstract classes as it
     is only meant to be used in clases that derive from it.

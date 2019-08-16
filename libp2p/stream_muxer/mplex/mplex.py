@@ -13,7 +13,7 @@ from libp2p.typing import TProtocol
 from .constants import HeaderTags
 from .exceptions import StreamNotFound
 from .mplex_stream import MplexStream
-from .utils import decode_uvarint_from_stream, encode_uvarint
+from libp2p.utils import decode_uvarint_from_stream, encode_uvarint
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 
