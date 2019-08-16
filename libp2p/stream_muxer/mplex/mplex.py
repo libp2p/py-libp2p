@@ -75,7 +75,8 @@ class Mplex(IMuxedConn):
 
     async def read_buffer(self, stream_id: int) -> bytes:
         """
-        Read a message from stream_id's buffer, check raw connection for new messages
+        Read a message from stream_id's buffer, check raw connection for new messages.
+        `StreamNotFound` is raised when stream `stream_id` is not found in `Mplex`.
         :param stream_id: stream id of stream to read from
         :return: message read
         """
@@ -86,6 +87,7 @@ class Mplex(IMuxedConn):
     async def read_buffer_nonblocking(self, stream_id: int) -> Optional[bytes]:
         """
         Read a message from `stream_id`'s buffer, non-blockingly.
+        `StreamNotFound` is raised when stream `stream_id` is not found in `Mplex`.
         """
         if stream_id not in self.buffers:
             raise StreamNotFound(f"stream {stream_id} is not found")
