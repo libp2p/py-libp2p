@@ -20,7 +20,10 @@ class BaseSession(ISecureConn):
     remote_permanent_pubkey: PublicKey
 
     def __init__(
-        self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
+        self,
+        transport: BaseSecureTransport,
+        conn: IRawConnection,
+        peer_id: Optional[ID] = None,
     ) -> None:
         self.local_peer = transport.local_peer
         self.local_private_key = transport.local_private_key
