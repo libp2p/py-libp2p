@@ -1,4 +1,10 @@
 FILES_TO_LINT = libp2p tests examples setup.py
+PB = libp2p/crypto/pb/crypto.proto libp2p/pubsub/pb/rpc.proto libp2p/security/insecure/pb/plaintext.proto
+PY = $(PB:.proto=_pb2.py)
+PYI = $(PB:.proto=_pb2.pyi)
+
+# Set default to `protobufs`, otherwise `format` is called when typing only `make`
+all: protobufs
 
 format:
 	black $(FILES_TO_LINT)
@@ -10,6 +16,12 @@ lintroll:
 	isort --recursive --check-only $(FILES_TO_LINT)
 	flake8 $(FILES_TO_LINT)
 
-protobufs:
-	cd libp2p/crypto/pb && protoc --python_out=. --mypy_out=. crypto.proto
-	cd libp2p/pubsub/pb && protoc --python_out=. --mypy_out=. rpc.proto
+protobufs: $(PY)
+
+%_pb2.py: %.proto
+	protoc --python_out=. --mypy_out=. $<
+
+.PHONY: clean
+
+clean:
+	rm -f $(PY) $(PYI)
