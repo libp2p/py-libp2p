@@ -48,12 +48,8 @@ class PublicKey(Key):
     def serialize_to_protobuf(self) -> protobuf.PublicKey:
         key_type = self.get_type().value
         data = self.to_bytes()
-<<<<<<< HEAD
         protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
         return protobuf_key
-=======
-        return protobuf.PublicKey(key_type=_type.value, data=data)
->>>>>>> Fix mypy
 
 
 class PrivateKey(Key):
@@ -72,12 +68,8 @@ class PrivateKey(Key):
     def serialize_to_protobuf(self) -> protobuf.PrivateKey:
         key_type = self.get_type().value
         data = self.to_bytes()
-<<<<<<< HEAD
         protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
         return protobuf_key
-=======
-        return protobuf.PrivateKey(key_type=_type.value, data=data)
->>>>>>> Fix mypy
 
 
 @dataclass(frozen=True)
