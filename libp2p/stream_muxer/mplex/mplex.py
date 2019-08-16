@@ -9,11 +9,11 @@ from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.typing import TProtocol
+from libp2p.utils import decode_uvarint_from_stream, encode_uvarint
 
 from .constants import HeaderTags
 from .exceptions import StreamNotFound
 from .mplex_stream import MplexStream
-from libp2p.utils import decode_uvarint_from_stream, encode_uvarint
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 

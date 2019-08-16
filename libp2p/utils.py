@@ -4,8 +4,7 @@ from typing import Tuple
 
 from libp2p.typing import StreamReader
 
-
-TIMEOUT = 10
+TIMEOUT = 1
 
 
 def encode_uvarint(number: int) -> bytes:

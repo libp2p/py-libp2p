@@ -1,15 +1,34 @@
+from libp2p.crypto.keys import PublicKey
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.typing import TProtocol
+from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
-PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/1.0.0")
+from .exceptions import UpgradeFailure
+from .pb import plaintext_pb2
+
+# Reference: https://github.com/libp2p/go-libp2p-core/blob/master/sec/insecure/insecure.go
+
+
+PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
 
 
 class InsecureSession(BaseSession):
-    pass
+    # FIXME: Update the read/write to `BaseSession`
+    async def run_handshake(self):
+        msg = make_exchange_message(self.local_private_key.get_public_key())
+        self.writer.write(encode_varint_prefixed(msg.SerializeToString()))
+        await self.writer.drain()
+
+        msg_bytes_other_side = await read_varint_prefixed_bytes(self.reader)
+        msg_other_side = plaintext_pb2.Exchange()
+        msg_other_side.ParseFromString(msg_bytes_other_side)
+        # TODO: Verify public key with peer id
+        # TODO: Store public key
+        self.remote_peer_id = ID(msg_other_side.id)
 
 
 class InsecureTransport(BaseSecureTransport):
@@ -24,7 +43,9 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return InsecureSession(self, conn, ID(b""))
+        session = InsecureSession(self, conn, ID(b""))
+        await session.run_handshake()
+        return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
@@ -32,4 +53,19 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return InsecureSession(self, conn, peer_id)
+        session = InsecureSession(self, conn, peer_id)
+        await session.run_handshake()
+        # TODO: Check if `remote_public_key is not None`. If so, check if `session.remote_peer`
+        received_peer_id = session.get_remote_peer()
+        if session.get_remote_peer() != peer_id:
+            raise UpgradeFailure(
+                "remote peer sent unexpected peer ID. "
+                f"expected={peer_id} received={received_peer_id}"
+            )
+        return session
+
+
+def make_exchange_message(pubkey: PublicKey) -> plaintext_pb2.Exchange:
+    pubkey_pb = pubkey.serialize_to_protobuf()
+    id_bytes = ID.from_pubkey(pubkey).to_bytes()
+    return plaintext_pb2.Exchange(id=id_bytes, pubkey=pubkey_pb)

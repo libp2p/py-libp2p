@@ -184,12 +184,6 @@ class Swarm(INetwork):
             async def conn_handler(
                 reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             ) -> None:
-                # Read in first message (should be peer_id of initiator) and ack
-                peer_id = ID.from_base58((await reader.read(1024)).decode())
-
-                writer.write("received peer id".encode())
-                await writer.drain()
-
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(
@@ -202,9 +196,11 @@ class Swarm(INetwork):
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
+                # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                 secured_conn = await self.upgrader.upgrade_security(
-                    raw_conn, peer_id, False
+                    raw_conn, ID(b""), False
                 )
+                peer_id = secured_conn.get_remote_peer()
                 muxed_conn = await self.upgrader.upgrade_connection(
                     secured_conn, self.generic_protocol_handler, peer_id
                 )
