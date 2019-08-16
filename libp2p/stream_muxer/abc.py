@@ -62,6 +62,7 @@ class IMuxedConn(ABC):
         Read a message from `stream_id`'s buffer, non-blockingly.
         """
 
+    # FIXME: Remove multiaddr from being passed into muxed_conn
     @abstractmethod
     async def open_stream(
         self, protocol_id: str, multi_addr: Multiaddr

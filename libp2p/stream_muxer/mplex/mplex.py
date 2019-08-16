@@ -25,7 +25,6 @@ class Mplex(IMuxedConn):
 
     secured_conn: ISecureConn
     raw_conn: IRawConnection
-    initiator: bool
     peer_id: ID
     # TODO: `dataIn` in go implementation. Should be size of 8.
     # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
@@ -41,13 +40,12 @@ class Mplex(IMuxedConn):
     ) -> None:
         """
         create a new muxed connection
-        :param conn: an instance of raw connection
+        :param secured_conn: an instance of ``ISecureConn``
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
         self.conn = secured_conn
-        self.initiator = secured_conn.initiator
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
@@ -62,6 +60,10 @@ class Mplex(IMuxedConn):
 
         # Kick off reading
         asyncio.ensure_future(self.handle_incoming())
+
+    @property
+    def initiator(self) -> bool:
+        return self.conn.initiator
 
     def close(self) -> None:
         """
@@ -98,6 +100,7 @@ class Mplex(IMuxedConn):
             return None
         return await self.buffers[stream_id].get()
 
+    # FIXME: Remove multiaddr from being passed into muxed_conn
     async def open_stream(
         self, protocol_id: str, multi_addr: Multiaddr
     ) -> IMuxedStream:
@@ -108,7 +111,7 @@ class Mplex(IMuxedConn):
         :return: a new stream
         """
         stream_id = self.conn.next_stream_id()
-        stream = MplexStream(stream_id, multi_addr, self)
+        stream = MplexStream(stream_id, True, self)
         self.buffers[stream_id] = asyncio.Queue()
         await self.send_message(HeaderTags.NewStream, None, stream_id)
         return stream
