@@ -24,10 +24,12 @@ class BaseSession(ISecureConn):
     ) -> None:
         self.local_peer = transport.local_peer
         self.local_private_key = transport.local_private_key
-        self.conn = conn
         self.remote_peer_id = peer_id
         self.remote_permanent_pubkey = None
 
+        self.conn = conn
+        self.writer = self.conn.writer
+        self.reader = self.conn.reader
         self.initiator = self.conn.initiator
 
     async def write(self, data: bytes) -> None:
