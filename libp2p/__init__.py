@@ -1,6 +1,7 @@
 import asyncio
 from typing import Mapping, Sequence
 
+from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.kademlia.network import KademliaServer
@@ -12,7 +13,7 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from libp2p.security.insecure_security import InsecureTransport
+from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
@@ -33,11 +34,15 @@ async def cleanup_done_tasks() -> None:
         await asyncio.sleep(3)
 
 
-def generate_peer_id_from_rsa_identity() -> ID:
-    new_key_pair = create_new_key_pair()
-    new_public_key = new_key_pair.public_key
-    new_id = ID.from_pubkey(new_public_key)
-    return new_id
+def generate_new_rsa_identity() -> KeyPair:
+    return create_new_key_pair()
+
+
+def generate_peer_id_from_rsa_identity(key_pair: KeyPair = None) -> ID:
+    if not key_pair:
+        key_pair = generate_new_rsa_identity()
+    public_key = key_pair.public_key
+    return ID.from_pubkey(public_key)
 
 
 def initialize_default_kademlia_router(
@@ -64,6 +69,7 @@ def initialize_default_kademlia_router(
 
 
 def initialize_default_swarm(
+    key_pair: KeyPair,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
     muxer_opt: Sequence[str] = None,
@@ -83,7 +89,7 @@ def initialize_default_swarm(
     """
 
     if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity()
+        id_opt = generate_peer_id_from_rsa_identity(key_pair)
 
     # TODO parse transport_opt to determine transport
     transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
@@ -92,8 +98,10 @@ def initialize_default_swarm(
     # TODO TransportUpgrader is not doing anything really
     # TODO parse muxer and sec to pass into TransportUpgrader
     muxer = muxer_opt or ["mplex/6.7.0"]
-    sec = sec_opt or {TProtocol("insecure/1.0.0"): InsecureTransport("insecure")}
-    upgrader = TransportUpgrader(sec, muxer)
+    security_transports_by_protocol = sec_opt or {
+        TProtocol("insecure/1.0.0"): InsecureTransport(key_pair)
+    }
+    upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
@@ -103,6 +111,7 @@ def initialize_default_swarm(
 
 
 async def new_node(
+    key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
@@ -113,6 +122,7 @@ async def new_node(
 ) -> BasicHost:
     """
     create new libp2p node
+    :param key_pair: key pair for deriving an identity
     :param swarm_opt: optional swarm
     :param id_opt: optional id for host
     :param transport_opt: optional choice of transport upgrade
@@ -123,11 +133,15 @@ async def new_node(
     :return: return a host instance
     """
 
+    if not key_pair:
+        key_pair = generate_new_rsa_identity()
+
     if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity()
+        id_opt = generate_peer_id_from_rsa_identity(key_pair)
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
+            key_pair=key_pair,
             id_opt=id_opt,
             transport_opt=transport_opt,
             muxer_opt=muxer_opt,

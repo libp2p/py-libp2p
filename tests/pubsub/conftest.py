@@ -3,9 +3,13 @@ import asyncio
 import pytest
 
 from tests.configs import LISTEN_MADDR
-
-from .configs import GOSSIPSUB_PARAMS
-from .factories import FloodsubFactory, GossipsubFactory, HostFactory, PubsubFactory
+from tests.pubsub.configs import GOSSIPSUB_PARAMS
+from tests.pubsub.factories import (
+    FloodsubFactory,
+    GossipsubFactory,
+    HostFactory,
+    PubsubFactory,
+)
 
 
 @pytest.fixture

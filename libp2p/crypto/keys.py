@@ -46,11 +46,9 @@ class PublicKey(Key):
         ...
 
     def serialize_to_protobuf(self) -> protobuf.PublicKey:
-        _type = self.get_type()
+        key_type = self.get_type().value
         data = self.to_bytes()
-        protobuf_key = protobuf.PublicKey()
-        protobuf_key.key_type = _type.value
-        protobuf_key.data = data
+        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
         return protobuf_key
 
 
@@ -68,11 +66,9 @@ class PrivateKey(Key):
         ...
 
     def serialize_to_protobuf(self) -> protobuf.PrivateKey:
-        _type = self.get_type()
+        key_type = self.get_type().value
         data = self.to_bytes()
-        protobuf_key = protobuf.PrivateKey()
-        protobuf_key.key_type = _type.value
-        protobuf_key.data = data
+        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
         return protobuf_key
 
 

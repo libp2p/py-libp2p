@@ -18,14 +18,11 @@ class TransportUpgrader:
     muxer: Sequence[str]
 
     def __init__(
-        self, secOpt: Mapping[TProtocol, ISecureTransport], muxerOpt: Sequence[str]
-    ) -> None:
-        # Store security option
-        self.security_multistream = SecurityMultistream()
-        for key in secOpt:
-            self.security_multistream.add_transport(key, secOpt[key])
-
-        # Store muxer option
+        self,
+        secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport],
+        muxerOpt: Sequence[str],
+    ):
+        self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
         self.muxer = muxerOpt
 
     def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
@@ -54,7 +51,5 @@ class TransportUpgrader:
         """
         Upgrade raw connection to muxed connection
         """
-
-        # For PoC, no security, default to mplex
         # TODO do exchange to determine multiplexer
         return Mplex(conn, generic_protocol_handler, peer_id)

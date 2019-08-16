@@ -1,14 +1,13 @@
 from abc import ABC
-from typing import Dict
+from typing import Dict, Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.typing import TProtocol
-
-from .secure_conn_interface import ISecureConn
-from .secure_transport_interface import ISecureTransport
 
 
 """
@@ -24,21 +23,19 @@ class SecurityMultistream(ABC):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self) -> None:
-        # Map protocol to secure transport
+    def __init__(
+        self, secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport]
+    ) -> None:
         self.transports = {}
-
-        # Create multiselect
         self.multiselect = Multiselect()
-
-        # Create multiselect client
         self.multiselect_client = MultiselectClient()
 
+        for protocol, transport in secure_transports_by_protocol.items():
+            self.add_transport(protocol, transport)
+
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
-        # Associate protocol with transport
         self.transports[protocol] = transport
 
-        # Add protocol and handler to multiselect
         # Note: None is added as the handler for the given protocol since
         # we only care about selecting the protocol, not any handler function
         self.multiselect.add_handler(protocol, None)
@@ -49,13 +46,8 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-
-        # Select a secure transport
         transport = await self.select_transport(conn, False)
-
-        # Create secured connection
         secure_conn = await transport.secure_inbound(conn)
-
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -64,13 +56,8 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-
-        # Select a secure transport
         transport = await self.select_transport(conn, True)
-
-        # Create secured connection
         secure_conn = await transport.secure_outbound(conn, peer_id)
-
         return secure_conn
 
     async def select_transport(

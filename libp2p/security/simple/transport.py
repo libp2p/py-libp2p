@@ -1,18 +1,18 @@
 import asyncio
-from typing import cast
 
+from libp2p.crypto.keys import KeyPair
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
+from libp2p.security.base_transport import BaseSecureTransport
+from libp2p.security.insecure.transport import InsecureSession
 from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.secure_transport_interface import ISecureTransport
-
-from .typing import TSecurityDetails
 
 
-class SimpleSecurityTransport(ISecureTransport):
+class SimpleSecurityTransport(BaseSecureTransport):
     key_phrase: str
 
-    def __init__(self, key_phrase: str) -> None:
+    def __init__(self, local_key_pair: KeyPair, key_phrase: str) -> None:
+        super().__init__(local_key_pair)
         self.key_phrase = key_phrase
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
@@ -29,8 +29,12 @@ class SimpleSecurityTransport(ISecureTransport):
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
-        secure_conn = SimpleSecureConn(conn, self.key_phrase)
-        return secure_conn
+        session = InsecureSession(self, conn, ID(b""))
+        # NOTE: this is abusing the abstraction we have here
+        # but this code may be deprecated soon and this exists
+        # mainly to satisfy a test that will go along w/ it
+        session.key_phrase = self.key_phrase
+        return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
@@ -50,28 +54,9 @@ class SimpleSecurityTransport(ISecureTransport):
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
-        secure_conn = SimpleSecureConn(conn, self.key_phrase)
-        return secure_conn
-
-
-class SimpleSecureConn(ISecureConn):
-    conn: IRawConnection
-    key_phrase: str
-    details: TSecurityDetails
-
-    def __init__(self, conn: IRawConnection, key_phrase: str) -> None:
-        self.conn = conn
-        self.details = cast(TSecurityDetails, {})
-        self.details["key_phrase"] = key_phrase
-
-    def get_conn(self) -> IRawConnection:
-        """
-        :return: connection object that has been made secure
-        """
-        return self.conn
-
-    def get_security_details(self) -> TSecurityDetails:
-        """
-        :return: map containing details about the connections security
-        """
-        return self.details
+        session = InsecureSession(self, conn, peer_id)
+        # NOTE: this is abusing the abstraction we have here
+        # but this code may be deprecated soon and this exists
+        # mainly to satisfy a test that will go along w/ it
+        session.key_phrase = self.key_phrase
+        return session

@@ -4,10 +4,11 @@ import multiaddr
 import pytest
 
 from libp2p import new_node
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
-from libp2p.security.insecure_security import InsecureTransport
-from libp2p.security.simple_security import SimpleSecurityTransport
+from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
+from libp2p.security.simple.transport import SimpleSecurityTransport
 from tests.utils import cleanup, connect
 
 # TODO: Add tests for multiple streams being opened on different
@@ -18,6 +19,11 @@ def peer_id_for_node(node):
     addr = node.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     return info.peer_id
+
+
+initiator_key_pair = create_new_key_pair()
+
+noninitiator_key_pair = create_new_key_pair()
 
 
 async def perform_simple_test(
@@ -50,8 +56,8 @@ async def perform_simple_test(
     node2_conn = node2.get_network().connections[peer_id_for_node(node1)]
 
     # Perform assertion
-    assertion_func(node1_conn.secured_conn.get_security_details())
-    assertion_func(node2_conn.secured_conn.get_security_details())
+    assertion_func(node1_conn.conn)
+    assertion_func(node2_conn.conn)
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -59,11 +65,11 @@ async def perform_simple_test(
 
 @pytest.mark.asyncio
 async def test_single_insecure_security_transport_succeeds():
-    transports_for_initiator = {"foo": InsecureTransport("foo")}
-    transports_for_noninitiator = {"foo": InsecureTransport("foo")}
+    transports_for_initiator = {"foo": InsecureTransport(initiator_key_pair)}
+    transports_for_noninitiator = {"foo": InsecureTransport(noninitiator_key_pair)}
 
-    def assertion_func(details):
-        assert details["id"] == "foo"
+    def assertion_func(conn):
+        assert isinstance(conn, InsecureSession)
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
@@ -72,11 +78,15 @@ async def test_single_insecure_security_transport_succeeds():
 
 @pytest.mark.asyncio
 async def test_single_simple_test_security_transport_succeeds():
-    transports_for_initiator = {"tacos": SimpleSecurityTransport("tacos")}
-    transports_for_noninitiator = {"tacos": SimpleSecurityTransport("tacos")}
+    transports_for_initiator = {
+        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos")
+    }
+    transports_for_noninitiator = {
+        "tacos": SimpleSecurityTransport(noninitiator_key_pair, "tacos")
+    }
 
-    def assertion_func(details):
-        assert details["key_phrase"] == "tacos"
+    def assertion_func(conn):
+        assert conn.key_phrase == "tacos"
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
@@ -86,13 +96,15 @@ async def test_single_simple_test_security_transport_succeeds():
 @pytest.mark.asyncio
 async def test_two_simple_test_security_transport_for_initiator_succeeds():
     transports_for_initiator = {
-        "tacos": SimpleSecurityTransport("tacos"),
-        "shleep": SimpleSecurityTransport("shleep"),
+        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos"),
+        "shleep": SimpleSecurityTransport(initiator_key_pair, "shleep"),
     }
-    transports_for_noninitiator = {"shleep": SimpleSecurityTransport("shleep")}
+    transports_for_noninitiator = {
+        "shleep": SimpleSecurityTransport(noninitiator_key_pair, "shleep")
+    }
 
-    def assertion_func(details):
-        assert details["key_phrase"] == "shleep"
+    def assertion_func(conn):
+        assert conn.key_phrase == "shleep"
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
@@ -101,14 +113,16 @@ async def test_two_simple_test_security_transport_for_initiator_succeeds():
 
 @pytest.mark.asyncio
 async def test_two_simple_test_security_transport_for_noninitiator_succeeds():
-    transports_for_initiator = {"tacos": SimpleSecurityTransport("tacos")}
+    transports_for_initiator = {
+        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos")
+    }
     transports_for_noninitiator = {
-        "shleep": SimpleSecurityTransport("shleep"),
-        "tacos": SimpleSecurityTransport("tacos"),
+        "shleep": SimpleSecurityTransport(noninitiator_key_pair, "shleep"),
+        "tacos": SimpleSecurityTransport(noninitiator_key_pair, "tacos"),
     }
 
-    def assertion_func(details):
-        assert details["key_phrase"] == "tacos"
+    def assertion_func(conn):
+        assert conn.key_phrase == "tacos"
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
@@ -118,16 +132,16 @@ async def test_two_simple_test_security_transport_for_noninitiator_succeeds():
 @pytest.mark.asyncio
 async def test_two_simple_test_security_transport_for_both_succeeds():
     transports_for_initiator = {
-        "a": SimpleSecurityTransport("a"),
-        "b": SimpleSecurityTransport("b"),
+        "a": SimpleSecurityTransport(initiator_key_pair, "a"),
+        "b": SimpleSecurityTransport(initiator_key_pair, "b"),
     }
     transports_for_noninitiator = {
-        "c": SimpleSecurityTransport("c"),
-        "b": SimpleSecurityTransport("b"),
+        "b": SimpleSecurityTransport(noninitiator_key_pair, "b"),
+        "c": SimpleSecurityTransport(noninitiator_key_pair, "c"),
     }
 
-    def assertion_func(details):
-        assert details["key_phrase"] == "b"
+    def assertion_func(conn):
+        assert conn.key_phrase == "b"
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
@@ -137,12 +151,12 @@ async def test_two_simple_test_security_transport_for_both_succeeds():
 @pytest.mark.asyncio
 async def test_multiple_security_none_the_same_fails():
     transports_for_initiator = {
-        "a": SimpleSecurityTransport("a"),
-        "b": SimpleSecurityTransport("b"),
+        "a": SimpleSecurityTransport(initiator_key_pair, "a"),
+        "b": SimpleSecurityTransport(initiator_key_pair, "b"),
     }
     transports_for_noninitiator = {
-        "c": SimpleSecurityTransport("c"),
-        "d": SimpleSecurityTransport("d"),
+        "d": SimpleSecurityTransport(noninitiator_key_pair, "d"),
+        "c": SimpleSecurityTransport(noninitiator_key_pair, "c"),
     }
 
     def assertion_func(_):
@@ -161,18 +175,18 @@ async def test_default_insecure_security():
     transports_for_initiator = None
     transports_for_noninitiator = None
 
-    details1 = None
-    details2 = None
+    conn1 = None
+    conn2 = None
 
-    def assertion_func(details):
-        nonlocal details1
-        nonlocal details2
-        if not details1:
-            details1 = details
-        elif not details2:
-            details2 = details
+    def assertion_func(conn):
+        nonlocal conn1
+        nonlocal conn2
+        if not conn1:
+            conn1 = conn
+        elif not conn2:
+            conn2 = conn
         else:
-            assert details1 == details2
+            assert conn1 == conn2
 
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator

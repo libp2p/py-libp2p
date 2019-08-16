@@ -1,17 +1,22 @@
 import factory
 
 from libp2p import initialize_default_swarm
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from tests.configs import LISTEN_MADDR
-
-from .configs import FLOODSUB_PROTOCOL_ID, GOSSIPSUB_PARAMS, GOSSIPSUB_PROTOCOL_ID
+from tests.pubsub.configs import (
+    FLOODSUB_PROTOCOL_ID,
+    GOSSIPSUB_PARAMS,
+    GOSSIPSUB_PROTOCOL_ID,
+)
 
 
 def swarm_factory():
-    return initialize_default_swarm(transport_opt=[str(LISTEN_MADDR)])
+    private_key = create_new_key_pair()
+    return initialize_default_swarm(private_key, transport_opt=[str(LISTEN_MADDR)])
 
 
 class HostFactory(factory.Factory):

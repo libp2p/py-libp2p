@@ -13,6 +13,7 @@ import multiaddr
 import pytest
 
 from libp2p import initialize_default_swarm, new_node
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
 from tests.utils import (
@@ -172,14 +173,18 @@ async def test_one_notifier_on_two_nodes():
 async def test_one_notifier_on_two_nodes_with_listen():
     events_b = []
 
+    node_a_key_pair = create_new_key_pair()
     node_a_transport_opt = ["/ip4/127.0.0.1/tcp/0"]
-    node_a = await new_node(transport_opt=node_a_transport_opt)
+    node_a = await new_node(node_a_key_pair, transport_opt=node_a_transport_opt)
     await node_a.get_network().listen(multiaddr.Multiaddr(node_a_transport_opt[0]))
 
     # Set up node_b swarm to pass into host
+    node_b_key_pair = create_new_key_pair()
     node_b_transport_opt = ["/ip4/127.0.0.1/tcp/0"]
     node_b_multiaddr = multiaddr.Multiaddr(node_b_transport_opt[0])
-    node_b_swarm = initialize_default_swarm(transport_opt=node_b_transport_opt)
+    node_b_swarm = initialize_default_swarm(
+        node_b_key_pair, transport_opt=node_b_transport_opt
+    )
     node_b = BasicHost(node_b_swarm)
 
     async def my_stream_handler(stream):
