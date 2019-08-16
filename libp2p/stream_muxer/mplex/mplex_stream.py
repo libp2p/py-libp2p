@@ -46,14 +46,15 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
+        # TODO: Handle `StreamNotFound` raised in `self.mplex_conn.read_buffer`.
+        # TODO: Add exceptions and handle/raise them in this class.
         if n < 0 and n != -1:
-            raise ValueError(f"the number of bytes to read ``n`` must be positive or -1 to indicate read until EOF")
+            raise ValueError(
+                f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
+            )
         # If the buffer is empty at first, blocking wait for data.
         if len(self._buf) == 0:
             self._buf.extend(await self.mplex_conn.read_buffer(self.stream_id))
-        # Sanity check: `self._buf` should never be empty here.
-        if self._buf is None or len(self._buf) == 0:
-            raise Exception("`self._buf` should never be empty here")
 
         # FIXME: If `n == -1`, we should blocking read until EOF, instead of returning when
         #   no message is available.
