@@ -47,7 +47,7 @@ class MplexStream(IMuxedStream):
         :return: bytes actually read
         """
         if n < 0 and n != -1:
-            raise ValueError("`n` can only be -1 if it is negative")
+            raise ValueError(f"the number of bytes to read ``n`` must be positive or -1 to indicate read until EOF")
         # If the buffer is empty at first, blocking wait for data.
         if len(self._buf) == 0:
             self._buf.extend(await self.mplex_conn.read_buffer(self.stream_id))
