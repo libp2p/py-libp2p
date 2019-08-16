@@ -67,13 +67,14 @@ class TCP(ITransport):
         dial a transport to peer listening on multiaddr
         :param maddr: multiaddr of peer
         :param self_id: peer_id of the dialer (to send to receiver)
-        :return: True if successful
+        :return: `RawConnection` if successful
         """
         host = maddr.value_for_protocol("ip4")
         port = maddr.value_for_protocol("tcp")
 
         reader, writer = await asyncio.open_connection(host, int(port))
 
+        # TODO: Change this `sending peer id` process to `/plaintext/2.0.0`
         # First: send our peer ID so receiver knows it
         writer.write(self_id.to_base58().encode())
         await writer.drain()
