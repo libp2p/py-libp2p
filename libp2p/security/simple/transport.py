@@ -30,6 +30,10 @@ class SimpleSecurityTransport(BaseSecureTransport):
             )
 
         session = InsecureSession(self, conn, ID(b""))
+        # TODO: Calls handshake to make them know the peer id each other, otherwise tests fail.
+        #   However, it seems pretty weird that `SimpleSecurityTransport` sends peer id through
+        #   `Insecure`.
+        await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it
@@ -56,6 +60,10 @@ class SimpleSecurityTransport(BaseSecureTransport):
             )
 
         session = InsecureSession(self, conn, peer_id)
+        # TODO: Calls handshake to make them know the peer id each other, otherwise tests fail.
+        #   However, it seems pretty weird that `SimpleSecurityTransport` sends peer id through
+        #   `Insecure`.
+        await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it
