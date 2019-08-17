@@ -5,7 +5,7 @@ from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.typing import TProtocol
-from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
 from .exceptions import UpgradeFailure
 from .pb import plaintext_pb2
@@ -20,12 +20,15 @@ class InsecureSession(BaseSession):
     # FIXME: Update the read/write to `BaseSession`
     async def run_handshake(self):
         msg = make_exchange_message(self.local_private_key.get_public_key())
-        self.writer.write(encode_varint_prefixed(msg.SerializeToString()))
+        msg_bytes = msg.SerializeToString()
+        encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
+        self.writer.write(encoded_msg_bytes)
         await self.writer.drain()
 
-        msg_bytes_other_side = await read_varint_prefixed_bytes(self.reader)
+        msg_bytes_other_side = await read_fixedint_prefixed(self.reader)
         msg_other_side = plaintext_pb2.Exchange()
         msg_other_side.ParseFromString(msg_bytes_other_side)
+
         # TODO: Verify public key with peer id
         # TODO: Store public key
         self.remote_peer_id = ID(msg_other_side.id)
