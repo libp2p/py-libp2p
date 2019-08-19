@@ -1,14 +1,13 @@
 import asyncio
 
-import multiaddr
 import pytest
 
 from libp2p import new_node
 from libp2p.crypto.rsa import create_new_key_pair
-from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.security.simple.transport import SimpleSecurityTransport
+from tests.configs import LISTEN_MADDR
 from tests.utils import cleanup, connect
 
 # TODO: Add tests for multiple streams being opened on different
@@ -16,9 +15,7 @@ from tests.utils import cleanup, connect
 
 
 def peer_id_for_node(node):
-    addr = node.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    return info.peer_id
+    return node.get_id()
 
 
 initiator_key_pair = create_new_key_pair()
@@ -35,14 +32,16 @@ async def perform_simple_test(
     # TODO: implement -- note we need to introduce the notion of communicating over a raw connection
     # for testing, we do NOT want to communicate over a stream so we can't just create two nodes
     # and use their conn because our mplex will internally relay messages to a stream
-    sec_opt1 = transports_for_initiator
-    sec_opt2 = transports_for_noninitiator
 
-    node1 = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"], sec_opt=sec_opt1)
-    node2 = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"], sec_opt=sec_opt2)
+    node1 = await new_node(
+        key_pair=initiator_key_pair, sec_opt=transports_for_initiator
+    )
+    node2 = await new_node(
+        key_pair=noninitiator_key_pair, sec_opt=transports_for_noninitiator
+    )
 
-    await node1.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
-    await node2.get_network().listen(multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    await node1.get_network().listen(LISTEN_MADDR)
+    await node2.get_network().listen(LISTEN_MADDR)
 
     await connect(node1, node2)
 
