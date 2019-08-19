@@ -37,7 +37,7 @@ class TransportUpgrader:
         self, raw_conn: IRawConnection, peer_id: ID, initiator: bool
     ) -> ISecureConn:
         """
-        Upgrade conn to be a secured connection
+        Upgrade conn to a secured connection
         """
         if initiator:
             return await self.security_multistream.secure_outbound(raw_conn, peer_id)
@@ -51,7 +51,7 @@ class TransportUpgrader:
         peer_id: ID,
     ) -> IMuxedConn:
         """
-        Upgrade secured connection to be a muxed connection
+        Upgrade secured connection to a muxed connection
         """
         return await self.muxer_multistream.new_conn(
             conn, generic_protocol_handler, peer_id

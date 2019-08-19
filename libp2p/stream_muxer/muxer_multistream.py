@@ -48,8 +48,7 @@ class MuxerMultistream:
         Select a transport that both us and the node on the
         other end of conn support and agree on
         :param conn: conn to choose a transport over
-        :param initiator: true if we are the initiator, false otherwise
-        :return: selected secure transport
+        :return: selected muxer transport
         """
         protocol: TProtocol
         communicator = RawConnectionCommunicator(conn)
