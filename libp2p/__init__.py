@@ -13,9 +13,9 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
-from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
 from libp2p.stream_muxer.muxer_multistream import MuxerClassType
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
@@ -96,10 +96,9 @@ def initialize_default_swarm(
     # TODO: Parse `transport_opt` to determine transport
     transport = TCP()
 
-    # TODO TransportUpgrader is not doing anything really
-    muxer_transports_by_protocol = muxer_opt or {TProtocol("/mplex/6.7.0"): Mplex}
+    muxer_transports_by_protocol = muxer_opt or {MPLEX_PROTOCOL_ID: Mplex}
     security_transports_by_protocol = sec_opt or {
-        TProtocol("/plaintext/1.0.0"): InsecureTransport(key_pair)
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)
     }
     upgrader = TransportUpgrader(
         security_transports_by_protocol, muxer_transports_by_protocol

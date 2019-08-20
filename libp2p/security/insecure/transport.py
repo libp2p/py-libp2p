@@ -3,6 +3,9 @@ from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.typing import TProtocol
+
+PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/1.0.0")
 
 
 class InsecureSession(BaseSession):
