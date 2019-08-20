@@ -1,4 +1,5 @@
 from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.utils import pubkey_from_protobuf
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
@@ -23,13 +24,31 @@ class InsecureSession(BaseSession):
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
         await self.write(encoded_msg_bytes)
 
-        msg_bytes_other_side = await read_fixedint_prefixed(self.conn)
-        msg_other_side = plaintext_pb2.Exchange()
-        msg_other_side.ParseFromString(msg_bytes_other_side)
+        remote_msg_bytes = await read_fixedint_prefixed(self.conn)
+        remote_msg = plaintext_pb2.Exchange()
+        remote_msg.ParseFromString(remote_msg_bytes)
 
-        # TODO: Verify public key with peer id
-        # TODO: Store public key
-        self.remote_peer_id = ID(msg_other_side.id)
+        # Verify if the given `pubkey` matches the given `peer_id`
+        try:
+            remote_pubkey = pubkey_from_protobuf(remote_msg.pubkey)
+        except ValueError as error:
+            raise SecurityUpgradeFailure(
+                f"unknown protocol of remote_msg.pubkey={remote_msg.pubkey}"
+            ) from error
+        remote_peer_id = ID(remote_msg.id)
+        remote_peer_id_from_pubkey = ID.from_pubkey(remote_pubkey)
+        if remote_peer_id_from_pubkey != remote_peer_id:
+            raise SecurityUpgradeFailure(
+                "peer id and pubkey from the remote mismatch: "
+                f"remote_peer_id={remote_peer_id}, remote_pubkey={remote_pubkey}, "
+                f"remote_peer_id_from_pubkey={remote_peer_id_from_pubkey}"
+            )
+
+        # Nothing is wrong. Store the `pubkey` and `peer_id` in the session.
+        self.remote_permanent_pubkey = remote_pubkey
+        self.remote_peer_id = ID(remote_msg.id)
+
+        # TODO: Store `pubkey` and `peer_id` to `PeerStore`
 
 
 class InsecureTransport(BaseSecureTransport):

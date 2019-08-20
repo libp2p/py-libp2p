@@ -13,6 +13,12 @@ class BaseSession(ISecureConn):
     is only meant to be used in clases that derive from it.
     """
 
+    local_peer: ID
+    local_private_key: PrivateKey
+    conn: IRawConnection
+    remote_peer_id: ID
+    remote_permanent_pubkey: PublicKey
+
     def __init__(
         self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
     ) -> None:

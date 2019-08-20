@@ -10,6 +10,11 @@ class Secp256k1PublicKey(PublicKey):
     def to_bytes(self) -> bytes:
         return self.impl.format()
 
+    @classmethod
+    def from_bytes(cls, key_bytes: bytes) -> "Secp256k1PublicKey":
+        secp256k1_pubkey = coincurve.PublicKey(key_bytes)
+        return cls(secp256k1_pubkey)
+
     def get_type(self) -> KeyType:
         return KeyType.Secp256k1
 
