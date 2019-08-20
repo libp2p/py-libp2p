@@ -32,11 +32,28 @@ class Key(ABC):
         """
         ...
 
+    def _serialize_to_protobuf(self) -> protobuf.PublicKey:
+        """
+        Return the protobuf representation of this ``Key``.
+        """
+        key_type = self.get_type().value
+        data = self.to_bytes()
+        protobuf_key = self.protobuf_constructor(key_type=key_type, data=data)
+        return protobuf_key
+
+    def serialize(self) -> bytes:
+        """
+        Return the canonical serialization of this ``Key``.
+        """
+        return self._serialize_to_protobuf().SerializeToString()
+
 
 class PublicKey(Key):
     """
     A ``PublicKey`` represents a cryptographic public key.
     """
+
+    protobuf_constructor = protobuf.PublicKey
 
     @abstractmethod
     def verify(self, data: bytes, signature: bytes) -> bool:
@@ -45,17 +62,13 @@ class PublicKey(Key):
         """
         ...
 
-    def serialize_to_protobuf(self) -> protobuf.PublicKey:
-        key_type = self.get_type().value
-        data = self.to_bytes()
-        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
-        return protobuf_key
-
 
 class PrivateKey(Key):
     """
     A ``PrivateKey`` represents a cryptographic private key.
     """
+
+    protobuf_constructor = protobuf.PrivateKey
 
     @abstractmethod
     def sign(self, data: bytes) -> bytes:
@@ -64,12 +77,6 @@ class PrivateKey(Key):
     @abstractmethod
     def get_public_key(self) -> PublicKey:
         ...
-
-    def serialize_to_protobuf(self) -> protobuf.PrivateKey:
-        key_type = self.get_type().value
-        data = self.to_bytes()
-        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
-        return protobuf_key
 
 
 @dataclass(frozen=True)
