@@ -32,28 +32,11 @@ class Key(ABC):
         """
         ...
 
-    def _serialize_to_protobuf(self) -> protobuf.PublicKey:
-        """
-        Return the protobuf representation of this ``Key``.
-        """
-        key_type = self.get_type().value
-        data = self.to_bytes()
-        protobuf_key = self.protobuf_constructor(key_type=key_type, data=data)
-        return protobuf_key
-
-    def serialize(self) -> bytes:
-        """
-        Return the canonical serialization of this ``Key``.
-        """
-        return self._serialize_to_protobuf().SerializeToString()
-
 
 class PublicKey(Key):
     """
     A ``PublicKey`` represents a cryptographic public key.
     """
-
-    protobuf_constructor = protobuf.PublicKey
 
     @abstractmethod
     def verify(self, data: bytes, signature: bytes) -> bool:
@@ -61,6 +44,21 @@ class PublicKey(Key):
         Verify that ``signature`` is the cryptographic signature of the hash of ``data``.
         """
         ...
+
+    def _serialize_to_protobuf(self) -> protobuf.PublicKey:
+        """
+        Return the protobuf representation of this ``Key``.
+        """
+        key_type = self.get_type().value
+        data = self.to_bytes()
+        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
+        return protobuf_key
+
+    def serialize(self) -> bytes:
+        """
+        Return the canonical serialization of this ``Key``.
+        """
+        return self._serialize_to_protobuf().SerializeToString()
 
 
 class PrivateKey(Key):
@@ -77,6 +75,21 @@ class PrivateKey(Key):
     @abstractmethod
     def get_public_key(self) -> PublicKey:
         ...
+
+    def _serialize_to_protobuf(self) -> protobuf.PrivateKey:
+        """
+        Return the protobuf representation of this ``Key``.
+        """
+        key_type = self.get_type().value
+        data = self.to_bytes()
+        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
+        return protobuf_key
+
+    def serialize(self) -> bytes:
+        """
+        Return the canonical serialization of this ``Key``.
+        """
+        return self._serialize_to_protobuf().SerializeToString()
 
 
 @dataclass(frozen=True)
