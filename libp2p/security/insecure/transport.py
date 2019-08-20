@@ -4,10 +4,10 @@ from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.transport.exceptions import SecurityUpgradeFailure
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
-from .exceptions import UpgradeFailure
 from .pb import plaintext_pb2
 
 # Reference: https://github.com/libp2p/go-libp2p-core/blob/master/sec/insecure/insecure.go
@@ -17,7 +17,6 @@ PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
 
 
 class InsecureSession(BaseSession):
-    # FIXME: Update the read/write to `BaseSession`
     async def run_handshake(self):
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
@@ -61,7 +60,7 @@ class InsecureTransport(BaseSecureTransport):
         # TODO: Check if `remote_public_key is not None`. If so, check if `session.remote_peer`
         received_peer_id = session.get_remote_peer()
         if received_peer_id != peer_id:
-            raise UpgradeFailure(
+            raise SecurityUpgradeFailure(
                 "remote peer sent unexpected peer ID. "
                 f"expected={peer_id} received={received_peer_id}"
             )

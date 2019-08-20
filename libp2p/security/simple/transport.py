@@ -6,6 +6,7 @@ from libp2p.peer.id import ID
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import InsecureSession
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.transport.exceptions import SecurityUpgradeFailure
 
 
 class SimpleSecurityTransport(BaseSecureTransport):
@@ -25,14 +26,14 @@ class SimpleSecurityTransport(BaseSecureTransport):
         incoming = (await conn.read()).decode()
 
         if incoming != self.key_phrase:
-            raise Exception(
+            raise SecurityUpgradeFailure(
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
         session = InsecureSession(self, conn, ID(b""))
-        # TODO: Calls handshake to make them know the peer id each other, otherwise tests fail.
-        #   However, it seems pretty weird that `SimpleSecurityTransport` sends peer id through
-        #   `Insecure`.
+        # NOTE: Here we calls `run_handshake` for both sides to exchange their public keys and
+        #   peer ids, otherwise tests fail. However, it seems pretty weird that
+        #   `SimpleSecurityTransport` sends peer id through `Insecure`.
         await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
@@ -55,14 +56,14 @@ class SimpleSecurityTransport(BaseSecureTransport):
         await asyncio.sleep(0)
 
         if incoming != self.key_phrase:
-            raise Exception(
+            raise SecurityUpgradeFailure(
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
         session = InsecureSession(self, conn, peer_id)
-        # TODO: Calls handshake to make them know the peer id each other, otherwise tests fail.
-        #   However, it seems pretty weird that `SimpleSecurityTransport` sends peer id through
-        #   `Insecure`.
+        # NOTE: Here we calls `run_handshake` for both sides to exchange their public keys and
+        #   peer ids, otherwise tests fail. However, it seems pretty weird that
+        #   `SimpleSecurityTransport` sends peer id through `Insecure`.
         await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists

@@ -1,2 +1,0 @@
-class UpgradeFailure(Exception):
-    pass

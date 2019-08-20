@@ -10,6 +10,7 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import StreamCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.transport.exceptions import UpgradeFailure
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
@@ -197,13 +198,18 @@ class Swarm(INetwork):
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
                 # FIXME: This dummy `ID(b"")` for the remote peer is useless.
-                secured_conn = await self.upgrader.upgrade_security(
-                    raw_conn, ID(b""), False
-                )
-                peer_id = secured_conn.get_remote_peer()
-                muxed_conn = await self.upgrader.upgrade_connection(
-                    secured_conn, self.generic_protocol_handler, peer_id
-                )
+                try:
+                    secured_conn = await self.upgrader.upgrade_security(
+                        raw_conn, ID(b""), False
+                    )
+                    peer_id = secured_conn.get_remote_peer()
+                    muxed_conn = await self.upgrader.upgrade_connection(
+                        secured_conn, self.generic_protocol_handler, peer_id
+                    )
+                except UpgradeFailure:
+                    # TODO: Add logging to indicate the failure
+                    raw_conn.close()
+                    return
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn

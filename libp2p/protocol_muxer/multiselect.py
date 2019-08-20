@@ -80,7 +80,8 @@ class Multiselect(IMultiselectMuxer):
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
             raise MultiselectError(
-                f"multiselect protocol ID mismatch: handshake_contents={handshake_contents}"
+                "multiselect protocol ID mismatch: "
+                f"received handshake_contents={handshake_contents}"
             )
 
         # Handshake succeeded if this point is reached
