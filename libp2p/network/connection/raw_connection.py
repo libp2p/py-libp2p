@@ -39,9 +39,12 @@ class RawConnection(IRawConnection):
         async with self._drain_lock:
             await self.writer.drain()
 
-    async def read(self) -> bytes:
-        line = await self.reader.readline()
-        return line.rstrip(b"\n")
+    async def read(self, n: int = -1) -> bytes:
+        """
+        Read up to ``n`` bytes from the underlying stream.
+        This call is delegated directly to the underlying ``self.reader``.
+        """
+        return await self.reader.read(n)
 
     def close(self) -> None:
         self.writer.close()

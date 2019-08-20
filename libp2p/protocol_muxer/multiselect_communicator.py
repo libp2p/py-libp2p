@@ -16,7 +16,7 @@ class RawConnectionCommunicator(IMultiselectCommunicator):
         await self.conn.write(msg_bytes)
 
     async def read(self) -> str:
-        data = await read_delim(self.conn.reader)
+        data = await read_delim(self.conn)
         return data.decode()
 
 

@@ -23,7 +23,7 @@ class InsecureSession(BaseSession):
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
         await self.write(encoded_msg_bytes)
 
-        msg_bytes_other_side = await read_fixedint_prefixed(self.reader)
+        msg_bytes_other_side = await read_fixedint_prefixed(self.conn)
         msg_other_side = plaintext_pb2.Exchange()
         msg_other_side.ParseFromString(msg_bytes_other_side)
 

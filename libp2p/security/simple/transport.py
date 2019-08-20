@@ -7,6 +7,7 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import InsecureSession
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.transport.exceptions import SecurityUpgradeFailure
+from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
 
 class SimpleSecurityTransport(BaseSecureTransport):
@@ -22,8 +23,8 @@ class SimpleSecurityTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        await conn.write(self.key_phrase.encode())
-        incoming = (await conn.read()).decode()
+        await conn.write(encode_fixedint_prefixed(self.key_phrase.encode()))
+        incoming = (await read_fixedint_prefixed(conn)).decode()
 
         if incoming != self.key_phrase:
             raise SecurityUpgradeFailure(
@@ -48,8 +49,8 @@ class SimpleSecurityTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        await conn.write(self.key_phrase.encode())
-        incoming = (await conn.read()).decode()
+        await conn.write(encode_fixedint_prefixed(self.key_phrase.encode()))
+        incoming = (await read_fixedint_prefixed(conn)).decode()
 
         # Force context switch, as this security transport is built for testing locally
         # in a single event loop

@@ -23,8 +23,6 @@ class BaseSession(ISecureConn):
         self.remote_permanent_pubkey = None
 
         self.initiator = self.conn.initiator
-        self.writer = self.conn.writer
-        self.reader = self.conn.reader
 
     # TODO clean up how this is passed around?
     def next_stream_id(self) -> int:
@@ -33,8 +31,8 @@ class BaseSession(ISecureConn):
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
-    async def read(self) -> bytes:
-        return await self.conn.read()
+    async def read(self, n: int = -1) -> bytes:
+        return await self.conn.read(n)
 
     def close(self) -> None:
         self.conn.close()

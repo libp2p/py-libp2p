@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import asyncio
 
 
 class IRawConnection(ABC):
@@ -9,17 +8,12 @@ class IRawConnection(ABC):
 
     initiator: bool
 
-    # TODO: reader and writer shouldn't be exposed.
-    # Need better API for the consumers
-    reader: asyncio.StreamReader
-    writer: asyncio.StreamWriter
-
     @abstractmethod
     async def write(self, data: bytes) -> None:
         pass
 
     @abstractmethod
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         pass
 
     @abstractmethod
