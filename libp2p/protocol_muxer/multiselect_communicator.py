@@ -12,12 +12,12 @@ class RawConnectionCommunicator(IMultiselectCommunicator):
         self.conn = conn
 
     async def write(self, msg_str: str) -> None:
-        msg_bytes = encode_delim(msg_str)
-        self.conn.writer.write(msg_bytes)
-        await self.conn.writer.drain()
+        msg_bytes = encode_delim(msg_str.encode())
+        await self.conn.write(msg_bytes)
 
     async def read(self) -> str:
-        return await read_delim(self.conn.reader)
+        data = await read_delim(self.conn.reader)
+        return data.decode()
 
 
 class StreamCommunicator(IMultiselectCommunicator):
@@ -27,8 +27,9 @@ class StreamCommunicator(IMultiselectCommunicator):
         self.stream = stream
 
     async def write(self, msg_str: str) -> None:
-        msg_bytes = encode_delim(msg_str)
+        msg_bytes = encode_delim(msg_str.encode())
         await self.stream.write(msg_bytes)
 
     async def read(self) -> str:
-        return await read_delim(self.stream)
+        data = await read_delim(self.stream)
+        return data.decode()

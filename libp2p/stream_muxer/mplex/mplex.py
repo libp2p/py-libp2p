@@ -150,8 +150,7 @@ class Mplex(IMuxedConn):
         :param _bytes: byte array to write
         :return: length written
         """
-        self.conn.writer.write(_bytes)
-        await self.conn.writer.drain()
+        await self.conn.write(_bytes)
         return len(_bytes)
 
     async def handle_incoming(self) -> None:

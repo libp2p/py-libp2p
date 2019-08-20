@@ -4,8 +4,6 @@ from typing import Tuple
 
 from libp2p.typing import StreamReader
 
-TIMEOUT = 10
-
 
 def encode_uvarint(number: int) -> bytes:
     """Pack `number` into varint bytes"""
@@ -57,25 +55,31 @@ def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
     return varint_len + msg_bytes
 
 
-async def read_varint_prefixed_bytes(
-    reader: StreamReader, timeout: int = TIMEOUT
-) -> bytes:
-    len_msg = await decode_uvarint_from_stream(reader, timeout)
-    return await reader.read(len_msg)
+async def read_varint_prefixed_bytes(reader: StreamReader) -> bytes:
+    len_msg = await decode_uvarint_from_stream(reader, None)
+    data = await reader.read(len_msg)
+    if len(data) != len_msg:
+        raise ValueError(
+            f"failed to read enough bytes: len_msg={len_msg}, data={data!r}"
+        )
+    return data
 
 
 # Delimited read/write, used by multistream-select.
 # Reference: https://github.com/gogo/protobuf/blob/07eab6a8298cf32fac45cceaac59424f98421bbc/io/varint.go#L109-L126  # noqa: E501
 
 
-def encode_delim(msg_str: str) -> bytes:
-    delimited_msg = msg_str + "\n"
-    return encode_varint_prefixed(delimited_msg.encode())
+def encode_delim(msg: bytes) -> bytes:
+    delimited_msg = msg + b"\n"
+    return encode_varint_prefixed(delimited_msg)
 
 
-async def read_delim(reader: StreamReader, timeout: int = TIMEOUT) -> str:
-    msg_bytes = await read_varint_prefixed_bytes(reader, timeout)
-    return msg_bytes.decode().rstrip()
+async def read_delim(reader: StreamReader) -> bytes:
+    msg_bytes = await read_varint_prefixed_bytes(reader)
+    # TODO: Investigate if it is possible to have empty `msg_bytes`
+    if len(msg_bytes) != 0 and msg_bytes[-1:] != b"\n":
+        raise ValueError(f'msg_bytes is not delimited by b"\\n": msg_bytes={msg_bytes}')
+    return msg_bytes[:-1]
 
 
 SIZE_LEN_BYTES = 4

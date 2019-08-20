@@ -21,8 +21,7 @@ class InsecureSession(BaseSession):
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
-        self.writer.write(encoded_msg_bytes)
-        await self.writer.drain()
+        await self.write(encoded_msg_bytes)
 
         msg_bytes_other_side = await read_fixedint_prefixed(self.reader)
         msg_other_side = plaintext_pb2.Exchange()

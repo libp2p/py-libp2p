@@ -9,8 +9,10 @@ class RawConnection(IRawConnection):
     conn_port: str
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
-    _next_id: int
     initiator: bool
+
+    _drain_lock: asyncio.Lock
+    _next_id: int
 
     def __init__(
         self,
@@ -24,13 +26,18 @@ class RawConnection(IRawConnection):
         self.conn_port = port
         self.reader = reader
         self.writer = writer
-        self._next_id = 0 if initiator else 1
         self.initiator = initiator
+
+        self._drain_lock = asyncio.Lock()
+        self._next_id = 0 if initiator else 1
 
     async def write(self, data: bytes) -> None:
         self.writer.write(data)
-        self.writer.write("\n".encode())
-        await self.writer.drain()
+        # Reference: https://github.com/ethereum/lahja/blob/93610b2eb46969ff1797e0748c7ac2595e130aef/lahja/asyncio/endpoint.py#L99-L102  # noqa: E501
+        # Use a lock to serialize drain() calls. Circumvents this bug:
+        # https://bugs.python.org/issue29930
+        async with self._drain_lock:
+            await self.writer.drain()
 
     async def read(self) -> bytes:
         line = await self.reader.readline()
