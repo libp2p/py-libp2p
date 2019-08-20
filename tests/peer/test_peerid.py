@@ -92,7 +92,7 @@ def test_id_from_public_key():
     key_pair = create_new_key_pair()
     public_key = key_pair.public_key
 
-    key_bin = public_key.serialize_to_protobuf().SerializeToString()
+    key_bin = public_key.serialize()
     algo = multihash.Func.sha2_256
     mh_digest = multihash.digest(key_bin, algo)
     expected = ID(mh_digest.encode())

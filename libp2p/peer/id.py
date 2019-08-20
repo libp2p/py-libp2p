@@ -7,13 +7,6 @@ import multihash
 from libp2p.crypto.keys import PublicKey
 
 
-def _serialize_public_key(key: PublicKey) -> bytes:
-    """
-    Serializes ``key`` in the way expected to form valid peer ids.
-    """
-    return key.serialize_to_protobuf().SerializeToString()
-
-
 class ID:
     _bytes: bytes
     _xor_id: int = None
@@ -62,7 +55,7 @@ class ID:
 
     @classmethod
     def from_pubkey(cls, key: PublicKey) -> "ID":
-        serialized_key = _serialize_public_key(key)
+        serialized_key = key.serialize()
         algo = multihash.Func.sha2_256
         mh_digest = multihash.digest(serialized_key, algo)
         return cls(mh_digest.encode())
