@@ -60,7 +60,7 @@ class InsecureTransport(BaseSecureTransport):
         await session.run_handshake()
         # TODO: Check if `remote_public_key is not None`. If so, check if `session.remote_peer`
         received_peer_id = session.get_remote_peer()
-        if session.get_remote_peer() != peer_id:
+        if received_peer_id != peer_id:
             raise UpgradeFailure(
                 "remote peer sent unexpected peer ID. "
                 f"expected={peer_id} received={received_peer_id}"
