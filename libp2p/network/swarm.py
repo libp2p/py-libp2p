@@ -111,7 +111,7 @@ class Swarm(INetwork):
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
-            muxed_conn = self.upgrader.upgrade_connection(
+            muxed_conn = await self.upgrader.upgrade_connection(
                 secured_conn, self.generic_protocol_handler, peer_id
             )
 
@@ -204,7 +204,7 @@ class Swarm(INetwork):
                 secured_conn = await self.upgrader.upgrade_security(
                     raw_conn, peer_id, False
                 )
-                muxed_conn = self.upgrader.upgrade_connection(
+                muxed_conn = await self.upgrader.upgrade_connection(
                     secured_conn, self.generic_protocol_handler, peer_id
                 )
 

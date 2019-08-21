@@ -1,5 +1,6 @@
 from abc import ABC
-from typing import Dict, Mapping
+from collections import OrderedDict
+from typing import Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -20,14 +21,20 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 
 class SecurityMultistream(ABC):
-    transports: Dict[TProtocol, ISecureTransport]
+    """
+    SSMuxer is a multistream stream security transport multiplexer.
+    Go implementation: github.com/libp2p/go-conn-security-multistream/ssms.go
+    """
+
+    # NOTE: Can be changed to `typing.OrderedDict` since Python 3.7.2.
+    transports: "OrderedDict[TProtocol, ISecureTransport]"
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
     def __init__(
         self, secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport]
     ) -> None:
-        self.transports = {}
+        self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
 
@@ -35,8 +42,17 @@ class SecurityMultistream(ABC):
             self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
+        """
+        Add a protocol and its corresponding transport to multistream-select(multiselect).
+        The order that a protocol is added is exactly the precedence it is negotiated in
+        multiselect.
+        :param protocol: the protocol name, which is negotiated in multiselect.
+        :param transport: the corresponding transportation to the ``protocol``.
+        """
+        # If protocol is already added before, remove it and add it again.
+        if protocol in self.transports:
+            del self.transports[protocol]
         self.transports[protocol] = transport
-
         # Note: None is added as the handler for the given protocol since
         # we only care about selecting the protocol, not any handler function
         self.multiselect.add_handler(protocol, None)

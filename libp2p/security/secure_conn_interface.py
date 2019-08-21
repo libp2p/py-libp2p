@@ -14,8 +14,6 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 
 class AbstractSecureConn(ABC):
-    conn: IRawConnection
-
     @abstractmethod
     def get_local_peer(self) -> ID:
         pass

@@ -13,8 +13,10 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.stream_muxer.muxer_multistream import MuxerClassType
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
@@ -72,7 +74,7 @@ def initialize_default_swarm(
     key_pair: KeyPair,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
-    muxer_opt: Sequence[str] = None,
+    muxer_opt: Mapping[TProtocol, MuxerClassType] = None,
     sec_opt: Mapping[TProtocol, ISecureTransport] = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
@@ -91,23 +93,20 @@ def initialize_default_swarm(
     if not id_opt:
         id_opt = generate_peer_id_from_rsa_identity(key_pair)
 
-    # TODO parse transport_opt to determine transport
-    transport_opt = transport_opt or ["/ip4/127.0.0.1/tcp/8001"]
+    # TODO: Parse `transport_opt` to determine transport
     transport = TCP()
 
-    # TODO TransportUpgrader is not doing anything really
-    # TODO parse muxer and sec to pass into TransportUpgrader
-    muxer = muxer_opt or ["mplex/6.7.0"]
+    muxer_transports_by_protocol = muxer_opt or {MPLEX_PROTOCOL_ID: Mplex}
     security_transports_by_protocol = sec_opt or {
-        TProtocol("insecure/1.0.0"): InsecureTransport(key_pair)
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)
     }
-    upgrader = TransportUpgrader(security_transports_by_protocol, muxer)
+    upgrader = TransportUpgrader(
+        security_transports_by_protocol, muxer_transports_by_protocol
+    )
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
-    swarm_opt = Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
-
-    return swarm_opt
+    return Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
 
 
 async def new_node(
@@ -115,7 +114,7 @@ async def new_node(
     swarm_opt: INetwork = None,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
-    muxer_opt: Sequence[str] = None,
+    muxer_opt: Mapping[TProtocol, MuxerClassType] = None,
     sec_opt: Mapping[TProtocol, ISecureTransport] = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
