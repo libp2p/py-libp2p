@@ -47,7 +47,7 @@ class InsecureSession(BaseSession):
 
         # Nothing is wrong. Store the `pubkey` and `peer_id` in the session.
         self.remote_permanent_pubkey = remote_pubkey
-        self.remote_peer_id = ID(remote_msg.id)
+        self.remote_peer_id = remote_peer_id
 
         # TODO: Store `pubkey` and `peer_id` to `PeerStore`
 
