@@ -4,11 +4,15 @@ from typing import Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
-from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
+from libp2p.protocol_muxer.multiselect import Multiselect, MultiselectError
+from libp2p.protocol_muxer.multiselect_client import (
+    MultiselectClient,
+    MultiselectClientError,
+)
 from libp2p.protocol_muxer.multiselect_communicator import RawConnectionCommunicator
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.transport.exceptions import HandshakeFailure, SecurityUpgradeFailure
 from libp2p.typing import TProtocol
 
 
@@ -63,8 +67,18 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        transport = await self.select_transport(conn, False)
-        secure_conn = await transport.secure_inbound(conn)
+        try:
+            transport = await self.select_transport(conn, False)
+        except MultiselectError as error:
+            raise SecurityUpgradeFailure(
+                "failed to negotiate the secure protocol"
+            ) from error
+        try:
+            secure_conn = await transport.secure_inbound(conn)
+        except HandshakeFailure as error:
+            raise SecurityUpgradeFailure(
+                "failed to secure the inbound transport"
+            ) from error
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -73,8 +87,18 @@ class SecurityMultistream(ABC):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        transport = await self.select_transport(conn, True)
-        secure_conn = await transport.secure_outbound(conn, peer_id)
+        try:
+            transport = await self.select_transport(conn, True)
+        except MultiselectClientError as error:
+            raise SecurityUpgradeFailure(
+                "failed to negotiate the secure protocol"
+            ) from error
+        try:
+            secure_conn = await transport.secure_outbound(conn, peer_id)
+        except HandshakeFailure as error:
+            raise SecurityUpgradeFailure(
+                "failed to secure the outbound transport"
+            ) from error
         return secure_conn
 
     async def select_transport(

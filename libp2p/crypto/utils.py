@@ -10,6 +10,7 @@ def pubkey_from_protobuf(pubkey_pb: protobuf.PublicKey) -> PublicKey:
     # TODO: Test against secp256k1 keys
     elif pubkey_pb.key_type == protobuf.Secp256k1:
         return Secp256k1PublicKey.from_bytes(pubkey_pb.data)
+    # TODO: Support `Ed25519` and `ECDSA` in the future?
     else:
         raise ValueError(
             f"unsupported key_type={pubkey_pb.key_type}, data={pubkey_pb.data!r}"

@@ -4,9 +4,9 @@ import pytest
 
 from libp2p import new_node
 from libp2p.crypto.rsa import create_new_key_pair
-from libp2p.protocol_muxer.multiselect_client import MultiselectClientError
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.security.simple.transport import SimpleSecurityTransport
+from libp2p.transport.exceptions import SecurityUpgradeFailure
 from tests.configs import LISTEN_MADDR
 from tests.utils import cleanup, connect
 
@@ -161,7 +161,7 @@ async def test_multiple_security_none_the_same_fails():
     def assertion_func(_):
         assert False
 
-    with pytest.raises(MultiselectClientError):
+    with pytest.raises(SecurityUpgradeFailure):
         await perform_simple_test(
             assertion_func, transports_for_initiator, transports_for_noninitiator
         )

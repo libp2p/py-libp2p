@@ -6,7 +6,7 @@ from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.transport.exceptions import SecurityUpgradeFailure
+from libp2p.transport.exceptions import HandshakeFailure
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
@@ -32,14 +32,14 @@ class InsecureSession(BaseSession):
         # Verify if the given `pubkey` matches the given `peer_id`
         try:
             remote_pubkey = pubkey_from_protobuf(remote_msg.pubkey)
-        except ValueError as error:
-            raise SecurityUpgradeFailure(
-                f"unknown protocol of remote_msg.pubkey={remote_msg.pubkey}"
-            ) from error
+        except ValueError:
+            raise HandshakeFailure(
+                f"unknown `key_type` of remote_msg.pubkey={remote_msg.pubkey}"
+            )
         remote_peer_id = ID(remote_msg.id)
         remote_peer_id_from_pubkey = ID.from_pubkey(remote_pubkey)
         if remote_peer_id_from_pubkey != remote_peer_id:
-            raise SecurityUpgradeFailure(
+            raise HandshakeFailure(
                 "peer id and pubkey from the remote mismatch: "
                 f"remote_peer_id={remote_peer_id}, remote_pubkey={remote_pubkey}, "
                 f"remote_peer_id_from_pubkey={remote_peer_id_from_pubkey}"
@@ -76,10 +76,9 @@ class InsecureTransport(BaseSecureTransport):
         """
         session = InsecureSession(self, conn, peer_id)
         await session.run_handshake()
-        # TODO: Check if `remote_public_key is not None`. If so, check if `session.remote_peer`
         received_peer_id = session.get_remote_peer()
-        if received_peer_id != peer_id:
-            raise SecurityUpgradeFailure(
+        if session.remote_permanent_pubkey is not None and received_peer_id != peer_id:
+            raise HandshakeFailure(
                 "remote peer sent unexpected peer ID. "
                 f"expected={peer_id} received={received_peer_id}"
             )
