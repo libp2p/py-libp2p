@@ -2,6 +2,7 @@ from typing import Sequence
 
 from libp2p.typing import TProtocol
 
+from .exceptions import MultiselectClientError
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
@@ -116,7 +117,3 @@ def validate_handshake(handshake_contents: str) -> bool:
     # TODO: Modify this when format used by go repo for messages
     # is added
     return handshake_contents == MULTISELECT_PROTOCOL_ID
-
-
-class MultiselectClientError(ValueError):
-    """Raised when an error occurs in protocol selection process"""

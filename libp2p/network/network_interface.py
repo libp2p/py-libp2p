@@ -33,7 +33,7 @@ class INetwork(ABC):
         dial_peer try to create a connection to peer_id
 
         :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when no address if found for peer_id
+        :raises SwarmException: raised when an error occurs
         :return: muxed connection
         """
 

@@ -19,7 +19,7 @@ PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
 
 
 class InsecureSession(BaseSession):
-    async def run_handshake(self):
+    async def run_handshake(self) -> None:
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)

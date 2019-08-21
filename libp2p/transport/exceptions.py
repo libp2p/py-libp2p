@@ -10,5 +10,9 @@ class SecurityUpgradeFailure(UpgradeFailure):
     pass
 
 
+class MuxerUpgradeFailure(UpgradeFailure):
+    pass
+
+
 class HandshakeFailure(BaseLibp2pError):
     pass

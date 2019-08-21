@@ -10,13 +10,14 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import StreamCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
-from libp2p.transport.exceptions import UpgradeFailure
+from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .connection.raw_connection import RawConnection
+from .exceptions import SwarmException
 from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
@@ -85,7 +86,7 @@ class Swarm(INetwork):
         """
         dial_peer try to create a connection to peer_id
         :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when no address if found for peer_id
+        :raises SwarmException: raised when an error occurs
         :return: muxed connection
         """
 
@@ -111,10 +112,26 @@ class Swarm(INetwork):
 
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
-            muxed_conn = await self.upgrader.upgrade_connection(
-                secured_conn, self.generic_protocol_handler, peer_id
-            )
+            try:
+                secured_conn = await self.upgrader.upgrade_security(
+                    raw_conn, peer_id, True
+                )
+            except SecurityUpgradeFailure as error:
+                # TODO: Add logging to indicate the failure
+                raw_conn.close()
+                raise SwarmException(
+                    f"fail to upgrade the connection to a secured connection from {peer_id}"
+                ) from error
+            try:
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, self.generic_protocol_handler, peer_id
+                )
+            except MuxerUpgradeFailure as error:
+                # TODO: Add logging to indicate the failure
+                secured_conn.close()
+                raise SwarmException(
+                    f"fail to upgrade the connection to a muxed connection from {peer_id}"
+                ) from error
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -197,19 +214,28 @@ class Swarm(INetwork):
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
-                # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                 try:
+                    # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                     secured_conn = await self.upgrader.upgrade_security(
                         raw_conn, ID(b""), False
                     )
-                    peer_id = secured_conn.get_remote_peer()
+                except SecurityUpgradeFailure as error:
+                    # TODO: Add logging to indicate the failure
+                    raw_conn.close()
+                    raise SwarmException(
+                        "fail to upgrade the connection to a secured connection"
+                    ) from error
+                peer_id = secured_conn.get_remote_peer()
+                try:
                     muxed_conn = await self.upgrader.upgrade_connection(
                         secured_conn, self.generic_protocol_handler, peer_id
                     )
-                except UpgradeFailure:
+                except MuxerUpgradeFailure as error:
                     # TODO: Add logging to indicate the failure
-                    raw_conn.close()
-                    return
+                    secured_conn.close()
+                    raise SwarmException(
+                        f"fail to upgrade the connection to a muxed connection from {peer_id}"
+                    ) from error
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
@@ -283,7 +309,3 @@ def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
         asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
-
-
-class SwarmException(Exception):
-    pass

@@ -2,6 +2,7 @@ from typing import Dict, Tuple
 
 from libp2p.typing import StreamHandlerFn, TProtocol
 
+from .exceptions import MultiselectError
 from .multiselect_communicator_interface import IMultiselectCommunicator
 from .multiselect_muxer_interface import IMultiselectMuxer
 
@@ -97,7 +98,3 @@ def validate_handshake(handshake_contents: str) -> bool:
     # TODO: Modify this when format used by go repo for messages
     # is added
     return handshake_contents == MULTISELECT_PROTOCOL_ID
-
-
-class MultiselectError(ValueError):
-    """Raised when an error occurs in multiselect process"""
