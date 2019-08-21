@@ -1,4 +1,5 @@
 from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.utils import pubkey_from_protobuf
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -86,6 +87,8 @@ class InsecureTransport(BaseSecureTransport):
 
 
 def make_exchange_message(pubkey: PublicKey) -> plaintext_pb2.Exchange:
-    pubkey_pb = pubkey.serialize_to_protobuf()
+    pubkey_pb = crypto_pb2.PublicKey(
+        key_type=pubkey.get_type().value, data=pubkey.to_bytes()
+    )
     id_bytes = ID.from_pubkey(pubkey).to_bytes()
     return plaintext_pb2.Exchange(id=id_bytes, pubkey=pubkey_pb)
