@@ -6,6 +6,8 @@ from libp2p.peer.id import ID
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import InsecureSession
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.transport.exceptions import SecurityUpgradeFailure
+from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
 
 class SimpleSecurityTransport(BaseSecureTransport):
@@ -21,15 +23,19 @@ class SimpleSecurityTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        await conn.write(self.key_phrase.encode())
-        incoming = (await conn.read()).decode()
+        await conn.write(encode_fixedint_prefixed(self.key_phrase.encode()))
+        incoming = (await read_fixedint_prefixed(conn)).decode()
 
         if incoming != self.key_phrase:
-            raise Exception(
+            raise SecurityUpgradeFailure(
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
         session = InsecureSession(self, conn, ID(b""))
+        # NOTE: Here we calls `run_handshake` for both sides to exchange their public keys and
+        #   peer ids, otherwise tests fail. However, it seems pretty weird that
+        #   `SimpleSecurityTransport` sends peer id through `Insecure`.
+        await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it
@@ -43,19 +49,23 @@ class SimpleSecurityTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        await conn.write(self.key_phrase.encode())
-        incoming = (await conn.read()).decode()
+        await conn.write(encode_fixedint_prefixed(self.key_phrase.encode()))
+        incoming = (await read_fixedint_prefixed(conn)).decode()
 
         # Force context switch, as this security transport is built for testing locally
         # in a single event loop
         await asyncio.sleep(0)
 
         if incoming != self.key_phrase:
-            raise Exception(
+            raise SecurityUpgradeFailure(
                 "Key phrase differed between nodes. Expected " + self.key_phrase
             )
 
         session = InsecureSession(self, conn, peer_id)
+        # NOTE: Here we calls `run_handshake` for both sides to exchange their public keys and
+        #   peer ids, otherwise tests fail. However, it seems pretty weird that
+        #   `SimpleSecurityTransport` sends peer id through `Insecure`.
+        await session.run_handshake()
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it

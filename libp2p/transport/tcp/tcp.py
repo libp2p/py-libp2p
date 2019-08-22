@@ -62,6 +62,7 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
+    # TODO: Remove `self_id`
     async def dial(self, maddr: Multiaddr, self_id: ID) -> IRawConnection:
         """
         dial a transport to peer listening on multiaddr
@@ -73,18 +74,6 @@ class TCP(ITransport):
         port = maddr.value_for_protocol("tcp")
 
         reader, writer = await asyncio.open_connection(host, int(port))
-
-        # TODO: Change this `sending peer id` process to `/plaintext/2.0.0`
-        # First: send our peer ID so receiver knows it
-        writer.write(self_id.to_base58().encode())
-        await writer.drain()
-
-        # Await ack for peer id
-        expected_ack_str = "received peer id"
-        ack = (await reader.read(len(expected_ack_str))).decode()
-
-        if ack != expected_ack_str:
-            raise Exception("Receiver did not receive peer id")
 
         return RawConnection(host, port, reader, writer, True)
 

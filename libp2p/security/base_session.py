@@ -7,11 +7,17 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
 
-class BaseSession(ISecureConn, IRawConnection):
+class BaseSession(ISecureConn):
     """
     ``BaseSession`` is not fully instantiated from its abstract classes as it
     is only meant to be used in clases that derive from it.
     """
+
+    local_peer: ID
+    local_private_key: PrivateKey
+    conn: IRawConnection
+    remote_peer_id: ID
+    remote_permanent_pubkey: PublicKey
 
     def __init__(
         self, transport: BaseSecureTransport, conn: IRawConnection, peer_id: ID
@@ -23,8 +29,6 @@ class BaseSession(ISecureConn, IRawConnection):
         self.remote_permanent_pubkey = None
 
         self.initiator = self.conn.initiator
-        self.writer = self.conn.writer
-        self.reader = self.conn.reader
 
     # TODO clean up how this is passed around?
     def next_stream_id(self) -> int:
@@ -33,8 +37,8 @@ class BaseSession(ISecureConn, IRawConnection):
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
-    async def read(self) -> bytes:
-        return await self.conn.read()
+    async def read(self, n: int = -1) -> bytes:
+        return await self.conn.read(n)
 
     def close(self) -> None:
         self.conn.close()

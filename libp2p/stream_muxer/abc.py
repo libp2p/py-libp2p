@@ -17,7 +17,6 @@ class IMuxedConn(ABC):
     reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
     """
 
-    initiator: bool
     peer_id: ID
 
     @abstractmethod
@@ -34,6 +33,11 @@ class IMuxedConn(ABC):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
+
+    @property
+    @abstractmethod
+    def initiator(self) -> bool:
+        pass
 
     @abstractmethod
     def close(self) -> None:
@@ -62,6 +66,7 @@ class IMuxedConn(ABC):
         Read a message from `stream_id`'s buffer, non-blockingly.
         """
 
+    # FIXME: Remove multiaddr from being passed into muxed_conn
     @abstractmethod
     async def open_stream(
         self, protocol_id: str, multi_addr: Multiaddr

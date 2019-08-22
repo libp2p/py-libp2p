@@ -87,10 +87,6 @@ class SecurityMultistream(ABC):
         :param initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        # TODO: Is conn acceptable to multiselect/multiselect_client
-        # instead of stream? In go repo, they pass in a raw conn
-        # (https://raw.githubusercontent.com/libp2p/go-conn-security-multistream/master/ssms.go)
-
         protocol: TProtocol
         communicator = RawConnectionCommunicator(conn)
         if initiator:

@@ -10,12 +10,14 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import StreamCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .connection.raw_connection import RawConnection
+from .exceptions import SwarmException
 from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
@@ -84,7 +86,7 @@ class Swarm(INetwork):
         """
         dial_peer try to create a connection to peer_id
         :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when no address if found for peer_id
+        :raises SwarmException: raised when an error occurs
         :return: muxed connection
         """
 
@@ -110,10 +112,26 @@ class Swarm(INetwork):
 
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
-            muxed_conn = await self.upgrader.upgrade_connection(
-                secured_conn, self.generic_protocol_handler, peer_id
-            )
+            try:
+                secured_conn = await self.upgrader.upgrade_security(
+                    raw_conn, peer_id, True
+                )
+            except SecurityUpgradeFailure as error:
+                # TODO: Add logging to indicate the failure
+                raw_conn.close()
+                raise SwarmException(
+                    f"fail to upgrade the connection to a secured connection from {peer_id}"
+                ) from error
+            try:
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, self.generic_protocol_handler, peer_id
+                )
+            except MuxerUpgradeFailure as error:
+                # TODO: Add logging to indicate the failure
+                secured_conn.close()
+                raise SwarmException(
+                    f"fail to upgrade the connection to a muxed connection from {peer_id}"
+                ) from error
 
             # Store muxed connection in connections
             self.connections[peer_id] = muxed_conn
@@ -145,6 +163,7 @@ class Swarm(INetwork):
         # Use muxed conn to open stream, which returns
         # a muxed stream
         # TODO: Remove protocol id from being passed into muxed_conn
+        # FIXME: Remove multiaddr from being passed into muxed_conn
         muxed_stream = await muxed_conn.open_stream(protocol_ids[0], multiaddr)
 
         # Perform protocol muxing to determine protocol to use
@@ -176,24 +195,18 @@ class Swarm(INetwork):
                 Call listener listen with the multiaddr
                 Map multiaddr to listener
         """
-        for multiaddr in multiaddrs:
-            if str(multiaddr) in self.listeners:
+        for maddr in multiaddrs:
+            if str(maddr) in self.listeners:
                 return True
 
             async def conn_handler(
                 reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             ) -> None:
-                # Read in first message (should be peer_id of initiator) and ack
-                peer_id = ID.from_base58((await reader.read(1024)).decode())
-
-                writer.write("received peer id".encode())
-                await writer.drain()
-
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(
-                    multiaddr.value_for_protocol("ip4"),
-                    multiaddr.value_for_protocol("tcp"),
+                    maddr.value_for_protocol("ip4"),
+                    maddr.value_for_protocol("tcp"),
                     reader,
                     writer,
                     False,
@@ -201,12 +214,28 @@ class Swarm(INetwork):
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
-                secured_conn = await self.upgrader.upgrade_security(
-                    raw_conn, peer_id, False
-                )
-                muxed_conn = await self.upgrader.upgrade_connection(
-                    secured_conn, self.generic_protocol_handler, peer_id
-                )
+                try:
+                    # FIXME: This dummy `ID(b"")` for the remote peer is useless.
+                    secured_conn = await self.upgrader.upgrade_security(
+                        raw_conn, ID(b""), False
+                    )
+                except SecurityUpgradeFailure as error:
+                    # TODO: Add logging to indicate the failure
+                    raw_conn.close()
+                    raise SwarmException(
+                        "fail to upgrade the connection to a secured connection"
+                    ) from error
+                peer_id = secured_conn.get_remote_peer()
+                try:
+                    muxed_conn = await self.upgrader.upgrade_connection(
+                        secured_conn, self.generic_protocol_handler, peer_id
+                    )
+                except MuxerUpgradeFailure as error:
+                    # TODO: Add logging to indicate the failure
+                    secured_conn.close()
+                    raise SwarmException(
+                        f"fail to upgrade the connection to a muxed connection from {peer_id}"
+                    ) from error
 
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
@@ -218,19 +247,19 @@ class Swarm(INetwork):
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
-                self.listeners[str(multiaddr)] = listener
-                await listener.listen(multiaddr)
+                self.listeners[str(maddr)] = listener
+                await listener.listen(maddr)
 
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
-                    await notifee.listen(self, multiaddr)
+                    await notifee.listen(self, maddr)
 
                 return True
             except IOError:
                 # Failed. Continue looping.
-                print("Failed to connect to: " + str(multiaddr))
+                print("Failed to connect to: " + str(maddr))
 
-        # No multiaddr succeeded
+        # No maddr succeeded
         return False
 
     def notify(self, notifee: INotifee) -> bool:
@@ -280,7 +309,3 @@ def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
         asyncio.ensure_future(handler(net_stream))
 
     return generic_protocol_handler
-
-
-class SwarmException(Exception):
-    pass
