@@ -1,50 +1,203 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
-from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.io.msgio import encode as encode_message
+from libp2p.io.msgio import read_next_message
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
+from .pb.spipe_pb2 import Exchange, Propose
+
 ID = "/secio/1.0.0"
 
+NONCE_SIZE = 16  # bytes
 
-@dataclass
-class NegotiationContext(frozen=True):
-    local_peer: PeerID
-    remote_peer: Optional[PeerID]
-
-    local_private_key: PrivateKey
-    conn: IRawConnection
+# NOTE: the following is only a subset of allowable parameters according to the
+# `secio` specification.
+DEFAULT_SUPPORTED_EXCHANGES = "P-256"
+DEFAULT_SUPPORTED_CIPHERS = "AES-128"
+DEFAULT_SUPPORTED_HASHES = "SHA256"
 
 
 class SecureSession(BaseSession):
+    local_peer: PeerID
+    remote_peer: PeerID
+    # specialize read and write
     pass
 
 
-def _mk_serialized_proposal(negotiation_context: NegotiationContext) -> bytes:
+@dataclass(frozen=True)
+class Proposal:
+    """
+    A ``Proposal`` represents the set of session parameters one peer in a pair of
+    peers attempting to negotiate a `secio` channel prefers.
+    """
+
+    nonce: bytes
+    public_key: PublicKey
+    exchanges: str = DEFAULT_SUPPORTED_EXCHANGES  # comma separated list
+    ciphers: str = DEFAULT_SUPPORTED_CIPHERS  # comma separated list
+    hashes: str = DEFAULT_SUPPORTED_HASHES  # comma separated list
+
+    def serialize(self) -> bytes:
+        protobuf = Propose(
+            self.nonce,
+            self.public_key.serialize(),
+            self.exchanges,
+            self.ciphers,
+            self.hashes,
+        )
+        return protobuf.SerializeToString()
+
+    @classmethod
+    def deserialize(cls, protobuf_bytes: bytes) -> "Proposal":
+        protobuf = Propose()
+        protobuf.ParseFromString(protobuf_bytes)
+
+        nonce = protobuf.rand
+        public_key_protobuf_bytes = protobuf.public_key
+        # TODO (ralexstokes) handle genericity in the deserialization
+        public_key = PublicKey.deserialize(public_key_protobuf_bytes)
+        exchanges = protobuf.exchanges
+        ciphers = protobuf.ciphers
+        hashes = protobuf.hashes
+
+        return cls(nonce, public_key, exchanges, ciphers, hashes)
+
+    def calculate_peer_id(self) -> PeerID:
+        return PeerID.from_pubkey(self.public_key)
+
+
+@dataclass
+class EncryptionParameters:
+    permanent_public_key: PublicKey
+
+    curve_type: str
+    cipher_type: str
+    hash_type: str
+
+    ephemeral_public_key: PublicKey
+    keys: ...
+    cipher: ...
+    mac: ...
+
+
+async def _response_to_msg(conn: IRawConnection, msg: bytes) -> bytes:
+    # TODO clean up ``IRawConnection`` so that we don't have to break
+    # the abstraction
+    conn.writer.write(encode_message(msg))
+    await conn.writer.drain()
+
+    return await read_next_message(conn.reader)
+
+
+@dataclass
+class SessionParameters:
+    local_peer: PeerID
+    local_encryption_parameters: EncryptionParameters
+    remote_peer: PeerID
+    remote_encryption_parameters: EncryptionParameters
+
+
+def _mk_multihash_sha256(data: bytes) -> bytes:
     pass
 
 
-async def _response_to_msg(msg) -> bytes:
-    return bytes()
+def _mk_score(public_key: PublicKey, nonce: bytes) -> bytes:
+    return _mk_multihash_sha256(public_key.serialize() + nonce)
 
 
-async def _establish_session_parameters():
-    # propose parameters
-    local_proposal = _mk_local_proposal(negotiation_context)
-    serialized_local_proposal = _mk_serialized_proposal(local_proposal)
-    serialized_remote_proposal = await _response_to_msg(serialized_local_proposal)
+def _select_parameter_from_order(
+    order: int, supported_parameters: str, available_parameters: str
+) -> str:
+    if order < 0:
+        first_choices = available_parameters.split(",")
+        second_choices = supported_parameters.split(",")
+    elif order > 0:
+        first_choices = supported_parameters.split(",")
+        second_choices = available_parameters.split(",")
+    else:
+        return supported_parameters.split(",")[0]
 
-    remote_proposal = _parse_proposal(serialized_remote_proposal)
+    for first, second in zip(first_choices, second_choices):
+        if first == second:
+            return first
 
-    # identify peer
-    remote_peer = _peer_from_proposal(remote_proposal)
 
-    # select enc params
-    encryption_parameters = _select_encryption_parameters(remote_proposal)
+def _select_encryption_parameters(
+    local_proposal: Proposal, remote_proposal: Proposal
+) -> Tuple[str, str, str]:
+    first_score = _mk_score(remote_proposal.public_key, local_proposal.nonce)
+    second_score = _mk_score(local_proposal.public_key, remote_proposal.nonce)
+
+    order = 0
+    if first_score < second_score:
+        order = -1
+    elif second_score < first_score:
+        order = 1
+
+    # NOTE: if order is 0, "talking to self"
+    # TODO(ralexstokes) nicer error handling here...
+    assert order != 0
+
+    return (
+        _select_parameter_from_order(
+            order, DEFAULT_SUPPORTED_EXCHANGES, remote_proposal.exchanges
+        ),
+        _select_encryption_parameters(
+            order, DEFAULT_SUPPORTED_CIPHERS, remote_proposal.ciphers
+        ),
+        _select_encryption_parameters(
+            order, DEFAULT_SUPPORTED_HASHES, remote_proposal.hashes
+        ),
+    )
+
+
+async def _establish_session_parameters(
+    local_peer: PeerID,
+    local_private_key: PrivateKey,
+    remote_peer: Optional[PeerID],
+    conn: IRawConnection,
+    nonce: bytes,
+) -> SessionParameters:
+    session_parameters = SessionParameters()
+    session_parameters.local_peer = local_peer
+
+    local_encryption_parameters = EncryptionParameters()
+    session_parameters.local_encryption_parameters = local_encryption_parameters
+
+    local_public_key = local_private_key.get_public_key()
+    local_encryption_parameters.permanent_public_key = local_public_key
+
+    local_proposal = Proposal(nonce, local_public_key)
+    serialized_local_proposal = local_proposal.serialize()
+    serialized_remote_proposal = await _response_to_msg(conn, serialized_local_proposal)
+
+    remote_encryption_parameters = EncryptionParameters()
+    session_parameters.remote_encryption_parameters = remote_encryption_parameters
+    remote_proposal = Proposal.deserialize(serialized_remote_proposal)
+    remote_encryption_parameters.permanent_public_key = remote_proposal.public_key
+
+    remote_peer_from_proposal = remote_proposal.calculate_peer_id()
+    if not remote_peer:
+        remote_peer = remote_peer_from_proposal
+    elif remote_peer != remote_peer_from_proposal:
+        raise PeerMismatchException()
+    session_parameters.remote_peer = remote_peer
+
+    curve_param, cipher_param, hash_param = _select_encryption_parameters(
+        local_proposal, remote_proposal
+    )
+    local_encryption_parameters.curve_type = curve_param
+    local_encryption_parameters.cipher_type = cipher_param
+    local_encryption_parameters.hash_type = hash_param
+    remote_encryption_parameters.curve_type = curve_param
+    remote_encryption_parameters.cipher_type = cipher_param
+    remote_encryption_parameters.hash_type = hash_param
 
     # exchange ephemeral pub keys
     local_ephemeral_key_pair, shared_key_generator = create_elliptic_key_pair(
@@ -86,14 +239,25 @@ async def _close_handshake(session):
     pass
 
 
-async def _run_handshake(negotiation_context: NegotiationContext):
+async def create_secure_session(
+    transport: BaseSecureTransport, conn: IRawConnection, remote_peer: PeerID = None
+) -> ISecureConn:
     """
-    Attempts the initial `secio` handshake with the remote peer.
+    Attempt the initial `secio` handshake with the remote peer.
+    If successful, return an object that provides secure communication to the
+    ``remote_peer``.
+    """
+    nonce = transport.get_nonce()
+    local_peer = transport.local_peer
+    local_private_key = transport.local_private_key
 
-    Successfully completing this routine implies ``self``'s instance
-    of this session is now ready for secure communication.
-    """
-    session_parameters = await _establish_session_parameters()
+    try:
+        session_parameters = await _establish_session_parameters(
+            local_peer, local_private_key, remote_peer, conn, nonce
+        )
+    except PeerMismatchException as e:
+        conn.close()
+        raise e
 
     session = _mk_session_from(session_parameters)
 
@@ -102,21 +266,14 @@ async def _run_handshake(negotiation_context: NegotiationContext):
     return session
 
 
-async def create_secure_session(
-    transport: BaseSecureTransport, conn: IRawConnection, remote_peer: PeerID = None
-) -> ISecureConn:
-    negotiation_context = NegotiationContext(
-        transport.local_peer, remote_peer, transport.local_private_key, conn
-    )
-
-    return await _run_handshake(negotiation_context)
-
-
 class SecIOTransport(BaseSecureTransport):
     """
     ``SecIOTransport`` provides a security upgrader for a ``IRawConnection``,
     following the `secio` protocol defined in the libp2p specs.
     """
+
+    def get_nonce(self) -> bytes:
+        return self.secure_bytes_provider(NONCE_SIZE)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
