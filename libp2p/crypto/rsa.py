@@ -35,11 +35,6 @@ class RSAPrivateKey(PrivateKey):
     def to_bytes(self) -> bytes:
         return self.impl.export_key("DER")
 
-    @classmethod
-    def from_bytes(cls, key_bytes: bytes) -> "RSAPrivateKey":
-        rsakey = RSA.import_key(key_bytes)
-        return cls(rsakey)
-
     def get_type(self) -> KeyType:
         return KeyType.RSA
 
