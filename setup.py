@@ -39,7 +39,7 @@ setuptools.setup(
         "rpcudp>=3.0.0,<4.0.0",
         "lru-dict>=1.1.6",
         "protobuf==3.9.0",
-        "coincurve==12.0.0",
+        "coincurve>=10.0.0,<11.0.0",
     ],
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
