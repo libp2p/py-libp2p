@@ -33,7 +33,8 @@ class SimpleSecurityTransport(BaseSecureTransport):
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it
-        session.key_phrase = self.key_phrase
+        # FIXME: Enable type check back when we can deprecate the simple transport.
+        session.key_phrase = self.key_phrase  # type: ignore
         return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -58,5 +59,6 @@ class SimpleSecurityTransport(BaseSecureTransport):
         # NOTE: this is abusing the abstraction we have here
         # but this code may be deprecated soon and this exists
         # mainly to satisfy a test that will go along w/ it
-        session.key_phrase = self.key_phrase
+        # FIXME: Enable type check back when we can deprecate the simple transport.
+        session.key_phrase = self.key_phrase  # type: ignore
         return session
