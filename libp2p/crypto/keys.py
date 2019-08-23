@@ -11,6 +11,7 @@ class KeyType(Enum):
     Ed25519 = 1
     Secp256k1 = 2
     ECDSA = 3
+    ECC_P256 = 4
 
 
 class Key(ABC):
