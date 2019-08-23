@@ -11,9 +11,14 @@ class Secp256k1PublicKey(PublicKey):
         return self.impl.format()
 
     @classmethod
-    def from_bytes(cls, key_bytes: bytes) -> "Secp256k1PublicKey":
-        secp256k1_pubkey = coincurve.PublicKey(key_bytes)
-        return cls(secp256k1_pubkey)
+    def from_bytes(cls, data: bytes) -> "Secp256k1PublicKey":
+        impl = coincurve.PublicKey(data)
+        return cls(impl)
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> "Secp256k1PublicKey":
+        protobuf_key = cls.deserialize_from_protobuf(data)
+        return cls.from_bytes(protobuf_key.data)
 
     def get_type(self) -> KeyType:
         return KeyType.Secp256k1
@@ -33,6 +38,16 @@ class Secp256k1PrivateKey(PrivateKey):
 
     def to_bytes(self) -> bytes:
         return self.impl.secret
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "Secp256k1PrivateKey":
+        impl = coincurve.PrivateKey(data)
+        return cls(impl)
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> "Secp256k1PrivateKey":
+        protobuf_key = cls.deserialize_from_protobuf(data)
+        return cls.from_bytes(protobuf_key.data)
 
     def get_type(self) -> KeyType:
         return KeyType.Secp256k1

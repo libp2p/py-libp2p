@@ -14,6 +14,7 @@ from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import ECCPublicKey
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.msgio import encode as encode_message
 from libp2p.io.msgio import read_next_message
 from libp2p.network.connection.raw_connection_interface import IRawConnection
@@ -112,8 +113,7 @@ class Proposal:
 
         nonce = protobuf.rand
         public_key_protobuf_bytes = protobuf.public_key
-        # TODO (ralexstokes) handle genericity in the deserialization
-        public_key = PublicKey.deserialize(public_key_protobuf_bytes)
+        public_key = deserialize_public_key(public_key_protobuf_bytes)
         exchanges = protobuf.exchanges
         ciphers = protobuf.ciphers
         hashes = protobuf.hashes

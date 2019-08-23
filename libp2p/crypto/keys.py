@@ -33,6 +33,9 @@ class Key(ABC):
         """
         ...
 
+    def __eq__(self, other: "Key") -> bool:
+        return self.impl == other.impl
+
 
 class PublicKey(Key):
     """
@@ -61,13 +64,17 @@ class PublicKey(Key):
         """
         return self._serialize_to_protobuf().SerializeToString()
 
+    @classmethod
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PublicKey:
+        protobuf_key = protobuf.PublicKey()
+        protobuf_key.ParseFromString(protobuf_data)
+        return protobuf_key
+
 
 class PrivateKey(Key):
     """
     A ``PrivateKey`` represents a cryptographic private key.
     """
-
-    protobuf_constructor = protobuf.PrivateKey
 
     @abstractmethod
     def sign(self, data: bytes) -> bytes:
@@ -91,6 +98,21 @@ class PrivateKey(Key):
         Return the canonical serialization of this ``Key``.
         """
         return self._serialize_to_protobuf().SerializeToString()
+
+    def _protobuf_from_serialization(self, data: bytes) -> protobuf.PrivateKey:
+        """
+        Return the protobuf representation of this ``Key``.
+        """
+        key_type = self.get_type().value
+        data = self.to_bytes()
+        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
+        return protobuf_key
+
+    @classmethod
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PrivateKey:
+        protobuf_key = protobuf.PrivateKey()
+        protobuf_key.ParseFromString(protobuf_data)
+        return protobuf_key
 
 
 @dataclass(frozen=True)
