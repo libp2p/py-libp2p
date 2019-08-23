@@ -1,0 +1,27 @@
+from typing import Callable, Tuple
+
+import Crypto.PublicKey.ECC as ECC
+
+from libp2p.crypto.ecc import create_new_key_pair
+from libp2p.crypto.keys import PublicKey
+
+SharedKeyGenerator = Callable[[bytes], bytes]
+
+
+def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGenerator]:
+    """
+    Facilitates ECDH key exchange.
+    """
+    if curve_type != "P-256":
+        raise NotImplementedError()
+
+    key_pair = create_new_key_pair(curve_type)
+
+    def _key_exchange(serialized_remote_public_key: bytes) -> bytes:
+        remote_public_key = ECC.import_key(serialized_remote_public_key)
+        curve_point = remote_public_key.pointQ
+        secret_point = curve_point * key_pair.private_key.impl.d
+        byte_size = secret_point.size_in_bytes()
+        return secret_point.x.to_bytes(byte_size, byteorder="big")
+
+    return key_pair.public_key, _key_exchange
