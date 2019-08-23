@@ -25,6 +25,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 
 from .exceptions import (
     HandshakeFailed,
+    IncompatibleChoices,
     InvalidSignatureOnExchange,
     PeerMismatchException,
     SecioException,
@@ -43,17 +44,20 @@ DEFAULT_SUPPORTED_CIPHERS = "AES-128"
 DEFAULT_SUPPORTED_HASHES = "SHA256"
 
 
-@dataclass
 class SecureSession(BaseSession):
-    local_peer: PeerID
-    local_encryption_parameters: AuthenticatedEncryptionParameters
+    def __init__(
+        self,
+        local_peer: PeerID,
+        local_private_key: PrivateKey,
+        local_encryption_parameters: AuthenticatedEncryptionParameters,
+        remote_peer: PeerID,
+        remote_encryption_parameters: AuthenticatedEncryptionParameters,
+        conn: IRawConnection,
+    ) -> None:
+        super().__init__(local_peer, local_private_key, conn, remote_peer)
 
-    remote_peer: PeerID
-    remote_encryption_parameters: AuthenticatedEncryptionParameters
-
-    conn: IRawConnection
-
-    def __post_init__(self):
+        self.local_encryption_parameters = local_encryption_parameters
+        self.remote_encryption_parameters = remote_encryption_parameters
         self._initialize_authenticated_encryption_for_local_peer()
         self._initialize_authenticated_encryption_for_remote_peer()
 
@@ -68,7 +72,8 @@ class SecureSession(BaseSession):
 
     async def _read_msg(self) -> bytes:
         # TODO do we need to serialize reads?
-        msg = await read_next_message(self.conn)
+        # TODO do not expose reader
+        msg = await read_next_message(self.conn.reader)
         return self.remote_encrypter.decrypt_if_valid(msg)
 
     async def write(self, data: bytes) -> None:
@@ -135,6 +140,9 @@ class EncryptionParameters:
 
     ephemeral_public_key: PublicKey
 
+    def __init__(self) -> None:
+        pass
+
 
 @dataclass
 class SessionParameters:
@@ -147,6 +155,9 @@ class SessionParameters:
     # order is a comparator used to break the symmetry b/t each pair of peers
     order: int
     shared_key: bytes
+
+    def __init__(self) -> None:
+        pass
 
 
 async def _response_to_msg(conn: IRawConnection, msg: bytes) -> bytes:
@@ -182,6 +193,7 @@ def _select_parameter_from_order(
     for first, second in zip(first_choices, second_choices):
         if first == second:
             return first
+    raise IncompatibleChoices()
 
 
 def _select_encryption_parameters(
@@ -302,7 +314,9 @@ async def _establish_session_parameters(
 
 
 def _mk_session_from(
-    session_parameters: SessionParameters, conn: IRawConnection
+    local_private_key: PrivateKey,
+    session_parameters: SessionParameters,
+    conn: IRawConnection,
 ) -> SecureSession:
     key_set1, key_set2 = initialize_pair_for_encryption(
         session_parameters.local_encryption_parameters.cipher_type,
@@ -315,6 +329,7 @@ def _mk_session_from(
 
     session = SecureSession(
         session_parameters.local_peer,
+        local_private_key,
         key_set1,
         session_parameters.remote_peer,
         key_set2,
@@ -329,7 +344,7 @@ async def _finish_handshake(session: ISecureConn, remote_nonce: bytes) -> bytes:
 
 
 async def create_secure_session(
-    transport: BaseSecureTransport, conn: IRawConnection, remote_peer: PeerID = None
+    transport: "SecIOTransport", conn: IRawConnection, remote_peer: PeerID = None
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.
@@ -348,7 +363,7 @@ async def create_secure_session(
         conn.close()
         raise e
 
-    session = _mk_session_from(session_parameters, conn)
+    session = _mk_session_from(local_private_key, session_parameters, conn)
 
     received_nonce = await _finish_handshake(session, remote_nonce)
     if received_nonce != local_nonce:

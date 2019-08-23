@@ -1,3 +1,5 @@
+from typing import cast
+
 from Crypto.PublicKey import ECC
 from Crypto.PublicKey.ECC import EccKey
 
@@ -9,7 +11,7 @@ class ECCPublicKey(PublicKey):
         self.impl = impl
 
     def to_bytes(self) -> bytes:
-        return self.impl.export_key("DER")
+        return cast(bytes, self.impl.export_key(format="DER"))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "ECCPublicKey":
@@ -33,7 +35,7 @@ class ECCPrivateKey(PrivateKey):
         return cls(private_key_impl)
 
     def to_bytes(self) -> bytes:
-        return self.impl.export_key("DER")
+        return cast(bytes, self.impl.export_key(format="DER"))
 
     def get_type(self) -> KeyType:
         return KeyType.ECC_P256
@@ -42,7 +44,7 @@ class ECCPrivateKey(PrivateKey):
         raise NotImplementedError
 
     def get_public_key(self) -> PublicKey:
-        return ECCPublicKey(self.impl.publickey())
+        return ECCPublicKey(self.impl.public_key())
 
 
 def create_new_key_pair(curve: str) -> KeyPair:

@@ -2,7 +2,7 @@ import asyncio
 
 SIZE_LEN_BYTES = 4
 
-# TODO unify w/ https://github.com/libp2p/py-libp2p/blob/1aed52856f56a4b791696bbcbac31b5f9c2e88c9/libp2p/utils.py#L85-L99
+# TODO unify w/ https://github.com/libp2p/py-libp2p/blob/1aed52856f56a4b791696bbcbac31b5f9c2e88c9/libp2p/utils.py#L85-L99  # noqa: E501
 
 
 def encode(msg_bytes: bytes) -> bytes:

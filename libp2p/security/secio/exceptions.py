@@ -21,3 +21,7 @@ class InvalidSignatureOnExchange(SecioException):
 
 class HandshakeFailed(SecioException):
     pass
+
+
+class IncompatibleChoices(SecioException):
+    pass

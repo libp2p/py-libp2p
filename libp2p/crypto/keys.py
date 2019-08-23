@@ -33,8 +33,10 @@ class Key(ABC):
         """
         ...
 
-    def __eq__(self, other: "Key") -> bool:
-        return self.impl == other.impl
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Key):
+            return NotImplemented
+        return self.to_bytes() == other.to_bytes()
 
 
 class PublicKey(Key):
@@ -66,9 +68,7 @@ class PublicKey(Key):
 
     @classmethod
     def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PublicKey:
-        protobuf_key = protobuf.PublicKey()
-        protobuf_key.ParseFromString(protobuf_data)
-        return protobuf_key
+        return protobuf.PublicKey.FromString(protobuf_data)
 
 
 class PrivateKey(Key):
@@ -110,9 +110,7 @@ class PrivateKey(Key):
 
     @classmethod
     def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PrivateKey:
-        protobuf_key = protobuf.PrivateKey()
-        protobuf_key.ParseFromString(protobuf_data)
-        return protobuf_key
+        return protobuf.PrivateKey.FromString(protobuf_data)
 
 
 @dataclass(frozen=True)

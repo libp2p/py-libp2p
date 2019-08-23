@@ -98,7 +98,7 @@ def initialize_pair(
         authenticator.update(tag)
         tag = authenticator.digest()
 
-    half = len(result) / 2
+    half = int(len(result) / 2)
     first_half = result[:half]
     second_half = result[half:]
 
