@@ -28,6 +28,7 @@ from .exceptions import (
     InvalidSignatureOnExchange,
     PeerMismatchException,
     SecioException,
+    SelfEncryption,
 )
 from .pb.spipe_pb2 import Exchange, Propose
 
@@ -195,9 +196,8 @@ def _select_encryption_parameters(
     elif second_score < first_score:
         order = 1
 
-    # NOTE: if order is 0, "talking to self"
-    # TODO(ralexstokes) nicer error handling here...
-    assert order != 0
+    if order == 0:
+        raise SelfEncryption()
 
     return (
         _select_parameter_from_order(
