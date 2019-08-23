@@ -19,7 +19,7 @@ class Secp256k1PublicKey(PublicKey):
         return KeyType.Secp256k1
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        raise NotImplementedError
+        return self.impl.verify(signature, data)
 
 
 class Secp256k1PrivateKey(PrivateKey):
@@ -38,7 +38,7 @@ class Secp256k1PrivateKey(PrivateKey):
         return KeyType.Secp256k1
 
     def sign(self, data: bytes) -> bytes:
-        raise NotImplementedError
+        return self.impl.sign(data)
 
     def get_public_key(self) -> PublicKey:
         public_key_impl = coincurve.PublicKey.from_secret(self.impl.secret)
