@@ -19,7 +19,3 @@ class IRawConnection(ABC):
     @abstractmethod
     def close(self) -> None:
         pass
-
-    @abstractmethod
-    def next_stream_id(self) -> int:
-        pass

@@ -9,7 +9,6 @@ class RawConnection(IRawConnection):
     initiator: bool
 
     _drain_lock: asyncio.Lock
-    _next_id: int
 
     def __init__(
         self,
@@ -22,7 +21,6 @@ class RawConnection(IRawConnection):
         self.initiator = initiator
 
         self._drain_lock = asyncio.Lock()
-        self._next_id = 0 if initiator else 1
 
     async def write(self, data: bytes) -> None:
         self.writer.write(data)
@@ -41,12 +39,3 @@ class RawConnection(IRawConnection):
 
     def close(self) -> None:
         self.writer.close()
-
-    def next_stream_id(self) -> int:
-        """
-        Get next available stream id
-        :return: next available stream id for the connection
-        """
-        next_id = self._next_id
-        self._next_id += 2
-        return next_id

@@ -29,6 +29,7 @@ class Mplex(IMuxedConn):
     #   to let the `MplexStream`s know that EOF arrived (#235).
     buffers: Dict[int, "asyncio.Queue[bytes]"]
     stream_queue: "asyncio.Queue[int]"
+    next_stream_id: int
 
     def __init__(
         self,
@@ -44,6 +45,11 @@ class Mplex(IMuxedConn):
         :param peer_id: peer_id of peer the connection is to
         """
         self.conn = secured_conn
+
+        if self.conn.initiator:
+            self.next_stream_id = 0
+        else:
+            self.next_stream_id = 1
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
@@ -98,6 +104,15 @@ class Mplex(IMuxedConn):
             return None
         return await self.buffers[stream_id].get()
 
+    def _get_next_stream_id(self) -> int:
+        """
+        Get next available stream id
+        :return: next available stream id for the connection
+        """
+        next_id = self.next_stream_id
+        self.next_stream_id += 2
+        return next_id
+
     # FIXME: Remove multiaddr from being passed into muxed_conn
     async def open_stream(
         self, protocol_id: str, multi_addr: Multiaddr
@@ -108,7 +123,7 @@ class Mplex(IMuxedConn):
         :param multi_addr: multi_addr that stream connects to
         :return: a new stream
         """
-        stream_id = self.conn.next_stream_id()
+        stream_id = self._get_next_stream_id()
         stream = MplexStream(stream_id, True, self)
         self.buffers[stream_id] = asyncio.Queue()
         await self.send_message(HeaderTags.NewStream, None, stream_id)
