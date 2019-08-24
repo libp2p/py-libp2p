@@ -4,9 +4,7 @@ import pytest
 
 from libp2p import new_node
 from libp2p.crypto.rsa import create_new_key_pair
-from libp2p.network.exceptions import SwarmException
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
-from libp2p.security.simple.transport import SimpleSecurityTransport
 from tests.configs import LISTEN_MADDR
 from tests.utils import cleanup, connect
 
@@ -73,100 +71,6 @@ async def test_single_insecure_security_transport_succeeds():
     await perform_simple_test(
         assertion_func, transports_for_initiator, transports_for_noninitiator
     )
-
-
-@pytest.mark.asyncio
-async def test_single_simple_test_security_transport_succeeds():
-    transports_for_initiator = {
-        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos")
-    }
-    transports_for_noninitiator = {
-        "tacos": SimpleSecurityTransport(noninitiator_key_pair, "tacos")
-    }
-
-    def assertion_func(conn):
-        assert conn.key_phrase == "tacos"
-
-    await perform_simple_test(
-        assertion_func, transports_for_initiator, transports_for_noninitiator
-    )
-
-
-@pytest.mark.asyncio
-async def test_two_simple_test_security_transport_for_initiator_succeeds():
-    transports_for_initiator = {
-        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos"),
-        "shleep": SimpleSecurityTransport(initiator_key_pair, "shleep"),
-    }
-    transports_for_noninitiator = {
-        "shleep": SimpleSecurityTransport(noninitiator_key_pair, "shleep")
-    }
-
-    def assertion_func(conn):
-        assert conn.key_phrase == "shleep"
-
-    await perform_simple_test(
-        assertion_func, transports_for_initiator, transports_for_noninitiator
-    )
-
-
-@pytest.mark.asyncio
-async def test_two_simple_test_security_transport_for_noninitiator_succeeds():
-    transports_for_initiator = {
-        "tacos": SimpleSecurityTransport(initiator_key_pair, "tacos")
-    }
-    transports_for_noninitiator = {
-        "shleep": SimpleSecurityTransport(noninitiator_key_pair, "shleep"),
-        "tacos": SimpleSecurityTransport(noninitiator_key_pair, "tacos"),
-    }
-
-    def assertion_func(conn):
-        assert conn.key_phrase == "tacos"
-
-    await perform_simple_test(
-        assertion_func, transports_for_initiator, transports_for_noninitiator
-    )
-
-
-@pytest.mark.asyncio
-async def test_two_simple_test_security_transport_for_both_succeeds():
-    transports_for_initiator = {
-        "a": SimpleSecurityTransport(initiator_key_pair, "a"),
-        "b": SimpleSecurityTransport(initiator_key_pair, "b"),
-    }
-    transports_for_noninitiator = {
-        "b": SimpleSecurityTransport(noninitiator_key_pair, "b"),
-        "c": SimpleSecurityTransport(noninitiator_key_pair, "c"),
-    }
-
-    def assertion_func(conn):
-        assert conn.key_phrase == "b"
-
-    await perform_simple_test(
-        assertion_func, transports_for_initiator, transports_for_noninitiator
-    )
-
-
-@pytest.mark.asyncio
-async def test_multiple_security_none_the_same_fails():
-    transports_for_initiator = {
-        "a": SimpleSecurityTransport(initiator_key_pair, "a"),
-        "b": SimpleSecurityTransport(initiator_key_pair, "b"),
-    }
-    transports_for_noninitiator = {
-        "d": SimpleSecurityTransport(noninitiator_key_pair, "d"),
-        "c": SimpleSecurityTransport(noninitiator_key_pair, "c"),
-    }
-
-    def assertion_func(_):
-        assert False
-
-    with pytest.raises(SwarmException):
-        await perform_simple_test(
-            assertion_func, transports_for_initiator, transports_for_noninitiator
-        )
-
-    await cleanup()
 
 
 @pytest.mark.asyncio
