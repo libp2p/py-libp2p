@@ -30,10 +30,6 @@ class BaseSession(ISecureConn):
 
         self.initiator = self.conn.initiator
 
-    # TODO clean up how this is passed around?
-    def next_stream_id(self) -> int:
-        return self.conn.next_stream_id()
-
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
