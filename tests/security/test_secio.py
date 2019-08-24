@@ -49,7 +49,7 @@ class InMemoryConnection(IRawConnection):
             self.current_msg = None
         return next_msg
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -88,13 +88,17 @@ async def test_create_secure_session():
         local_session_builder, remote_session_builder
     )
 
+    msg = b"abc"
+    await local_secure_conn.write(msg)
+    received_msg = await remote_secure_conn.read()
+    assert received_msg == msg
+
+    await asyncio.gather(local_secure_conn.close(), remote_secure_conn.close())
+
     local_pipe_task.cancel()
     remote_pipe_task.cancel()
     await local_pipe_task
     await remote_pipe_task
-
-    assert local_secure_conn
-    assert remote_secure_conn
 
 
 if __name__ == "__main__":
