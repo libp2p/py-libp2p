@@ -1,5 +1,6 @@
 from typing import Callable, Tuple, cast
 
+from Crypto.Math.Numbers import Integer
 import Crypto.PublicKey.ECC as ECC
 
 from libp2p.crypto.ecc import ECCPrivateKey, create_new_key_pair
@@ -23,6 +24,6 @@ def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGene
         private_key = cast(ECCPrivateKey, key_pair.private_key)
         secret_point = curve_point * private_key.impl.d
         byte_size = secret_point.size_in_bytes()
-        return secret_point.x.to_bytes(byte_size)
+        return cast(Integer, secret_point.x).to_bytes(byte_size)
 
     return key_pair.public_key, _key_exchange

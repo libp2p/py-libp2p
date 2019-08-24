@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-import hashlib
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import multihash
 
@@ -17,6 +16,7 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.msgio import encode as encode_message
 from libp2p.io.msgio import read_next_message
+from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_session import BaseSession
@@ -67,13 +67,13 @@ class SecureSession(BaseSession):
     def _initialize_authenticated_encryption_for_remote_peer(self) -> None:
         self.remote_encrypter = Encrypter(self.remote_encryption_parameters)
 
-    async def read(self) -> bytes:
+    async def read(self, n: int = -1) -> bytes:
         return await self._read_msg()
 
     async def _read_msg(self) -> bytes:
         # TODO do we need to serialize reads?
         # TODO do not expose reader
-        msg = await read_next_message(self.conn.reader)
+        msg = await read_next_message(cast(RawConnection, self.conn).reader)
         return self.remote_encrypter.decrypt_if_valid(msg)
 
     async def write(self, data: bytes) -> None:
@@ -85,8 +85,8 @@ class SecureSession(BaseSession):
         tag = self.local_encrypter.authenticate(encrypted_data)
         msg = encode_message(encrypted_data + tag)
         # TODO clean up how we write messages
-        await self.conn.writer.write(msg)
-        await self.conn.writer.drain()
+        await cast(RawConnection, self.conn).writer.write(msg)
+        await cast(RawConnection, self.conn).writer.drain()
 
 
 @dataclass(frozen=True)
@@ -162,10 +162,10 @@ class SessionParameters:
 async def _response_to_msg(conn: IRawConnection, msg: bytes) -> bytes:
     # TODO clean up ``IRawConnection`` so that we don't have to break
     # the abstraction
-    await conn.writer.write(encode_message(msg))
-    await conn.writer.drain()
+    await cast(RawConnection, conn).writer.write(encode_message(msg))
+    await cast(RawConnection, conn).writer.drain()
 
-    return await read_next_message(conn.reader)
+    return await read_next_message(cast(RawConnection, conn).reader)
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
