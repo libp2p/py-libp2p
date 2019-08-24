@@ -19,27 +19,12 @@ class InMemoryConnection(IRawConnection):
         self.current_position = 0
 
         self.closed = False
-        self.stream_counter = 0
-
-    @property
-    def writer(self):
-        return self
-
-    @property
-    def reader(self):
-        return self
 
     async def write(self, data: bytes) -> None:
         if self.closed:
             raise Exception("InMemoryConnection is closed for writing")
 
         await self.send_queue.put(data)
-
-    async def drain(self):
-        return
-
-    async def readexactly(self, n):
-        return await self.read(n)
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -66,10 +51,6 @@ class InMemoryConnection(IRawConnection):
 
     def close(self) -> None:
         self.closed = True
-
-    def next_stream_id(self) -> int:
-        self.stream_counter += 1
-        return self.stream_counter
 
 
 async def create_pipe(local_conn, remote_conn):
