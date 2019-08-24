@@ -36,8 +36,8 @@ class BaseSession(ISecureConn):
     async def read(self, n: int = -1) -> bytes:
         return await self.conn.read(n)
 
-    def close(self) -> None:
-        self.conn.close()
+    async def close(self) -> None:
+        await self.conn.close()
 
     def get_local_peer(self) -> ID:
         return self.local_peer

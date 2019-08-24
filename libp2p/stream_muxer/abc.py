@@ -40,7 +40,7 @@ class IMuxedConn(ABC):
         pass
 
     @abstractmethod
-    def close(self) -> None:
+    async def close(self) -> None:
         """
         close connection
         """

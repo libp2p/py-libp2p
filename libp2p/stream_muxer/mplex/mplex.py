@@ -69,11 +69,11 @@ class Mplex(IMuxedConn):
     def initiator(self) -> bool:
         return self.conn.initiator
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """
         close the stream muxer and underlying raw connection
         """
-        self.conn.close()
+        await self.conn.close()
 
     def is_closed(self) -> bool:
         """
