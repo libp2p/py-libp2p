@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple, cast
+from typing import Optional, Tuple
 
 import multihash
 
@@ -16,7 +16,6 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.msgio import encode as encode_message
 from libp2p.io.msgio import read_next_message
-from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_session import BaseSession
@@ -72,8 +71,7 @@ class SecureSession(BaseSession):
 
     async def _read_msg(self) -> bytes:
         # TODO do we need to serialize reads?
-        # TODO do not expose reader
-        msg = await read_next_message(cast(RawConnection, self.conn).reader)
+        msg = await read_next_message(self.conn)
         return self.remote_encrypter.decrypt_if_valid(msg)
 
     async def write(self, data: bytes) -> None:
@@ -84,9 +82,7 @@ class SecureSession(BaseSession):
         encrypted_data = self.local_encrypter.encrypt(data)
         tag = self.local_encrypter.authenticate(encrypted_data)
         msg = encode_message(encrypted_data + tag)
-        # TODO clean up how we write messages
-        await cast(RawConnection, self.conn).writer.write(msg)
-        await cast(RawConnection, self.conn).writer.drain()
+        await self.conn.write(msg)
 
 
 @dataclass(frozen=True)
@@ -160,12 +156,8 @@ class SessionParameters:
 
 
 async def _response_to_msg(conn: IRawConnection, msg: bytes) -> bytes:
-    # TODO clean up ``IRawConnection`` so that we don't have to break
-    # the abstraction
-    await cast(RawConnection, conn).writer.write(encode_message(msg))
-    await cast(RawConnection, conn).writer.drain()
-
-    return await read_next_message(cast(RawConnection, conn).reader)
+    await conn.write(encode_message(msg))
+    return await read_next_message(conn)
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
