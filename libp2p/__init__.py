@@ -100,7 +100,7 @@ def initialize_default_swarm(
     muxer_transports_by_protocol = muxer_opt or {MPLEX_PROTOCOL_ID: Mplex}
     security_transports_by_protocol = sec_opt or {
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
-        TProtocol(secio.ID): secio.SecIOTransport(key_pair),
+        TProtocol(secio.ID): secio.Transport(key_pair),
     }
     upgrader = TransportUpgrader(
         security_transports_by_protocol, muxer_transports_by_protocol

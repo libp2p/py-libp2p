@@ -344,17 +344,17 @@ async def _finish_handshake(session: ISecureConn, remote_nonce: bytes) -> bytes:
 
 
 async def create_secure_session(
-    transport: "SecIOTransport", conn: IRawConnection, remote_peer: PeerID = None
+    local_nonce: bytes,
+    local_peer: PeerID,
+    local_private_key: PrivateKey,
+    conn: IRawConnection,
+    remote_peer: PeerID = None,
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.
     If successful, return an object that provides secure communication to the
     ``remote_peer``.
     """
-    local_nonce = transport.get_nonce()
-    local_peer = transport.local_peer
-    local_private_key = transport.local_private_key
-
     try:
         session_parameters, remote_nonce = await _establish_session_parameters(
             local_peer, local_private_key, remote_peer, conn, local_nonce
@@ -373,9 +373,9 @@ async def create_secure_session(
     return session
 
 
-class SecIOTransport(BaseSecureTransport):
+class Transport(BaseSecureTransport):
     """
-    ``SecIOTransport`` provides a security upgrader for a ``IRawConnection``,
+    ``Transport`` provides a security upgrader for a ``IRawConnection``,
     following the `secio` protocol defined in the libp2p specs.
     """
 
@@ -388,7 +388,13 @@ class SecIOTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return await create_secure_session(self, conn)
+        local_nonce = self.get_nonce()
+        local_peer = self.local_peer
+        local_private_key = self.local_private_key
+
+        return await create_secure_session(
+            local_nonce, local_peer, local_private_key, conn
+        )
 
     async def secure_outbound(
         self, conn: IRawConnection, peer_id: PeerID
@@ -398,4 +404,10 @@ class SecIOTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        return await create_secure_session(self, conn, peer_id)
+        local_nonce = self.get_nonce()
+        local_peer = self.local_peer
+        local_private_key = self.local_private_key
+
+        return await create_secure_session(
+            local_nonce, local_peer, local_private_key, conn, peer_id
+        )
