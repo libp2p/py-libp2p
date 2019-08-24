@@ -3,6 +3,7 @@ import hmac
 from typing import Tuple
 
 from Crypto.Cipher import AES
+import Crypto.Util.Counter as Counter
 
 
 class InvalidMACException(Exception):
@@ -23,8 +24,14 @@ class MacAndCipher:
         self.authenticator = hmac.new(
             parameters.mac_key, digestmod=parameters.hash_type
         )
+        iv_bit_size = 8 * len(parameters.iv)
         cipher = AES.new(
-            parameters.cipher_key, AES.MODE_CTR, initial_value=parameters.iv
+            parameters.cipher_key,
+            AES.MODE_CTR,
+            counter=Counter.new(
+                iv_bit_size,
+                initial_value=int.from_bytes(parameters.iv, byteorder="big"),
+            ),
         )
         self.cipher = cipher
 
@@ -70,14 +77,16 @@ def initialize_pair(
     hmac_key_size = 20
     seed = "key expansion".encode()
 
-    result = bytearray(2 * (iv_size + cipher_key_size + hmac_key_size))
+    params_size = iv_size + cipher_key_size + hmac_key_size
+    result = bytearray(2 * params_size)
 
     authenticator = hmac.new(secret, digestmod=hash_type)
     authenticator.update(seed)
     tag = authenticator.digest()
 
     i = 0
-    while i < len(result):
+    len_result = 2 * params_size
+    while i < len_result:
         authenticator = hmac.new(secret, digestmod=hash_type)
 
         authenticator.update(tag)
@@ -87,10 +96,10 @@ def initialize_pair(
 
         remaining_bytes = len(another_tag)
 
-        if i + remaining_bytes > len(result):
-            remaining_bytes = len(result) - i
+        if i + remaining_bytes > len_result:
+            remaining_bytes = len_result - i
 
-        result[i : i + remaining_bytes] = another_tag
+        result[i : i + remaining_bytes] = another_tag[0:remaining_bytes]
 
         i += remaining_bytes
 
@@ -98,23 +107,22 @@ def initialize_pair(
         authenticator.update(tag)
         tag = authenticator.digest()
 
-    half = int(len(result) / 2)
-    first_half = result[:half]
-    second_half = result[half:]
+    first_half = result[:params_size]
+    second_half = result[params_size:]
 
     return (
         EncryptionParameters(
             cipher_type,
             hash_type,
             first_half[0:iv_size],
-            first_half[iv_size : iv_size + cipher_key_size],
             first_half[iv_size + cipher_key_size :],
+            first_half[iv_size : iv_size + cipher_key_size],
         ),
         EncryptionParameters(
             cipher_type,
             hash_type,
             second_half[0:iv_size],
-            second_half[iv_size : iv_size + cipher_key_size],
             second_half[iv_size + cipher_key_size :],
+            second_half[iv_size : iv_size + cipher_key_size],
         ),
     )

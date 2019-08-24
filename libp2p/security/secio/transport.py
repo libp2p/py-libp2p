@@ -85,7 +85,7 @@ class SecureSession(BaseSession):
         tag = self.local_encrypter.authenticate(encrypted_data)
         msg = encode_message(encrypted_data + tag)
         # TODO clean up how we write messages
-        self.conn.writer.write(msg)
+        await self.conn.writer.write(msg)
         await self.conn.writer.drain()
 
 
@@ -104,18 +104,17 @@ class Proposal:
 
     def serialize(self) -> bytes:
         protobuf = Propose(
-            self.nonce,
-            self.public_key.serialize(),
-            self.exchanges,
-            self.ciphers,
-            self.hashes,
+            rand=self.nonce,
+            public_key=self.public_key.serialize(),
+            exchanges=self.exchanges,
+            ciphers=self.ciphers,
+            hashes=self.hashes,
         )
         return protobuf.SerializeToString()
 
     @classmethod
     def deserialize(cls, protobuf_bytes: bytes) -> "Proposal":
-        protobuf = Propose()
-        protobuf.ParseFromString(protobuf_bytes)
+        protobuf = Propose.FromString(protobuf_bytes)
 
         nonce = protobuf.rand
         public_key_protobuf_bytes = protobuf.public_key
@@ -163,15 +162,14 @@ class SessionParameters:
 async def _response_to_msg(conn: IRawConnection, msg: bytes) -> bytes:
     # TODO clean up ``IRawConnection`` so that we don't have to break
     # the abstraction
-    conn.writer.write(encode_message(msg))
+    await conn.writer.write(encode_message(msg))
     await conn.writer.drain()
 
     return await read_next_message(conn.reader)
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
-    digest = hashlib.sha256(data).digest()
-    return multihash.encode(digest, "sha2-256")
+    return multihash.digest(data, "sha2-256")
 
 
 def _mk_score(public_key: PublicKey, nonce: bytes) -> bytes:
