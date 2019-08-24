@@ -70,12 +70,12 @@ class TCP(ITransport):
         :param self_id: peer_id of the dialer (to send to receiver)
         :return: `RawConnection` if successful
         """
-        host = maddr.value_for_protocol("ip4")
-        port = maddr.value_for_protocol("tcp")
+        self.host = maddr.value_for_protocol("ip4")
+        self.port = int(maddr.value_for_protocol("tcp"))
 
-        reader, writer = await asyncio.open_connection(host, int(port))
+        reader, writer = await asyncio.open_connection(self.host, self.port)
 
-        return RawConnection(host, port, reader, writer, True)
+        return RawConnection(reader, writer, True)
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """

@@ -204,13 +204,7 @@ class Swarm(INetwork):
             ) -> None:
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
-                raw_conn = RawConnection(
-                    maddr.value_for_protocol("ip4"),
-                    maddr.value_for_protocol("tcp"),
-                    reader,
-                    writer,
-                    False,
-                )
+                raw_conn = RawConnection(reader, writer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn

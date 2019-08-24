@@ -3,7 +3,6 @@ from typing import Dict, Optional, Tuple
 
 from multiaddr import Multiaddr
 
-from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -24,7 +23,6 @@ class Mplex(IMuxedConn):
     """
 
     secured_conn: ISecureConn
-    raw_conn: IRawConnection
     peer_id: ID
     # TODO: `dataIn` in go implementation. Should be size of 8.
     # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
