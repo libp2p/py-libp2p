@@ -31,8 +31,6 @@ class BaseSession(ISecureConn):
         self.remote_permanent_pubkey = None
 
         self.conn = conn
-        self.writer = self.conn.writer
-        self.reader = self.conn.reader
         self.initiator = self.conn.initiator
 
     async def write(self, data: bytes) -> None:
