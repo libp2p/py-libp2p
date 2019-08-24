@@ -118,7 +118,7 @@ class Swarm(INetwork):
                 )
             except SecurityUpgradeFailure as error:
                 # TODO: Add logging to indicate the failure
-                raw_conn.close()
+                await raw_conn.close()
                 raise SwarmException(
                     f"fail to upgrade the connection to a secured connection from {peer_id}"
                 ) from error
@@ -128,7 +128,7 @@ class Swarm(INetwork):
                 )
             except MuxerUpgradeFailure as error:
                 # TODO: Add logging to indicate the failure
-                secured_conn.close()
+                await secured_conn.close()
                 raise SwarmException(
                     f"fail to upgrade the connection to a muxed connection from {peer_id}"
                 ) from error
@@ -215,7 +215,7 @@ class Swarm(INetwork):
                     )
                 except SecurityUpgradeFailure as error:
                     # TODO: Add logging to indicate the failure
-                    raw_conn.close()
+                    await raw_conn.close()
                     raise SwarmException(
                         "fail to upgrade the connection to a secured connection"
                     ) from error
@@ -226,7 +226,7 @@ class Swarm(INetwork):
                     )
                 except MuxerUpgradeFailure as error:
                     # TODO: Add logging to indicate the failure
-                    secured_conn.close()
+                    await secured_conn.close()
                     raise SwarmException(
                         f"fail to upgrade the connection to a muxed connection from {peer_id}"
                     ) from error

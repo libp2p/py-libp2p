@@ -37,5 +37,6 @@ class RawConnection(IRawConnection):
         """
         return await self.reader.read(n)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.writer.close()
+        await self.writer.wait_closed()
