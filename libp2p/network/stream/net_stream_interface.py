@@ -42,3 +42,9 @@ class INetStream(ABC):
         close the underlying muxed stream
         :return: true if successful
         """
+
+    @abstractmethod
+    async def reset(self) -> bool:
+        """
+        Close both ends of the stream.
+        """
