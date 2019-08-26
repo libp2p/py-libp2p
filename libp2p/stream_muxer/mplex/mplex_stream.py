@@ -132,7 +132,7 @@ class MplexStream(IMuxedStream):
                 flag = (
                     HeaderTags.ResetInitiator
                     if self.initiator
-                    else HeaderTags.ResetInitiator
+                    else HeaderTags.ResetReceiver
                 )
                 await self.mplex_conn.send_message(flag, None, self.stream_id)
 
