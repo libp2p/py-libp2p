@@ -49,8 +49,7 @@ class ECCPrivateKey(PrivateKey):
 
 def create_new_key_pair(curve: str) -> KeyPair:
     """
-    Returns a new RSA keypair with the requested key size (``bits``) and the given public
-    exponent ``e``. Sane defaults are provided for both values.
+    Return a new ECC keypair with the requested ``curve`` type, e.g. "P-256".
     """
     private_key = ECCPrivateKey.new(curve)
     public_key = private_key.get_public_key()
