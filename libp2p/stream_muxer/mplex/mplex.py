@@ -1,8 +1,6 @@
 import asyncio
 from typing import Dict, Optional, Tuple
 
-from multiaddr import Multiaddr
-
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -31,6 +29,7 @@ class Mplex(IMuxedConn):
     stream_queue: "asyncio.Queue[int]"
     next_stream_id: int
 
+    # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(
         self,
         secured_conn: ISecureConn,
@@ -114,28 +113,25 @@ class Mplex(IMuxedConn):
         self.next_stream_id += 2
         return next_id
 
-    # FIXME: Remove multiaddr from being passed into muxed_conn
-    async def open_stream(
-        self, protocol_id: str, multi_addr: Multiaddr
-    ) -> IMuxedStream:
+    async def open_stream(self) -> IMuxedStream:
         """
         creates a new muxed_stream
-        :param protocol_id: protocol_id of stream
-        :param multi_addr: multi_addr that stream connects to
-        :return: a new muxed stream
+        :return: a new ``MplexStream``
         """
         stream_id = self._get_next_stream_id()
-        stream = MplexStream(stream_id, True, self)
+        name = str(stream_id).encode()
+        stream = MplexStream(name, stream_id, True, self)
         self.buffers[stream_id] = asyncio.Queue()
-        await self.send_message(HeaderTags.NewStream, None, stream_id)
+        # Default stream name is the `stream_id`
+        await self.send_message(HeaderTags.NewStream, name, stream_id)
         return stream
 
-    async def accept_stream(self) -> None:
+    async def accept_stream(self, name: str) -> None:
         """
         accepts a muxed stream opened by the other end
         """
         stream_id = await self.stream_queue.get()
-        stream = MplexStream(stream_id, False, self)
+        stream = MplexStream(name, stream_id, False, self)
         asyncio.ensure_future(self.generic_protocol_handler(stream))
 
     async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
@@ -181,11 +177,14 @@ class Mplex(IMuxedConn):
                     self.buffers[stream_id] = asyncio.Queue()
                     await self.stream_queue.put(stream_id)
 
+                # TODO: Handle more tags, and refactor `HeaderTags`
                 if flag == HeaderTags.NewStream.value:
                     # new stream detected on connection
-                    await self.accept_stream()
-
-                if message:
+                    await self.accept_stream(message)
+                elif flag in (
+                    HeaderTags.MessageInitiator.value,
+                    HeaderTags.MessageReceiver.value,
+                ):
                     await self.buffers[stream_id].put(message)
 
             # Force context switch
