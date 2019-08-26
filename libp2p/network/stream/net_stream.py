@@ -50,3 +50,6 @@ class NetStream(INetStream):
         """
         await self.muxed_stream.close()
         return True
+
+    async def reset(self) -> bool:
+        return await self.muxed_stream.reset()
