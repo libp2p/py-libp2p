@@ -99,15 +99,6 @@ class PrivateKey(Key):
         """
         return self._serialize_to_protobuf().SerializeToString()
 
-    def _protobuf_from_serialization(self, data: bytes) -> protobuf.PrivateKey:
-        """
-        Return the protobuf representation of this ``Key``.
-        """
-        key_type = self.get_type().value
-        data = self.to_bytes()
-        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
-        return protobuf_key
-
     @classmethod
     def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PrivateKey:
         return protobuf.PrivateKey.FromString(protobuf_data)

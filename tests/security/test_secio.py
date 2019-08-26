@@ -99,7 +99,3 @@ async def test_create_secure_session():
     remote_pipe_task.cancel()
     await local_pipe_task
     await remote_pipe_task
-
-
-if __name__ == "__main__":
-    asyncio.run(test_create_secure_session())

@@ -1,4 +1,7 @@
-class MsgioException(Exception):
+from libp2p.exceptions import BaseLibp2pError
+
+
+class MsgioException(BaseLibp2pError):
     pass
 
 

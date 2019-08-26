@@ -350,14 +350,14 @@ async def create_secure_session(
             local_peer, local_private_key, remote_peer, conn, local_nonce
         )
     except SecioException as e:
-        conn.close()
+        await conn.close()
         raise e
 
     session = _mk_session_from(local_private_key, session_parameters, conn)
 
     received_nonce = await _finish_handshake(session, remote_nonce)
     if received_nonce != local_nonce:
-        conn.close()
+        await conn.close()
         raise HandshakeFailed()
 
     return session
