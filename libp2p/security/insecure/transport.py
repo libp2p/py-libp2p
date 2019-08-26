@@ -76,7 +76,7 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        session = InsecureSession(self, conn, ID(b""))
+        session = InsecureSession(self.local_peer, self.local_private_key, conn)
         await session.run_handshake()
         return session
 
@@ -86,7 +86,9 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        session = InsecureSession(self, conn, peer_id)
+        session = InsecureSession(
+            self.local_peer, self.local_private_key, conn, peer_id
+        )
         await session.run_handshake()
         return session
 

@@ -11,6 +11,7 @@ class KeyType(Enum):
     Ed25519 = 1
     Secp256k1 = 2
     ECDSA = 3
+    ECC_P256 = 4
 
 
 class Key(ABC):
@@ -31,6 +32,11 @@ class Key(ABC):
         Returns the ``KeyType`` for ``self``.
         """
         ...
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Key):
+            return NotImplemented
+        return self.to_bytes() == other.to_bytes()
 
 
 class PublicKey(Key):
@@ -60,13 +66,15 @@ class PublicKey(Key):
         """
         return self._serialize_to_protobuf().SerializeToString()
 
+    @classmethod
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PublicKey:
+        return protobuf.PublicKey.FromString(protobuf_data)
+
 
 class PrivateKey(Key):
     """
     A ``PrivateKey`` represents a cryptographic private key.
     """
-
-    protobuf_constructor = protobuf.PrivateKey
 
     @abstractmethod
     def sign(self, data: bytes) -> bytes:
@@ -90,6 +98,10 @@ class PrivateKey(Key):
         Return the canonical serialization of this ``Key``.
         """
         return self._serialize_to_protobuf().SerializeToString()
+
+    @classmethod
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PrivateKey:
+        return protobuf.PrivateKey.FromString(protobuf_data)
 
 
 @dataclass(frozen=True)

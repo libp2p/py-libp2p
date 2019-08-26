@@ -6,6 +6,11 @@ import multihash
 
 from libp2p.crypto.keys import PublicKey
 
+# NOTE: ``FRIENDLY_IDS`` renders a ``str`` representation of ``ID`` as a
+# short string of a prefix of the base58 representation. This feature is primarily
+# intended for debugging, logging, etc.
+FRIENDLY_IDS = True
+
 
 class ID:
     _bytes: bytes
@@ -32,7 +37,13 @@ class ID:
     def __repr__(self) -> str:
         return "<libp2p.peer.id.ID 0x" + self._bytes.hex() + ">"
 
-    __str__ = pretty = to_string = to_base58
+    pretty = to_string = to_base58
+
+    def __str__(self) -> str:
+        if FRIENDLY_IDS:
+            return self.to_string()[2:8]
+        else:
+            return self.to_string()
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):

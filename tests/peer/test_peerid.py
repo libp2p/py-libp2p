@@ -4,9 +4,13 @@ import base58
 import multihash
 
 from libp2p.crypto.rsa import create_new_key_pair
+import libp2p.peer.id as PeerID
 from libp2p.peer.id import ID
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+# ensure we are not in "debug" mode for the following tests
+PeerID.FRIENDLY_IDS = False
 
 
 def test_eq_impl_for_bytes():
