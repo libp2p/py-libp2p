@@ -156,15 +156,10 @@ class Swarm(INetwork):
         if not addrs:
             raise SwarmException("No known addresses to peer")
 
-        multiaddr = addrs[0]
-
         muxed_conn = await self.dial_peer(peer_id)
 
-        # Use muxed conn to open stream, which returns
-        # a muxed stream
-        # TODO: Remove protocol id from being passed into muxed_conn
-        # FIXME: Remove multiaddr from being passed into muxed_conn
-        muxed_stream = await muxed_conn.open_stream(protocol_ids[0], multiaddr)
+        # Use muxed conn to open stream, which returns a muxed stream
+        muxed_stream = await muxed_conn.open_stream()
 
         # Perform protocol muxing to determine protocol to use
         selected_protocol = await self.multiselect_client.select_one_of(

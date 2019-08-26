@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
-from multiaddr import Multiaddr
-
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.mplex.constants import HeaderTags
@@ -66,20 +64,15 @@ class IMuxedConn(ABC):
         Read a message from `stream_id`'s buffer, non-blockingly.
         """
 
-    # FIXME: Remove multiaddr from being passed into muxed_conn
     @abstractmethod
-    async def open_stream(
-        self, protocol_id: str, multi_addr: Multiaddr
-    ) -> "IMuxedStream":
+    async def open_stream(self) -> "IMuxedStream":
         """
         creates a new muxed_stream
-        :param protocol_id: protocol_id of stream
-        :param multi_addr: multi_addr that stream connects to
-        :return: a new stream
+        :return: a new ``IMuxedStream`` stream
         """
 
     @abstractmethod
-    async def accept_stream(self) -> None:
+    async def accept_stream(self, name: str) -> None:
         """
         accepts a muxed stream opened by the other end
         """

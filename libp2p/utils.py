@@ -1,8 +1,19 @@
-import asyncio
-import struct
-from typing import Tuple
+import itertools
+import math
 
+from libp2p.exceptions import ParseError
 from libp2p.typing import StreamReader
+
+# Unsigned LEB128(varint codec)
+# Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
+
+LOW_MASK = 2 ** 7 - 1
+HIGH_MASK = 2 ** 7
+
+
+# The maximum shift width for a 64 bit integer.  We shouldn't have to decode
+# integers larger than this.
+SHIFT_64_BIT_MAX = int(math.ceil(64 / 7)) * 7
 
 
 def encode_uvarint(number: int) -> bytes:
@@ -19,35 +30,29 @@ def encode_uvarint(number: int) -> bytes:
     return buf
 
 
-def decode_uvarint(buff: bytes, index: int) -> Tuple[int, int]:
-    shift = 0
-    result = 0
-    while True:
-        i = buff[index]
-        result |= (i & 0x7F) << shift
-        shift += 7
-        if not i & 0x80:
+async def decode_uvarint_from_stream(reader: StreamReader) -> int:
+    """
+    https://en.wikipedia.org/wiki/LEB128
+    """
+    res = 0
+    for shift in itertools.count(0, 7):
+        if shift > SHIFT_64_BIT_MAX:
+            raise ParseError("TODO: better exception msg: Integer is too large...")
+
+        byte = await reader.read(1)
+
+        try:
+            value = byte[0]
+        except IndexError:
+            raise ParseError(
+                "Unexpected end of stream while parsing LEB128 encoded integer"
+            )
+
+        res += (value & LOW_MASK) << shift
+
+        if not value & HIGH_MASK:
             break
-        index += 1
-
-    return result, index + 1
-
-
-async def decode_uvarint_from_stream(reader: StreamReader, timeout: float) -> int:
-    shift = 0
-    result = 0
-    while True:
-        byte = await asyncio.wait_for(reader.read(1), timeout=timeout)
-        i = struct.unpack(">H", b"\x00" + byte)[0]
-        result |= (i & 0x7F) << shift
-        shift += 7
-        if not i & 0x80:
-            break
-
-    return result
-
-
-# Varint-prefixed read/write
+    return res
 
 
 def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
@@ -56,7 +61,7 @@ def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
 
 
 async def read_varint_prefixed_bytes(reader: StreamReader) -> bytes:
-    len_msg = await decode_uvarint_from_stream(reader, None)
+    len_msg = await decode_uvarint_from_stream(reader)
     data = await reader.read(len_msg)
     if len(data) != len_msg:
         raise ValueError(

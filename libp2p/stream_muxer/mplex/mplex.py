@@ -1,14 +1,16 @@
 import asyncio
 from typing import Dict, Optional, Tuple
 
-from multiaddr import Multiaddr
-
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.typing import TProtocol
-from libp2p.utils import decode_uvarint_from_stream, encode_uvarint
+from libp2p.utils import (
+    decode_uvarint_from_stream,
+    encode_uvarint,
+    read_varint_prefixed_bytes,
+)
 
 from .constants import HeaderTags
 from .exceptions import StreamNotFound
@@ -31,6 +33,7 @@ class Mplex(IMuxedConn):
     stream_queue: "asyncio.Queue[int]"
     next_stream_id: int
 
+    # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(
         self,
         secured_conn: ISecureConn,
@@ -114,28 +117,25 @@ class Mplex(IMuxedConn):
         self.next_stream_id += 2
         return next_id
 
-    # FIXME: Remove multiaddr from being passed into muxed_conn
-    async def open_stream(
-        self, protocol_id: str, multi_addr: Multiaddr
-    ) -> IMuxedStream:
+    async def open_stream(self) -> IMuxedStream:
         """
         creates a new muxed_stream
-        :param protocol_id: protocol_id of stream
-        :param multi_addr: multi_addr that stream connects to
-        :return: a new muxed stream
+        :return: a new ``MplexStream``
         """
         stream_id = self._get_next_stream_id()
-        stream = MplexStream(stream_id, True, self)
+        name = str(stream_id)
+        stream = MplexStream(name, stream_id, True, self)
         self.buffers[stream_id] = asyncio.Queue()
-        await self.send_message(HeaderTags.NewStream, None, stream_id)
+        # Default stream name is the `stream_id`
+        await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def accept_stream(self) -> None:
+    async def accept_stream(self, name: str) -> None:
         """
         accepts a muxed stream opened by the other end
         """
         stream_id = await self.stream_queue.get()
-        stream = MplexStream(stream_id, False, self)
+        stream = MplexStream(name, stream_id, False, self)
         asyncio.ensure_future(self.generic_protocol_handler(stream))
 
     async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
@@ -181,11 +181,14 @@ class Mplex(IMuxedConn):
                     self.buffers[stream_id] = asyncio.Queue()
                     await self.stream_queue.put(stream_id)
 
+                # TODO: Handle more tags, and refactor `HeaderTags`
                 if flag == HeaderTags.NewStream.value:
                     # new stream detected on connection
-                    await self.accept_stream()
-
-                if message:
+                    await self.accept_stream(message.decode())
+                elif flag in (
+                    HeaderTags.MessageInitiator.value,
+                    HeaderTags.MessageReceiver.value,
+                ):
                     await self.buffers[stream_id].put(message)
 
             # Force context switch
@@ -200,14 +203,14 @@ class Mplex(IMuxedConn):
         # FIXME: No timeout is used in Go implementation.
         # Timeout is set to a relatively small value to alleviate wait time to exit
         #  loop in handle_incoming
-        timeout = 0.1
+        header = await decode_uvarint_from_stream(self.secured_conn)
+        # TODO: Handle the case of EOF and other exceptions?
         try:
-            header = await decode_uvarint_from_stream(self.secured_conn, timeout)
-            length = await decode_uvarint_from_stream(self.secured_conn, timeout)
             message = await asyncio.wait_for(
-                self.secured_conn.read(length), timeout=timeout
+                read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
         except asyncio.TimeoutError:
+            # TODO: Investigate what we should do if time is out.
             return None, None, None
 
         flag = header & 0x07

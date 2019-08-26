@@ -10,6 +10,7 @@ class MplexStream(IMuxedStream):
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
     """
 
+    name: str
     stream_id: int
     initiator: bool
     mplex_conn: IMuxedConn
@@ -21,13 +22,16 @@ class MplexStream(IMuxedStream):
 
     _buf: bytearray
 
-    def __init__(self, stream_id: int, initiator: bool, mplex_conn: IMuxedConn) -> None:
+    def __init__(
+        self, name: str, stream_id: int, initiator: bool, mplex_conn: IMuxedConn
+    ) -> None:
         """
         create new MuxedStream in muxer
         :param stream_id: stream stream id
         :param initiator: boolean if this is an initiator
         :param mplex_conn: muxed connection of this muxed_stream
         """
+        self.name = name
         self.stream_id = stream_id
         self.initiator = initiator
         self.mplex_conn = mplex_conn
