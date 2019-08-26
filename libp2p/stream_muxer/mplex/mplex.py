@@ -6,7 +6,11 @@ from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.typing import TProtocol
-from libp2p.utils import decode_uvarint_from_stream, encode_uvarint
+from libp2p.utils import (
+    decode_uvarint_from_stream,
+    encode_uvarint,
+    read_varint_prefixed_bytes,
+)
 
 from .constants import HeaderTags
 from .exceptions import StreamNotFound
@@ -119,11 +123,11 @@ class Mplex(IMuxedConn):
         :return: a new ``MplexStream``
         """
         stream_id = self._get_next_stream_id()
-        name = str(stream_id).encode()
+        name = str(stream_id)
         stream = MplexStream(name, stream_id, True, self)
         self.buffers[stream_id] = asyncio.Queue()
         # Default stream name is the `stream_id`
-        await self.send_message(HeaderTags.NewStream, name, stream_id)
+        await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
     async def accept_stream(self, name: str) -> None:
@@ -180,7 +184,7 @@ class Mplex(IMuxedConn):
                 # TODO: Handle more tags, and refactor `HeaderTags`
                 if flag == HeaderTags.NewStream.value:
                     # new stream detected on connection
-                    await self.accept_stream(message)
+                    await self.accept_stream(message.decode())
                 elif flag in (
                     HeaderTags.MessageInitiator.value,
                     HeaderTags.MessageReceiver.value,
@@ -199,14 +203,14 @@ class Mplex(IMuxedConn):
         # FIXME: No timeout is used in Go implementation.
         # Timeout is set to a relatively small value to alleviate wait time to exit
         #  loop in handle_incoming
-        timeout = 0.1
+        header = await decode_uvarint_from_stream(self.secured_conn)
+        # TODO: Handle the case of EOF and other exceptions?
         try:
-            header = await decode_uvarint_from_stream(self.secured_conn, timeout)
-            length = await decode_uvarint_from_stream(self.secured_conn, timeout)
             message = await asyncio.wait_for(
-                self.secured_conn.read(length), timeout=timeout
+                read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
         except asyncio.TimeoutError:
+            # TODO: Investigate what we should do if time is out.
             return None, None, None
 
         flag = header & 0x07
