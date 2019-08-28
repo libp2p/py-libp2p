@@ -11,7 +11,13 @@ matrix:
     - python: 3.7
       dist: xenial
       env: TOXENV=py37-interop
+      sudo: true
       before_install:
+        - wget https://dl.google.com/go/go1.12.6.linux-amd64.tar.gz
+        - sudo tar -C /usr/local -xzf $GOPACKAGE
+        - export GOPATH=$HOME/go
+        - export GOROOT=/usr/local/go
+        - export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
         - ./install_interop_go_pkgs.sh
 
 install:
