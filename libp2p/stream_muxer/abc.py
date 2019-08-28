@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Optional
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.mplex.constants import HeaderTags
+from libp2p.stream_muxer.mplex.datastructures import StreamID
 
 if TYPE_CHECKING:
     # Prevent GenericProtocolHandlerFn introducing circular dependencies
@@ -51,7 +52,7 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def read_buffer(self, stream_id: int) -> bytes:
+    async def read_buffer(self, stream_id: StreamID) -> bytes:
         """
         Read a message from stream_id's buffer, check raw connection for new messages
         :param stream_id: stream id of stream to read from
@@ -59,7 +60,7 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def read_buffer_nonblocking(self, stream_id: int) -> Optional[bytes]:
+    async def read_buffer_nonblocking(self, stream_id: StreamID) -> Optional[bytes]:
         """
         Read a message from `stream_id`'s buffer, non-blockingly.
         """
@@ -78,7 +79,9 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
+    async def send_message(
+        self, flag: HeaderTags, data: bytes, stream_id: StreamID
+    ) -> int:
         """
         sends a message over the connection
         :param header: header to use

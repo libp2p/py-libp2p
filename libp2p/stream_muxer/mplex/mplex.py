@@ -13,6 +13,7 @@ from libp2p.utils import (
 )
 
 from .constants import HeaderTags
+from .datastructures import StreamID
 from .exceptions import StreamNotFound
 from .mplex_stream import MplexStream
 
@@ -29,9 +30,9 @@ class Mplex(IMuxedConn):
     # TODO: `dataIn` in go implementation. Should be size of 8.
     # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
     #   to let the `MplexStream`s know that EOF arrived (#235).
-    buffers: Dict[int, "asyncio.Queue[bytes]"]
-    stream_queue: "asyncio.Queue[int]"
-    next_stream_id: int
+    buffers: Dict[StreamID, "asyncio.Queue[bytes]"]
+    stream_queue: "asyncio.Queue[StreamID]"
+    next_channel_id: int
 
     # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(
@@ -49,10 +50,7 @@ class Mplex(IMuxedConn):
         """
         self.secured_conn = secured_conn
 
-        if self.secured_conn.initiator:
-            self.next_stream_id = 0
-        else:
-            self.next_stream_id = 1
+        self.next_channel_id = 0
 
         # Store generic protocol handler
         self.generic_protocol_handler = generic_protocol_handler
@@ -85,7 +83,7 @@ class Mplex(IMuxedConn):
         """
         raise NotImplementedError()
 
-    async def read_buffer(self, stream_id: int) -> bytes:
+    async def read_buffer(self, stream_id: StreamID) -> bytes:
         """
         Read a message from buffer of the stream specified by `stream_id`,
         check secured connection for new messages.
@@ -97,7 +95,7 @@ class Mplex(IMuxedConn):
             raise StreamNotFound(f"stream {stream_id} is not found")
         return await self.buffers[stream_id].get()
 
-    async def read_buffer_nonblocking(self, stream_id: int) -> Optional[bytes]:
+    async def read_buffer_nonblocking(self, stream_id: StreamID) -> Optional[bytes]:
         """
         Read a message from buffer of the stream specified by `stream_id`, non-blockingly.
         `StreamNotFound` is raised when stream `stream_id` is not found in `Mplex`.
@@ -108,13 +106,13 @@ class Mplex(IMuxedConn):
             return None
         return await self.buffers[stream_id].get()
 
-    def _get_next_stream_id(self) -> int:
+    def _get_next_channel_id(self) -> int:
         """
         Get next available stream id
         :return: next available stream id for the connection
         """
-        next_id = self.next_stream_id
-        self.next_stream_id += 2
+        next_id = self.next_channel_id
+        self.next_channel_id += 1
         return next_id
 
     async def open_stream(self) -> IMuxedStream:
@@ -122,11 +120,12 @@ class Mplex(IMuxedConn):
         creates a new muxed_stream
         :return: a new ``MplexStream``
         """
-        stream_id = self._get_next_stream_id()
-        name = str(stream_id)
-        stream = MplexStream(name, stream_id, True, self)
+        channel_id = self._get_next_channel_id()
+        stream_id = StreamID(channel_id=channel_id, is_initiator=True)
+        name = str(channel_id)
+        stream = MplexStream(name, stream_id, self)
         self.buffers[stream_id] = asyncio.Queue()
-        # Default stream name is the `stream_id`
+        # Default stream name is the `channel_id`
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
@@ -135,10 +134,12 @@ class Mplex(IMuxedConn):
         accepts a muxed stream opened by the other end
         """
         stream_id = await self.stream_queue.get()
-        stream = MplexStream(name, stream_id, False, self)
+        stream = MplexStream(name, stream_id, self)
         asyncio.ensure_future(self.generic_protocol_handler(stream))
 
-    async def send_message(self, flag: HeaderTags, data: bytes, stream_id: int) -> int:
+    async def send_message(
+        self, flag: HeaderTags, data: bytes, stream_id: StreamID
+    ) -> int:
         """
         sends a message over the connection
         :param header: header to use
@@ -146,7 +147,7 @@ class Mplex(IMuxedConn):
         :param stream_id: stream the message is in
         """
         # << by 3, then or with flag
-        header = (stream_id << 3) | flag.value
+        header = (stream_id.channel_id << 3) | flag.value
         header = encode_uvarint(header)
 
         if data is None:
@@ -174,9 +175,10 @@ class Mplex(IMuxedConn):
         # TODO Deal with other types of messages using flag (currently _)
 
         while True:
-            stream_id, flag, message = await self.read_message()
+            channel_id, flag, message = await self.read_message()
 
-            if stream_id is not None and flag is not None and message is not None:
+            if channel_id is not None and flag is not None and message is not None:
+                stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
                 if stream_id not in self.buffers:
                     self.buffers[stream_id] = asyncio.Queue()
                     await self.stream_queue.put(stream_id)
@@ -214,6 +216,6 @@ class Mplex(IMuxedConn):
             return None, None, None
 
         flag = header & 0x07
-        stream_id = header >> 3
+        channel_id = header >> 3
 
-        return stream_id, flag, message
+        return channel_id, flag, message

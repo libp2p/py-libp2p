@@ -23,14 +23,16 @@ async def hosts(num_hosts):
     await asyncio.gather(
         *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
     )
-    yield _hosts
-    # Clean up
-    listeners = []
-    for _host in _hosts:
-        for listener in _host.get_network().listeners.values():
-            listener.server.close()
-            listeners.append(listener)
-    await asyncio.gather(*[listener.server.wait_closed() for listener in listeners])
+    try:
+        yield _hosts
+    finally:
+        # Clean up
+        listeners = []
+        for _host in _hosts:
+            for listener in _host.get_network().listeners.values():
+                listener.server.close()
+                listeners.append(listener)
+        await asyncio.gather(*[listener.server.wait_closed() for listener in listeners])
 
 
 @pytest.fixture

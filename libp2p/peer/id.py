@@ -41,7 +41,7 @@ class ID:
 
     def __str__(self) -> str:
         if FRIENDLY_IDS:
-            return self.to_string()[2:8]
+            return f"<peer.ID {self.to_string()[2:8]}>"
         else:
             return self.to_string()
 
