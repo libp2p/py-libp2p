@@ -13,7 +13,6 @@ from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTr
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
 
-
 GOPATH = pathlib.Path(os.environ["GOPATH"])
 ECHO_PATH = GOPATH / "bin" / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
