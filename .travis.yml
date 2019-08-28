@@ -8,6 +8,11 @@ matrix:
     - python: 3.7
       dist: xenial
       env: TOXENV=lint
+    - python: 3.7
+      dist: xenial
+      env: TOXENV=py37-interop
+      before_install:
+        - ./install_interop_go_pkgs.sh
 
 install:
   - pip install --upgrade pip
