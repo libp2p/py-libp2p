@@ -32,6 +32,8 @@ class Swarm(INetwork):
     upgrader: TransportUpgrader
     transport: ITransport
     router: IPeerRouting
+    # TODO: Connections an `peer_id` are 1-1 mapping in our implementation,
+    #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, IMuxedConn]
     listeners: Dict[str, IListener]
     stream_handlers: Dict[INetStream, Callable[[INetStream], None]]
@@ -225,10 +227,8 @@ class Swarm(INetwork):
                     raise SwarmException(
                         f"fail to upgrade the connection to a muxed connection from {peer_id}"
                     ) from error
-
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
-
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
                     await notifee.connected(self, muxed_conn)
