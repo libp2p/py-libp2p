@@ -1,39 +1,18 @@
 import asyncio
 import os
 import pathlib
-import sys
 
 from multiaddr import Multiaddr
-import pexpect
 import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.typing import TProtocol
 
+from .constants import PEXPECT_NEW_LINE
+
 GOPATH = pathlib.Path(os.environ["GOPATH"])
 ECHO_PATH = GOPATH / "bin" / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
-NEW_LINE = "\r\n"
-
-
-@pytest.fixture
-def proc_factory():
-    procs = []
-
-    def call_proc(cmd, args, logfile=None, encoding=None):
-        if logfile is None:
-            logfile = sys.stdout
-        if encoding is None:
-            encoding = "utf-8"
-        proc = pexpect.spawn(cmd, args, logfile=logfile, encoding=encoding)
-        procs.append(proc)
-        return proc
-
-    try:
-        yield call_proc
-    finally:
-        for proc in procs:
-            proc.close()
 
 
 async def make_echo_proc(
@@ -44,8 +23,8 @@ async def make_echo_proc(
         args.append("-insecure")
     if destination is not None:
         args.append(f"-d={str(destination)}")
-    echo_proc = proc_factory(str(ECHO_PATH), args, logfile=sys.stdout, encoding="utf-8")
-    await echo_proc.expect(r"I am ([\w\./]+)" + NEW_LINE, async_=True)
+    echo_proc = proc_factory(str(ECHO_PATH), args)
+    await echo_proc.expect(r"I am ([\w\./]+)" + PEXPECT_NEW_LINE, async_=True)
     maddr_str_ipfs = echo_proc.match.group(1)
     maddr_str = maddr_str_ipfs.replace("ipfs", "p2p")
     maddr = Multiaddr(maddr_str)

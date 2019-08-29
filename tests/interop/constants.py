@@ -1,0 +1,1 @@
+PEXPECT_NEW_LINE = "\r\n"
