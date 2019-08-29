@@ -70,3 +70,11 @@ class INetwork(ABC):
         :param notifee: object implementing Notifee interface
         :return: true if notifee registered successfully, false otherwise
         """
+
+    @abstractmethod
+    async def close(self) -> None:
+        pass
+
+    @abstractmethod
+    async def close_peer(self, peer_id: ID) -> None:
+        pass

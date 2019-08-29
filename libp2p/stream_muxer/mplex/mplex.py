@@ -1,5 +1,6 @@
 import asyncio
-from typing import Dict, Optional, Tuple
+from typing import Any  # noqa: F401
+from typing import Dict, List, Optional, Tuple
 
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
@@ -34,6 +35,8 @@ class Mplex(IMuxedConn):
     stream_queue: "asyncio.Queue[StreamID]"
     next_channel_id: int
 
+    _tasks: List["asyncio.Future[Any]"]
+
     # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(
         self,
@@ -63,8 +66,10 @@ class Mplex(IMuxedConn):
 
         self.stream_queue = asyncio.Queue()
 
+        self._tasks = []
+
         # Kick off reading
-        asyncio.ensure_future(self.handle_incoming())
+        self._tasks.append(asyncio.ensure_future(self.handle_incoming()))
 
     @property
     def initiator(self) -> bool:
@@ -74,6 +79,8 @@ class Mplex(IMuxedConn):
         """
         close the stream muxer and underlying secured connection
         """
+        for task in self._tasks:
+            task.cancel()
         await self.secured_conn.close()
 
     def is_closed(self) -> bool:
@@ -135,7 +142,7 @@ class Mplex(IMuxedConn):
         """
         stream_id = await self.stream_queue.get()
         stream = MplexStream(name, stream_id, self)
-        asyncio.ensure_future(self.generic_protocol_handler(stream))
+        self._tasks.append(asyncio.ensure_future(self.generic_protocol_handler(stream)))
 
     async def send_message(
         self, flag: HeaderTags, data: bytes, stream_id: StreamID

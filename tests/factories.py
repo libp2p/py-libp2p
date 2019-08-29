@@ -1,12 +1,17 @@
+from typing import Dict
+
 import factory
 
-from libp2p import initialize_default_swarm
-from libp2p.crypto.rsa import create_new_key_pair
+from libp2p import generate_new_rsa_identity, initialize_default_swarm
+from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
-from tests.configs import LISTEN_MADDR
+from libp2p.security.base_transport import BaseSecureTransport
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
+from libp2p.security.secio.transport import ID, Transport
+from libp2p.typing import TProtocol
 from tests.pubsub.configs import (
     FLOODSUB_PROTOCOL_ID,
     GOSSIPSUB_PARAMS,
@@ -14,16 +19,34 @@ from tests.pubsub.configs import (
 )
 
 
-def swarm_factory():
-    private_key = create_new_key_pair()
-    return initialize_default_swarm(private_key, transport_opt=[str(LISTEN_MADDR)])
+def security_transport_factory(
+    is_secure: bool, key_pair: KeyPair
+) -> Dict[TProtocol, BaseSecureTransport]:
+    protocol_id: TProtocol
+    security_transport: BaseSecureTransport
+    if not is_secure:
+        protocol_id = PLAINTEXT_PROTOCOL_ID
+        security_transport = InsecureTransport(key_pair)
+    else:
+        protocol_id = ID
+        security_transport = Transport(key_pair)
+    return {protocol_id: security_transport}
+
+
+def swarm_factory(is_secure: bool):
+    key_pair = generate_new_rsa_identity()
+    sec_opt = security_transport_factory(is_secure, key_pair)
+    return initialize_default_swarm(key_pair, sec_opt=sec_opt)
 
 
 class HostFactory(factory.Factory):
     class Meta:
         model = BasicHost
 
-    network = factory.LazyFunction(swarm_factory)
+    class Params:
+        is_secure = False
+
+    network = factory.LazyAttribute(lambda o: swarm_factory(o.is_secure))
 
 
 class FloodsubFactory(factory.Factory):

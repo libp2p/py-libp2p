@@ -1,38 +1,7 @@
-import asyncio
-
 import pytest
 
-from tests.configs import LISTEN_MADDR
+from tests.factories import FloodsubFactory, GossipsubFactory, PubsubFactory
 from tests.pubsub.configs import GOSSIPSUB_PARAMS
-from tests.pubsub.factories import (
-    FloodsubFactory,
-    GossipsubFactory,
-    HostFactory,
-    PubsubFactory,
-)
-
-
-@pytest.fixture
-def num_hosts():
-    return 3
-
-
-@pytest.fixture
-async def hosts(num_hosts):
-    _hosts = HostFactory.create_batch(num_hosts)
-    await asyncio.gather(
-        *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
-    )
-    try:
-        yield _hosts
-    finally:
-        # Clean up
-        listeners = []
-        for _host in _hosts:
-            for listener in _host.get_network().listeners.values():
-                listener.server.close()
-                listeners.append(listener)
-        await asyncio.gather(*[listener.server.wait_closed() for listener in listeners])
 
 
 @pytest.fixture

@@ -3,10 +3,10 @@ import asyncio
 import pytest
 
 from tests.configs import LISTEN_MADDR
+from tests.factories import PubsubFactory
 from tests.utils import cleanup, connect
 
 from .configs import FLOODSUB_PROTOCOL_ID
-from .factories import PubsubFactory
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 
