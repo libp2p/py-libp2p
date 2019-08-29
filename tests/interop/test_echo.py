@@ -57,8 +57,12 @@ async def make_echo_proc(
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.asyncio
-async def test_insecure_conn_py_to_go(hosts, proc_factory, unused_tcp_port):
-    go_proc, go_pinfo = await make_echo_proc(proc_factory, unused_tcp_port, False)
+async def test_insecure_conn_py_to_go(
+    hosts, proc_factory, is_host_secure, unused_tcp_port
+):
+    go_proc, go_pinfo = await make_echo_proc(
+        proc_factory, unused_tcp_port, is_host_secure
+    )
 
     host = hosts[0]
     await host.connect(go_pinfo)
@@ -76,7 +80,9 @@ async def test_insecure_conn_py_to_go(hosts, proc_factory, unused_tcp_port):
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.asyncio
-async def test_insecure_conn_go_to_py(hosts, proc_factory, unused_tcp_port):
+async def test_insecure_conn_go_to_py(
+    hosts, proc_factory, is_host_secure, unused_tcp_port
+):
     host = hosts[0]
     expected_data = "Hello, world!\n"
     reply_data = "Replyooo!\n"
@@ -91,7 +97,9 @@ async def test_insecure_conn_go_to_py(hosts, proc_factory, unused_tcp_port):
 
     host.set_stream_handler(ECHO_PROTOCOL_ID, _handle_echo)
     py_maddr = host.get_addrs()[0]
-    go_proc, _ = await make_echo_proc(proc_factory, unused_tcp_port, False, py_maddr)
+    go_proc, _ = await make_echo_proc(
+        proc_factory, unused_tcp_port, is_host_secure, py_maddr
+    )
     await go_proc.expect("connect with peer", async_=True)
     await go_proc.expect("opened stream", async_=True)
     await event_handler_finished.wait()
