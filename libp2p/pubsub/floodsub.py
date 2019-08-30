@@ -7,6 +7,8 @@ from .pb import rpc_pb2
 from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
 
+PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
+
 
 class FloodSub(IPubsubRouter):
 

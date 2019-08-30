@@ -1,6 +1,4 @@
 import asyncio
-import os
-import pathlib
 
 from multiaddr import Multiaddr
 import pytest
@@ -9,9 +7,9 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.typing import TProtocol
 
 from .constants import PEXPECT_NEW_LINE
+from .envs import GO_BIN_PATH
 
-GOPATH = pathlib.Path(os.environ["GOPATH"])
-ECHO_PATH = GOPATH / "bin" / "echo"
+ECHO_PATH = GO_BIN_PATH / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
 
