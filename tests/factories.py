@@ -10,7 +10,7 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
-from libp2p.security.secio.transport import ID, Transport
+import libp2p.security.secio.transport as secio
 from libp2p.typing import TProtocol
 from tests.pubsub.configs import (
     FLOODSUB_PROTOCOL_ID,
@@ -22,15 +22,10 @@ from tests.pubsub.configs import (
 def security_transport_factory(
     is_secure: bool, key_pair: KeyPair
 ) -> Dict[TProtocol, BaseSecureTransport]:
-    protocol_id: TProtocol
-    security_transport: BaseSecureTransport
     if not is_secure:
-        protocol_id = PLAINTEXT_PROTOCOL_ID
-        security_transport = InsecureTransport(key_pair)
+        return {PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)}
     else:
-        protocol_id = ID
-        security_transport = Transport(key_pair)
-    return {protocol_id: security_transport}
+        return {secio.ID: secio.Transport(key_pair)}
 
 
 def swarm_factory(is_secure: bool):
