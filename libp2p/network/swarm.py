@@ -279,6 +279,8 @@ class Swarm(INetwork):
         )
 
     async def close_peer(self, peer_id: ID) -> None:
+        if peer_id not in self.connections:
+            return
         connection = self.connections[peer_id]
         del self.connections[peer_id]
         await connection.close()
