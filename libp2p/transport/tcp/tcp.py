@@ -45,20 +45,16 @@ class TCPListener(IListener):
         # TODO check if server is listening
         return self.multiaddrs
 
-    def close(self) -> bool:
+    async def close(self) -> None:
         """
         close the listener such that no more connections
         can be open on this transport instance
-        :return: return True if successful
         """
         if self.server is None:
-            return False
+            return
         self.server.close()
-        _loop = asyncio.get_event_loop()
-        _loop.run_until_complete(self.server.wait_closed())
-        _loop.close()
+        await self.server.wait_closed()
         self.server = None
-        return True
 
 
 class TCP(ITransport):

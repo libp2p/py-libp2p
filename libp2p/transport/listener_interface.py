@@ -21,9 +21,8 @@ class IListener(ABC):
         """
 
     @abstractmethod
-    def close(self) -> bool:
+    async def close(self) -> None:
         """
         close the listener such that no more connections
         can be open on this transport instance
-        :return: return True if successful
         """

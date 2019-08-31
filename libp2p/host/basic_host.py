@@ -107,3 +107,9 @@ class BasicHost(IHost):
             return
 
         await self._network.dial_peer(peer_info.peer_id)
+
+    async def disconnect(self, peer_id: ID) -> None:
+        await self._network.close_peer(peer_id)
+
+    async def close(self) -> None:
+        await self._network.close()

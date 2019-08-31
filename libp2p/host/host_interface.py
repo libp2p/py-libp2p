@@ -71,3 +71,11 @@ class IHost(ABC):
         :param peer_info: peer_info of the host we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
+
+    @abstractmethod
+    async def disconnect(self, peer_id: ID) -> None:
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        pass

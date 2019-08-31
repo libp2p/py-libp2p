@@ -3,9 +3,9 @@ import asyncio
 import pytest
 
 from libp2p.peer.id import ID
+from tests.factories import FloodsubFactory
 from tests.utils import cleanup, connect
 
-from .factories import FloodsubFactory
 from .floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,

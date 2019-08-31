@@ -32,6 +32,8 @@ class Swarm(INetwork):
     upgrader: TransportUpgrader
     transport: ITransport
     router: IPeerRouting
+    # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
+    #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, IMuxedConn]
     listeners: Dict[str, IListener]
     stream_handlers: Dict[INetStream, Callable[[INetStream], None]]
@@ -225,10 +227,8 @@ class Swarm(INetwork):
                     raise SwarmException(
                         f"fail to upgrade the connection to a muxed connection from {peer_id}"
                     ) from error
-
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
-
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
                     await notifee.connected(self, muxed_conn)
@@ -264,12 +264,26 @@ class Swarm(INetwork):
     def add_router(self, router: IPeerRouting) -> None:
         self.router = router
 
-    # TODO: `tear_down`
-    async def tear_down(self) -> None:
-        # Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L118  # noqa: E501
-        pass
+    async def close(self) -> None:
+        # TODO: Prevent from new listeners and conns being added.
+        #   Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L124-L134  # noqa: E501
 
-    # TODO: `disconnect`?
+        # Close listeners
+        await asyncio.gather(
+            *[listener.close() for listener in self.listeners.values()]
+        )
+
+        # Close connections
+        await asyncio.gather(
+            *[connection.close() for connection in self.connections.values()]
+        )
+
+    async def close_peer(self, peer_id: ID) -> None:
+        if peer_id not in self.connections:
+            return
+        connection = self.connections[peer_id]
+        del self.connections[peer_id]
+        await connection.close()
 
 
 def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
