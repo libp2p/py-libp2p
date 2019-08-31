@@ -26,7 +26,7 @@ async def hosts(num_hosts, is_host_secure):
         yield _hosts
     finally:
         # TODO: It's possible that `close` raises exceptions currently,
-        #   due to the connection reset things. Though we are not so careful about that when
+        #   due to the connection reset things. Though we don't care much about that when
         #   cleaning up the tasks, it is probably better to handle the exceptions properly.
         await asyncio.gather(
             *[_host.close() for _host in _hosts], return_exceptions=True
