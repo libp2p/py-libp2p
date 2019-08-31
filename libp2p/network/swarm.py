@@ -32,7 +32,7 @@ class Swarm(INetwork):
     upgrader: TransportUpgrader
     transport: ITransport
     router: IPeerRouting
-    # TODO: Connections an `peer_id` are 1-1 mapping in our implementation,
+    # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
     #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, IMuxedConn]
     listeners: Dict[str, IListener]
