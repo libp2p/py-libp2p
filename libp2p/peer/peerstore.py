@@ -33,7 +33,7 @@ class PeerStore(IPeerStore):
     def peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
         if peer_id in self.peer_map:
             peer_data = self.peer_map[peer_id]
-            return PeerInfo(peer_id, peer_data)
+            return PeerInfo(peer_id, peer_data.addrs)
         return None
 
     def get_protocols(self, peer_id: ID) -> List[str]:
