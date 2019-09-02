@@ -39,14 +39,16 @@ class P2PDProcess:
     cmd: str = str(P2PD_PATH)
     args: List[Any]
 
+    _tasks: List["asyncio.Future[Any]"]
+
     def __init__(
         self,
         control_maddr: Multiaddr,
         is_secure: bool,
-        is_pubsub_enabled=True,
-        is_gossipsub=True,
-        is_pubsub_signing=False,
-        is_pubsub_signing_strict=False,
+        is_pubsub_enabled: bool = True,
+        is_gossipsub: bool = True,
+        is_pubsub_signing: bool = False,
+        is_pubsub_signing_strict: bool = False,
     ) -> None:
         args = [f"-listen={str(control_maddr)}"]
         # NOTE: To support `-insecure`, we need to hack `go-libp2p-daemon`.
@@ -68,6 +70,7 @@ class P2PDProcess:
             #   - gossipsubHeartbeatInitialDelay: GossipSubHeartbeatInterval = 1 * time.Second
             #   Referece: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/p2pd/main.go#L348-L353  # noqa: E501
         self.args = args
+        self._tasks = []
 
     async def wait_until_ready(self):
         lines_head_pattern = (b"Control socket:", b"Peer ID:", b"Peer Addrs:")
@@ -84,6 +87,24 @@ class P2PDProcess:
         # Sleep a little bit to ensure the listener is up after logs are emitted.
         await asyncio.sleep(0.01)
 
+    async def start_printing_logs(self) -> None:
+        async def _print_from_stream(
+            src_name: str, reader: asyncio.StreamReader
+        ) -> None:
+            while True:
+                line = await reader.readline()
+                if line != b"":
+                    print(f"{src_name}\t: {line.rstrip().decode()}")
+                await asyncio.sleep(0.01)
+
+        self._tasks.append(
+            asyncio.ensure_future(_print_from_stream("out", self.proc.stdout))
+        )
+        self._tasks.append(
+            asyncio.ensure_future(_print_from_stream("err", self.proc.stderr))
+        )
+        await asyncio.sleep(0)
+
     async def start(self) -> None:
         self.proc = await asyncio.subprocess.create_subprocess_exec(
             self.cmd,
@@ -93,10 +114,13 @@ class P2PDProcess:
             bufsize=0,
         )
         await self.wait_until_ready()
+        await self.start_printing_logs()
 
     async def close(self) -> None:
         self.proc.terminate()
         await self.proc.wait()
+        for task in self._tasks:
+            task.cancel()
 
 
 class Daemon:
@@ -165,5 +189,4 @@ async def make_p2pd(
     peer_info = info_from_p2p_addr(
         listen_maddr.encapsulate(Multiaddr(f"/p2p/{peer_id.to_string()}"))
     )
-    print(f"!@# peer_info: peer_id={peer_info.peer_id}, maddrs={peer_info.addrs}")
     return Daemon(p2pd_proc, p2pc, peer_info)
