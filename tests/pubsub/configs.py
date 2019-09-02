@@ -1,8 +1,6 @@
 from typing import NamedTuple
 
-from libp2p.pubsub import floodsub
-from libp2p.pubsub import gossipsub
-
+from libp2p.pubsub import floodsub, gossipsub
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID = gossipsub.PROTOCOL_ID

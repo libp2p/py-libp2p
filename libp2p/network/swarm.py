@@ -217,6 +217,10 @@ class Swarm(INetwork):
                         "fail to upgrade the connection to a secured connection"
                     ) from error
                 peer_id = secured_conn.get_remote_peer()
+                peer_ip, peer_port = writer.get_extra_info("peername")
+                peer_maddr = Multiaddr(f"/ip4/{peer_ip}/tcp/{peer_port}")
+                # TODO: Fix the ttl
+                self.peerstore.add_addr(peer_id, peer_maddr, 12345678)
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
                         secured_conn, self.generic_protocol_handler, peer_id

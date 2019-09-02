@@ -4,8 +4,8 @@ from typing import Union
 from multiaddr import Multiaddr
 
 from libp2p.host.host_interface import IHost
-from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
 
 from .daemon import Daemon
 
