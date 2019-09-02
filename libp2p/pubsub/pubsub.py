@@ -16,6 +16,7 @@ from typing import (
 
 from lru import LRU
 
+from libp2p.utils import encode_varint_prefixed
 from libp2p.exceptions import ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
@@ -131,7 +132,7 @@ class Pubsub:
         # Call handle peer to keep waiting for updates to peer queue
         asyncio.ensure_future(self.handle_peer_queue())
 
-    def get_hello_packet(self) -> bytes:
+    def get_hello_packet(self) -> rpc_pb2.RPC:
         """
         Generate subscription message with all topics we are subscribed to
         only send hello packet if we have subscribed topics
@@ -141,7 +142,7 @@ class Pubsub:
             packet.subscriptions.extend(
                 [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
             )
-        return packet.SerializeToString()
+        return packet
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
         """
@@ -227,9 +228,9 @@ class Pubsub:
         self.router.add_peer(peer_id, stream.get_protocol())
 
         # Send hello packet
-        hello: bytes = self.get_hello_packet()
+        hello = self.get_hello_packet()
+        await stream.write(hello.SerializeToString())
 
-        await stream.write(hello)
         # Pass stream off to stream reader
         asyncio.ensure_future(self.continuously_read_stream(stream))
         # Force context switch
@@ -257,8 +258,8 @@ class Pubsub:
             self.router.add_peer(peer_id, stream.get_protocol())
 
             # Send hello packet
-            hello: bytes = self.get_hello_packet()
-            await stream.write(hello)
+            hello = self.get_hello_packet()
+            await stream.write(hello.SerializeToString())
 
             # TODO: Investigate whether this should be replaced by `handlePeerEOF`
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/49274b0e8aecdf6cad59d768e5702ff00aa48488/comm.go#L80  # noqa: E501

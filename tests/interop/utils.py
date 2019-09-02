@@ -5,10 +5,33 @@ from multiaddr import Multiaddr
 
 from libp2p.host.host_interface import IHost
 from libp2p.peer.peerinfo import PeerInfo
+from libp2p.peer.id import ID
 
 from .daemon import Daemon
 
 TDaemonOrHost = Union[IHost, Daemon]
+
+
+def _get_peer_info(node: TDaemonOrHost) -> PeerInfo:
+    peer_info: PeerInfo
+    if isinstance(node, Daemon):
+        peer_info = node.peer_info
+    else:  # isinstance(node, IHost)
+        peer_id = node.get_id()
+        maddrs = [
+            node.get_addrs()[0].decapsulate(Multiaddr(f"/p2p/{peer_id.to_string()}"))
+        ]
+        peer_info = PeerInfo(peer_id, maddrs)
+    return peer_info
+
+
+async def _is_peer(peer_id: ID, node: TDaemonOrHost) -> bool:
+    if isinstance(node, Daemon):
+        pinfos = await node.control.list_peers()
+        peers = tuple([pinfo.peer_id for pinfo in pinfos])
+        return peer_id in peers
+    else:  # isinstance(node, IHost)
+        return peer_id in node.get_network().connections
 
 
 async def connect(a: TDaemonOrHost, b: TDaemonOrHost) -> None:
@@ -21,20 +44,15 @@ async def connect(a: TDaemonOrHost, b: TDaemonOrHost) -> None:
         [isinstance(node, IHost) or isinstance(node, Daemon) for node in (a, b)]
     ), err_msg
 
-    # TODO: Get peer info
-    peer_info: PeerInfo
-    if isinstance(b, Daemon):
-        peer_info = b.peer_info
-    else:  # isinstance(b, IHost)
-        peer_id = b.get_id()
-        maddrs = [
-            b.get_addrs()[0].decapsulate(Multiaddr(f"/p2p/{peer_id.to_string()}"))
-        ]
-        peer_info = PeerInfo(peer_id, maddrs)
-    # TODO: connect to peer info
+    b_peer_info = _get_peer_info(b)
     if isinstance(a, Daemon):
-        await a.control.connect(peer_info.peer_id, peer_info.addrs)
+        await a.control.connect(b_peer_info.peer_id, b_peer_info.addrs)
     else:  # isinstance(b, IHost)
-        await a.connect(peer_info)
+        await a.connect(b_peer_info)
     # Allow additional sleep for both side to establish the connection.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
+
+    a_peer_info = _get_peer_info(a)
+
+    assert await _is_peer(b_peer_info.peer_id, a)
+    assert await _is_peer(a_peer_info.peer_id, b)

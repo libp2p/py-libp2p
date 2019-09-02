@@ -70,8 +70,7 @@ async def test_peers_subscribe(pubsubs_fsub):
 @pytest.mark.asyncio
 async def test_get_hello_packet(pubsubs_fsub):
     def _get_hello_packet_topic_ids():
-        packet = rpc_pb2.RPC()
-        packet.ParseFromString(pubsubs_fsub[0].get_hello_packet())
+        packet = pubsubs_fsub[0].get_hello_packet()
         return tuple(sub.topicid for sub in packet.subscriptions)
 
     # Test: No subscription, so there should not be any topic ids in the hello packet.
