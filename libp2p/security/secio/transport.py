@@ -245,7 +245,12 @@ async def _establish_session_parameters(
     if not remote_peer:
         remote_peer = remote_peer_from_proposal
     elif remote_peer != remote_peer_from_proposal:
-        raise PeerMismatchException()
+        raise PeerMismatchException(
+            {
+                "expected_remote_peer": remote_peer,
+                "received_remote_peer": remote_peer_from_proposal,
+            }
+        )
     session_parameters.remote_peer = remote_peer
 
     curve_param, cipher_param, hash_param, order = _select_encryption_parameters(
