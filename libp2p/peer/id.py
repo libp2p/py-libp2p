@@ -11,6 +11,32 @@ from libp2p.crypto.keys import PublicKey
 # intended for debugging, logging, etc.
 FRIENDLY_IDS = True
 
+# NOTE: On inlining...
+# See: https://github.com/libp2p/specs/issues/138
+# NOTE: enabling to be interoperable w/ the Go implementation
+ENABLE_INLINING = True
+MAX_INLINE_KEY_LENGTH = 42
+
+IDENTITY_MULTIHASH_CODE = 0x00
+
+if ENABLE_INLINING:
+
+    class IdentityHash:
+        _digest: bytes
+
+        def __init__(self) -> None:
+            self._digest = bytearray()
+
+        def update(self, input: bytes) -> None:
+            self._digest += input
+
+        def digest(self) -> bytes:
+            return self._digest
+
+    multihash.FuncReg.register(
+        IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
+    )
+
 
 class ID:
     _bytes: bytes
@@ -68,6 +94,8 @@ class ID:
     def from_pubkey(cls, key: PublicKey) -> "ID":
         serialized_key = key.serialize()
         algo = multihash.Func.sha2_256
+        if ENABLE_INLINING and len(serialized_key) <= MAX_INLINE_KEY_LENGTH:
+            algo = IDENTITY_MULTIHASH_CODE
         mh_digest = multihash.digest(serialized_key, algo)
         return cls(mh_digest.encode())
 
