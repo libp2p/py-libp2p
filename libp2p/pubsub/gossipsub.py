@@ -4,6 +4,7 @@ import random
 from typing import Any, Dict, Iterable, List, Sequence, Set
 
 from libp2p.peer.id import ID
+from libp2p.pubsub import floodsub
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
@@ -107,16 +108,19 @@ class GossipSub(IPubsubRouter):
         :param peer_id: id of peer to add
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
-
-        # Add peer to the correct peer list
-        peer_type = GossipSub.get_peer_type(protocol_id)
-
         self.peers_to_protocol[peer_id] = protocol_id
 
-        if peer_type == "gossip":
+        if protocol_id == PROTOCOL_ID:
             self.peers_gossipsub.append(peer_id)
-        elif peer_type == "flood":
+        elif protocol_id == floodsub.PROTOCOL_ID:
             self.peers_floodsub.append(peer_id)
+        else:
+            # We should never enter here. Becuase the `protocol_id` is registered by your pubsub
+            #   instance in multistream-select, but it is not the protocol that gossipsub supports,
+            #   what we check above. In this case, probably we registered gossipsub to a wrong
+            #   `protocol_id` in multistream-select, or wrong versions.
+            # TODO: Better handling
+            raise Exception(f"protocol is not supported: protocol_id={protocol_id}")
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -266,16 +270,6 @@ class GossipSub(IPubsubRouter):
 
         # Forget mesh[topic]
         self.mesh.pop(topic, None)
-
-    # Interface Helper Functions
-    @staticmethod
-    def get_peer_type(protocol_id: str) -> str:
-        # TODO: Do this in a better, more efficient way
-        if "gossipsub" in protocol_id:
-            return "gossip"
-        if "floodsub" in protocol_id:
-            return "flood"
-        return "unknown"
 
     # Heartbeat
     async def heartbeat(self) -> None:

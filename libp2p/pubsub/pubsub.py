@@ -227,12 +227,8 @@ class Pubsub:
         await self.continuously_read_stream(stream)
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
-        # Open a stream to peer on existing connection
-        # (we know connection exists since that's the only way
-        # an element gets added to peer_queue)
         stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
 
-        # Map peer to stream
         self.peers[peer_id] = stream
 
         # Send hello packet

@@ -140,7 +140,9 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
     "num_hosts, gossipsub_params", ((2, GossipsubParams(heartbeat_interval=3)),)
 )
 @pytest.mark.asyncio
-async def test_handle_prune(pubsubs_gsub, hosts, gossipsubs):
+async def test_handle_prune(pubsubs_gsub, hosts):
+    gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
+
     index_alice = 0
     id_alice = hosts[index_alice].get_id()
     index_bob = 1
