@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import itertools
 from typing import Optional, Tuple
 
 import multihash
@@ -180,7 +181,7 @@ def _select_parameter_from_order(
     else:
         return supported_parameters.split(",")[0]
 
-    for first, second in zip(first_choices, second_choices):
+    for first, second in itertools.product(first_choices, second_choices):
         if first == second:
             return first
     raise IncompatibleChoices()
@@ -245,7 +246,12 @@ async def _establish_session_parameters(
     if not remote_peer:
         remote_peer = remote_peer_from_proposal
     elif remote_peer != remote_peer_from_proposal:
-        raise PeerMismatchException()
+        raise PeerMismatchException(
+            {
+                "expected_remote_peer": remote_peer,
+                "received_remote_peer": remote_peer_from_proposal,
+            }
+        )
     session_parameters.remote_peer = remote_peer
 
     curve_param, cipher_param, hash_param, order = _select_encryption_parameters(
