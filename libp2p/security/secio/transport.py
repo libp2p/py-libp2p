@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import itertools
 from typing import Optional, Tuple
 
 import multihash
@@ -180,7 +181,7 @@ def _select_parameter_from_order(
     else:
         return supported_parameters.split(",")[0]
 
-    for first, second in zip(first_choices, second_choices):
+    for first, second in itertools.product(first_choices, second_choices):
         if first == second:
             return first
     raise IncompatibleChoices()
