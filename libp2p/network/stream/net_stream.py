@@ -7,6 +7,7 @@ from .net_stream_interface import INetStream
 class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
+    # TODO: Why we expose `mplex_conn` here?
     mplex_conn: IMuxedConn
     protocol_id: TProtocol
 

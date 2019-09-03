@@ -9,5 +9,4 @@ if TYPE_CHECKING:
 TProtocol = NewType("TProtocol", str)
 StreamHandlerFn = Callable[["INetStream"], Awaitable[None]]
 
-
-StreamReader = Union["IMuxedStream", IRawConnection]
+StreamReader = Union["IMuxedStream", "INetStream", IRawConnection]
