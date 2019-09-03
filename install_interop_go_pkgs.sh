@@ -27,4 +27,4 @@ cd -
 # Install example modeuls
 cd $EXAMPLES_PATHS && go install ./...
 
-echo "Finish installing go modeuls for interop."
+echo "Finish installing go modules for interop."
