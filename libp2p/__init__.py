@@ -41,9 +41,7 @@ def generate_new_rsa_identity() -> KeyPair:
     return create_new_key_pair()
 
 
-def generate_peer_id_from_rsa_identity(key_pair: KeyPair = None) -> ID:
-    if not key_pair:
-        key_pair = generate_new_rsa_identity()
+def generate_peer_id_from(key_pair: KeyPair) -> ID:
     public_key = key_pair.public_key
     return ID.from_pubkey(public_key)
 
@@ -61,7 +59,8 @@ def initialize_default_kademlia_router(
     :return: return a default kademlia instance
     """
     if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity()
+        key_pair = generate_new_rsa_identity()
+        id_opt = generate_peer_id_from(key_pair)
 
     node_id = id_opt.to_bytes()
     # ignore type for Kademlia module
@@ -92,7 +91,7 @@ def initialize_default_swarm(
     """
 
     if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity(key_pair)
+        id_opt = generate_peer_id_from(key_pair)
 
     # TODO: Parse `transport_opt` to determine transport
     transport = TCP()
@@ -114,7 +113,6 @@ def initialize_default_swarm(
 async def new_node(
     key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
-    id_opt: ID = None,
     transport_opt: Sequence[str] = None,
     muxer_opt: Mapping[TProtocol, MuxerClassType] = None,
     sec_opt: Mapping[TProtocol, ISecureTransport] = None,
@@ -137,8 +135,7 @@ async def new_node(
     if not key_pair:
         key_pair = generate_new_rsa_identity()
 
-    if not id_opt:
-        id_opt = generate_peer_id_from_rsa_identity(key_pair)
+    id_opt = generate_peer_id_from(key_pair)
 
     if not swarm_opt:
         swarm_opt = initialize_default_swarm(
