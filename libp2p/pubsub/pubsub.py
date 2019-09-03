@@ -153,14 +153,11 @@ class Pubsub:
         peer_id = stream.mplex_conn.peer_id
 
         while True:
-            print("!@# continuously_read_stream: waiting")
             incoming: bytes = await read_varint_prefixed_bytes(stream)
-            print(f"!@# continuously_read_stream: incoming={incoming}")
             rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
 
             if rpc_incoming.publish:
-                print("!@# continuously_read_stream: publish")
                 # deal with RPC.publish
                 for msg in rpc_incoming.publish:
                     if not self._is_subscribed_to_msg(msg):
@@ -168,7 +165,6 @@ class Pubsub:
                     asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
-                print("!@# continuously_read_stream: subscriptions")
                 # deal with RPC.subscriptions
                 # We don't need to relay the subscription to our
                 # peers because a given node only needs its peers
@@ -181,7 +177,6 @@ class Pubsub:
             #   This is necessary because `control` is an optional field in pb2.
             #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
             if rpc_incoming.HasField("control"):
-                print("!@# continuously_read_stream: control")
                 # Pass rpc to router so router could perform custom logic
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
