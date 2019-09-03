@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Sequence
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
+from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
@@ -15,7 +16,6 @@ from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn, TProtocol
-from libp2p.peer.peerstore import PeerStoreError
 
 from .connection.raw_connection import RawConnection
 from .exceptions import SwarmException

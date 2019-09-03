@@ -1,13 +1,12 @@
 import asyncio
 import functools
 
+from p2pclient.pb import p2pd_pb2
 import pytest
 
 from libp2p.peer.id import ID
-from libp2p.utils import read_varint_prefixed_bytes
 from libp2p.pubsub.pb import rpc_pb2
-
-from p2pclient.pb import p2pd_pb2
+from libp2p.utils import read_varint_prefixed_bytes
 
 from .utils import connect
 
@@ -57,13 +56,14 @@ def validate_pubsub_msg(msg: rpc_pb2.Message, data: bytes, from_peer_id: ID) -> 
     assert msg.data == data and msg.from_id == from_peer_id
 
 
+@pytest.mark.parametrize("is_gossipsub", (True, False))
 @pytest.mark.parametrize("num_hosts, num_p2pds", ((1, 2),))
 @pytest.mark.asyncio
-async def test_pubsub(pubsubs_gsub, p2pds):
+async def test_pubsub(pubsubs, p2pds):
     #
     # Test: Recognize pubsub peers on connection.
     #
-    py_pubsub = pubsubs_gsub[0]
+    py_pubsub = pubsubs[0]
     # go0 <-> py <-> go1
     await connect(p2pds[0], py_pubsub.host)
     await connect(py_pubsub.host, p2pds[1])

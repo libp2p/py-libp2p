@@ -4,6 +4,9 @@ import sys
 import pexpect
 import pytest
 
+from tests.factories import FloodsubFactory, GossipsubFactory, PubsubFactory
+from tests.pubsub.configs import GOSSIPSUB_PARAMS
+
 from .daemon import make_p2pd
 
 
@@ -33,11 +36,35 @@ def num_p2pds():
 
 
 @pytest.fixture
-async def p2pds(num_p2pds, is_host_secure, unused_tcp_port_factory):
+def is_gossipsub():
+    return True
+
+
+@pytest.fixture
+async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory):
     p2pds = await asyncio.gather(
-        *[make_p2pd(unused_tcp_port_factory, is_host_secure) for _ in range(num_p2pds)]
+        *[
+            make_p2pd(
+                unused_tcp_port_factory, is_host_secure, is_gossipsub=is_gossipsub
+            )
+            for _ in range(num_p2pds)
+        ]
     )
     try:
         yield p2pds
     finally:
         await asyncio.gather(*[p2pd.close() for p2pd in p2pds])
+
+
+@pytest.fixture
+def pubsubs(num_hosts, hosts, is_gossipsub):
+    routers = None
+    if is_gossipsub:
+        routers = GossipsubFactory.create_batch(num_hosts, **GOSSIPSUB_PARAMS._asdict())
+    else:
+        routers = FloodsubFactory.create_batch(num_hosts)
+    _pubsubs = tuple(
+        PubsubFactory(host=host, router=router) for host, router in zip(hosts, routers)
+    )
+    yield _pubsubs
+    # TODO: Clean up
