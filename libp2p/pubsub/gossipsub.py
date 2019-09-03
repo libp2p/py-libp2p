@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Set
 
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
+from libp2p.utils import encode_varint_prefixed
 
 from .mcache import MessageCache
 from .pb import rpc_pb2
@@ -169,7 +170,7 @@ class GossipSub(IPubsubRouter):
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await stream.write(rpc_msg.SerializeToString())
+            await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -275,19 +276,6 @@ class GossipSub(IPubsubRouter):
         if "floodsub" in protocol_id:
             return "flood"
         return "unknown"
-
-    async def deliver_messages_to_peers(
-        self, peers: List[ID], msg_sender: ID, origin_id: ID, serialized_packet: bytes
-    ) -> None:
-        for peer_id_in_topic in peers:
-            # Forward to all peers that are not the
-            # message sender and are not the message origin
-
-            if peer_id_in_topic not in (msg_sender, origin_id):
-                stream = self.pubsub.peers[peer_id_in_topic]
-
-                # Publish the packet
-                await stream.write(serialized_packet)
 
     # Heartbeat
     async def heartbeat(self) -> None:
@@ -511,7 +499,7 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        await peer_stream.write(rpc_msg)
+        await peer_stream.write(encode_varint_prefixed(rpc_msg))
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -603,4 +591,4 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream
-        await peer_stream.write(rpc_msg)
+        await peer_stream.write(encode_varint_prefixed(rpc_msg))

@@ -72,7 +72,7 @@ class Pubsub:
 
     topic_validators: Dict[str, TopicValidator]
 
-    # NOTE: Be sure it is increased atomically everytime.
+    # TODO: Be sure it is increased atomically everytime.
     counter: int  # uint64
 
     def __init__(
@@ -165,8 +165,6 @@ class Pubsub:
                 for msg in rpc_incoming.publish:
                     if not self._is_subscribed_to_msg(msg):
                         continue
-                    # TODO(mhchia): This will block this read_stream loop until all data are pushed.
-                    #   Should investigate further if this is an issue.
                     asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
