@@ -152,14 +152,15 @@ class Daemon:
 
 
 async def make_p2pd(
-    unused_tcp_port_factory,
+    daemon_control_port: int,
+    client_callback_port: int,
     is_secure: bool,
     is_pubsub_enabled=True,
     is_gossipsub=True,
     is_pubsub_signing=False,
     is_pubsub_signing_strict=False,
 ) -> Daemon:
-    control_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{unused_tcp_port_factory()}")
+    control_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{daemon_control_port}")
     p2pd_proc = P2PDProcess(
         control_maddr,
         is_secure,
@@ -169,9 +170,7 @@ async def make_p2pd(
         is_pubsub_signing_strict,
     )
     await p2pd_proc.start()
-    client_callback_maddr = Multiaddr(
-        f"/ip4/{LOCALHOST_IP}/tcp/{unused_tcp_port_factory()}"
-    )
+    client_callback_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{client_callback_port}")
     p2pc = Client(control_maddr, client_callback_maddr)
     await p2pc.listen()
     peer_id, maddrs = await p2pc.identify()

@@ -45,7 +45,10 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
     p2pds = await asyncio.gather(
         *[
             make_p2pd(
-                unused_tcp_port_factory, is_host_secure, is_gossipsub=is_gossipsub
+                unused_tcp_port_factory(),
+                unused_tcp_port_factory(),
+                is_host_secure,
+                is_gossipsub=is_gossipsub,
             )
             for _ in range(num_p2pds)
         ]
