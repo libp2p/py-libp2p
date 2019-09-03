@@ -1,22 +1,34 @@
-from typing import cast
-
-from Crypto.PublicKey import ECC
-from Crypto.PublicKey.ECC import EccKey
+from fastecdsa import curve as curve_types
+from fastecdsa import keys, point
+from fastecdsa.encoding.sec1 import SEC1Encoder
 
 from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
 
 
+def infer_local_type(curve: str) -> curve_types.Curve:
+    """
+    converts a ``str`` representation of some elliptic curve to
+    a representation understood by the backend of this module.
+    """
+    if curve == "P-256":
+        return curve_types.P256
+    else:
+        raise NotImplementedError()
+
+
 class ECCPublicKey(PublicKey):
-    def __init__(self, impl: EccKey) -> None:
+    def __init__(self, impl: point.Point, curve: curve_types.Curve) -> None:
         self.impl = impl
+        self.curve = curve
 
     def to_bytes(self) -> bytes:
-        return cast(bytes, self.impl.export_key(format="DER"))
+        return SEC1Encoder.encode_public_key(self.impl, compressed=False)
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "ECCPublicKey":
-        public_key_impl = ECC.import_key(data)
-        return cls(public_key_impl)
+    def from_bytes(cls, data: bytes, curve: str) -> "ECCPublicKey":
+        curve_type = infer_local_type(curve)
+        public_key_impl = SEC1Encoder.decode_public_key(data, curve_type)
+        return cls(public_key_impl, curve_type)
 
     def get_type(self) -> KeyType:
         return KeyType.ECC_P256
@@ -26,16 +38,18 @@ class ECCPublicKey(PublicKey):
 
 
 class ECCPrivateKey(PrivateKey):
-    def __init__(self, impl: EccKey) -> None:
+    def __init__(self, impl: int, curve: curve_types.Curve) -> None:
         self.impl = impl
+        self.curve = curve
 
     @classmethod
     def new(cls, curve: str) -> "ECCPrivateKey":
-        private_key_impl = ECC.generate(curve=curve)
-        return cls(private_key_impl)
+        curve_type = infer_local_type(curve)
+        private_key_impl = keys.gen_private_key(curve_type)
+        return cls(private_key_impl, curve_type)
 
     def to_bytes(self) -> bytes:
-        return cast(bytes, self.impl.export_key(format="DER"))
+        return keys.export_key(self.impl, self.curve)
 
     def get_type(self) -> KeyType:
         return KeyType.ECC_P256
@@ -44,7 +58,8 @@ class ECCPrivateKey(PrivateKey):
         raise NotImplementedError
 
     def get_public_key(self) -> PublicKey:
-        return ECCPublicKey(self.impl.public_key())
+        public_key_impl = keys.get_public_key(self.impl, self.curve)
+        return ECCPublicKey(public_key_impl, self.curve)
 
 
 def create_new_key_pair(curve: str) -> KeyPair:

@@ -1,9 +1,8 @@
 from typing import Callable, Tuple, cast
 
-from Crypto.Math.Numbers import Integer
-import Crypto.PublicKey.ECC as ECC
+from fastecdsa.encoding.util import int_bytelen
 
-from libp2p.crypto.ecc import ECCPrivateKey, create_new_key_pair
+from libp2p.crypto.ecc import ECCPrivateKey, ECCPublicKey, create_new_key_pair
 from libp2p.crypto.keys import PublicKey
 
 SharedKeyGenerator = Callable[[bytes], bytes]
@@ -19,11 +18,12 @@ def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGene
     key_pair = create_new_key_pair(curve_type)
 
     def _key_exchange(serialized_remote_public_key: bytes) -> bytes:
-        remote_public_key = ECC.import_key(serialized_remote_public_key)
-        curve_point = remote_public_key.pointQ
         private_key = cast(ECCPrivateKey, key_pair.private_key)
-        secret_point = curve_point * private_key.impl.d
-        byte_size = secret_point.size_in_bytes()
-        return cast(Integer, secret_point.x).to_bytes(byte_size)
+
+        remote_point = ECCPublicKey.from_bytes(serialized_remote_public_key, curve_type)
+        secret_point = remote_point.impl * private_key.impl
+        secret_x_coordinate = secret_point.x
+        byte_size = int_bytelen(secret_x_coordinate)
+        return secret_x_coordinate.to_bytes(byte_size, byteorder="big")
 
     return key_pair.public_key, _key_exchange

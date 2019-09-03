@@ -283,7 +283,7 @@ async def _establish_session_parameters(
 
     remote_ephemeral_public_key_bytes = remote_exchange.ephemeral_public_key
     remote_ephemeral_public_key = ECCPublicKey.from_bytes(
-        remote_ephemeral_public_key_bytes
+        remote_ephemeral_public_key_bytes, curve_param
     )
     remote_encryption_parameters.ephemeral_public_key = remote_ephemeral_public_key
     remote_selection = (
