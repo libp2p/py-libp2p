@@ -61,7 +61,6 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
 
 @pytest.fixture
 def pubsubs(num_hosts, hosts, is_gossipsub):
-    routers = None
     if is_gossipsub:
         routers = GossipsubFactory.create_batch(num_hosts, **GOSSIPSUB_PARAMS._asdict())
     else:
