@@ -31,7 +31,7 @@ class BaseSession(ISecureConn):
         self.remote_permanent_pubkey = None
 
         self.conn = conn
-        self.initiator = self.conn.initiator
+        self.initiator = peer_id is not None
 
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)

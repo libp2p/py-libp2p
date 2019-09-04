@@ -20,11 +20,12 @@ class InMemoryConnection(IRawConnection):
 
         self.closed = False
 
-    async def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> int:
         if self.closed:
             raise Exception("InMemoryConnection is closed for writing")
 
         await self.send_queue.put(data)
+        return len(data)
 
     async def read(self, n: int = -1) -> bytes:
         """
