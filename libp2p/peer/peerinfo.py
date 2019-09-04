@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Sequence
 
 import multiaddr
 
@@ -10,9 +10,9 @@ class PeerInfo:
     peer_id: ID
     addrs: List[multiaddr.Multiaddr]
 
-    def __init__(self, peer_id: ID, addrs: List[multiaddr.Multiaddr]) -> None:
+    def __init__(self, peer_id: ID, addrs: Sequence[multiaddr.Multiaddr]) -> None:
         self.peer_id = peer_id
-        self.addrs = addrs
+        self.addrs = list(addrs)
 
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:

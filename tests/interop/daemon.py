@@ -183,6 +183,7 @@ async def make_p2pd(
     for maddr in maddrs:
         try:
             ip = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
+            # NOTE: Check if this `maddr` uses `tcp`.
             maddr.value_for_protocol(multiaddr.protocols.P_TCP)
         except multiaddr.exceptions.ProtocolLookupError:
             continue

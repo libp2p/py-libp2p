@@ -116,9 +116,9 @@ class GossipSub(IPubsubRouter):
             self.peers_floodsub.append(peer_id)
         else:
             # We should never enter here. Becuase the `protocol_id` is registered by your pubsub
-            #   instance in multistream-select, but it is not the protocol that gossipsub supports,
-            #   what we check above. In this case, probably we registered gossipsub to a wrong
-            #   `protocol_id` in multistream-select, or wrong versions.
+            #   instance in multistream-select, but it is not the protocol that gossipsub supports.
+            #   In this case, probably we registered gossipsub to a wrong `protocol_id`
+            #   in multistream-select, or wrong versions.
             # TODO: Better handling
             raise Exception(f"protocol is not supported: protocol_id={protocol_id}")
 
