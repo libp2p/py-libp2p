@@ -81,7 +81,7 @@ class P2PDProcess:
             for head_pattern in lines_head_occurred:
                 if line.startswith(head_pattern):
                     lines_head_occurred[head_pattern] = True
-            return all([value for _, value in lines_head_occurred.items()])
+            return all([value for value in lines_head_occurred.values()])
 
         await try_until_success(read_from_daemon_and_check)
         # Sleep a little bit to ensure the listener is up after logs are emitted.
