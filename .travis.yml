@@ -18,7 +18,7 @@ matrix:
         - export GOPATH=$HOME/go
         - export GOROOT=/usr/local/go
         - export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
-        - ./install_interop_go_pkgs.sh
+        - ./tests/interop/go_pkgs/install_interop_go_pkgs.sh
 
 install:
   - pip install --upgrade pip
