@@ -1,21 +1,9 @@
-from abc import ABC, abstractmethod
+from libp2p.io.abc import ReadWriteCloser
 
 
-class IRawConnection(ABC):
+class IRawConnection(ReadWriteCloser):
     """
     A Raw Connection provides a Reader and a Writer
     """
 
     initiator: bool
-
-    @abstractmethod
-    async def write(self, data: bytes) -> None:
-        pass
-
-    @abstractmethod
-    async def read(self, n: int = -1) -> bytes:
-        pass
-
-    @abstractmethod
-    async def close(self) -> None:
-        pass

@@ -1,7 +1,17 @@
 from libp2p.exceptions import BaseLibp2pError
 
 
-class MsgioException(BaseLibp2pError):
+class IOException(BaseLibp2pError):
+    pass
+
+
+class IncompleteReadError(IOException):
+    """
+    Fewer bytes were read than requested.
+    """
+
+
+class MsgioException(IOException):
     pass
 
 
