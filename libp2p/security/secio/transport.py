@@ -58,7 +58,8 @@ class SecureSession(BaseSession):
         remote_encryption_parameters: AuthenticatedEncryptionParameters,
         conn: MsgIOReadWriter,
     ) -> None:
-        super().__init__(local_peer, local_private_key, conn, remote_peer)
+        super().__init__(local_peer, local_private_key, remote_peer)
+        self.conn = conn
 
         self.local_encryption_parameters = local_encryption_parameters
         self.remote_encryption_parameters = remote_encryption_parameters
