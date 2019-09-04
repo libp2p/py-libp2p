@@ -1,7 +1,7 @@
 from typing import Optional
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 
@@ -14,7 +14,7 @@ class BaseSession(ISecureConn):
 
     local_peer: ID
     local_private_key: PrivateKey
-    conn: IRawConnection
+    conn: MsgIOReadWriter
     remote_peer_id: ID
     remote_permanent_pubkey: PublicKey
 
@@ -22,7 +22,7 @@ class BaseSession(ISecureConn):
         self,
         local_peer: ID,
         local_private_key: PrivateKey,
-        conn: IRawConnection,
+        conn: MsgIOReadWriter,
         peer_id: Optional[ID] = None,
     ) -> None:
         self.local_peer = local_peer
@@ -33,8 +33,9 @@ class BaseSession(ISecureConn):
         self.conn = conn
         self.initiator = peer_id is not None
 
-    async def write(self, data: bytes) -> None:
+    async def write(self, data: bytes) -> int:
         await self.conn.write(data)
+        return len(data)
 
     async def read(self, n: int = -1) -> bytes:
         return await self.conn.read(n)

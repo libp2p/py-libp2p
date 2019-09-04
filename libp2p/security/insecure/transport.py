@@ -1,6 +1,7 @@
 from libp2p.crypto.keys import PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.utils import pubkey_from_protobuf
+from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
@@ -76,7 +77,8 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        session = InsecureSession(self.local_peer, self.local_private_key, conn)
+        msg_io = MsgIOReadWriter(conn)
+        session = InsecureSession(self.local_peer, self.local_private_key, msg_io)
         await session.run_handshake()
         return session
 
@@ -86,8 +88,9 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
+        msg_io = MsgIOReadWriter(conn)
         session = InsecureSession(
-            self.local_peer, self.local_private_key, conn, peer_id
+            self.local_peer, self.local_private_key, msg_io, peer_id
         )
         await session.run_handshake()
         return session

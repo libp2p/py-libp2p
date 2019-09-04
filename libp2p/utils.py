@@ -2,6 +2,7 @@ import itertools
 import math
 
 from libp2p.exceptions import ParseError
+from libp2p.io.abc import Reader
 from libp2p.typing import StreamReader
 
 # Unsigned LEB128(varint codec)
@@ -98,7 +99,7 @@ def encode_fixedint_prefixed(msg_bytes: bytes) -> bytes:
     return len_prefix + msg_bytes
 
 
-async def read_fixedint_prefixed(reader: StreamReader) -> bytes:
+async def read_fixedint_prefixed(reader: Reader) -> bytes:
     len_bytes = await reader.read(SIZE_LEN_BYTES)
     len_int = int.from_bytes(len_bytes, "big")
     return await reader.read(len_int)
