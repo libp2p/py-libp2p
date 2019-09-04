@@ -20,7 +20,7 @@ TIMEOUT_DURATION = 30
 
 async def try_until_success(coro_func, timeout=TIMEOUT_DURATION):
     """
-    Keep running ``coro_func`` until the time is out.
+    Keep running ``coro_func`` until either it succeed or time is up.
     All arguments of ``coro_func`` should be filled, i.e. it should be called without arguments.
     """
     t_start = time.monotonic()
