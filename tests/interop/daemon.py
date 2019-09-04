@@ -38,6 +38,7 @@ class P2PDProcess:
     proc: asyncio.subprocess.Process
     cmd: str = str(P2PD_PATH)
     args: List[Any]
+    is_running: bool
 
     _tasks: List["asyncio.Future[Any]"]
 
@@ -70,6 +71,8 @@ class P2PDProcess:
             #   - gossipsubHeartbeatInitialDelay: GossipSubHeartbeatInterval = 1 * time.Second
             #   Referece: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/p2pd/main.go#L348-L353  # noqa: E501
         self.args = args
+        self.is_running = False
+
         self._tasks = []
 
     async def wait_until_ready(self):
@@ -117,8 +120,10 @@ class P2PDProcess:
         await self.start_printing_logs()
 
     async def close(self) -> None:
-        self.proc.terminate()
-        await self.proc.wait()
+        if self.is_running:
+            self.proc.terminate()
+            await self.proc.wait()
+            self.is_running = False
         for task in self._tasks:
             task.cancel()
 
