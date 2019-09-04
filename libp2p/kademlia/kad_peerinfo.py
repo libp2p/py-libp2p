@@ -1,11 +1,11 @@
 import heapq
 from operator import itemgetter
 import random
+from typing import List
 
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
-from libp2p.peer.peerdata import PeerData
 from libp2p.peer.peerinfo import PeerInfo
 
 from .utils import digest
@@ -15,16 +15,16 @@ P_UDP = "udp"
 
 
 class KadPeerInfo(PeerInfo):
-    def __init__(self, peer_id, peer_data=None):
-        super(KadPeerInfo, self).__init__(peer_id, peer_data)
+    def __init__(self, peer_id, addrs):
+        super(KadPeerInfo, self).__init__(peer_id, addrs)
 
         self.peer_id_bytes = peer_id.to_bytes()
         self.xor_id = peer_id.xor_id
 
-        self.addrs = peer_data.get_addrs() if peer_data else None
+        self.addrs = addrs
 
-        self.ip = self.addrs[0].value_for_protocol(P_IP) if peer_data else None
-        self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if peer_data else None
+        self.ip = self.addrs[0].value_for_protocol(P_IP) if addrs else None
+        self.port = int(self.addrs[0].value_for_protocol(P_UDP)) if addrs else None
 
     def same_home_as(self, node):
         return sorted(self.addrs) == sorted(node.addrs)
@@ -142,14 +142,14 @@ def create_kad_peerinfo(node_id_bytes=None, sender_ip=None, sender_port=None):
     node_id = (
         ID(node_id_bytes) if node_id_bytes else ID(digest(random.getrandbits(255)))
     )
-    peer_data = None
+    addrs: List[Multiaddr]
     if sender_ip and sender_port:
-        peer_data = PeerData()
-        addr = [
+        addrs = [
             Multiaddr(
                 "/" + P_IP + "/" + str(sender_ip) + "/" + P_UDP + "/" + str(sender_port)
             )
         ]
-        peer_data.add_addrs(addr)
+    else:
+        addrs = []
 
-    return KadPeerInfo(node_id, peer_data)
+    return KadPeerInfo(node_id, addrs)
