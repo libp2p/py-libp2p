@@ -156,7 +156,6 @@ class Pubsub:
             incoming: bytes = await read_varint_prefixed_bytes(stream)
             rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
-
             if rpc_incoming.publish:
                 # deal with RPC.publish
                 for msg in rpc_incoming.publish:
