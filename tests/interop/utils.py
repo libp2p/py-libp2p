@@ -37,7 +37,7 @@ async def _is_peer(peer_id: ID, node: TDaemonOrHost) -> bool:
 async def connect(a: TDaemonOrHost, b: TDaemonOrHost) -> None:
     # Type check
     err_msg = (
-        f"Type of type(a)={type(a)} or type(b)={type(b)} is wrong."
+        f"Type of a={type(a)} or type of b={type(b)} is wrong."
         "Should be either `IHost` or `Daemon`"
     )
     assert all(
