@@ -21,6 +21,7 @@ from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
+from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
@@ -71,7 +72,7 @@ class Pubsub:
 
     topic_validators: Dict[str, TopicValidator]
 
-    # NOTE: Be sure it is increased atomically everytime.
+    # TODO: Be sure it is increased atomically everytime.
     counter: int  # uint64
 
     def __init__(
@@ -131,7 +132,7 @@ class Pubsub:
         # Call handle peer to keep waiting for updates to peer queue
         asyncio.ensure_future(self.handle_peer_queue())
 
-    def get_hello_packet(self) -> bytes:
+    def get_hello_packet(self) -> rpc_pb2.RPC:
         """
         Generate subscription message with all topics we are subscribed to
         only send hello packet if we have subscribed topics
@@ -141,7 +142,7 @@ class Pubsub:
             packet.subscriptions.extend(
                 [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
             )
-        return packet.SerializeToString()
+        return packet
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
         """
@@ -152,17 +153,14 @@ class Pubsub:
         peer_id = stream.mplex_conn.peer_id
 
         while True:
-            incoming: bytes = (await stream.read())
+            incoming: bytes = await read_varint_prefixed_bytes(stream)
             rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
-
             if rpc_incoming.publish:
                 # deal with RPC.publish
                 for msg in rpc_incoming.publish:
                     if not self._is_subscribed_to_msg(msg):
                         continue
-                    # TODO(mhchia): This will block this read_stream loop until all data are pushed.
-                    #   Should investigate further if this is an issue.
                     asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
@@ -220,20 +218,19 @@ class Pubsub:
         on one of the supported pubsub protocols.
         :param stream: newly created stream
         """
-        # Add peer
-        # Map peer to stream
-        peer_id: ID = stream.mplex_conn.peer_id
+        await self.continuously_read_stream(stream)
+
+    async def _handle_new_peer(self, peer_id: ID) -> None:
+        stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
+
         self.peers[peer_id] = stream
-        self.router.add_peer(peer_id, stream.get_protocol())
 
         # Send hello packet
-        hello: bytes = self.get_hello_packet()
-
-        await stream.write(hello)
-        # Pass stream off to stream reader
-        asyncio.ensure_future(self.continuously_read_stream(stream))
-        # Force context switch
-        await asyncio.sleep(0)
+        hello = self.get_hello_packet()
+        await stream.write(encode_varint_prefixed(hello.SerializeToString()))
+        # TODO: Check EOF of this stream.
+        # TODO: Check if the peer in black list.
+        self.router.add_peer(peer_id, stream.get_protocol())
 
     async def handle_peer_queue(self) -> None:
         """
@@ -246,25 +243,9 @@ class Pubsub:
 
             peer_id: ID = await self.peer_queue.get()
 
-            # Open a stream to peer on existing connection
-            # (we know connection exists since that's the only way
-            # an element gets added to peer_queue)
-            stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
-
             # Add Peer
-            # Map peer to stream
-            self.peers[peer_id] = stream
-            self.router.add_peer(peer_id, stream.get_protocol())
 
-            # Send hello packet
-            hello: bytes = self.get_hello_packet()
-            await stream.write(hello)
-
-            # TODO: Investigate whether this should be replaced by `handlePeerEOF`
-            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/49274b0e8aecdf6cad59d768e5702ff00aa48488/comm.go#L80  # noqa: E501
-            # Pass stream off to stream reader
-            asyncio.ensure_future(self.continuously_read_stream(stream))
-
+            asyncio.ensure_future(self._handle_new_peer(peer_id))
             # Force context switch
             await asyncio.sleep(0)
 
@@ -365,7 +346,7 @@ class Pubsub:
         # Broadcast message
         for stream in self.peers.values():
             # Write message to stream
-            await stream.write(raw_msg)
+            await stream.write(encode_varint_prefixed(raw_msg))
 
     async def publish(self, topic_id: str, data: bytes) -> None:
         """

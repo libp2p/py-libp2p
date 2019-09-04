@@ -1,9 +1,8 @@
-from typing import List
+from typing import List, Sequence
 
 import multiaddr
 
 from .id import ID
-from .peerdata import PeerData
 
 
 class PeerInfo:
@@ -11,9 +10,9 @@ class PeerInfo:
     peer_id: ID
     addrs: List[multiaddr.Multiaddr]
 
-    def __init__(self, peer_id: ID, peer_data: PeerData = None) -> None:
+    def __init__(self, peer_id: ID, addrs: Sequence[multiaddr.Multiaddr]) -> None:
         self.peer_id = peer_id
-        self.addrs = peer_data.get_addrs() if peer_data else None
+        self.addrs = list(addrs)
 
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
@@ -44,11 +43,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if len(parts) > 1:
         addr = multiaddr.Multiaddr.join(*parts[:-1])
 
-    peer_data = PeerData()
-    peer_data.add_addrs([addr])
-    peer_data.set_protocols([p.code for p in addr.protocols()])
-
-    return PeerInfo(peer_id, peer_data)
+    return PeerInfo(peer_id, [addr])
 
 
 class InvalidAddrError(ValueError):

@@ -2,10 +2,13 @@ from typing import Iterable, List, Sequence
 
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
+from libp2p.utils import encode_varint_prefixed
 
 from .pb import rpc_pb2
 from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
+
+PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
 
 class FloodSub(IPubsubRouter):
@@ -76,7 +79,7 @@ class FloodSub(IPubsubRouter):
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
-            await stream.write(rpc_msg.SerializeToString())
+            await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
 
     async def join(self, topic: str) -> None:
         """

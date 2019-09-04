@@ -36,11 +36,7 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-
-        # Only add peer_id if we are initiator (otherwise we would end up
-        # with two pubsub streams between us and the peer)
-        if conn.initiator:
-            await self.initiator_peers_queue.put(conn.peer_id)
+        await self.initiator_peers_queue.put(conn.peer_id)
 
     async def disconnected(self, network: INetwork, conn: IMuxedConn) -> None:
         pass

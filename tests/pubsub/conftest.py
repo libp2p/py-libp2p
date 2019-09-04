@@ -1,23 +1,8 @@
 import pytest
 
 from tests.factories import FloodsubFactory, GossipsubFactory, PubsubFactory
-from tests.pubsub.configs import GOSSIPSUB_PARAMS
 
-
-@pytest.fixture
-def floodsubs(num_hosts):
-    return FloodsubFactory.create_batch(num_hosts)
-
-
-@pytest.fixture
-def gossipsub_params():
-    return GOSSIPSUB_PARAMS
-
-
-@pytest.fixture
-def gossipsubs(num_hosts, gossipsub_params):
-    yield GossipsubFactory.create_batch(num_hosts, **gossipsub_params._asdict())
-    # TODO: Clean up
+from .configs import GOSSIPSUB_PARAMS
 
 
 def _make_pubsubs(hosts, pubsub_routers, cache_size):
@@ -38,14 +23,21 @@ def pubsub_cache_size():
 
 
 @pytest.fixture
-def pubsubs_fsub(hosts, floodsubs, pubsub_cache_size):
+def gossipsub_params():
+    return GOSSIPSUB_PARAMS
+
+
+@pytest.fixture
+def pubsubs_fsub(num_hosts, hosts, pubsub_cache_size):
+    floodsubs = FloodsubFactory.create_batch(num_hosts)
     _pubsubs_fsub = _make_pubsubs(hosts, floodsubs, pubsub_cache_size)
     yield _pubsubs_fsub
     # TODO: Clean up
 
 
 @pytest.fixture
-def pubsubs_gsub(hosts, gossipsubs, pubsub_cache_size):
+def pubsubs_gsub(num_hosts, hosts, pubsub_cache_size, gossipsub_params):
+    gossipsubs = GossipsubFactory.create_batch(num_hosts, **gossipsub_params._asdict())
     _pubsubs_gsub = _make_pubsubs(hosts, gossipsubs, pubsub_cache_size)
     yield _pubsubs_gsub
     # TODO: Clean up

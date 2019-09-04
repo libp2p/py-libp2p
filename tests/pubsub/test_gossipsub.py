@@ -14,7 +14,8 @@ from .utils import dense_connect, one_to_all_connect
     ((4, GossipsubParams(degree=4, degree_low=3, degree_high=5)),),
 )
 @pytest.mark.asyncio
-async def test_join(num_hosts, hosts, gossipsubs, pubsubs_gsub):
+async def test_join(num_hosts, hosts, pubsubs_gsub):
+    gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
     hosts_indices = list(range(num_hosts))
 
     topic = "test_join"
@@ -85,7 +86,9 @@ async def test_leave(pubsubs_gsub):
 
 @pytest.mark.parametrize("num_hosts", (2,))
 @pytest.mark.asyncio
-async def test_handle_graft(pubsubs_gsub, hosts, gossipsubs, event_loop, monkeypatch):
+async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
+    gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
+
     index_alice = 0
     id_alice = hosts[index_alice].get_id()
     index_bob = 1
@@ -137,7 +140,9 @@ async def test_handle_graft(pubsubs_gsub, hosts, gossipsubs, event_loop, monkeyp
     "num_hosts, gossipsub_params", ((2, GossipsubParams(heartbeat_interval=3)),)
 )
 @pytest.mark.asyncio
-async def test_handle_prune(pubsubs_gsub, hosts, gossipsubs):
+async def test_handle_prune(pubsubs_gsub, hosts):
+    gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
+
     index_alice = 0
     id_alice = hosts[index_alice].get_id()
     index_bob = 1
