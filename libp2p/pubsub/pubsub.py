@@ -228,7 +228,7 @@ class Pubsub:
         # Send hello packet
         hello = self.get_hello_packet()
         await stream.write(encode_varint_prefixed(hello.SerializeToString()))
-        # TODO: Check EOF in the future in the stream's lifetime.
+        # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
         self.router.add_peer(peer_id, stream.get_protocol())
 
