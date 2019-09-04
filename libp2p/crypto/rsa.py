@@ -1,5 +1,7 @@
+from Crypto.Hash import SHA256
 import Crypto.PublicKey.RSA as RSA
 from Crypto.PublicKey.RSA import RsaKey
+from Crypto.Signature import pkcs1_15
 
 from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
 
@@ -20,7 +22,13 @@ class RSAPublicKey(PublicKey):
         return KeyType.RSA
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        raise NotImplementedError
+        h = SHA256.new(data)
+        try:
+            # NOTE: the typing in ``pycryptodome`` is wrong on the arguments to ``verify``.
+            pkcs1_15.new(self.impl).verify(h, signature)  # type: ignore
+        except (ValueError, TypeError):
+            return False
+        return True
 
 
 class RSAPrivateKey(PrivateKey):
@@ -39,7 +47,9 @@ class RSAPrivateKey(PrivateKey):
         return KeyType.RSA
 
     def sign(self, data: bytes) -> bytes:
-        raise NotImplementedError
+        h = SHA256.new(data)
+        # NOTE: the typing in ``pycryptodome`` is wrong on the arguments to ``sign``.
+        return pkcs1_15.new(self.impl).sign(h)  # type: ignore
 
     def get_public_key(self) -> PublicKey:
         return RSAPublicKey(self.impl.publickey())
