@@ -1,12 +1,13 @@
 #!/bin/bash
 
-GO_PKGS_PATH=./tests/interop/go_pkgs
+SCRIPT_RELATIVE_PATH=`dirname $0`
+
+GO_PKGS_PATH=$SCRIPT_RELATIVE_PATH
 
 DAEMON_REPO=go-libp2p-daemon
 DAEMON_PATH=$GO_PKGS_PATH/$DAEMON_REPO
 
 EXAMPLES_PATHS=$GO_PKGS_PATH/examples
-
 
 go version
 
