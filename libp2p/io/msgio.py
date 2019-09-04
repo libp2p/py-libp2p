@@ -32,6 +32,16 @@ def encode_msg_with_length(msg_bytes: bytes) -> bytes:
     return len_prefix + msg_bytes
 
 
+# NOTE: temporary for this PR
+encode = encode_msg_with_length
+
+
+# NOTE: temporary for this PR
+async def read_next_message(reader: Reader) -> bytes:
+    length = await read_length(reader)
+    return await reader.read(length)
+
+
 class MsgIOWriter(Writer, Closer):
     write_closer: WriteCloser
 
