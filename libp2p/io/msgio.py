@@ -8,14 +8,7 @@ NOTE: currently missing the capability to indicate lengths by "varint" method.
 # TODO unify w/ https://github.com/libp2p/py-libp2p/blob/1aed52856f56a4b791696bbcbac31b5f9c2e88c9/libp2p/utils.py#L85-L99  # noqa: E501
 from typing import Optional, cast
 
-from libp2p.io.abc import (
-    Closer,
-    ReadCloser,
-    Reader,
-    ReadWriteCloser,
-    WriteCloser,
-    Writer,
-)
+from libp2p.io.abc import Closer, ReadCloser, Reader, ReadWriteCloser, WriteCloser
 from libp2p.io.utils import read_exactly
 
 SIZE_LEN_BYTES = 4
@@ -42,11 +35,10 @@ async def read_next_message(reader: Reader) -> bytes:
     return await reader.read(length)
 
 
-class MsgIOWriter(Writer, Closer):
+class MsgIOWriter(WriteCloser):
     write_closer: WriteCloser
 
     def __init__(self, write_closer: WriteCloser) -> None:
-        super().__init__()
         self.write_closer = write_closer
 
     async def write(self, data: bytes) -> int:
@@ -61,7 +53,7 @@ class MsgIOWriter(Writer, Closer):
         await self.write_closer.close()
 
 
-class MsgIOReader(Reader, Closer):
+class MsgIOReader(ReadCloser):
     read_closer: ReadCloser
     next_length: Optional[int]
 
