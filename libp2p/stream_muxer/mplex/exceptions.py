@@ -5,9 +5,13 @@ class MplexError(BaseLibp2pError):
     pass
 
 
-class MplexShutdown(MplexError):
+class MplexStreamReset(MplexError):
     pass
 
 
-class StreamNotFound(MplexError):
+class MplexStreamEOF(MplexError, EOFError):
+    pass
+
+
+class MplexShutdown(MplexError):
     pass
