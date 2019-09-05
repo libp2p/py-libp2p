@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -52,20 +52,6 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def read_buffer(self, stream_id: StreamID) -> bytes:
-        """
-        Read a message from stream_id's buffer, check raw connection for new messages
-        :param stream_id: stream id of stream to read from
-        :return: message read
-        """
-
-    @abstractmethod
-    async def read_buffer_nonblocking(self, stream_id: StreamID) -> Optional[bytes]:
-        """
-        Read a message from `stream_id`'s buffer, non-blockingly.
-        """
-
-    @abstractmethod
     async def open_stream(self) -> "IMuxedStream":
         """
         creates a new muxed_stream
@@ -73,7 +59,7 @@ class IMuxedConn(ABC):
         """
 
     @abstractmethod
-    async def accept_stream(self, name: str) -> None:
+    async def accept_stream(self, stream_id: StreamID, name: str) -> None:
         """
         accepts a muxed stream opened by the other end
         """
