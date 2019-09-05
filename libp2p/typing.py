@@ -1,6 +1,4 @@
-from typing import TYPE_CHECKING, Awaitable, Callable, NewType, Union
-
-from libp2p.network.connection.raw_connection_interface import IRawConnection
+from typing import TYPE_CHECKING, Awaitable, Callable, NewType
 
 if TYPE_CHECKING:
     from libp2p.network.stream.net_stream_interface import INetStream  # noqa: F401
@@ -8,5 +6,3 @@ if TYPE_CHECKING:
 
 TProtocol = NewType("TProtocol", str)
 StreamHandlerFn = Callable[["INetStream"], Awaitable[None]]
-
-StreamReader = Union["IMuxedStream", "INetStream", IRawConnection]

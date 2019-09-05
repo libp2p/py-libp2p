@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.mplex.constants import HeaderTags
@@ -76,31 +77,9 @@ class IMuxedConn(ABC):
         """
 
 
-class IMuxedStream(ABC):
+class IMuxedStream(ReadWriteCloser):
 
     mplex_conn: IMuxedConn
-
-    @abstractmethod
-    async def read(self, n: int = -1) -> bytes:
-        """
-        reads from the underlying muxed_conn
-        :param n: number of bytes to read
-        :return: bytes of input
-        """
-
-    @abstractmethod
-    async def write(self, data: bytes) -> int:
-        """
-        writes to the underlying muxed_conn
-        :return: number of bytes written
-        """
-
-    @abstractmethod
-    async def close(self) -> bool:
-        """
-        close the underlying muxed_conn
-        :return: true if successful
-        """
 
     @abstractmethod
     async def reset(self) -> bool:

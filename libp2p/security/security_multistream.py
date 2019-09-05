@@ -6,7 +6,7 @@ from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import RawConnectionCommunicator
+from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.typing import TProtocol
@@ -88,7 +88,7 @@ class SecurityMultistream(ABC):
         :return: selected secure transport
         """
         protocol: TProtocol
-        communicator = RawConnectionCommunicator(conn)
+        communicator = MultiselectCommunicator(conn)
         if initiator:
             # Select protocol if initiator
             protocol = await self.multiselect_client.select_one_of(
