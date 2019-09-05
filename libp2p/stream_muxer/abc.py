@@ -82,11 +82,10 @@ class IMuxedStream(ReadWriteCloser):
     mplex_conn: IMuxedConn
 
     @abstractmethod
-    async def reset(self) -> bool:
+    async def reset(self) -> None:
         """
         closes both ends of the stream
         tells this remote side to hang up
-        :return: true if successful
         """
 
     @abstractmethod
