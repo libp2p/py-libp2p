@@ -16,8 +16,8 @@ from libp2p import initialize_default_swarm, new_node
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
-from tests.utils import cleanup, perform_two_host_set_up
 from tests.constants import MAX_READ_LEN
+from tests.utils import cleanup, perform_two_host_set_up
 
 ACK = "ack:"
 

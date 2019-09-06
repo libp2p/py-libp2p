@@ -166,8 +166,11 @@ class Mplex(IMuxedConn):
             if channel_id is not None and flag is not None and message is not None:
                 stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
                 is_stream_id_seen: bool
+                stream: MplexStream
                 async with self.streams_lock:
                     is_stream_id_seen = stream_id in self.streams
+                    if is_stream_id_seen:
+                        stream = self.streams[stream_id]
                 # Other consequent stream message should wait until the stream get accepted
                 # TODO: Handle more tags, and refactor `HeaderTags`
                 if flag == HeaderTags.NewStream.value:
@@ -185,8 +188,6 @@ class Mplex(IMuxedConn):
                         #   before. It is abnormal. Possibly disconnect?
                         # TODO: Warn and emit logs about this.
                         continue
-                    async with self.streams_lock:
-                        stream = self.streams[stream_id]
                     await stream.incoming_data.put(message)
                 elif flag in (
                     HeaderTags.CloseInitiator.value,
@@ -194,15 +195,17 @@ class Mplex(IMuxedConn):
                 ):
                     if not is_stream_id_seen:
                         continue
-                    stream: MplexStream
-                    async with self.streams_lock:
-                        stream = self.streams[stream_id]
+                    # NOTE: If remote is already closed, then return: Technically a bug
+                    #   on the other side. We should consider killing the connection.
+                    async with stream.close_lock:
+                        if stream.event_remote_closed.is_set():
+                            continue
                     is_local_closed: bool
                     async with stream.close_lock:
                         stream.event_remote_closed.set()
                         is_local_closed = stream.event_local_closed.is_set()
                     # If local is also closed, both sides are closed. Then, we should clean up
-                    #   this stream.
+                    #   the entry of this stream, to avoid others from accessing it.
                     if is_local_closed:
                         async with self.streams_lock:
                             del self.streams[stream_id]
@@ -213,24 +216,21 @@ class Mplex(IMuxedConn):
                     if not is_stream_id_seen:
                         # This is *ok*. We forget the stream on reset.
                         continue
-                    stream: MplexStream
-                    async with self.streams_lock:
-                        stream = self.streams[stream_id]
                     async with stream.close_lock:
                         if not stream.event_remote_closed.is_set():
+                            # TODO: Why? Only if remote is not closed before then reset.
                             stream.event_reset.set()
+
                             stream.event_remote_closed.set()
+                        # If local is not closed, we should close it.
                         if not stream.event_local_closed.is_set():
-                            stream.event_local_closed.close()
+                            stream.event_local_closed.set()
                     async with self.streams_lock:
                         del self.streams[stream_id]
                 else:
                     # TODO: logging
-                    print(f"message with unknown header on stream {stream_id}")
                     if is_stream_id_seen:
-                        async with self.streams_lock:
-                            stream = self.streams[stream_id]
-                            await stream.reset()
+                        await stream.reset()
 
             # Force context switch
             await asyncio.sleep(0)

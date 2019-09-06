@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING
 from libp2p.stream_muxer.abc import IMuxedStream
 
 from .constants import HeaderTags
-from .exceptions import MplexStreamReset, MplexStreamEOF
 from .datastructures import StreamID
+from .exceptions import MplexStreamEOF, MplexStreamReset
 
 if TYPE_CHECKING:
     from libp2p.stream_muxer.mplex.mplex import Mplex
@@ -55,7 +55,7 @@ class MplexStream(IMuxedStream):
         return self.stream_id.is_initiator
 
     async def _wait_for_data(self) -> None:
-        done, pending = await asyncio.wait(
+        done, pending = await asyncio.wait(  # type: ignore
             [
                 self.event_reset.wait(),
                 self.event_remote_closed.wait(),
