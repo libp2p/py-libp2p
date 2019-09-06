@@ -1,9 +1,14 @@
 import asyncio
+from typing import TYPE_CHECKING
 
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedStream
 
 from .constants import HeaderTags
 from .datastructures import StreamID
+from .exceptions import MplexStreamEOF, MplexStreamReset
+
+if TYPE_CHECKING:
+    from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
 class MplexStream(IMuxedStream):
@@ -13,16 +18,21 @@ class MplexStream(IMuxedStream):
 
     name: str
     stream_id: StreamID
-    mplex_conn: IMuxedConn
+    mplex_conn: "Mplex"
     read_deadline: int
     write_deadline: int
-    local_closed: bool
-    remote_closed: bool
-    stream_lock: asyncio.Lock
+
+    close_lock: asyncio.Lock
+
+    incoming_data: "asyncio.Queue[bytes]"
+
+    event_local_closed: asyncio.Event
+    event_remote_closed: asyncio.Event
+    event_reset: asyncio.Event
 
     _buf: bytearray
 
-    def __init__(self, name: str, stream_id: StreamID, mplex_conn: IMuxedConn) -> None:
+    def __init__(self, name: str, stream_id: StreamID, mplex_conn: "Mplex") -> None:
         """
         create new MuxedStream in muxer
         :param stream_id: stream id of this stream
@@ -33,14 +43,44 @@ class MplexStream(IMuxedStream):
         self.mplex_conn = mplex_conn
         self.read_deadline = None
         self.write_deadline = None
-        self.local_closed = False
-        self.remote_closed = False
-        self.stream_lock = asyncio.Lock()
+        self.event_local_closed = asyncio.Event()
+        self.event_remote_closed = asyncio.Event()
+        self.event_reset = asyncio.Event()
+        self.close_lock = asyncio.Lock()
+        self.incoming_data = asyncio.Queue()
         self._buf = bytearray()
 
     @property
     def is_initiator(self) -> bool:
         return self.stream_id.is_initiator
+
+    async def _wait_for_data(self) -> None:
+        done, pending = await asyncio.wait(  # type: ignore
+            [
+                self.event_reset.wait(),
+                self.event_remote_closed.wait(),
+                self.incoming_data.get(),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if self.event_reset.is_set():
+            raise MplexStreamReset
+        if self.event_remote_closed.is_set():
+            raise MplexStreamEOF
+        # TODO: Handle timeout when deadline is used.
+
+        data = tuple(done)[0].result()
+        self._buf.extend(data)
+
+    async def _read_until_eof(self) -> bytes:
+        while True:
+            try:
+                await self._wait_for_data()
+            except MplexStreamEOF:
+                break
+        payload = self._buf
+        self._buf = self._buf[len(payload) :]
+        return bytes(payload)
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -50,31 +90,23 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
-        # TODO: Handle `StreamNotFound` raised in `self.mplex_conn.read_buffer`.
         # TODO: Add exceptions and handle/raise them in this class.
         if n < 0 and n != -1:
             raise ValueError(
                 f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
             )
-        # If the buffer is empty at first, blocking wait for data.
-        if len(self._buf) == 0:
-            self._buf.extend(await self.mplex_conn.read_buffer(self.stream_id))
-
-        # FIXME: If `n == -1`, we should blocking read until EOF, instead of returning when
-        #   no message is available.
-        # If `n >= 0`, read up to `n` bytes.
-        # Else, read until no message is available.
-        while len(self._buf) < n or n == -1:
-            new_bytes = await self.mplex_conn.read_buffer_nonblocking(self.stream_id)
-            if new_bytes is None:
-                # Nothing to read in the `MplexConn` buffer
-                break
-            self._buf.extend(new_bytes)
-        payload: bytearray
+        if self.event_reset.is_set():
+            raise MplexStreamReset
         if n == -1:
-            payload = self._buf
-        else:
-            payload = self._buf[:n]
+            return await self._read_until_eof()
+        if len(self._buf) == 0:
+            await self._wait_for_data()
+        # Read up to `n` bytes.
+        while len(self._buf) < n:
+            if self.incoming_data.empty() or self.event_remote_closed.is_set():
+                break
+            self._buf.extend(await self.incoming_data.get())
+        payload = self._buf[:n]
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
 
@@ -90,63 +122,62 @@ class MplexStream(IMuxedStream):
         )
         return await self.mplex_conn.send_message(flag, data, self.stream_id)
 
-    async def close(self) -> bool:
+    async def close(self) -> None:
         """
         Closing a stream closes it for writing and closes the remote end for reading
         but allows writing in the other direction.
-        :return: true if successful
         """
         # TODO error handling with timeout
-        # TODO understand better how mutexes are used from go repo
+
+        async with self.close_lock:
+            if self.event_local_closed.is_set():
+                return
+
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
+        # TODO: Raise when `mplex_conn.send_message` fails and `Mplex` isn't shutdown.
         await self.mplex_conn.send_message(flag, None, self.stream_id)
 
-        remote_lock = False
-        async with self.stream_lock:
-            if self.local_closed:
-                return True
-            self.local_closed = True
-            remote_lock = self.remote_closed
+        _is_remote_closed: bool
+        async with self.close_lock:
+            self.event_local_closed.set()
+            _is_remote_closed = self.event_remote_closed.is_set()
 
-        if remote_lock:
-            # FIXME: mplex_conn has no conn_lock!
-            async with self.mplex_conn.conn_lock:  # type: ignore
-                # FIXME: Don't access to buffers directly
-                self.mplex_conn.buffers.pop(self.stream_id)  # type: ignore
+        if _is_remote_closed:
+            # Both sides are closed, we can safely remove the buffer from the dict.
+            async with self.mplex_conn.streams_lock:
+                del self.mplex_conn.streams[self.stream_id]
 
-        return True
-
-    async def reset(self) -> bool:
+    async def reset(self) -> None:
         """
         closes both ends of the stream
         tells this remote side to hang up
-        :return: true if successful
         """
-        # TODO understand better how mutexes are used here
-        # TODO understand the difference between close and reset
-        async with self.stream_lock:
-            if self.remote_closed and self.local_closed:
-                return True
+        async with self.close_lock:
+            # Both sides have been closed. No need to event_reset.
+            if self.event_remote_closed.is_set() and self.event_local_closed.is_set():
+                return
+            if self.event_reset.is_set():
+                return
+            self.event_reset.set()
 
-            if not self.remote_closed:
+            if not self.event_remote_closed.is_set():
                 flag = (
                     HeaderTags.ResetInitiator
                     if self.is_initiator
                     else HeaderTags.ResetReceiver
                 )
-                await self.mplex_conn.send_message(flag, None, self.stream_id)
+                asyncio.ensure_future(
+                    self.mplex_conn.send_message(flag, None, self.stream_id)
+                )
+                await asyncio.sleep(0)
 
-            self.local_closed = True
-            self.remote_closed = True
+            self.event_local_closed.set()
+            self.event_remote_closed.set()
 
-        # FIXME: mplex_conn has no conn_lock!
-        async with self.mplex_conn.conn_lock:  # type: ignore
-            # FIXME: Don't access to buffers directly
-            self.mplex_conn.buffers.pop(self.stream_id, None)  # type: ignore
-
-        return True
+        async with self.mplex_conn.streams_lock:
+            del self.mplex_conn.streams[self.stream_id]
 
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:

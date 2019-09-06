@@ -1,35 +1,19 @@
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.io.abc import ReadWriteCloser
 from libp2p.utils import encode_delim, read_delim
 
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
 
-class RawConnectionCommunicator(IMultiselectCommunicator):
-    conn: IRawConnection
+class MultiselectCommunicator(IMultiselectCommunicator):
+    read_writer: ReadWriteCloser
 
-    def __init__(self, conn: IRawConnection) -> None:
-        self.conn = conn
-
-    async def write(self, msg_str: str) -> None:
-        msg_bytes = encode_delim(msg_str.encode())
-        await self.conn.write(msg_bytes)
-
-    async def read(self) -> str:
-        data = await read_delim(self.conn)
-        return data.decode()
-
-
-class StreamCommunicator(IMultiselectCommunicator):
-    stream: IMuxedStream
-
-    def __init__(self, stream: IMuxedStream) -> None:
-        self.stream = stream
+    def __init__(self, read_writer: ReadWriteCloser) -> None:
+        self.read_writer = read_writer
 
     async def write(self, msg_str: str) -> None:
         msg_bytes = encode_delim(msg_str.encode())
-        await self.stream.write(msg_bytes)
+        await self.read_writer.write(msg_bytes)
 
     async def read(self) -> str:
-        data = await read_delim(self.stream)
+        data = await read_delim(self.read_writer)
         return data.decode()

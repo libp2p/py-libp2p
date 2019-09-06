@@ -8,7 +8,7 @@ from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import StreamCommunicator
+from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
@@ -161,7 +161,7 @@ class Swarm(INetwork):
 
         # Perform protocol muxing to determine protocol to use
         selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids), StreamCommunicator(muxed_stream)
+            list(protocol_ids), MultiselectCommunicator(muxed_stream)
         )
 
         # Create a net stream with the selected protocol
@@ -294,7 +294,7 @@ def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
     async def generic_protocol_handler(muxed_stream: IMuxedStream) -> None:
         # Perform protocol muxing to determine protocol to use
         protocol, handler = await multiselect.negotiate(
-            StreamCommunicator(muxed_stream)
+            MultiselectCommunicator(muxed_stream)
         )
 
         net_stream = NetStream(muxed_stream)

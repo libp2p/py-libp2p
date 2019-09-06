@@ -3,7 +3,6 @@ import math
 
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
-from libp2p.typing import StreamReader
 
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
@@ -31,7 +30,7 @@ def encode_uvarint(number: int) -> bytes:
     return buf
 
 
-async def decode_uvarint_from_stream(reader: StreamReader) -> int:
+async def decode_uvarint_from_stream(reader: Reader) -> int:
     """
     https://en.wikipedia.org/wiki/LEB128
     """
@@ -61,7 +60,7 @@ def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
     return varint_len + msg_bytes
 
 
-async def read_varint_prefixed_bytes(reader: StreamReader) -> bytes:
+async def read_varint_prefixed_bytes(reader: Reader) -> bytes:
     len_msg = await decode_uvarint_from_stream(reader)
     data = await reader.read(len_msg)
     if len(data) != len_msg:
@@ -80,7 +79,7 @@ def encode_delim(msg: bytes) -> bytes:
     return encode_varint_prefixed(delimited_msg)
 
 
-async def read_delim(reader: StreamReader) -> bytes:
+async def read_delim(reader: Reader) -> bytes:
     msg_bytes = await read_varint_prefixed_bytes(reader)
     # TODO: Investigate if it is possible to have empty `msg_bytes`
     if len(msg_bytes) != 0 and msg_bytes[-1:] != b"\n":

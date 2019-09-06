@@ -11,11 +11,12 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.typing import TProtocol
 
 PROTOCOL_ID = TProtocol("/chat/1.0.0")
+MAX_READ_LEN = 2 ** 32 - 1
 
 
 async def read_data(stream: INetStream) -> None:
     while True:
-        read_bytes = await stream.read()
+        read_bytes = await stream.read(MAX_READ_LEN)
         if read_bytes is not None:
             read_string = read_bytes.decode()
             if read_string != "\n":
@@ -24,7 +25,6 @@ async def read_data(stream: INetStream) -> None:
                 print("\x1b[32m %s\x1b[0m " % read_string, end="")
 
 
-# FIXME(mhchia): Reconsider whether we should use a thread pool here.
 async def write_data(stream: INetStream) -> None:
     loop = asyncio.get_event_loop()
     while True:

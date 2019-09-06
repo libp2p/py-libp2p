@@ -16,11 +16,10 @@ from libp2p import initialize_default_swarm, new_node
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
-from tests.utils import (
-    cleanup,
-    echo_stream_handler,
-    perform_two_host_set_up_custom_handler,
-)
+from tests.constants import MAX_READ_LEN
+from tests.utils import cleanup, perform_two_host_set_up
+
+ACK = "ack:"
 
 
 class MyNotifee(INotifee):
@@ -67,38 +66,9 @@ class InvalidNotifee:
         assert False
 
 
-async def perform_two_host_simple_set_up():
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-    async def my_stream_handler(stream):
-        while True:
-            read_string = (await stream.read()).decode()
-
-            resp = "ack:" + read_string
-            await stream.write(resp.encode())
-
-    node_b.set_stream_handler("/echo/1.0.0", my_stream_handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
-    return node_a, node_b
-
-
-async def perform_two_host_simple_set_up_custom_handler(handler):
-    node_a = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-    node_b = await new_node(transport_opt=["/ip4/127.0.0.1/tcp/0"])
-
-    node_b.set_stream_handler("/echo/1.0.0", handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
-    return node_a, node_b
-
-
 @pytest.mark.asyncio
 async def test_one_notifier():
-    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
+    node_a, node_b = await perform_two_host_set_up()
 
     # Add notifee for node_a
     events = []
@@ -113,11 +83,12 @@ async def test_one_notifier():
 
     messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -126,6 +97,7 @@ async def test_one_notifier():
 @pytest.mark.asyncio
 async def test_one_notifier_on_two_nodes():
     events_b = []
+    messages = ["hello", "hello"]
 
     async def my_stream_handler(stream):
         # Ensure the connected and opened_stream events were hit in Notifee obj
@@ -135,13 +107,13 @@ async def test_one_notifier_on_two_nodes():
             ["connectedb", stream.mplex_conn],
             ["opened_streamb", stream],
         ]
-        while True:
-            read_string = (await stream.read()).decode()
+        for message in messages:
+            read_string = (await stream.read(len(message))).decode()
 
-            resp = "ack:" + read_string
+            resp = ACK + read_string
             await stream.write(resp.encode())
 
-    node_a, node_b = await perform_two_host_set_up_custom_handler(my_stream_handler)
+    node_a, node_b = await perform_two_host_set_up(my_stream_handler)
 
     # Add notifee for node_a
     events_a = []
@@ -157,13 +129,13 @@ async def test_one_notifier_on_two_nodes():
     # node_a
     assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
 
-    messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -172,6 +144,7 @@ async def test_one_notifier_on_two_nodes():
 @pytest.mark.asyncio
 async def test_one_notifier_on_two_nodes_with_listen():
     events_b = []
+    messages = ["hello", "hello"]
 
     node_a_key_pair = create_new_key_pair()
     node_a_transport_opt = ["/ip4/127.0.0.1/tcp/0"]
@@ -196,10 +169,9 @@ async def test_one_notifier_on_two_nodes_with_listen():
             ["connectedb", stream.mplex_conn],
             ["opened_streamb", stream],
         ]
-        while True:
-            read_string = (await stream.read()).decode()
-
-            resp = "ack:" + read_string
+        for message in messages:
+            read_string = (await stream.read(len(message))).decode()
+            resp = ACK + read_string
             await stream.write(resp.encode())
 
     # Add notifee for node_a
@@ -222,13 +194,13 @@ async def test_one_notifier_on_two_nodes_with_listen():
     # node_a
     assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
 
-    messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -236,7 +208,7 @@ async def test_one_notifier_on_two_nodes_with_listen():
 
 @pytest.mark.asyncio
 async def test_two_notifiers():
-    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
+    node_a, node_b = await perform_two_host_set_up()
 
     # Add notifee for node_a
     events0 = []
@@ -255,11 +227,12 @@ async def test_two_notifiers():
 
     messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -269,7 +242,7 @@ async def test_two_notifiers():
 async def test_ten_notifiers():
     num_notifiers = 10
 
-    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
+    node_a, node_b = await perform_two_host_set_up()
 
     # Add notifee for node_a
     events_lst = []
@@ -290,11 +263,12 @@ async def test_ten_notifiers():
 
     messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -315,12 +289,12 @@ async def test_ten_notifiers_on_two_nodes():
                 ["opened_streamb" + str(i), stream],
             ]
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
-            resp = "ack:" + read_string
+            resp = ACK + read_string
             await stream.write(resp.encode())
 
-    node_a, node_b = await perform_two_host_set_up_custom_handler(my_stream_handler)
+    node_a, node_b = await perform_two_host_set_up(my_stream_handler)
 
     # Add notifee for node_a and node_b
     events_lst_a = []
@@ -343,11 +317,12 @@ async def test_ten_notifiers_on_two_nodes():
 
     messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()
@@ -357,7 +332,7 @@ async def test_ten_notifiers_on_two_nodes():
 async def test_invalid_notifee():
     num_notifiers = 10
 
-    node_a, node_b = await perform_two_host_set_up_custom_handler(echo_stream_handler)
+    node_a, node_b = await perform_two_host_set_up()
 
     # Add notifee for node_a
     events_lst = []
@@ -372,11 +347,12 @@ async def test_invalid_notifee():
     # given that InvalidNotifee should not have been added as a notifee)
     messages = ["hello", "hello"]
     for message in messages:
+        expected_resp = ACK + message
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(len(expected_resp))).decode()
 
-        assert response == ("ack:" + message)
+        assert response == expected_resp
 
     # Success, terminate pending tasks.
     await cleanup()

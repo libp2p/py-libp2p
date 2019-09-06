@@ -6,7 +6,7 @@ from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import RawConnectionCommunicator
+from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.typing import TProtocol
 
@@ -60,7 +60,7 @@ class MuxerMultistream:
         :return: selected muxer transport
         """
         protocol: TProtocol
-        communicator = RawConnectionCommunicator(conn)
+        communicator = MultiselectCommunicator(conn)
         if conn.initiator:
             protocol = await self.multiselect_client.select_one_of(
                 tuple(self.transports.keys()), communicator

@@ -10,12 +10,12 @@ from libp2p.typing import TProtocol
 from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
+    encode_varint_prefixed,
     read_varint_prefixed_bytes,
 )
 
 from .constants import HeaderTags
 from .datastructures import StreamID
-from .exceptions import StreamNotFound
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
@@ -31,9 +31,10 @@ class Mplex(IMuxedConn):
     # TODO: `dataIn` in go implementation. Should be size of 8.
     # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
     #   to let the `MplexStream`s know that EOF arrived (#235).
-    buffers: Dict[StreamID, "asyncio.Queue[bytes]"]
-    stream_queue: "asyncio.Queue[StreamID]"
     next_channel_id: int
+    streams: Dict[StreamID, MplexStream]
+    streams_lock: asyncio.Lock
+    shutdown: asyncio.Event
 
     _tasks: List["asyncio.Future[Any]"]
 
@@ -62,9 +63,9 @@ class Mplex(IMuxedConn):
         self.peer_id = peer_id
 
         # Mapping from stream ID -> buffer of messages for that stream
-        self.buffers = {}
-
-        self.stream_queue = asyncio.Queue()
+        self.streams = {}
+        self.streams_lock = asyncio.Lock()
+        self.shutdown = asyncio.Event()
 
         self._tasks = []
 
@@ -90,29 +91,6 @@ class Mplex(IMuxedConn):
         """
         raise NotImplementedError()
 
-    async def read_buffer(self, stream_id: StreamID) -> bytes:
-        """
-        Read a message from buffer of the stream specified by `stream_id`,
-        check secured connection for new messages.
-        `StreamNotFound` is raised when stream `stream_id` is not found in `Mplex`.
-        :param stream_id: stream id of stream to read from
-        :return: message read
-        """
-        if stream_id not in self.buffers:
-            raise StreamNotFound(f"stream {stream_id} is not found")
-        return await self.buffers[stream_id].get()
-
-    async def read_buffer_nonblocking(self, stream_id: StreamID) -> Optional[bytes]:
-        """
-        Read a message from buffer of the stream specified by `stream_id`, non-blockingly.
-        `StreamNotFound` is raised when stream `stream_id` is not found in `Mplex`.
-        """
-        if stream_id not in self.buffers:
-            raise StreamNotFound(f"stream {stream_id} is not found")
-        if self.buffers[stream_id].empty():
-            return None
-        return await self.buffers[stream_id].get()
-
     def _get_next_channel_id(self) -> int:
         """
         Get next available stream id
@@ -122,6 +100,12 @@ class Mplex(IMuxedConn):
         self.next_channel_id += 1
         return next_id
 
+    async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
+        async with self.streams_lock:
+            stream = MplexStream(name, stream_id, self)
+        self.streams[stream_id] = stream
+        return stream
+
     async def open_stream(self) -> IMuxedStream:
         """
         creates a new muxed_stream
@@ -129,23 +113,22 @@ class Mplex(IMuxedConn):
         """
         channel_id = self._get_next_channel_id()
         stream_id = StreamID(channel_id=channel_id, is_initiator=True)
-        name = str(channel_id)
-        stream = MplexStream(name, stream_id, self)
-        self.buffers[stream_id] = asyncio.Queue()
         # Default stream name is the `channel_id`
+        name = str(channel_id)
+        stream = await self._initialize_stream(stream_id, name)
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def accept_stream(self, name: str) -> None:
+    async def accept_stream(self, stream_id: StreamID, name: str) -> None:
         """
         accepts a muxed stream opened by the other end
         """
-        stream_id = await self.stream_queue.get()
-        stream = MplexStream(name, stream_id, self)
+        stream = await self._initialize_stream(stream_id, name)
+        # Perform protocol negotiation for the stream.
         self._tasks.append(asyncio.ensure_future(self.generic_protocol_handler(stream)))
 
     async def send_message(
-        self, flag: HeaderTags, data: bytes, stream_id: StreamID
+        self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
     ) -> int:
         """
         sends a message over the connection
@@ -154,19 +137,16 @@ class Mplex(IMuxedConn):
         :param stream_id: stream the message is in
         """
         # << by 3, then or with flag
-        header = (stream_id.channel_id << 3) | flag.value
-        header = encode_uvarint(header)
+        header = encode_uvarint((stream_id.channel_id << 3) | flag.value)
 
         if data is None:
-            data_length = encode_uvarint(0)
-            _bytes = header + data_length
-        else:
-            data_length = encode_uvarint(len(data))
-            _bytes = header + data_length + data
+            data = b""
+
+        _bytes = header + encode_varint_prefixed(data)
 
         return await self.write_to_stream(_bytes)
 
-    async def write_to_stream(self, _bytes: bytearray) -> int:
+    async def write_to_stream(self, _bytes: bytes) -> int:
         """
         writes a byte array to a secured connection
         :param _bytes: byte array to write
@@ -183,22 +163,74 @@ class Mplex(IMuxedConn):
 
         while True:
             channel_id, flag, message = await self.read_message()
-
             if channel_id is not None and flag is not None and message is not None:
                 stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
-                if stream_id not in self.buffers:
-                    self.buffers[stream_id] = asyncio.Queue()
-                    await self.stream_queue.put(stream_id)
-
+                is_stream_id_seen: bool
+                stream: MplexStream
+                async with self.streams_lock:
+                    is_stream_id_seen = stream_id in self.streams
+                    if is_stream_id_seen:
+                        stream = self.streams[stream_id]
+                # Other consequent stream message should wait until the stream get accepted
                 # TODO: Handle more tags, and refactor `HeaderTags`
                 if flag == HeaderTags.NewStream.value:
-                    # new stream detected on connection
-                    await self.accept_stream(message.decode())
+                    if is_stream_id_seen:
+                        # `NewStream` for the same id is received twice...
+                        # TODO: Shutdown
+                        pass
+                    await self.accept_stream(stream_id, message.decode())
                 elif flag in (
                     HeaderTags.MessageInitiator.value,
                     HeaderTags.MessageReceiver.value,
                 ):
-                    await self.buffers[stream_id].put(message)
+                    if not is_stream_id_seen:
+                        # We receive a message of the stream `stream_id` which is not accepted
+                        #   before. It is abnormal. Possibly disconnect?
+                        # TODO: Warn and emit logs about this.
+                        continue
+                    await stream.incoming_data.put(message)
+                elif flag in (
+                    HeaderTags.CloseInitiator.value,
+                    HeaderTags.CloseReceiver.value,
+                ):
+                    if not is_stream_id_seen:
+                        continue
+                    # NOTE: If remote is already closed, then return: Technically a bug
+                    #   on the other side. We should consider killing the connection.
+                    async with stream.close_lock:
+                        if stream.event_remote_closed.is_set():
+                            continue
+                    is_local_closed: bool
+                    async with stream.close_lock:
+                        stream.event_remote_closed.set()
+                        is_local_closed = stream.event_local_closed.is_set()
+                    # If local is also closed, both sides are closed. Then, we should clean up
+                    #   the entry of this stream, to avoid others from accessing it.
+                    if is_local_closed:
+                        async with self.streams_lock:
+                            del self.streams[stream_id]
+                elif flag in (
+                    HeaderTags.ResetInitiator.value,
+                    HeaderTags.ResetReceiver.value,
+                ):
+                    if not is_stream_id_seen:
+                        # This is *ok*. We forget the stream on reset.
+                        continue
+                    async with stream.close_lock:
+                        if not stream.event_remote_closed.is_set():
+                            # TODO: Why? Only if remote is not closed before then reset.
+                            stream.event_reset.set()
+
+                            stream.event_remote_closed.set()
+                        # If local is not closed, we should close it.
+                        if not stream.event_local_closed.is_set():
+                            stream.event_local_closed.set()
+                    async with self.streams_lock:
+                        del self.streams[stream_id]
+                else:
+                    # TODO: logging
+                    if is_stream_id_seen:
+                        await stream.reset()
 
             # Force context switch
             await asyncio.sleep(0)
