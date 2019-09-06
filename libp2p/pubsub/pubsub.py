@@ -249,8 +249,9 @@ class Pubsub:
             # Force context switch
             await asyncio.sleep(0)
 
-    # FIXME: `sub_message` can be further type hinted with mypy_protobuf
-    def handle_subscription(self, origin_id: ID, sub_message: Any) -> None:
+    def handle_subscription(
+        self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
+    ) -> None:
         """
         Handle an incoming subscription message from a peer. Update internal
         mapping to mark the peer as subscribed or unsubscribed to topics as
@@ -270,8 +271,7 @@ class Pubsub:
                     self.peer_topics[sub_message.topicid].remove(origin_id)
 
     # FIXME(mhchia): Change the function name?
-    # FIXME(mhchia): `publish_message` can be further type hinted with mypy_protobuf
-    async def handle_talk(self, publish_message: Any) -> None:
+    async def handle_talk(self, publish_message: rpc_pb2.Message) -> None:
         """
         Put incoming message from a peer onto my blocking queue
         :param publish_message: RPC.Message format
