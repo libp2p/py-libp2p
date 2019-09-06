@@ -3,6 +3,7 @@ import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from tests.utils import cleanup, set_up_nodes_by_transport_opt
+from tests.constants import MAX_READ_LEN
 
 
 @pytest.mark.asyncio
@@ -12,7 +13,7 @@ async def test_simple_messages():
 
     async def stream_handler(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack:" + read_string
             await stream.write(response.encode())
@@ -28,7 +29,7 @@ async def test_simple_messages():
     for message in messages:
         await stream.write(message.encode())
 
-        response = (await stream.read()).decode()
+        response = (await stream.read(MAX_READ_LEN)).decode()
 
         assert response == ("ack:" + message)
 
@@ -43,7 +44,7 @@ async def test_double_response():
 
     async def stream_handler(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack1:" + read_string
             await stream.write(response.encode())
@@ -61,10 +62,10 @@ async def test_double_response():
     for message in messages:
         await stream.write(message.encode())
 
-        response1 = (await stream.read()).decode()
+        response1 = (await stream.read(MAX_READ_LEN)).decode()
         assert response1 == ("ack1:" + message)
 
-        response2 = (await stream.read()).decode()
+        response2 = (await stream.read(MAX_READ_LEN)).decode()
         assert response2 == ("ack2:" + message)
 
     # Success, terminate pending tasks.
@@ -80,14 +81,14 @@ async def test_multiple_streams():
 
     async def stream_handler_a(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_b(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_b:" + read_string
             await stream.write(response.encode())
@@ -111,8 +112,8 @@ async def test_multiple_streams():
         await stream_a.write(a_message.encode())
         await stream_b.write(b_message.encode())
 
-        response_a = (await stream_a.read()).decode()
-        response_b = (await stream_b.read()).decode()
+        response_a = (await stream_a.read(MAX_READ_LEN)).decode()
+        response_b = (await stream_b.read(MAX_READ_LEN)).decode()
 
         assert response_a == ("ack_b:" + a_message) and response_b == (
             "ack_a:" + b_message
@@ -129,21 +130,21 @@ async def test_multiple_streams_same_initiator_different_protocols():
 
     async def stream_handler_a1(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a1:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_a2(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a2:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_a3(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a3:" + read_string
             await stream.write(response.encode())
@@ -171,9 +172,9 @@ async def test_multiple_streams_same_initiator_different_protocols():
         await stream_a2.write(a2_message.encode())
         await stream_a3.write(a3_message.encode())
 
-        response_a1 = (await stream_a1.read()).decode()
-        response_a2 = (await stream_a2.read()).decode()
-        response_a3 = (await stream_a3.read()).decode()
+        response_a1 = (await stream_a1.read(MAX_READ_LEN)).decode()
+        response_a2 = (await stream_a2.read(MAX_READ_LEN)).decode()
+        response_a3 = (await stream_a3.read(MAX_READ_LEN)).decode()
 
         assert (
             response_a1 == ("ack_a1:" + a1_message)
@@ -192,28 +193,28 @@ async def test_multiple_streams_two_initiators():
 
     async def stream_handler_a1(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a1:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_a2(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_a2:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_b1(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_b1:" + read_string
             await stream.write(response.encode())
 
     async def stream_handler_b2(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack_b2:" + read_string
             await stream.write(response.encode())
@@ -249,11 +250,11 @@ async def test_multiple_streams_two_initiators():
         await stream_b1.write(b1_message.encode())
         await stream_b2.write(b2_message.encode())
 
-        response_a1 = (await stream_a1.read()).decode()
-        response_a2 = (await stream_a2.read()).decode()
+        response_a1 = (await stream_a1.read(MAX_READ_LEN)).decode()
+        response_a2 = (await stream_a2.read(MAX_READ_LEN)).decode()
 
-        response_b1 = (await stream_b1.read()).decode()
-        response_b2 = (await stream_b2.read()).decode()
+        response_b1 = (await stream_b1.read(MAX_READ_LEN)).decode()
+        response_b2 = (await stream_b2.read(MAX_READ_LEN)).decode()
 
         assert (
             response_a1 == ("ack_a1:" + a1_message)
@@ -277,7 +278,7 @@ async def test_triangle_nodes_connection():
 
     async def stream_handler(stream):
         while True:
-            read_string = (await stream.read()).decode()
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
             response = "ack:" + read_string
             await stream.write(response.encode())
@@ -320,7 +321,7 @@ async def test_triangle_nodes_connection():
         for stream in streams:
             await stream.write(message.encode())
 
-            response = (await stream.read()).decode()
+            response = (await stream.read(MAX_READ_LEN)).decode()
 
             assert response == ("ack:" + message)
 

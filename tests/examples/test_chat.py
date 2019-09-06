@@ -10,10 +10,13 @@ PROTOCOL_ID = "/chat/1.0.0"
 
 
 async def hello_world(host_a, host_b):
+    hello_world_from_host_a = b"hello world from host a"
+    hello_world_from_host_b = b"hello world from host b"
+
     async def stream_handler(stream):
-        read = await stream.read()
-        assert read == b"hello world from host b"
-        await stream.write(b"hello world from host a")
+        read = await stream.read(len(hello_world_from_host_b))
+        assert read == hello_world_from_host_b
+        await stream.write(hello_world_from_host_a)
         await stream.close()
 
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
@@ -21,9 +24,9 @@ async def hello_world(host_a, host_b):
     # Start a stream with the destination.
     # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
     stream = await host_b.new_stream(host_a.get_id(), [PROTOCOL_ID])
-    await stream.write(b"hello world from host b")
+    await stream.write(hello_world_from_host_b)
     read = await stream.read()
-    assert read == b"hello world from host a"
+    assert read == hello_world_from_host_a
     await stream.close()
 
 
@@ -32,11 +35,8 @@ async def connect_write(host_a, host_b):
     received = []
 
     async def stream_handler(stream):
-        while True:
-            try:
-                received.append((await stream.read()).decode())
-            except Exception:  # exception is raised when other side close the stream ?
-                break
+        for message in messages:
+            received.append((await stream.read(len(message))).decode())
 
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
 
@@ -67,12 +67,8 @@ async def connect_read(host_a, host_b):
     # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
     stream = await host_b.new_stream(host_a.get_id(), [PROTOCOL_ID])
     received = []
-    # while True: Seems the close stream event from the other host is not received
-    for _ in range(5):
-        try:
-            received.append(await stream.read())
-        except Exception:  # exception is raised when other side close the stream ?
-            break
+    for message in messages:
+        received.append(await stream.read(len(message)))
     await stream.close()
     assert received == messages
 

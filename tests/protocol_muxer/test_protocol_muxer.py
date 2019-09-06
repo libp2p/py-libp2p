@@ -1,7 +1,7 @@
 import pytest
 
 from libp2p.protocol_muxer.exceptions import MultiselectClientError
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
+from tests.utils import cleanup, set_up_nodes_by_transport_opt, echo_stream_handler
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -18,14 +18,8 @@ async def perform_simple_test(
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
-    async def stream_handler(stream):
-        while True:
-            read_string = (await stream.read()).decode()
-            response = "ack:" + read_string
-            await stream.write(response.encode())
-
     for protocol in protocols_with_handlers:
-        node_b.set_stream_handler(protocol, stream_handler)
+        node_b.set_stream_handler(protocol, echo_stream_handler)
 
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
@@ -33,11 +27,10 @@ async def perform_simple_test(
     stream = await node_a.new_stream(node_b.get_id(), protocols_for_client)
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
+        expected_resp = "ack:" + message
         await stream.write(message.encode())
-
-        response = (await stream.read()).decode()
-
-        assert response == ("ack:" + message)
+        response = (await stream.read(len(expected_resp))).decode()
+        assert response == expected_resp
 
     assert expected_selected_protocol == stream.get_protocol()
 
