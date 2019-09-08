@@ -1,5 +1,7 @@
 from typing import Sequence
 
+import logging
+
 from libp2p.typing import TProtocol
 
 from .exceptions import MultiselectClientError
@@ -8,6 +10,10 @@ from .multiselect_communicator_interface import IMultiselectCommunicator
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
+
+
+logger = logging.getLogger("trinity.libp2p.multiselect")
+logger.setLevel(logging.DEBUG)
 
 
 class MultiselectClient(IMultiselectClient):
@@ -65,6 +71,7 @@ class MultiselectClient(IMultiselectClient):
 
         for protocol in protocols:
             # Tell counterparty we want to use protocol
+            logging.debug(f"Sending candidate protocol: {protocol}")
             await communicator.write(protocol)
 
         # Read in the protocol ID from other party
@@ -80,13 +87,20 @@ class MultiselectClient(IMultiselectClient):
 
             if response == protocol:
                 # somehow ignore the other messages before returning?
+                logging.debug(f"Successfully negotiated: {protocol}")
                 return protocol
-            if response == PROTOCOL_NOT_FOUND_MSG:
+            elif response == PROTOCOL_NOT_FOUND_MSG:
+                logging.debug(f"Protocol not supported: {protocol} (probably)")
                 continue
+            else:
+                logging.error(
+                    f"Received unexpected reponse during protocol handshake: {response}"
+                )
             continue
 
         # No protocols were found, so return no protocols supported error
         raise MultiselectClientError("protocols not supported")
+
 
 def validate_handshake(handshake_contents: str) -> bool:
     """
