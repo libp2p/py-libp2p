@@ -27,9 +27,10 @@ class InsecureSession(BaseSession):
         local_peer: ID,
         local_private_key: PrivateKey,
         conn: ReadWriteCloser,
+        initiator: bool,
         peer_id: Optional[ID] = None,
     ) -> None:
-        super().__init__(local_peer, local_private_key, peer_id)
+        super().__init__(local_peer, local_private_key, initiator, peer_id)
         self.conn = conn
 
     async def write(self, data: bytes) -> int:
@@ -99,7 +100,7 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        session = InsecureSession(self.local_peer, self.local_private_key, conn)
+        session = InsecureSession(self.local_peer, self.local_private_key, conn, False)
         await session.run_handshake()
         return session
 
@@ -110,7 +111,7 @@ class InsecureTransport(BaseSecureTransport):
         :return: secure connection object (that implements secure_conn_interface)
         """
         session = InsecureSession(
-            self.local_peer, self.local_private_key, conn, peer_id
+            self.local_peer, self.local_private_key, conn, True, peer_id
         )
         await session.run_handshake()
         return session
