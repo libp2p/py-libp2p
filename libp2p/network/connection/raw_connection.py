@@ -2,7 +2,6 @@ import asyncio
 
 from .raw_connection_interface import IRawConnection
 
-
 class RawConnection(IRawConnection):
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
