@@ -409,7 +409,7 @@ async def create_secure_session(
         await conn.close()
         raise e
 
-    initiator = remote_peer is None
+    initiator = remote_peer is not None
     session = _mk_session_from(local_private_key, session_parameters, msg_io, initiator)
 
     received_nonce = await _finish_handshake(session, remote_nonce)
