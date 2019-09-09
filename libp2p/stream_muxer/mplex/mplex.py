@@ -188,6 +188,10 @@ class Mplex(IMuxedConn):
                         #   before. It is abnormal. Possibly disconnect?
                         # TODO: Warn and emit logs about this.
                         continue
+                    async with stream.close_lock:
+                        if stream.event_remote_closed.is_set():
+                            # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
+                            continue
                     await stream.incoming_data.put(message)
                 elif flag in (
                     HeaderTags.CloseInitiator.value,
