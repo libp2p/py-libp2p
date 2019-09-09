@@ -1,6 +1,5 @@
-from typing import Sequence
-
 import logging
+from typing import Sequence
 
 from libp2p.typing import TProtocol
 
