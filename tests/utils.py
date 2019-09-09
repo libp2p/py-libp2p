@@ -17,6 +17,7 @@ async def connect(node1, node2):
     await node1.connect(info)
 
 
+# FIXME: Should be deprecated, since it also kills the main task.
 async def cleanup():
     pending = asyncio.all_tasks()
     for task in pending:
@@ -24,7 +25,9 @@ async def cleanup():
 
         # Now we should await task to execute it's cancellation.
         # Cancelled task raises asyncio.CancelledError that we can suppress:
-        with suppress(asyncio.CancelledError):
+        # NOTE: Changed from `asyncio.CancelledError` to `Exception`, to suppress all exceptions
+        #   including the one in `run_until_complete`.
+        with suppress(Exception):
             await task
 
 
