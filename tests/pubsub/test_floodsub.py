@@ -4,7 +4,7 @@ import pytest
 
 from libp2p.peer.id import ID
 from tests.factories import FloodsubFactory
-from tests.utils import cleanup, connect
+from tests.utils import connect
 
 from .floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
@@ -36,7 +36,6 @@ async def test_simple_two_nodes(pubsubs_fsub):
     assert res_b.topicIDs == [topic]
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 # Initialize Pubsub with a cache_size of 4
@@ -82,7 +81,6 @@ async def test_lru_cache_two_nodes(pubsubs_fsub, monkeypatch):
     assert sub_b.empty()
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)

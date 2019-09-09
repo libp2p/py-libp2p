@@ -3,7 +3,7 @@ from threading import Thread
 
 import pytest
 
-from tests.utils import cleanup, connect
+from tests.utils import connect
 
 from .dummy_account_node import DummyAccountNode
 
@@ -64,7 +64,6 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
         assertion_func(dummy_node)
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@ import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from tests.constants import MAX_READ_LEN
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
+from tests.utils import set_up_nodes_by_transport_opt
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,6 @@ async def test_simple_messages():
         assert response == ("ack:" + message)
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -69,7 +68,6 @@ async def test_double_response():
         assert response2 == ("ack2:" + message)
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -120,7 +118,6 @@ async def test_multiple_streams():
         )
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -183,7 +180,6 @@ async def test_multiple_streams_same_initiator_different_protocols():
         )
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -264,7 +260,6 @@ async def test_multiple_streams_two_initiators():
         )
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -326,7 +321,6 @@ async def test_triangle_nodes_connection():
             assert response == ("ack:" + message)
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -353,4 +347,3 @@ async def test_host_connect():
         assert addr.encapsulate(ma_node_b) in node_b.get_addrs()
 
     # Success, terminate pending tasks.
-    await cleanup()
