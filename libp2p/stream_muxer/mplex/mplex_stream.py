@@ -8,6 +8,7 @@ from .datastructures import StreamID
 from .exceptions import MplexStreamClosed, MplexStreamEOF, MplexStreamReset
 
 if TYPE_CHECKING:
+    from typing import Any  # noqa: F401
     from libp2p.stream_muxer.mplex.mplex import Mplex
 
 
@@ -67,8 +68,9 @@ class MplexStream(IMuxedStream):
             fut.cancel()
         if self.event_reset.is_set():
             raise MplexStreamReset
-        done_task = tuple(done)[0]
-        if done_task._coro.__qualname__ == "Queue.get":
+        done_task = cast("asyncio.Task[Any]", tuple(done)[0])
+        # TODO: `_coro` is not in `asyncio.Task`'s typeshed.
+        if done_task._coro.__qualname__ == "Queue.get":  # type: ignore
             data = done_task.result()
             self._buf.extend(data)
             return

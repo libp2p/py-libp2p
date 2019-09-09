@@ -15,7 +15,6 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import Mplex
-from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
 from tests.pubsub.configs import (
