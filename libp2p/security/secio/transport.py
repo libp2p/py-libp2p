@@ -45,10 +45,6 @@ DEFAULT_SUPPORTED_HASHES = "SHA256"
 
 
 class SecureSession(BaseSession):
-    buf: io.BytesIO
-    low_watermark: int
-    high_watermark: int
-
     def __init__(
         self,
         local_peer: PeerID,
@@ -59,15 +55,12 @@ class SecureSession(BaseSession):
         conn: MsgIOReadWriter,
         initiator: bool,
     ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, remote_peer)
-        self.conn = conn
+        super().__init__(local_peer, local_private_key, initiator, conn, remote_peer)
 
         self.local_encryption_parameters = local_encryption_parameters
         self.remote_encryption_parameters = remote_encryption_parameters
         self._initialize_authenticated_encryption_for_local_peer()
         self._initialize_authenticated_encryption_for_remote_peer()
-
-        self._reset_internal_buffer()
 
     def _initialize_authenticated_encryption_for_local_peer(self) -> None:
         self.local_encrypter = Encrypter(self.local_encryption_parameters)
@@ -75,62 +68,14 @@ class SecureSession(BaseSession):
     def _initialize_authenticated_encryption_for_remote_peer(self) -> None:
         self.remote_encrypter = Encrypter(self.remote_encryption_parameters)
 
-    async def next_msg_len(self) -> int:
-        return await self.conn.next_msg_len()
-
-    def _reset_internal_buffer(self) -> None:
-        self.buf = io.BytesIO()
-        self.low_watermark = 0
-        self.high_watermark = 0
-
-    def _drain(self, n: int) -> bytes:
-        if self.low_watermark == self.high_watermark:
-            return bytes()
-
-        data = self.buf.getbuffer()[self.low_watermark : self.high_watermark]
-
-        if n < 0:
-            n = len(data)
-        result = data[:n].tobytes()
-        self.low_watermark += len(result)
-
-        if self.low_watermark == self.high_watermark:
-            del data  # free the memoryview so we can free the underlying BytesIO
-            self.buf.close()
-            self._reset_internal_buffer()
-        return result
-
-    async def _fill(self) -> None:
-        msg = await self.read_msg()
-        self.buf.write(msg)
-        self.low_watermark = 0
-        self.high_watermark = len(msg)
-
-    async def read(self, n: int = -1) -> bytes:
-        data_from_buffer = self._drain(n)
-        if len(data_from_buffer) > 0:
-            return data_from_buffer
-
-        next_length = await self.next_msg_len()
-
-        if n < next_length:
-            await self._fill()
-            return self._drain(n)
-        else:
-            return await self.read_msg()
-
     async def read_msg(self) -> bytes:
-        msg = await self.conn.read_msg()
+        msg = await super().read_msg()
         return self.remote_encrypter.decrypt_if_valid(msg)
-
-    async def write(self, data: bytes) -> int:
-        await self.write_msg(data)
-        return len(data)
 
     async def write_msg(self, msg: bytes) -> None:
         encrypted_data = self.local_encrypter.encrypt(msg)
         tag = self.local_encrypter.authenticate(encrypted_data)
-        await self.conn.write_msg(encrypted_data + tag)
+        await super().write_msg(encrypted_data + tag)
 
 
 @dataclass(frozen=True)
