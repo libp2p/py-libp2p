@@ -4,6 +4,7 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.utils import pubkey_from_protobuf
 from libp2p.io.abc import ReadWriteCloser
+from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
@@ -22,34 +23,12 @@ PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
 
 
 class InsecureSession(BaseSession):
-    def __init__(
-        self,
-        local_peer: ID,
-        local_private_key: PrivateKey,
-        conn: ReadWriteCloser,
-        initiator: bool,
-        peer_id: Optional[ID] = None,
-    ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, peer_id)
-        self.conn = conn
-
-    async def write(self, data: bytes) -> int:
-        await self.conn.write(data)
-        return len(data)
-
-    async def read(self, n: int = -1) -> bytes:
-        return await self.conn.read(n)
-
-    async def close(self) -> None:
-        await self.conn.close()
-
-    async def run_handshake(self) -> None:
+    async def run_handshake(self, inbound=False) -> None:
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
-        encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
-        await self.write(encoded_msg_bytes)
+        await self.write_msg(msg_bytes)
 
-        remote_msg_bytes = await read_fixedint_prefixed(self.conn)
+        remote_msg_bytes = await self.read_msg()
         remote_msg = plaintext_pb2.Exchange()
         remote_msg.ParseFromString(remote_msg_bytes)
         received_peer_id = ID(remote_msg.id)
@@ -100,8 +79,11 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are not the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
-        session = InsecureSession(self.local_peer, self.local_private_key, conn, False)
-        await session.run_handshake()
+        msg_io = MsgIOReadWriter(conn)
+        session = InsecureSession(
+            self.local_peer, self.local_private_key, msg_io, False
+        )
+        await session.run_handshake(inbound=True)
         return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -110,8 +92,9 @@ class InsecureTransport(BaseSecureTransport):
         for an inbound connection (i.e. we are the initiator)
         :return: secure connection object (that implements secure_conn_interface)
         """
+        msg_io = MsgIOReadWriter(conn)
         session = InsecureSession(
-            self.local_peer, self.local_private_key, conn, True, peer_id
+            self.local_peer, self.local_private_key, msg_io, True, peer_id
         )
         await session.run_handshake()
         return session
