@@ -14,7 +14,6 @@ PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
-    # Wait until EOF
     msg = await stream.read()
     await stream.write(msg)
     await stream.close()

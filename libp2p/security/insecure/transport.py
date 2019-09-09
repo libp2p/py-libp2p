@@ -4,11 +4,11 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.utils import pubkey_from_protobuf
 from libp2p.io.abc import ReadWriteCloser
+from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
-from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.transport.exceptions import HandshakeFailure
 from libp2p.typing import TProtocol
