@@ -103,3 +103,6 @@ class BaseSession(ISecureConn):
 
     async def write_msg(self, msg: bytes) -> None:
         await self.conn.write_msg(msg)
+
+    async def close(self) -> None:
+        await self.conn.close()
