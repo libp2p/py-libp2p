@@ -4,6 +4,8 @@ import math
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
 
+from .io.utils import read_exactly
+
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
 
@@ -62,7 +64,7 @@ def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
 
 async def read_varint_prefixed_bytes(reader: Reader) -> bytes:
     len_msg = await decode_uvarint_from_stream(reader)
-    data = await reader.read(len_msg)
+    data = await read_exactly(reader, len_msg)
     if len(data) != len_msg:
         raise ValueError(
             f"failed to read enough bytes: len_msg={len_msg}, data={data!r}"
