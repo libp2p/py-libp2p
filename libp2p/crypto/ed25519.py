@@ -1,8 +1,9 @@
 from Crypto.Hash import SHA256
 
 from libp2p.crypto.keys import KeyType, PublicKey
+from nacl.exceptions import BadSignatureError
 from nacl.public import PublicKey as Ed255129PublicKeyImpl
-from nacl.signing import BadSignatureError, VerifyKey
+from nacl.signing import VerifyKey
 
 
 class Ed25519PublicKey(PublicKey):
