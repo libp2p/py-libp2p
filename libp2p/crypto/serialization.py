@@ -1,3 +1,4 @@
+from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
 from libp2p.crypto.rsa import RSAPublicKey
 from libp2p.crypto.secp256k1 import Secp256k1PrivateKey, Secp256k1PublicKey
@@ -5,6 +6,7 @@ from libp2p.crypto.secp256k1 import Secp256k1PrivateKey, Secp256k1PublicKey
 key_type_to_public_key_deserializer = {
     KeyType.Secp256k1.value: Secp256k1PublicKey.from_bytes,
     KeyType.RSA.value: RSAPublicKey.from_bytes,
+    KeyType.Ed25519.value: Ed25519PublicKey.from_bytes,
 }
 
 key_type_to_private_key_deserializer = {

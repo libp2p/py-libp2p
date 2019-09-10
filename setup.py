@@ -41,6 +41,7 @@ setuptools.setup(
         "protobuf==3.9.0",
         "coincurve>=10.0.0,<11.0.0",
         "fastecdsa==1.7.4",
+        "pynacl==1.3.0",
     ],
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
