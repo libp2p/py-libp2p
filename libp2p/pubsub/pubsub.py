@@ -425,7 +425,7 @@ class Pubsub:
             log.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s",
                 f"{base58.b58encode(msg.from_id).decode()}:{msg.seqno.hex()}",
-                msg.data,
+                msg.data.hex(),
                 msg.topicIDs,
             )
             return
