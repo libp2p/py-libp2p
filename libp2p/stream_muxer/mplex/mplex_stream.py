@@ -112,7 +112,6 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
-        # TODO: Add exceptions and handle/raise them in this class.
         if n < 0 and n != -1:
             raise ValueError(
                 f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
