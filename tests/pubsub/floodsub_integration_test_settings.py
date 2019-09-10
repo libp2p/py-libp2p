@@ -4,7 +4,7 @@ import pytest
 
 from tests.configs import LISTEN_MADDR
 from tests.factories import PubsubFactory
-from tests.utils import cleanup, connect
+from tests.utils import connect
 
 from .configs import FLOODSUB_PROTOCOL_ID
 
@@ -258,4 +258,3 @@ async def perform_test_from_obj(obj, router_factory):
             assert node_map[origin_node_id].get_id().to_bytes() == msg.from_id
 
     # Success, terminate pending tasks.
-    await cleanup()

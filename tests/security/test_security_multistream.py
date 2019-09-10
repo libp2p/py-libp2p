@@ -6,7 +6,7 @@ from libp2p import new_node
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from tests.configs import LISTEN_MADDR
-from tests.utils import cleanup, connect
+from tests.utils import connect
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -57,7 +57,6 @@ async def perform_simple_test(
     assertion_func(node2_conn.secured_conn)
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio

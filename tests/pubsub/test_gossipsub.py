@@ -3,7 +3,7 @@ import random
 
 import pytest
 
-from tests.utils import cleanup, connect
+from tests.utils import connect
 
 from .configs import GossipsubParams
 from .utils import dense_connect, one_to_all_connect
@@ -61,8 +61,6 @@ async def test_join(num_hosts, hosts, pubsubs_gsub):
             assert hosts[i].get_id() not in gossipsubs[central_node_index].mesh[topic]
             assert topic not in gossipsubs[i].mesh
 
-    await cleanup()
-
 
 @pytest.mark.parametrize("num_hosts", (1,))
 @pytest.mark.asyncio
@@ -80,8 +78,6 @@ async def test_leave(pubsubs_gsub):
 
     # Test re-leave
     await gossipsub.leave(topic)
-
-    await cleanup()
 
 
 @pytest.mark.parametrize("num_hosts", (2,))
@@ -133,8 +129,6 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
     # Check that bob is now alice's mesh peer
     assert id_bob in gossipsubs[index_alice].mesh[topic]
 
-    await cleanup()
-
 
 @pytest.mark.parametrize(
     "num_hosts, gossipsub_params", ((2, GossipsubParams(heartbeat_interval=3)),)
@@ -174,8 +168,6 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     assert id_alice not in gossipsubs[index_bob].mesh[topic]
     assert id_bob in gossipsubs[index_alice].mesh[topic]
 
-    await cleanup()
-
 
 @pytest.mark.parametrize("num_hosts", (10,))
 @pytest.mark.asyncio
@@ -210,7 +202,6 @@ async def test_dense(num_hosts, pubsubs_gsub, hosts):
         for queue in queues:
             msg = await queue.get()
             assert msg.data == msg_content
-    await cleanup()
 
 
 @pytest.mark.parametrize("num_hosts", (10,))
@@ -267,8 +258,6 @@ async def test_fanout(hosts, pubsubs_gsub):
         for queue in queues:
             msg = await queue.get()
             assert msg.data == msg_content
-
-    await cleanup()
 
 
 @pytest.mark.parametrize("num_hosts", (10,))
@@ -340,8 +329,6 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
             msg = await queue.get()
             assert msg.data == msg_content
 
-    await cleanup()
-
 
 @pytest.mark.parametrize(
     "num_hosts, gossipsub_params",
@@ -380,5 +367,3 @@ async def test_gossip_propagation(hosts, pubsubs_gsub):
     # should be able to read message
     msg = await queue_1.get()
     assert msg.data == msg_content
-
-    await cleanup()

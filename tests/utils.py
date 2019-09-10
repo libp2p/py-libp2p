@@ -1,6 +1,3 @@
-import asyncio
-from contextlib import suppress
-
 import multiaddr
 
 from libp2p import new_node
@@ -15,17 +12,6 @@ async def connect(node1, node2):
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
-
-
-async def cleanup():
-    pending = asyncio.all_tasks()
-    for task in pending:
-        task.cancel()
-
-        # Now we should await task to execute it's cancellation.
-        # Cancelled task raises asyncio.CancelledError that we can suppress:
-        with suppress(asyncio.CancelledError):
-            await task
 
 
 async def set_up_nodes_by_transport_opt(transport_opt_list):

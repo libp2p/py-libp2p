@@ -4,7 +4,7 @@ import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.protocol_muxer.exceptions import MultiselectClientError
-from tests.utils import cleanup, set_up_nodes_by_transport_opt
+from tests.utils import set_up_nodes_by_transport_opt
 
 PROTOCOL_ID = "/chat/1.0.0"
 
@@ -101,5 +101,3 @@ async def test_chat(test):
     await host_b.connect(info)
 
     await test(host_a, host_b)
-
-    await cleanup()

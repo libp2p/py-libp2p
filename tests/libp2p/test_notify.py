@@ -17,7 +17,7 @@ from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
 from tests.constants import MAX_READ_LEN
-from tests.utils import cleanup, perform_two_host_set_up
+from tests.utils import perform_two_host_set_up
 
 ACK = "ack:"
 
@@ -91,7 +91,6 @@ async def test_one_notifier():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -138,7 +137,6 @@ async def test_one_notifier_on_two_nodes():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -203,7 +201,6 @@ async def test_one_notifier_on_two_nodes_with_listen():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -235,7 +232,6 @@ async def test_two_notifiers():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -271,7 +267,6 @@ async def test_ten_notifiers():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -325,7 +320,6 @@ async def test_ten_notifiers_on_two_nodes():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -355,4 +349,3 @@ async def test_invalid_notifee():
         assert response == expected_resp
 
     # Success, terminate pending tasks.
-    await cleanup()

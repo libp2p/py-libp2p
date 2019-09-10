@@ -1,7 +1,7 @@
 import pytest
 
 from libp2p.protocol_muxer.exceptions import MultiselectClientError
-from tests.utils import cleanup, echo_stream_handler, set_up_nodes_by_transport_opt
+from tests.utils import echo_stream_handler, set_up_nodes_by_transport_opt
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection
@@ -35,7 +35,6 @@ async def perform_simple_test(
     assert expected_selected_protocol == stream.get_protocol()
 
     # Success, terminate pending tasks.
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -52,7 +51,6 @@ async def test_single_protocol_fails():
         await perform_simple_test("", ["/echo/1.0.0"], ["/potato/1.0.0"])
 
     # Cleanup not reached on error
-    await cleanup()
 
 
 @pytest.mark.asyncio
@@ -83,4 +81,3 @@ async def test_multiple_protocol_fails():
         await perform_simple_test("", protocols_for_client, protocols_for_listener)
 
     # Cleanup not reached on error
-    await cleanup()

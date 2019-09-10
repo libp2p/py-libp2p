@@ -5,7 +5,7 @@ from libp2p.stream_muxer.abc import IMuxedStream
 
 from .constants import HeaderTags
 from .datastructures import StreamID
-from .exceptions import MplexStreamEOF, MplexStreamReset
+from .exceptions import MplexStreamClosed, MplexStreamEOF, MplexStreamReset
 
 if TYPE_CHECKING:
     from libp2p.stream_muxer.mplex.mplex import Mplex
@@ -55,22 +55,46 @@ class MplexStream(IMuxedStream):
         return self.stream_id.is_initiator
 
     async def _wait_for_data(self) -> None:
+        task_event_reset = asyncio.ensure_future(self.event_reset.wait())
+        task_incoming_data_get = asyncio.ensure_future(self.incoming_data.get())
+        task_event_remote_closed = asyncio.ensure_future(
+            self.event_remote_closed.wait()
+        )
         done, pending = await asyncio.wait(  # type: ignore
-            [
-                self.event_reset.wait(),
-                self.event_remote_closed.wait(),
-                self.incoming_data.get(),
-            ],
+            [task_event_reset, task_incoming_data_get, task_event_remote_closed],
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if self.event_reset.is_set():
-            raise MplexStreamReset
-        if self.event_remote_closed.is_set():
-            raise MplexStreamEOF
-        # TODO: Handle timeout when deadline is used.
+        for fut in pending:
+            fut.cancel()
 
-        data = tuple(done)[0].result()
-        self._buf.extend(data)
+        if task_event_reset in done:
+            if self.event_reset.is_set():
+                raise MplexStreamReset
+            else:
+                # However, it is abnormal that `Event.wait` is unblocked without any of the flag
+                #   is set. The task is probably cancelled.
+                raise Exception(
+                    "Should not enter here. "
+                    f"It is probably because {task_event_remote_closed} is cancelled."
+                )
+
+        if task_incoming_data_get in done:
+            data = task_incoming_data_get.result()
+            self._buf.extend(data)
+            return
+
+        if task_event_remote_closed in done:
+            if self.event_remote_closed.is_set():
+                raise MplexStreamEOF
+            else:
+                # However, it is abnormal that `Event.wait` is unblocked without any of the flag
+                #   is set. The task is probably cancelled.
+                raise Exception(
+                    "Should not enter here. "
+                    f"It is probably because {task_event_remote_closed} is cancelled."
+                )
+
+        # TODO: Handle timeout when deadline is used.
 
     async def _read_until_eof(self) -> bytes:
         while True:
@@ -90,7 +114,6 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
-        # TODO: Add exceptions and handle/raise them in this class.
         if n < 0 and n != -1:
             raise ValueError(
                 f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
@@ -99,13 +122,15 @@ class MplexStream(IMuxedStream):
             raise MplexStreamReset
         if n == -1:
             return await self._read_until_eof()
-        if len(self._buf) == 0:
+        if len(self._buf) == 0 and self.incoming_data.empty():
             await self._wait_for_data()
-        # Read up to `n` bytes.
+        # Now we are sure we have something to read.
+        # Try to put enough incoming data into `self._buf`.
         while len(self._buf) < n:
-            if self.incoming_data.empty() or self.event_remote_closed.is_set():
+            try:
+                self._buf.extend(self.incoming_data.get_nowait())
+            except asyncio.QueueEmpty:
                 break
-            self._buf.extend(await self.incoming_data.get())
         payload = self._buf[:n]
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
@@ -115,6 +140,8 @@ class MplexStream(IMuxedStream):
         write to stream
         :return: number of bytes written
         """
+        if self.event_local_closed.is_set():
+            raise MplexStreamClosed(f"cannot write to closed stream: data={data}")
         flag = (
             HeaderTags.MessageInitiator
             if self.is_initiator

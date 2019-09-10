@@ -1,17 +1,27 @@
-from libp2p.exceptions import BaseLibp2pError
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnError,
+    MuxedConnShutdown,
+    MuxedStreamClosed,
+    MuxedStreamEOF,
+    MuxedStreamReset,
+)
 
 
-class MplexError(BaseLibp2pError):
+class MplexError(MuxedConnError):
     pass
 
 
-class MplexStreamReset(MplexError):
+class MplexShutdown(MuxedConnShutdown):
     pass
 
 
-class MplexStreamEOF(MplexError, EOFError):
+class MplexStreamReset(MuxedStreamReset):
     pass
 
 
-class MplexShutdown(MplexError):
+class MplexStreamEOF(MuxedStreamEOF):
+    pass
+
+
+class MplexStreamClosed(MuxedStreamClosed):
     pass
