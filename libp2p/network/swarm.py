@@ -1,5 +1,6 @@
 import asyncio
 from typing import Callable, Dict, List, Sequence
+import logging
 
 from multiaddr import Multiaddr
 
@@ -24,6 +25,9 @@ from .notifee_interface import INotifee
 from .stream.net_stream import NetStream
 from .stream.net_stream_interface import INetStream
 from .typing import GenericProtocolHandlerFn
+
+logger = logging.getLogger("libp2p.network.swarm")
+logger.setLevel(logging.DEBUG)
 
 
 class Swarm(INetwork):
@@ -98,6 +102,8 @@ class Swarm(INetwork):
             # set muxed connection equal to existing muxed connection
             return self.connections[peer_id]
 
+        logger.debug("attempting to dial peer %s", peer_id)
+
         try:
             # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
@@ -115,6 +121,8 @@ class Swarm(INetwork):
         # Transport dials peer (gets back a raw conn)
         raw_conn = await self.transport.dial(multiaddr, self.self_id)
 
+        logger.debug("dialed peer %s over base transport", peer_id)
+
         # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
         # the conn and then mux the conn
         try:
@@ -125,6 +133,9 @@ class Swarm(INetwork):
             raise SwarmException(
                 f"fail to upgrade the connection to a secured connection from {peer_id}"
             ) from error
+
+        logger.debug("upgraded security for peer %s", peer_id)
+
         try:
             muxed_conn = await self.upgrader.upgrade_connection(
                 secured_conn, self.generic_protocol_handler, peer_id
@@ -136,12 +147,16 @@ class Swarm(INetwork):
                 f"fail to upgrade the connection to a muxed connection from {peer_id}"
             ) from error
 
+        logger.debug("upgraded mux for peer %s", peer_id)
+
         # Store muxed connection in connections
         self.connections[peer_id] = muxed_conn
 
         # Call notifiers since event occurred
         for notifee in self.notifees:
             await notifee.connected(self, muxed_conn)
+
+        logger.debug("successfully dialed peer %s", peer_id)
 
         return muxed_conn
 
@@ -195,6 +210,11 @@ class Swarm(INetwork):
             async def conn_handler(
                 reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             ) -> None:
+                connection_info = writer.get_extra_info("peername")
+                # TODO make a proper multiaddr
+                peer_addr = f"/ip4/{connection_info[0]}/tcp/{connection_info[1]}"
+                logger.debug("inbound connection at %s", peer_addr)
+                # logger.debug("inbound connection request", peer_id)
                 # Upgrade reader/write to a net_stream and pass \
                 # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(reader, writer, False)
@@ -213,6 +233,10 @@ class Swarm(INetwork):
                         "fail to upgrade the connection to a secured connection"
                     ) from error
                 peer_id = secured_conn.get_remote_peer()
+
+                logger.debug("upgraded security for peer at %s", peer_addr)
+                logger.debug("identified peer at %s as %s", peer_addr, peer_id)
+
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
                         secured_conn, self.generic_protocol_handler, peer_id
@@ -223,11 +247,14 @@ class Swarm(INetwork):
                     raise SwarmException(
                         f"fail to upgrade the connection to a muxed connection from {peer_id}"
                     ) from error
+                logger.debug("upgraded mux for peer %s", peer_id)
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
                 # Call notifiers since event occurred
                 for notifee in self.notifees:
                     await notifee.connected(self, muxed_conn)
+
+                logger.debug("successfully opened connection to peer %s", peer_id)
 
             try:
                 # Success
