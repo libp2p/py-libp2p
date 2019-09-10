@@ -13,6 +13,7 @@ from typing import (
     cast,
 )
 
+import base58
 from lru import LRU
 
 from libp2p.exceptions import ValidationError
@@ -414,14 +415,19 @@ class Pubsub:
         # Validate the signature of the message
         # FIXME: `signature_validator` is currently a stub.
         if not signature_validator(msg.key, msg.SerializeToString()):
-            log.debug(f"Signature validation failed for msg={msg}")
+            log.debug("Signature validation failed for msg: %s", msg)
             return
         # Validate the message with registered topic validators.
         # If the validation failed, return(i.e., don't further process the message).
         try:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
-            log.debug(f"Topic validation failed for msg={msg}")
+            log.debug(
+                "Topic validation failed: sender %s sent data %s under topic IDs: %s",
+                f"{base58.b58encode(msg.from_id).decode()}:{msg.seqno.hex()}",
+                msg.data,
+                msg.topicIDs,
+            )
             return
 
         self._mark_msg_seen(msg)
