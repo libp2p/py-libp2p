@@ -6,7 +6,6 @@ from multiaddr import Multiaddr
 
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
