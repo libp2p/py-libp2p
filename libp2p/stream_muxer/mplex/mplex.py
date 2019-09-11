@@ -2,7 +2,6 @@ import asyncio
 from typing import Any  # noqa: F401
 from typing import Dict, List, Optional, Tuple
 
-from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
@@ -34,17 +33,13 @@ class Mplex(IMuxedConn):
     next_channel_id: int
     streams: Dict[StreamID, MplexStream]
     streams_lock: asyncio.Lock
+    new_stream_queue: "asyncio.Queue[IMuxedStream]"
     shutdown: asyncio.Event
 
     _tasks: List["asyncio.Future[Any]"]
 
     # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
-    def __init__(
-        self,
-        secured_conn: ISecureConn,
-        generic_protocol_handler: GenericProtocolHandlerFn,
-        peer_id: ID,
-    ) -> None:
+    def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
         create a new muxed connection
         :param secured_conn: an instance of ``ISecureConn``
@@ -56,15 +51,13 @@ class Mplex(IMuxedConn):
 
         self.next_channel_id = 0
 
-        # Store generic protocol handler
-        self.generic_protocol_handler = generic_protocol_handler
-
         # Set peer_id
         self.peer_id = peer_id
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.streams = {}
         self.streams_lock = asyncio.Lock()
+        self.new_stream_queue = asyncio.Queue()
         self.shutdown = asyncio.Event()
 
         self._tasks = []
@@ -101,9 +94,10 @@ class Mplex(IMuxedConn):
         return next_id
 
     async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
+        stream = MplexStream(name, stream_id, self)
         async with self.streams_lock:
-            stream = MplexStream(name, stream_id, self)
-        self.streams[stream_id] = stream
+            self.streams[stream_id] = stream
+        print(f"!@# _initialize_stream: stream_id={stream_id}, name={name}")
         return stream
 
     async def open_stream(self) -> IMuxedStream:
@@ -119,13 +113,11 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def accept_stream(self, stream_id: StreamID, name: str) -> None:
+    async def accept_stream(self) -> IMuxedStream:
         """
         accepts a muxed stream opened by the other end
         """
-        stream = await self._initialize_stream(stream_id, name)
-        # Perform protocol negotiation for the stream.
-        self._tasks.append(asyncio.ensure_future(self.generic_protocol_handler(stream)))
+        return await self.new_stream_queue.get()
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -178,7 +170,11 @@ class Mplex(IMuxedConn):
                         # `NewStream` for the same id is received twice...
                         # TODO: Shutdown
                         pass
-                    await self.accept_stream(stream_id, message.decode())
+                    mplex_stream = await self._initialize_stream(
+                        stream_id, message.decode()
+                    )
+                    # TODO: Check if `self` is shutdown.
+                    await self.new_stream_queue.put(mplex_stream)
                 elif flag in (
                     HeaderTags.MessageInitiator.value,
                     HeaderTags.MessageReceiver.value,

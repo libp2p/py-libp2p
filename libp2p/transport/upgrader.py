@@ -1,7 +1,6 @@
 from typing import Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -60,19 +59,12 @@ class TransportUpgrader:
                 "handshake failed when upgrading to secure connection"
             ) from error
 
-    async def upgrade_connection(
-        self,
-        conn: ISecureConn,
-        generic_protocol_handler: GenericProtocolHandlerFn,
-        peer_id: ID,
-    ) -> IMuxedConn:
+    async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         """
         Upgrade secured connection to a muxed connection
         """
         try:
-            return await self.muxer_multistream.new_conn(
-                conn, generic_protocol_handler, peer_id
-            )
+            return await self.muxer_multistream.new_conn(conn, peer_id)
         except (MultiselectError, MultiselectClientError) as error:
             raise MuxerUpgradeFailure(
                 "failed to negotiate the multiplexer protocol"

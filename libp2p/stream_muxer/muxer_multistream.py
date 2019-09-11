@@ -2,7 +2,6 @@ from collections import OrderedDict
 from typing import Mapping, Type
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
@@ -69,11 +68,6 @@ class MuxerMultistream:
             protocol, _ = await self.multiselect.negotiate(communicator)
         return self.transports[protocol]
 
-    async def new_conn(
-        self,
-        conn: ISecureConn,
-        generic_protocol_handler: GenericProtocolHandlerFn,
-        peer_id: ID,
-    ) -> IMuxedConn:
+    async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         transport_class = await self.select_transport(conn)
-        return transport_class(conn, generic_protocol_handler, peer_id)
+        return transport_class(conn, peer_id)
