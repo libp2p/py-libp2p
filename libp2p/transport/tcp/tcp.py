@@ -58,12 +58,10 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
-    # TODO: Remove `self_id`
-    async def dial(self, maddr: Multiaddr, self_id: ID) -> IRawConnection:
+    async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
         dial a transport to peer listening on multiaddr
         :param maddr: multiaddr of peer
-        :param self_id: peer_id of the dialer (to send to receiver)
         :return: `RawConnection` if successful
         """
         self.host = maddr.value_for_protocol("ip4")
