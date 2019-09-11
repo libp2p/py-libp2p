@@ -1,6 +1,6 @@
 import asyncio
-from typing import Callable, Dict, List, Sequence
 import logging
+from typing import Callable, Dict, List, Sequence
 
 from multiaddr import Multiaddr
 
