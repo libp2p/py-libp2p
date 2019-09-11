@@ -119,7 +119,7 @@ class Swarm(INetwork):
             multiaddr = self.router.find_peer(peer_id)
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
-        raw_conn = await self.transport.dial(multiaddr, self.self_id)
+        raw_conn = await self.transport.dial(multiaddr)
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
