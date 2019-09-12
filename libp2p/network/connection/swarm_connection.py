@@ -46,12 +46,15 @@ class SwarmConn(INetConn):
         while True:
             print("!@# SwarmConn._handle_new_streams")
             stream = await self.conn.accept_stream()
-            print("!@# SwarmConn._handle_new_streams: accept_stream:", stream)
-            net_stream = await self._add_stream(stream)
-            print("!@# SwarmConn.calling common_stream_handler")
-            if self.swarm.common_stream_handler is not None:
-                await self.run_task(self.swarm.common_stream_handler(net_stream))
+            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+            await self.run_task(self._handle_muxed_stream(stream))
+
         await self.close()
+
+    async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        net_stream = await self._add_stream(muxed_stream)
+        if self.swarm.common_stream_handler is not None:
+            await self.run_task(self.swarm.common_stream_handler(net_stream))
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         print("!@# SwarmConn._add_stream:", muxed_stream)
