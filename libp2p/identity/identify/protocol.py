@@ -30,8 +30,8 @@ def identify_handler_for(public_key: PublicKey, swarm: Any) -> StreamHandlerFn:
             public_key=public_key.serialize(),
             listen_addrs=map(_multiaddr_to_bytes, swarm.get_laddrs()),
             # TODO send observed address from ``stream``
-            observed_addr="",
-            protocols="".join(swarm.multiselect.get_protocols()),
+            observed_addr=b"",
+            protocols=swarm.multiselect.get_protocols(),
         )
         response = protobuf.SerializeToString()
 

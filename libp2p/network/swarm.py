@@ -317,9 +317,9 @@ class Swarm(INetwork):
         await connection.close()
 
     def get_laddrs(self) -> Sequence[Multiaddr]:
-        p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_peer_id()))
+        p2p_part = Multiaddr("/p2p/{}".format(self.get_peer_id()))
 
-        addrs: List[multiaddr.Multiaddr] = []
+        addrs: List[Multiaddr] = []
         for transport in self.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
