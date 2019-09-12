@@ -1,7 +1,7 @@
 from libp2p.stream_muxer.exceptions import (
+    MuxedConnClosed,
     MuxedConnError,
     MuxedConnShuttingDown,
-    MuxedConnClosed,
     MuxedStreamClosed,
     MuxedStreamEOF,
     MuxedStreamReset,
