@@ -14,8 +14,8 @@ from libp2p.utils import (
 )
 
 from .constants import HeaderTags
-from .exceptions import MplexClosed, MplexShuttingDown
 from .datastructures import StreamID
+from .exceptions import MplexClosed, MplexShuttingDown
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
