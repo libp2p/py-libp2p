@@ -33,3 +33,6 @@ class IMultiselectMuxer(ABC):
         :return: selected protocol name, handler function
         :raise Exception: negotiation failed exception
         """
+
+    def get_protocols(self) -> Tuple[TProtocol, ...]:
+        return tuple(self.handlers.keys())

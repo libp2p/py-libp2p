@@ -53,6 +53,7 @@ class BasicHost(IHost):
         """
         :return: mux instance of host
         """
+        return cast(self._network, Swarm).multiselect
 
     def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """

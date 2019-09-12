@@ -90,8 +90,8 @@ def initialize_default_swarm(
     :return: return a default swarm instance
     """
 
-    if not id_opt:
-        id_opt = generate_peer_id_from(key_pair)
+    # if not id_opt:
+    #     id_opt = generate_peer_id_from(key_pair)
 
     # TODO: Parse `transport_opt` to determine transport
     transport = TCP()
@@ -107,7 +107,7 @@ def initialize_default_swarm(
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
-    return Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
+    return Swarm(key_pair, peerstore, upgrader, transport, disc_opt)
 
 
 async def new_node(

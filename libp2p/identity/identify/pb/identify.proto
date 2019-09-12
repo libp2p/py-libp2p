@@ -1,0 +1,12 @@
+syntax = "proto2";
+
+package identify.pb;
+
+message Identify {
+  optional string protocol_version = 5;
+  optional string agent_version = 6;
+  optional bytes public_key = 1;
+  repeated bytes listen_addrs = 2;
+  optional bytes observed_addr = 4;
+  repeated string protocols = 3;
+}

@@ -11,10 +11,13 @@ from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.interfaces import IPeerRouting
+from libp2p.crypto.keys import KeyPair
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
+from libp2p.identity.identify.protocol import ID as IDENTIFY_ID
+from libp2p.identity.identify.protocol import identify_handler_for
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn, TProtocol
 
@@ -50,13 +53,13 @@ class Swarm(INetwork):
 
     def __init__(
         self,
-        peer_id: ID,
+        key_pair: KeyPair,
         peerstore: IPeerStore,
         upgrader: TransportUpgrader,
         transport: ITransport,
         router: IPeerRouting,
     ):
-        self.self_id = peer_id
+        self.self_id = ID.from_pubkey(key_pair.public_key)
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.transport = transport
@@ -74,6 +77,11 @@ class Swarm(INetwork):
 
         # Create generic protocol handler
         self.generic_protocol_handler = create_generic_protocol_handler(self)
+
+        # Install "identify" protocol by default
+        self.set_stream_handler(
+            IDENTIFY_ID, identify_handler_for(key_pair.public_key, self)
+        )
 
     def get_peer_id(self) -> ID:
         return self.self_id
@@ -307,6 +315,15 @@ class Swarm(INetwork):
         connection = self.connections[peer_id]
         del self.connections[peer_id]
         await connection.close()
+
+    def get_laddrs(self) -> Sequence[Multiaddr]:
+        p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_peer_id()))
+
+        addrs: List[multiaddr.Multiaddr] = []
+        for transport in self.listeners.values():
+            for addr in transport.get_addrs():
+                addrs.append(addr.encapsulate(p2p_part))
+        return addrs
 
 
 def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
