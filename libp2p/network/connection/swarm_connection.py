@@ -42,13 +42,15 @@ class SwarmConn(INetConn):
         # TODO: Notify closed.
 
     async def _handle_new_streams(self) -> None:
+        # TODO: Break the loop when anything wrong in the connection.
         while True:
             print("!@# SwarmConn._handle_new_streams")
             stream = await self.conn.accept_stream()
             print("!@# SwarmConn._handle_new_streams: accept_stream:", stream)
             net_stream = await self._add_stream(stream)
-            print("!@# SwarmConn.calling swarm_stream_handler")
-            await self.run_task(self.swarm.swarm_stream_handler(net_stream))
+            print("!@# SwarmConn.calling common_stream_handler")
+            if self.swarm.common_stream_handler is not None:
+                await self.run_task(self.swarm.common_stream_handler(net_stream))
         await self.close()
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:

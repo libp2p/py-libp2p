@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from multiaddr import Multiaddr
 
@@ -8,9 +8,6 @@ from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
@@ -25,7 +22,6 @@ from .exceptions import SwarmException
 from .network_interface import INetwork
 from .notifee_interface import INotifee
 from .stream.net_stream_interface import INetStream
-from .typing import GenericProtocolHandlerFn
 
 logger = logging.getLogger("libp2p.network.swarm")
 logger.setLevel(logging.DEBUG)
@@ -42,10 +38,7 @@ class Swarm(INetwork):
     #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, INetConn]
     listeners: Dict[str, IListener]
-    swarm_stream_handler: Optional[Callable[[INetStream], None]]
-
-    multiselect: Multiselect
-    multiselect_client: MultiselectClient
+    common_stream_handler: Optional[StreamHandlerFn]
 
     notifees: List[INotifee]
 
@@ -65,29 +58,16 @@ class Swarm(INetwork):
         self.connections = dict()
         self.listeners = dict()
 
-        # Protocol muxing
-        self.multiselect = Multiselect()
-        self.multiselect_client = MultiselectClient()
-
         # Create Notifee array
         self.notifees = []
 
-        # Create generic protocol handler
-        self.swarm_stream_handler = (
-            self.generic_protocol_handler
-        ) = create_generic_protocol_handler(self)
+        self.common_stream_handler = None
 
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(
-        self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
-    ) -> None:
-        """
-        :param protocol_id: protocol id used on stream
-        :param stream_handler: a stream handler instance
-        """
-        self.multiselect.add_handler(protocol_id, stream_handler)
+    def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
+        self.common_stream_handler = stream_handler
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
@@ -169,23 +149,8 @@ class Swarm(INetwork):
         swarm_conn = await self.dial_peer(peer_id)
 
         print(f"!@# swarm.new_stream: 1")
-        # Use muxed conn to open stream, which returns a muxed stream
         net_stream = await swarm_conn.new_stream()
-        print(f"!@# swarm.new_stream: 2")
-
-        # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids), MultiselectCommunicator(net_stream)
-        )
-        print(f"!@# swarm.new_stream: 3")
-
-        net_stream.set_protocol(selected_protocol)
-
-        logger.debug(
-            "successfully opened a stream to peer %s, over protocol %s",
-            peer_id,
-            selected_protocol,
-        )
+        logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
 
     async def listen(self, *multiaddrs: Multiaddr) -> bool:
@@ -314,25 +279,3 @@ class Swarm(INetwork):
             await notifee.connected(self, muxed_conn)
         await swarm_conn.start()
         return swarm_conn
-
-
-# TODO: Move to `BasicHost`
-def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
-    """
-    Create a generic protocol handler from the given swarm. We use swarm
-    to extract the multiselect module so that generic_protocol_handler
-    can use multiselect when generic_protocol_handler is called
-    from a different class
-    """
-    multiselect = swarm.multiselect
-
-    # Reference: `BasicHost.newStreamHandler` in Go.
-    async def generic_protocol_handler(net_stream: INetStream) -> None:
-        # Perform protocol muxing to determine protocol to use
-        protocol, handler = await multiselect.negotiate(
-            MultiselectCommunicator(net_stream)
-        )
-        net_stream.set_protocol(protocol)
-        asyncio.ensure_future(handler(net_stream))
-
-    return generic_protocol_handler
