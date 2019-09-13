@@ -264,7 +264,6 @@ class Swarm(INetwork):
         if peer_id not in self.connections:
             return
         connection = self.connections[peer_id]
-        del self.connections[peer_id]
         await connection.close()
 
         logger.debug("successfully close the connection to peer %s", peer_id)
@@ -279,3 +278,10 @@ class Swarm(INetwork):
             await notifee.connected(self, muxed_conn)
         await swarm_conn.start()
         return swarm_conn
+
+    def remove_conn(self, swarm_conn: SwarmConn) -> None:
+        print(f"!@# remove_conn: {swarm_conn}")
+        peer_id = swarm_conn.conn.peer_id
+        # TODO: Should be changed to remove the exact connection,
+        #   if we have several connections per peer in the future.
+        del self.connections[peer_id]

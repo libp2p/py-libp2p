@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, List, Set, Tuple
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.stream.net_stream import NetStream
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
@@ -34,18 +35,28 @@ class SwarmConn(INetConn):
         if self.event_closed.is_set():
             return
         self.event_closed.set()
+        self.swarm.remove_conn(self)
+
         await self.conn.close()
+
+        # This is just for cleaning up state. The connection has already been closed.
+        # We *could* optimize this but it really isn't worth it.
+        for stream in self.streams:
+            await stream.reset()
+        # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
+        asyncio.ensure_future(self._notify_disconnected())
+
         for task in self._tasks:
             task.cancel()
-
-        # TODO: Reset streams for local.
-        # TODO: Notify closed.
 
     async def _handle_new_streams(self) -> None:
         # TODO: Break the loop when anything wrong in the connection.
         while True:
             print("!@# SwarmConn._handle_new_streams")
-            stream = await self.conn.accept_stream()
+            try:
+                stream = await self.conn.accept_stream()
+            except MuxedConnUnavailable:
+                break
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             await self.run_task(self._handle_muxed_stream(stream))
 
@@ -59,10 +70,15 @@ class SwarmConn(INetConn):
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         print("!@# SwarmConn._add_stream:", muxed_stream)
         net_stream = NetStream(muxed_stream)
+        self.streams.add(net_stream)
         # Call notifiers since event occurred
         for notifee in self.swarm.notifees:
             await notifee.opened_stream(self.swarm, net_stream)
         return net_stream
+
+    async def _notify_disconnected(self) -> None:
+        for notifee in self.swarm.notifees:
+            await notifee.disconnected(self.swarm, self.conn)
 
     async def start(self) -> None:
         print("!@# SwarmConn.start")

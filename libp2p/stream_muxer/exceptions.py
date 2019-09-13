@@ -5,11 +5,7 @@ class MuxedConnError(BaseLibp2pError):
     pass
 
 
-class MuxedConnShuttingDown(MuxedConnError):
-    pass
-
-
-class MuxedConnClosed(MuxedConnError):
+class MuxedConnUnavailable(MuxedConnError):
     pass
 
 
