@@ -2,6 +2,7 @@ import asyncio
 from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
+from libp2p.io.exceptions import IncompleteReadError
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
@@ -184,7 +185,11 @@ class Mplex(IMuxedConn):
                 channel_id, flag, message = await self._wait_until_shutting_down_or_closed(
                     self.read_message()
                 )
-            except (MplexUnavailable, ConnectionResetError) as error:
+            except (
+                MplexUnavailable,
+                ConnectionResetError,
+                IncompleteReadError,
+            ) as error:
                 print(f"!@# handle_incoming: read_message: exception={error}")
                 break
             if channel_id is not None and flag is not None and message is not None:
