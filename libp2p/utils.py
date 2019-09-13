@@ -41,14 +41,8 @@ async def decode_uvarint_from_stream(reader: Reader) -> int:
         if shift > SHIFT_64_BIT_MAX:
             raise ParseError("TODO: better exception msg: Integer is too large...")
 
-        byte = await reader.read(1)
-
-        try:
-            value = byte[0]
-        except IndexError:
-            raise ParseError(
-                "Unexpected end of stream while parsing LEB128 encoded integer"
-            )
+        byte = await read_exactly(reader, 1)
+        value = byte[0]
 
         res += (value & LOW_MASK) << shift
 

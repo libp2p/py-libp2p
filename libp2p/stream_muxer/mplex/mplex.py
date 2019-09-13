@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any  # noqa: F401
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Dict, List, Optional, Tuple
 
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -15,7 +15,7 @@ from libp2p.utils import (
 
 from .constants import HeaderTags
 from .datastructures import StreamID
-from .exceptions import MplexClosed, MplexShuttingDown
+from .exceptions import MplexUnavailable
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
@@ -76,13 +76,13 @@ class Mplex(IMuxedConn):
         """
         close the stream muxer and underlying secured connection
         """
-        # for task in self._tasks:
-        #     task.cancel()
-        await self.secured_conn.close()
+        if self.event_shutting_down.is_set():
+            return
         # Set the `event_shutting_down`, to allow graceful shutdown.
         self.event_shutting_down.set()
+        await self.secured_conn.close()
         # Blocked until `close` is finally set.
-        # await self.event_closed.wait()
+        await self.event_closed.wait()
 
     def is_closed(self) -> bool:
         """
@@ -119,31 +119,29 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def _wait_until_closed(self, coro) -> Any:
+    async def _wait_until_shutting_down_or_closed(self, coro: Awaitable[Any]) -> Any:
         task_coro = asyncio.ensure_future(coro)
         task_wait_closed = asyncio.ensure_future(self.event_closed.wait())
-        done, pending = await asyncio.wait(
-            [task_coro, task_wait_closed], return_when=asyncio.FIRST_COMPLETED
-        )
-        if task_wait_closed in done:
-            raise MplexClosed
-        return task_coro.result()
-
-    async def _wait_until_shutting_down(self, coro) -> Any:
-        task_coro = asyncio.ensure_future(coro)
         task_wait_shutting_down = asyncio.ensure_future(self.event_shutting_down.wait())
         done, pending = await asyncio.wait(
-            [task_coro, task_wait_shutting_down], return_when=asyncio.FIRST_COMPLETED
+            [task_coro, task_wait_closed, task_wait_shutting_down],
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        for fut in pending:
+            fut.cancel()
+        if task_wait_closed in done:
+            raise MplexUnavailable("Mplex is closed")
         if task_wait_shutting_down in done:
-            raise MplexShuttingDown
+            raise MplexUnavailable("Mplex is shutting down")
         return task_coro.result()
 
     async def accept_stream(self) -> IMuxedStream:
         """
         accepts a muxed stream opened by the other end
         """
-        return await self._wait_until_closed(self.new_stream_queue.get())
+        return await self._wait_until_shutting_down_or_closed(
+            self.new_stream_queue.get()
+        )
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -162,7 +160,9 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        return await self.write_to_stream(_bytes)
+        return await self._wait_until_shutting_down_or_closed(
+            self.write_to_stream(_bytes)
+        )
 
     async def write_to_stream(self, _bytes: bytes) -> int:
         """
@@ -180,7 +180,13 @@ class Mplex(IMuxedConn):
         # TODO Deal with other types of messages using flag (currently _)
 
         while True:
-            channel_id, flag, message = await self.read_message()
+            try:
+                channel_id, flag, message = await self._wait_until_shutting_down_or_closed(
+                    self.read_message()
+                )
+            except (MplexUnavailable, ConnectionResetError) as error:
+                print(f"!@# handle_incoming: read_message: exception={error}")
+                break
             if channel_id is not None and flag is not None and message is not None:
                 stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
                 is_stream_id_seen: bool
@@ -199,8 +205,12 @@ class Mplex(IMuxedConn):
                     mplex_stream = await self._initialize_stream(
                         stream_id, message.decode()
                     )
-                    # TODO: Check if `self` is shutdown.
-                    await self.new_stream_queue.put(mplex_stream)
+                    try:
+                        await self._wait_until_shutting_down_or_closed(
+                            self.new_stream_queue.put(mplex_stream)
+                        )
+                    except MplexUnavailable:
+                        break
                 elif flag in (
                     HeaderTags.MessageInitiator.value,
                     HeaderTags.MessageReceiver.value,
@@ -214,7 +224,12 @@ class Mplex(IMuxedConn):
                         if stream.event_remote_closed.is_set():
                             # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                             continue
-                    await stream.incoming_data.put(message)
+                    try:
+                        await self._wait_until_shutting_down_or_closed(
+                            stream.incoming_data.put(message)
+                        )
+                    except MplexUnavailable:
+                        break
                 elif flag in (
                     HeaderTags.CloseInitiator.value,
                     HeaderTags.CloseReceiver.value,
@@ -244,7 +259,6 @@ class Mplex(IMuxedConn):
                         continue
                     async with stream.close_lock:
                         if not stream.event_remote_closed.is_set():
-                            # TODO: Why? Only if remote is not closed before then reset.
                             stream.event_reset.set()
 
                             stream.event_remote_closed.set()
@@ -260,6 +274,7 @@ class Mplex(IMuxedConn):
 
             # Force context switch
             await asyncio.sleep(0)
+        await self._cleanup()
 
     async def read_message(self) -> Tuple[int, int, bytes]:
         """
@@ -284,3 +299,16 @@ class Mplex(IMuxedConn):
         channel_id = header >> 3
 
         return channel_id, flag, message
+
+    async def _cleanup(self) -> None:
+        if not self.event_shutting_down.is_set():
+            self.event_shutting_down.set()
+        async with self.streams_lock:
+            for stream in self.streams.values():
+                async with stream.close_lock:
+                    if not stream.event_remote_closed.is_set():
+                        stream.event_remote_closed.set()
+                        stream.event_reset.set()
+                        stream.event_local_closed.set()
+            self.streams = None
+        self.event_closed.set()
