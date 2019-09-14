@@ -1,3 +1,4 @@
+import logging
 from typing import Iterable, List, Sequence
 
 from libp2p.peer.id import ID
@@ -9,6 +10,9 @@ from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
+
+logger = logging.getLogger("libp2p.pubsub.floodsub")
+logger.setLevel(logging.DEBUG)
 
 
 class FloodSub(IPubsubRouter):
@@ -75,6 +79,9 @@ class FloodSub(IPubsubRouter):
             origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
+
+        logger.debug("publishing message %s", pubsub_msg)
+
         for peer_id in peers_gen:
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.

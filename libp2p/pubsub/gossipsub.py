@@ -1,5 +1,6 @@
 from ast import literal_eval
 import asyncio
+import logging
 import random
 from typing import Any, Dict, Iterable, List, Sequence, Set
 
@@ -14,6 +15,9 @@ from .pubsub import Pubsub
 from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
+
+logger = logging.getLogger("libp2p.pubsub.gossipsub")
+logger.setLevel(logging.DEBUG)
 
 
 class GossipSub(IPubsubRouter):
@@ -98,6 +102,8 @@ class GossipSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
+        logger.debug("attached to pusub")
+
         # Start heartbeat now that we have a pubsub instance
         # TODO: Start after delay
         asyncio.ensure_future(self.heartbeat())
@@ -108,7 +114,7 @@ class GossipSub(IPubsubRouter):
         :param peer_id: id of peer to add
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
-        self.peers_to_protocol[peer_id] = protocol_id
+        logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
 
         if protocol_id == PROTOCOL_ID:
             self.peers_gossipsub.append(peer_id)
@@ -121,18 +127,22 @@ class GossipSub(IPubsubRouter):
             #   in multistream-select, or wrong versions.
             # TODO: Better handling
             raise Exception(f"protocol is not supported: protocol_id={protocol_id}")
+        self.peers_to_protocol[peer_id] = protocol_id
 
     def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected
         :param peer_id: id of peer to remove
         """
-        del self.peers_to_protocol[peer_id]
+        logger.debug("removing peer %s", peer_id)
 
         if peer_id in self.peers_gossipsub:
             self.peers_gossipsub.remove(peer_id)
-        if peer_id in self.peers_gossipsub:
+        elif peer_id in self.peers_floodsub:
             self.peers_floodsub.remove(peer_id)
+
+        if peer_id in self.peers_to_protocol:
+            del self.peers_to_protocol[peer_id]
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -169,6 +179,9 @@ class GossipSub(IPubsubRouter):
             origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
+
+        logger.debug("publishing message %s", pubsub_msg)
+
         for peer_id in peers_gen:
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
@@ -227,6 +240,8 @@ class GossipSub(IPubsubRouter):
         subscription announcement
         :param topic: topic to join
         """
+        logger.debug("joining topic %s", topic)
+
         if topic in self.mesh:
             return
         # Create mesh[topic] if it does not yet exist
@@ -262,6 +277,8 @@ class GossipSub(IPubsubRouter):
         It is invoked after the unsubscription announcement.
         :param topic: topic to leave
         """
+        logger.debug("leaving topic %s", topic)
+
         if topic not in self.mesh:
             return
         # Notify the peers in mesh[topic] with a PRUNE(topic) message
@@ -269,7 +286,7 @@ class GossipSub(IPubsubRouter):
             await self.emit_prune(topic, peer)
 
         # Forget mesh[topic]
-        self.mesh.pop(topic, None)
+        del self.mesh[topic]
 
     # Heartbeat
     async def heartbeat(self) -> None:
