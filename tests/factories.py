@@ -8,13 +8,13 @@ from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
+from libp2p.network.swarm import Swarm
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
-from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
 from tests.pubsub.configs import (
@@ -22,7 +22,7 @@ from tests.pubsub.configs import (
     GOSSIPSUB_PARAMS,
     GOSSIPSUB_PROTOCOL_ID,
 )
-from tests.utils import connect
+from tests.utils import connect, connect_swarm
 
 
 def security_transport_factory(
@@ -34,10 +34,29 @@ def security_transport_factory(
         return {secio.ID: secio.Transport(key_pair)}
 
 
-def swarm_factory(is_secure: bool):
-    key_pair = generate_new_rsa_identity()
-    sec_opt = security_transport_factory(is_secure, key_pair)
-    return initialize_default_swarm(key_pair, sec_opt=sec_opt)
+class SwarmFactory(factory.Factory):
+    class Meta:
+        model = Swarm
+
+    @classmethod
+    def _create(cls, is_secure=False):
+        key_pair = generate_new_rsa_identity()
+        sec_opt = security_transport_factory(is_secure, key_pair)
+        return initialize_default_swarm(key_pair, sec_opt=sec_opt)
+
+    @classmethod
+    async def create_and_listen(cls, is_secure: bool) -> Swarm:
+        swarm = cls._create(is_secure)
+        await swarm.listen(LISTEN_MADDR)
+        return swarm
+
+    @classmethod
+    async def create_batch_and_listen(
+        cls, is_secure: bool, number: int
+    ) -> Tuple[Swarm, ...]:
+        return await asyncio.gather(
+            *[cls.create_and_listen(is_secure) for _ in range(number)]
+        )
 
 
 class HostFactory(factory.Factory):
@@ -47,13 +66,12 @@ class HostFactory(factory.Factory):
     class Params:
         is_secure = False
 
-    network = factory.LazyAttribute(lambda o: swarm_factory(o.is_secure))
+    network = factory.LazyAttribute(lambda o: SwarmFactory(o.is_secure))
 
     @classmethod
-    async def create_and_listen(cls) -> IHost:
-        host = cls()
-        await host.get_network().listen(LISTEN_MADDR)
-        return host
+    async def create_and_listen(cls, is_secure: bool) -> IHost:
+        swarm = await SwarmFactory.create_and_listen(is_secure)
+        return BasicHost(swarm)
 
 
 class FloodsubFactory(factory.Factory):
@@ -87,24 +105,33 @@ class PubsubFactory(factory.Factory):
     cache_size = None
 
 
-async def host_pair_factory() -> Tuple[BasicHost, BasicHost]:
+async def swarm_pair_factory(is_secure: bool) -> Tuple[Swarm, Swarm]:
+    swarms = await SwarmFactory.create_batch_and_listen(2)
+    await connect_swarm(swarms[0], swarms[1])
+    return swarms[0], swarms[1]
+
+
+async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
     hosts = await asyncio.gather(
-        *[HostFactory.create_and_listen(), HostFactory.create_and_listen()]
+        *[
+            HostFactory.create_and_listen(is_secure),
+            HostFactory.create_and_listen(is_secure),
+        ]
     )
     await connect(hosts[0], hosts[1])
     return hosts[0], hosts[1]
 
 
-async def connection_pair_factory() -> Tuple[Mplex, BasicHost, Mplex, BasicHost]:
-    host_0, host_1 = await host_pair_factory()
-    mplex_conn_0 = host_0.get_network().connections[host_1.get_id()]
-    mplex_conn_1 = host_1.get_network().connections[host_0.get_id()]
-    return mplex_conn_0, host_0, mplex_conn_1, host_1
+# async def connection_pair_factory() -> Tuple[Mplex, BasicHost, Mplex, BasicHost]:
+#     host_0, host_1 = await host_pair_factory()
+#     mplex_conn_0 = host_0.get_network().connections[host_1.get_id()]
+#     mplex_conn_1 = host_1.get_network().connections[host_0.get_id()]
+#     return mplex_conn_0, host_0, mplex_conn_1, host_1
 
 
-async def net_stream_pair_factory() -> Tuple[
-    INetStream, BasicHost, INetStream, BasicHost
-]:
+async def net_stream_pair_factory(
+    is_secure: bool
+) -> Tuple[INetStream, BasicHost, INetStream, BasicHost]:
     protocol_id = "/example/id/1"
 
     stream_1: INetStream
@@ -114,7 +141,7 @@ async def net_stream_pair_factory() -> Tuple[
         nonlocal stream_1
         stream_1 = stream
 
-    host_0, host_1 = await host_pair_factory()
+    host_0, host_1 = await host_pair_factory(is_secure)
     host_1.set_stream_handler(protocol_id, handler)
 
     stream_0 = await host_0.new_stream(host_1.get_id(), [protocol_id])

@@ -5,6 +5,19 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from tests.constants import MAX_READ_LEN
 
 
+async def connect_swarm(swarm_0, swarm_1):
+    peer_id = swarm_1.get_peer_id()
+    addrs = tuple(
+        addr
+        for transport in swarm_1.listeners.values()
+        for addr in transport.get_addrs()
+    )
+    swarm_0.peerstore.add_addrs(peer_id, addrs, 10000)
+    await swarm_0.dial_peer(peer_id)
+    assert swarm_0.get_peer_id() in swarm_1.connections
+    assert swarm_1.get_peer_id() in swarm_0.connections
+
+
 async def connect(node1, node2):
     """
     Connect node1 to node2
