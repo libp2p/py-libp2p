@@ -13,16 +13,12 @@ class IMultiselectClient(ABC):
     module in order to select a protocol id to communicate over
     """
 
-    @abstractmethod
-    async def select_protocol_or_fail(
-        self, protocol: TProtocol, communicator: IMultiselectCommunicator
-    ) -> TProtocol:
+    async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
-        Send message to multiselect selecting protocol
-        and fail if multiselect does not return same protocol
-        :param protocol: protocol to select
+        Ensure that the client and multiselect
+        are both using the same multiselect protocol
         :param stream: stream to communicate with multiselect over
-        :return: selected protocol
+        :raise Exception: multiselect protocol ID mismatch
         """
 
     @abstractmethod
@@ -35,5 +31,16 @@ class IMultiselectClient(ABC):
         protocol that multiselect agrees on (i.e. that multiselect selects)
         :param protocol: protocol to select
         :param stream: stream to communicate with multiselect over
+        :return: selected protocol
+        """
+
+    async def try_select(
+        self, communicator: IMultiselectCommunicator, protocol: TProtocol
+    ) -> TProtocol:
+        """
+        Try to select the given protocol or raise exception if fails
+        :param communicator: communicator to use to communicate with counterparty
+        :param protocol: protocol to select
+        :raise Exception: error in protocol selection
         :return: selected protocol
         """
