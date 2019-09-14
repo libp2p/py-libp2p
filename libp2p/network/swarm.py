@@ -80,14 +80,12 @@ class Swarm(INetwork):
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
-    ) -> bool:
+    ) -> None:
         """
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler instance
-        :return: true if successful
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
-        return True
 
     async def dial_peer(self, peer_id: ID) -> IMuxedConn:
         """
@@ -128,11 +126,10 @@ class Swarm(INetwork):
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
         except SecurityUpgradeFailure as error:
-            # TODO: Add logging to indicate the failure
+            error_msg = "fail to upgrade security for peer %s" % peer_id
+            logger.debug(error_msg)
             await raw_conn.close()
-            raise SwarmException(
-                f"fail to upgrade the connection to a secured connection from {peer_id}"
-            ) from error
+            raise SwarmException(error_msg) from error
 
         logger.debug("upgraded security for peer %s", peer_id)
 
@@ -141,11 +138,10 @@ class Swarm(INetwork):
                 secured_conn, self.generic_protocol_handler, peer_id
             )
         except MuxerUpgradeFailure as error:
-            # TODO: Add logging to indicate the failure
+            error_msg = "fail to upgrade mux for peer %s" % peer_id
+            logger.debug(error_msg)
             await secured_conn.close()
-            raise SwarmException(
-                f"fail to upgrade the connection to a muxed connection from {peer_id}"
-            ) from error
+            raise SwarmException(error_msg) from error
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
@@ -168,6 +164,11 @@ class Swarm(INetwork):
         :param protocol_id: protocol id
         :return: net stream instance
         """
+        logger.debug(
+            "attempting to open a stream to peer %s, over one of the protocols %s",
+            peer_id,
+            protocol_ids,
+        )
 
         muxed_conn = await self.dial_peer(peer_id)
 
@@ -182,6 +183,12 @@ class Swarm(INetwork):
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
         net_stream.set_protocol(selected_protocol)
+
+        logger.debug(
+            "successfully opened a stream to peer %s, over protocol %s",
+            peer_id,
+            selected_protocol,
+        )
 
         # Call notifiers since event occurred
         for notifee in self.notifees:
@@ -215,8 +222,6 @@ class Swarm(INetwork):
                 peer_addr = f"/ip4/{connection_info[0]}/tcp/{connection_info[1]}"
                 logger.debug("inbound connection at %s", peer_addr)
                 # logger.debug("inbound connection request", peer_id)
-                # Upgrade reader/write to a net_stream and pass \
-                # to appropriate stream handler (using multiaddr)
                 raw_conn = RawConnection(reader, writer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
@@ -227,11 +232,10 @@ class Swarm(INetwork):
                         raw_conn, ID(b""), False
                     )
                 except SecurityUpgradeFailure as error:
-                    # TODO: Add logging to indicate the failure
+                    error_msg = "fail to upgrade security for peer at %s" % peer_addr
+                    logger.debug(error_msg)
                     await raw_conn.close()
-                    raise SwarmException(
-                        "fail to upgrade the connection to a secured connection"
-                    ) from error
+                    raise SwarmException(error_msg) from error
                 peer_id = secured_conn.get_remote_peer()
 
                 logger.debug("upgraded security for peer at %s", peer_addr)
@@ -242,11 +246,10 @@ class Swarm(INetwork):
                         secured_conn, self.generic_protocol_handler, peer_id
                     )
                 except MuxerUpgradeFailure as error:
-                    # TODO: Add logging to indicate the failure
+                    error_msg = "fail to upgrade mux for peer %s" % peer_id
+                    logger.debug(error_msg)
                     await secured_conn.close()
-                    raise SwarmException(
-                        f"fail to upgrade the connection to a muxed connection from {peer_id}"
-                    ) from error
+                    raise SwarmException(error_msg) from error
                 logger.debug("upgraded mux for peer %s", peer_id)
                 # Store muxed_conn with peer id
                 self.connections[peer_id] = muxed_conn
@@ -269,7 +272,7 @@ class Swarm(INetwork):
                 return True
             except IOError:
                 # Failed. Continue looping.
-                print("Failed to connect to: " + str(maddr))
+                logger.debug("fail to listen on: " + str(maddr))
 
         # No maddr succeeded
         return False
@@ -301,12 +304,16 @@ class Swarm(INetwork):
             *[connection.close() for connection in self.connections.values()]
         )
 
+        logger.debug("swarm successfully closed")
+
     async def close_peer(self, peer_id: ID) -> None:
         if peer_id not in self.connections:
             return
         connection = self.connections[peer_id]
         del self.connections[peer_id]
         await connection.close()
+
+        logger.debug("successfully close the connection to peer %s", peer_id)
 
 
 def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:

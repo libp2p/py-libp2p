@@ -21,7 +21,7 @@ from .host_interface import IHost
 class BasicHost(IHost):
 
     _network: INetwork
-    router: KadmeliaPeerRouter
+    _router: KadmeliaPeerRouter
     peerstore: IPeerStore
 
     # default options constructor
@@ -56,7 +56,7 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """
-        :return: all the multiaddr addresses this host is listening too
+        :return: all the multiaddr addresses this host is listening to
         """
         p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_id().pretty()))
 
@@ -68,23 +68,22 @@ class BasicHost(IHost):
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
-    ) -> bool:
+    ) -> None:
         """
-        set stream handler for host
+        set stream handler for given `protocol_id`
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
-        :return: true if successful
         """
-        return self._network.set_stream_handler(protocol_id, stream_handler)
+        self._network.set_stream_handler(protocol_id, stream_handler)
 
-    # protocol_id can be a list of protocol_ids
-    # stream will decide which protocol_id to run on
+    # `protocol_ids` can be a list of `protocol_id`
+    # stream will decide which `protocol_id` to run on
     async def new_stream(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
-        :param protocol_id: protocol id that stream runs on
+        :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
         return await self._network.new_stream(peer_id, protocol_ids)
@@ -92,12 +91,11 @@ class BasicHost(IHost):
     async def connect(self, peer_info: PeerInfo) -> None:
         """
         connect ensures there is a connection between this host and the peer with
-        given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal
+        given `peer_info.peer_id`. connect will absorb the addresses in peer_info into its internal
         peerstore. If there is not an active connection, connect will issue a
-        dial, and block until a connection is open, or an error is
-        returned.
+        dial, and block until a connection is opened, or an error is returned.
 
-        :param peer_info: peer_info of the host we want to connect to
+        :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
         self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)

@@ -16,10 +16,9 @@ class INetStream(ReadWriteCloser):
         """
 
     @abstractmethod
-    def set_protocol(self, protocol_id: TProtocol) -> bool:
+    def set_protocol(self, protocol_id: TProtocol) -> None:
         """
         :param protocol_id: protocol id that stream runs on
-        :return: true if successful
         """
 
     @abstractmethod

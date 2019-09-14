@@ -34,7 +34,6 @@ class NetStream(INetStream):
     def set_protocol(self, protocol_id: TProtocol) -> None:
         """
         :param protocol_id: protocol id that stream runs on
-        :return: true if successful
         """
         self.protocol_id = protocol_id
 
@@ -64,7 +63,6 @@ class NetStream(INetStream):
     async def close(self) -> None:
         """
         close stream
-        :return: true if successful
         """
         await self.muxed_stream.close()
 
