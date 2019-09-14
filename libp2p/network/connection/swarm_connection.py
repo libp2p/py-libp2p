@@ -50,12 +50,13 @@ class SwarmConn(INetConn):
             task.cancel()
 
     async def _handle_new_streams(self) -> None:
-        # TODO: Break the loop when anything wrong in the connection.
         while True:
             print("!@# SwarmConn._handle_new_streams")
             try:
                 stream = await self.conn.accept_stream()
             except MuxedConnUnavailable:
+                # If there is anything wrong in the MuxedConn,
+                # we should break the loop and close the connection.
                 break
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             await self.run_task(self._handle_muxed_stream(stream))
