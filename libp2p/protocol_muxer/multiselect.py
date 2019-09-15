@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 from libp2p.typing import StreamHandlerFn, TProtocol
 
-from .exceptions import MultiselectError
+from .exceptions import MultiselectCommunicatorError, MultiselectError
 from .multiselect_communicator_interface import IMultiselectCommunicator
 from .multiselect_muxer_interface import IMultiselectMuxer
 
@@ -46,7 +46,10 @@ class Multiselect(IMultiselectMuxer):
         # Read and respond to commands until a valid protocol ID is sent
         while True:
             # Read message
-            command = await communicator.read()
+            try:
+                command = await communicator.read()
+            except MultiselectCommunicatorError as error:
+                raise MultiselectError(str(error))
 
             # Command is ls or a protocol
             if command == "ls":
@@ -76,7 +79,10 @@ class Multiselect(IMultiselectMuxer):
         await communicator.write(MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read()
+        try:
+            handshake_contents = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectError(str(error))
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):

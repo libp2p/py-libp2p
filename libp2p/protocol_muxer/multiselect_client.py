@@ -2,7 +2,7 @@ from typing import Sequence
 
 from libp2p.typing import TProtocol
 
-from .exceptions import MultiselectClientError
+from .exceptions import MultiselectClientError, MultiselectCommunicatorError
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
@@ -30,7 +30,10 @@ class MultiselectClient(IMultiselectClient):
         await communicator.write(MULTISELECT_PROTOCOL_ID)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read()
+        try:
+            handshake_contents = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(str(error))
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
@@ -79,7 +82,10 @@ class MultiselectClient(IMultiselectClient):
         await communicator.write(protocol)
 
         # Get what counterparty says in response
-        response = await communicator.read()
+        try:
+            response = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(str(error))
 
         # Return protocol if response is equal to protocol or raise error
         if response == protocol:
