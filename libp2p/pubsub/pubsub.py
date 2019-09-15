@@ -31,7 +31,8 @@ if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter  # noqa: F401
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger("libp2p.pubsub")
+logger.setLevel(logging.DEBUG)
 
 
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
@@ -161,6 +162,9 @@ class Pubsub:
                 for msg in rpc_incoming.publish:
                     if not self._is_subscribed_to_msg(msg):
                         continue
+                    logger.debug(
+                        "received `publish` message %s from peer %s", msg, peer_id
+                    )
                     asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg))
 
             if rpc_incoming.subscriptions:
@@ -170,6 +174,11 @@ class Pubsub:
                 # to know that it is subscribed to the topic (doesn't
                 # need everyone to know)
                 for message in rpc_incoming.subscriptions:
+                    logger.debug(
+                        "received `subscriptions` message %s from peer %s",
+                        message,
+                        peer_id,
+                    )
                     self.handle_subscription(peer_id, message)
 
             # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
@@ -177,6 +186,7 @@ class Pubsub:
             #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
             if rpc_incoming.HasField("control"):
                 # Pass rpc to router so router could perform custom logic
+                logger.debug("received `control` message %s from peer %s", peer_id)
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
             # Force context switch
@@ -230,7 +240,13 @@ class Pubsub:
         await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
-        self.router.add_peer(peer_id, stream.get_protocol())
+        try:
+            self.router.add_peer(peer_id, stream.get_protocol())
+        except Exception as error:
+            logger.debug("fail to add new peer %s, error %s", peer_id, error)
+            return
+
+        logger.debug("added new peer %s", peer_id)
 
     async def handle_peer_queue(self) -> None:
         """
@@ -291,6 +307,8 @@ class Pubsub:
         :param topic_id: topic_id to subscribe to
         """
 
+        logger.debug("subscribing to topic %s", topic_id)
+
         # Already subscribed
         if topic_id in self.my_topics:
             return self.my_topics[topic_id]
@@ -318,6 +336,8 @@ class Pubsub:
         Unsubscribe ourself from a topic
         :param topic_id: topic_id to unsubscribe from
         """
+
+        logger.debug("unsubscribing from topic %s", topic_id)
 
         # Return if we already unsubscribed from the topic
         if topic_id not in self.my_topics:
@@ -366,6 +386,8 @@ class Pubsub:
 
         await self.push_msg(self.host.get_id(), msg)
 
+        logger.debug("successfully published message %s", msg)
+
     async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
         Validate the received message
@@ -401,6 +423,8 @@ class Pubsub:
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message we are going to push out.
         """
+        logger.debug("attempting to publish message %s", msg)
+
         # TODO: Check if the `source` is in the blacklist. If yes, reject.
 
         # TODO: Check if the `from` is in the blacklist. If yes, reject.
@@ -415,14 +439,14 @@ class Pubsub:
         # Validate the signature of the message
         # FIXME: `signature_validator` is currently a stub.
         if not signature_validator(msg.key, msg.SerializeToString()):
-            log.debug("Signature validation failed for msg: %s", msg)
+            logger.debug("Signature validation failed for msg: %s", msg)
             return
         # Validate the message with registered topic validators.
         # If the validation failed, return(i.e., don't further process the message).
         try:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
-            log.debug(
+            logger.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s",
                 f"{base58.b58encode(msg.from_id).decode()}:{msg.seqno.hex()}",
                 msg.data.hex(),

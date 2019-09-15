@@ -38,24 +38,6 @@ class MultiselectClient(IMultiselectClient):
 
         # Handshake succeeded if this point is reached
 
-    async def select_protocol_or_fail(
-        self, protocol: TProtocol, communicator: IMultiselectCommunicator
-    ) -> TProtocol:
-        """
-        Send message to multiselect selecting protocol
-        and fail if multiselect does not return same protocol
-        :param protocol: protocol to select
-        :param stream: stream to communicate with multiselect over
-        :return: selected protocol
-        """
-        # Perform handshake to ensure multiselect protocol IDs match
-        await self.handshake(communicator)
-
-        # Try to select the given protocol
-        selected_protocol = await self.try_select(communicator, protocol)
-
-        return selected_protocol
-
     async def select_one_of(
         self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
     ) -> TProtocol:
