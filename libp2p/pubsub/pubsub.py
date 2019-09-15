@@ -151,7 +151,7 @@ class Pubsub:
         messages from other nodes
         :param stream: stream to continously read from
         """
-        peer_id = stream.mplex_conn.peer_id
+        peer_id = stream.muxed_conn.peer_id
 
         while True:
             incoming: bytes = await read_varint_prefixed_bytes(stream)

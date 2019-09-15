@@ -18,7 +18,7 @@ class MplexStream(IMuxedStream):
 
     name: str
     stream_id: StreamID
-    mplex_conn: "Mplex"
+    muxed_conn: "Mplex"
     read_deadline: int
     write_deadline: int
 
@@ -32,15 +32,15 @@ class MplexStream(IMuxedStream):
 
     _buf: bytearray
 
-    def __init__(self, name: str, stream_id: StreamID, mplex_conn: "Mplex") -> None:
+    def __init__(self, name: str, stream_id: StreamID, muxed_conn: "Mplex") -> None:
         """
         create new MuxedStream in muxer
         :param stream_id: stream id of this stream
-        :param mplex_conn: muxed connection of this muxed_stream
+        :param muxed_conn: muxed connection of this muxed_stream
         """
         self.name = name
         self.stream_id = stream_id
-        self.mplex_conn = mplex_conn
+        self.muxed_conn = muxed_conn
         self.read_deadline = None
         self.write_deadline = None
         self.event_local_closed = asyncio.Event()
@@ -147,7 +147,7 @@ class MplexStream(IMuxedStream):
             if self.is_initiator
             else HeaderTags.MessageReceiver
         )
-        return await self.mplex_conn.send_message(flag, data, self.stream_id)
+        return await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
         """
@@ -163,8 +163,8 @@ class MplexStream(IMuxedStream):
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
-        # TODO: Raise when `mplex_conn.send_message` fails and `Mplex` isn't shutdown.
-        await self.mplex_conn.send_message(flag, None, self.stream_id)
+        # TODO: Raise when `muxed_conn.send_message` fails and `Mplex` isn't shutdown.
+        await self.muxed_conn.send_message(flag, None, self.stream_id)
 
         _is_remote_closed: bool
         async with self.close_lock:
@@ -173,8 +173,8 @@ class MplexStream(IMuxedStream):
 
         if _is_remote_closed:
             # Both sides are closed, we can safely remove the buffer from the dict.
-            async with self.mplex_conn.streams_lock:
-                del self.mplex_conn.streams[self.stream_id]
+            async with self.muxed_conn.streams_lock:
+                del self.muxed_conn.streams[self.stream_id]
 
     async def reset(self) -> None:
         """
@@ -196,19 +196,19 @@ class MplexStream(IMuxedStream):
                     else HeaderTags.ResetReceiver
                 )
                 asyncio.ensure_future(
-                    self.mplex_conn.send_message(flag, None, self.stream_id)
+                    self.muxed_conn.send_message(flag, None, self.stream_id)
                 )
                 await asyncio.sleep(0)
 
             self.event_local_closed.set()
             self.event_remote_closed.set()
 
-        async with self.mplex_conn.streams_lock:
+        async with self.muxed_conn.streams_lock:
             if (
-                self.mplex_conn.streams is not None
-                and self.stream_id in self.mplex_conn.streams
+                self.muxed_conn.streams is not None
+                and self.stream_id in self.muxed_conn.streams
             ):
-                del self.mplex_conn.streams[self.stream_id]
+                del self.muxed_conn.streams[self.stream_id]
 
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:

@@ -69,7 +69,6 @@ class SwarmConn(INetConn):
             await self.run_task(self.swarm.common_stream_handler(net_stream))
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        print("!@# SwarmConn._add_stream:", muxed_stream)
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
         # Call notifiers since event occurred
@@ -79,7 +78,7 @@ class SwarmConn(INetConn):
 
     async def _notify_disconnected(self) -> None:
         for notifee in self.swarm.notifees:
-            await notifee.disconnected(self.swarm, self.conn)
+            await notifee.disconnected(self.swarm, self)
 
     async def start(self) -> None:
         print("!@# SwarmConn.start")

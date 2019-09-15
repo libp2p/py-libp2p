@@ -280,8 +280,7 @@ class Swarm(INetwork):
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
         for notifee in self.notifees:
-            # TODO: Call with other type of conn?
-            await notifee.connected(self, muxed_conn)
+            await notifee.connected(self, swarm_conn)
         await swarm_conn.start()
         return swarm_conn
 

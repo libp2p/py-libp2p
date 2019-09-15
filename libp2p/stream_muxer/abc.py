@@ -55,7 +55,7 @@ class IMuxedConn(ABC):
 
 class IMuxedStream(ReadWriteCloser):
 
-    mplex_conn: IMuxedConn
+    muxed_conn: IMuxedConn
 
     @abstractmethod
     async def reset(self) -> None:

@@ -233,7 +233,7 @@ class FakeNetStream:
     class FakeMplexConn(NamedTuple):
         peer_id: ID = ID(b"\x12\x20" + b"\x00" * 32)
 
-    mplex_conn = FakeMplexConn()
+    muxed_conn = FakeMplexConn()
 
     def __init__(self) -> None:
         self._queue = asyncio.Queue()
