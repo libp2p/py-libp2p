@@ -112,7 +112,7 @@ class PubsubFactory(factory.Factory):
 
 
 async def swarm_pair_factory(is_secure: bool) -> Tuple[Swarm, Swarm]:
-    swarms = await ListeningSwarmFactory.create_batch_and_listen(2)
+    swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, 2)
     await connect_swarm(swarms[0], swarms[1])
     return swarms[0], swarms[1]
 

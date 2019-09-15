@@ -263,12 +263,18 @@ class Swarm(INetwork):
     async def close_peer(self, peer_id: ID) -> None:
         if peer_id not in self.connections:
             return
+        # TODO: Should be changed to close multisple connections,
+        #   if we have several connections per peer in the future.
         connection = self.connections[peer_id]
         await connection.close()
 
         logger.debug("successfully close the connection to peer %s", peer_id)
 
     async def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
+        """
+        Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
+        and start to monitor the connection for its new streams and disconnection.
+        """
         swarm_conn = SwarmConn(muxed_conn, self)
         # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
@@ -280,8 +286,12 @@ class Swarm(INetwork):
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
-        print(f"!@# remove_conn: {swarm_conn}")
+        """
+        Simply remove the connection from Swarm's records, without closing the connection.
+        """
         peer_id = swarm_conn.conn.peer_id
+        if peer_id not in self.connections:
+            return
         # TODO: Should be changed to remove the exact connection,
         #   if we have several connections per peer in the future.
         del self.connections[peer_id]
