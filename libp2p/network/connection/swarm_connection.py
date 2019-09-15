@@ -77,7 +77,7 @@ class SwarmConn(INetConn):
 
     async def _notify_disconnected(self) -> None:
         for notifee in self.swarm.notifees:
-            await notifee.disconnected(self.swarm, self.conn)
+            await notifee.disconnected(self.swarm, self)
 
     async def start(self) -> None:
         await self.run_task(self._handle_new_streams())

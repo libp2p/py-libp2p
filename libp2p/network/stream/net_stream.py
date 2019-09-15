@@ -1,4 +1,4 @@
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedStream
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
@@ -16,13 +16,11 @@ from .net_stream_interface import INetStream
 class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
-    # TODO: Why we expose `mplex_conn` here?
-    mplex_conn: IMuxedConn
     protocol_id: TProtocol
 
     def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream
-        self.mplex_conn = muxed_stream.mplex_conn
+        self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
 
     def get_protocol(self) -> TProtocol:

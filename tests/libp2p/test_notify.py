@@ -34,7 +34,7 @@ class MyNotifee(INotifee):
         pass
 
     async def connected(self, network, conn):
-        self.events.append(["connected" + self.val_to_append_to_event, conn])
+        self.events.append(["connected" + self.val_to_append_to_event, conn.conn])
 
     async def disconnected(self, network, conn):
         pass
@@ -79,7 +79,7 @@ async def test_one_notifier():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events == [["connected0", stream.mplex_conn], ["opened_stream0", stream]]
+    assert events == [["connected0", stream.muxed_conn], ["opened_stream0", stream]]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -103,7 +103,7 @@ async def test_one_notifier_on_two_nodes():
         # and that the stream passed into opened_stream matches the stream created on
         # node_b
         assert events_b == [
-            ["connectedb", stream.mplex_conn],
+            ["connectedb", stream.muxed_conn],
             ["opened_streamb", stream],
         ]
         for message in messages:
@@ -126,7 +126,7 @@ async def test_one_notifier_on_two_nodes():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
+    assert events_a == [["connecteda", stream.muxed_conn], ["opened_streama", stream]]
 
     for message in messages:
         expected_resp = ACK + message
@@ -164,7 +164,7 @@ async def test_one_notifier_on_two_nodes_with_listen():
         # node_b
         assert events_b == [
             ["listenedb", node_b_multiaddr],
-            ["connectedb", stream.mplex_conn],
+            ["connectedb", stream.muxed_conn],
             ["opened_streamb", stream],
         ]
         for message in messages:
@@ -190,7 +190,7 @@ async def test_one_notifier_on_two_nodes_with_listen():
     # Ensure the connected and opened_stream events were hit in MyNotifee obj
     # and that stream passed into opened_stream matches the stream created on
     # node_a
-    assert events_a == [["connecteda", stream.mplex_conn], ["opened_streama", stream]]
+    assert events_a == [["connecteda", stream.muxed_conn], ["opened_streama", stream]]
 
     for message in messages:
         expected_resp = ACK + message
@@ -219,8 +219,8 @@ async def test_two_notifiers():
     # Ensure the connected and opened_stream events were hit in both Notifee objs
     # and that the stream passed into opened_stream matches the stream created on
     # node_a
-    assert events0 == [["connected0", stream.mplex_conn], ["opened_stream0", stream]]
-    assert events1 == [["connected1", stream.mplex_conn], ["opened_stream1", stream]]
+    assert events0 == [["connected0", stream.muxed_conn], ["opened_stream0", stream]]
+    assert events1 == [["connected1", stream.muxed_conn], ["opened_stream1", stream]]
 
     messages = ["hello", "hello"]
     for message in messages:
@@ -253,7 +253,7 @@ async def test_ten_notifiers():
     # node_a
     for i in range(num_notifiers):
         assert events_lst[i] == [
-            ["connected" + str(i), stream.mplex_conn],
+            ["connected" + str(i), stream.muxed_conn],
             ["opened_stream" + str(i), stream],
         ]
 
@@ -280,7 +280,7 @@ async def test_ten_notifiers_on_two_nodes():
         # node_b
         for i in range(num_notifiers):
             assert events_lst_b[i] == [
-                ["connectedb" + str(i), stream.mplex_conn],
+                ["connectedb" + str(i), stream.muxed_conn],
                 ["opened_streamb" + str(i), stream],
             ]
         while True:
@@ -306,7 +306,7 @@ async def test_ten_notifiers_on_two_nodes():
     # node_a
     for i in range(num_notifiers):
         assert events_lst_a[i] == [
-            ["connecteda" + str(i), stream.mplex_conn],
+            ["connecteda" + str(i), stream.muxed_conn],
             ["opened_streama" + str(i), stream],
         ]
 
