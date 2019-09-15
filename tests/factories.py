@@ -6,7 +6,6 @@ import factory
 from libp2p import generate_new_rsa_identity, initialize_default_swarm
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
-from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.pubsub.floodsub import FloodSub
@@ -34,19 +33,19 @@ def security_transport_factory(
         return {secio.ID: secio.Transport(key_pair)}
 
 
-class SwarmFactory(factory.Factory):
+def SwarmFactory(is_secure: bool) -> Swarm:
+    key_pair = generate_new_rsa_identity()
+    sec_opt = security_transport_factory(False, key_pair)
+    return initialize_default_swarm(key_pair, sec_opt=sec_opt)
+
+
+class ListeningSwarmFactory(factory.Factory):
     class Meta:
         model = Swarm
 
     @classmethod
-    def _create(cls, is_secure=False):
-        key_pair = generate_new_rsa_identity()
-        sec_opt = security_transport_factory(is_secure, key_pair)
-        return initialize_default_swarm(key_pair, sec_opt=sec_opt)
-
-    @classmethod
     async def create_and_listen(cls, is_secure: bool) -> Swarm:
-        swarm = cls._create(is_secure)
+        swarm = SwarmFactory(is_secure)
         await swarm.listen(LISTEN_MADDR)
         return swarm
 
@@ -69,9 +68,16 @@ class HostFactory(factory.Factory):
     network = factory.LazyAttribute(lambda o: SwarmFactory(o.is_secure))
 
     @classmethod
-    async def create_and_listen(cls, is_secure: bool) -> IHost:
-        swarm = await SwarmFactory.create_and_listen(is_secure)
-        return BasicHost(swarm)
+    async def create_and_listen(cls, is_secure: bool) -> BasicHost:
+        swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, 1)
+        return BasicHost(swarms[0])
+
+    @classmethod
+    async def create_batch_and_listen(
+        cls, is_secure: bool, number: int
+    ) -> Tuple[BasicHost, ...]:
+        swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, number)
+        return tuple(BasicHost(swarm) for swarm in range(swarms))
 
 
 class FloodsubFactory(factory.Factory):
@@ -106,7 +112,7 @@ class PubsubFactory(factory.Factory):
 
 
 async def swarm_pair_factory(is_secure: bool) -> Tuple[Swarm, Swarm]:
-    swarms = await SwarmFactory.create_batch_and_listen(2)
+    swarms = await ListeningSwarmFactory.create_batch_and_listen(2)
     await connect_swarm(swarms[0], swarms[1])
     return swarms[0], swarms[1]
 
