@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 
-from tests.factories import SwarmFactory
+from tests.factories import ListeningSwarmFactory
 from tests.utils import connect_swarm
 
 
 @pytest.mark.asyncio
 async def test_swarm_close_peer(is_host_secure):
-    swarms = await SwarmFactory.create_batch_and_listen(is_host_secure, 3)
+    swarms = await ListeningSwarmFactory.create_batch_and_listen(is_host_secure, 3)
     # 0 <> 1 <> 2
     await connect_swarm(swarms[0], swarms[1])
     await connect_swarm(swarms[1], swarms[2])
