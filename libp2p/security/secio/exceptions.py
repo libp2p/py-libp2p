@@ -1,4 +1,7 @@
-class SecioException(Exception):
+from libp2p.security.exceptions import HandshakeFailure
+
+
+class SecioException(HandshakeFailure):
     pass
 
 
@@ -16,10 +19,6 @@ class PeerMismatchException(SecioException):
 
 
 class InvalidSignatureOnExchange(SecioException):
-    pass
-
-
-class HandshakeFailed(SecioException):
     pass
 
 
