@@ -24,3 +24,7 @@ class InvalidSignatureOnExchange(SecioException):
 
 class IncompatibleChoices(SecioException):
     pass
+
+
+class InconsistentNonce(SecioException):
+    pass
