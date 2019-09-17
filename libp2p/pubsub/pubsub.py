@@ -19,11 +19,12 @@ from lru import LRU
 from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
+from libp2p.network.exceptions import SwarmException
+from libp2p.network.stream.exceptions import StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
-from libp2p.network.stream.exceptions import StreamEOF, StreamReset
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
@@ -245,7 +246,11 @@ class Pubsub:
             # disconnect the peer?
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
-        stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
+        try:
+            stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
+        except SwarmException as error:
+            logger.debug("fail to add new peer %s, error %s", peer_id, error)
+            return
 
         self.peers[peer_id] = stream
 

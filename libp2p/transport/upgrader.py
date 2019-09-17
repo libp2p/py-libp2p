@@ -10,10 +10,7 @@ from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.security.security_multistream import SecurityMultistream
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.stream_muxer.muxer_multistream import MuxerClassType, MuxerMultistream
-from libp2p.transport.exceptions import (
-    MuxerUpgradeFailure,
-    SecurityUpgradeFailure,
-)
+from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
 from libp2p.typing import TProtocol
 
 from .listener_interface import IListener

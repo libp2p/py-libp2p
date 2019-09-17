@@ -7,6 +7,7 @@ from multiaddr import Multiaddr
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.protocol_muxer.exceptions import MultiselectClientError
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
@@ -176,9 +177,16 @@ class Swarm(INetwork):
         muxed_stream = await muxed_conn.open_stream()
 
         # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids), MultiselectCommunicator(muxed_stream)
-        )
+        try:
+            selected_protocol = await self.multiselect_client.select_one_of(
+                list(protocol_ids), MultiselectCommunicator(muxed_stream)
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await muxed_stream.reset()
+            raise SwarmException(
+                "failt to open a stream to peer %s", peer_id
+            ) from error
 
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)
