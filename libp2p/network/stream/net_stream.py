@@ -66,3 +66,7 @@ class NetStream(INetStream):
 
     async def reset(self) -> None:
         await self.muxed_stream.reset()
+
+    # TODO: `remove`: Called by close and write when the stream is in specific states.
+    #   It notify `ClosedStream` after `SwarmConn.remove_stream` is called.
+    # Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501

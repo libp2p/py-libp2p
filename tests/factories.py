@@ -6,6 +6,7 @@ import factory
 from libp2p import generate_new_rsa_identity, initialize_default_swarm
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
+from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.pubsub.floodsub import FloodSub
@@ -128,11 +129,13 @@ async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
     return hosts[0], hosts[1]
 
 
-# async def connection_pair_factory() -> Tuple[Mplex, BasicHost, Mplex, BasicHost]:
-#     host_0, host_1 = await host_pair_factory()
-#     mplex_conn_0 = host_0.get_network().connections[host_1.get_id()]
-#     mplex_conn_1 = host_1.get_network().connections[host_0.get_id()]
-#     return mplex_conn_0, host_0, mplex_conn_1, host_1
+async def swarm_conn_pair_factory(
+    is_secure
+) -> Tuple[SwarmConn, Swarm, SwarmConn, Swarm]:
+    swarms = await swarm_pair_factory(is_secure)
+    conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
+    conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
+    return conn_0, swarms[0], conn_1, swarms[1]
 
 
 async def net_stream_pair_factory(

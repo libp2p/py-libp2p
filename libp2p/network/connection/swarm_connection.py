@@ -43,11 +43,15 @@ class SwarmConn(INetConn):
         # We *could* optimize this but it really isn't worth it.
         for stream in self.streams:
             await stream.reset()
-        # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
-        asyncio.ensure_future(self._notify_disconnected())
 
         for task in self._tasks:
             task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
+        asyncio.ensure_future(self._notify_disconnected())
 
     async def _handle_new_streams(self) -> None:
         while True:
@@ -71,7 +75,6 @@ class SwarmConn(INetConn):
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
-        # Call notifiers since event occurred
         for notifee in self.swarm.notifees:
             await notifee.opened_stream(self.swarm, net_stream)
         return net_stream
@@ -93,3 +96,7 @@ class SwarmConn(INetConn):
 
     async def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)
+
+    # TODO: Called by `Stream` whenever it is time to remove the stream.
+    def remove_stream(self, stream: NetStream) -> None:
+        self.streams.remove(stream)
