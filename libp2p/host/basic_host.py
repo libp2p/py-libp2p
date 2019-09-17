@@ -100,7 +100,7 @@ class BasicHost(IHost):
         :return: stream: new stream created
         """
 
-        net_stream = await self._network.new_stream(peer_id, protocol_ids)
+        net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
         selected_protocol = await self.multiselect_client.select_one_of(

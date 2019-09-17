@@ -95,7 +95,7 @@ class Pubsub:
 
         # Register a notifee
         self.peer_queue = asyncio.Queue()
-        self.host.get_network().notify(PubsubNotifee(self.peer_queue))
+        self.host.get_network().register_notifee(PubsubNotifee(self.peer_queue))
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols

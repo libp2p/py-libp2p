@@ -5,347 +5,108 @@ called, and that the stream passed into opened_stream is correct
 Note: Listen event does not get hit because MyNotifee is passed
 into network after network has already started listening
 
-TODO: Add tests for closed_stream disconnected, listen_close when those
+TODO: Add tests for closed_stream, listen_close when those
 features are implemented in swarm
 """
 
-import multiaddr
+import asyncio
+import enum
+
 import pytest
 
-from libp2p import initialize_default_swarm, new_node
-from libp2p.crypto.rsa import create_new_key_pair
-from libp2p.host.basic_host import BasicHost
 from libp2p.network.notifee_interface import INotifee
-from tests.constants import MAX_READ_LEN
-from tests.utils import perform_two_host_set_up
+from tests.configs import LISTEN_MADDR
+from tests.factories import SwarmFactory
+from tests.utils import connect_swarm
 
-ACK = "ack:"
+
+class Event(enum.Enum):
+    OpenedStream = 0
+    ClosedStream = 1  # Not implemented
+    Connected = 2
+    Disconnected = 3
+    Listen = 4
+    ListenClose = 5  # Not implemented
 
 
 class MyNotifee(INotifee):
-    def __init__(self, events, val_to_append_to_event):
+    def __init__(self, events):
         self.events = events
-        self.val_to_append_to_event = val_to_append_to_event
 
     async def opened_stream(self, network, stream):
-        self.events.append(["opened_stream" + self.val_to_append_to_event, stream])
+        self.events.append(Event.OpenedStream)
 
     async def closed_stream(self, network, stream):
+        # TODO: It is not implemented yet.
         pass
 
     async def connected(self, network, conn):
-        self.events.append(["connected" + self.val_to_append_to_event, conn.conn])
+        self.events.append(Event.Connected)
 
     async def disconnected(self, network, conn):
-        pass
+        self.events.append(Event.Disconnected)
 
     async def listen(self, network, _multiaddr):
-        self.events.append(["listened" + self.val_to_append_to_event, _multiaddr])
+        self.events.append(Event.Listen)
 
     async def listen_close(self, network, _multiaddr):
+        # TODO: It is not implemented yet.
         pass
 
 
-class InvalidNotifee:
-    def __init__(self):
-        pass
-
-    async def opened_stream(self):
-        assert False
-
-    async def closed_stream(self):
-        assert False
-
-    async def connected(self):
-        assert False
-
-    async def disconnected(self):
-        assert False
-
-    async def listen(self):
-        assert False
-
-
 @pytest.mark.asyncio
-async def test_one_notifier():
-    node_a, node_b = await perform_two_host_set_up()
-
-    # Add notifee for node_a
-    events = []
-    assert node_a.get_network().notify(MyNotifee(events, "0"))
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in MyNotifee obj
-    # and that stream passed into opened_stream matches the stream created on
-    # node_a
-    assert events == [["connected0", stream.muxed_conn], ["opened_stream0", stream]]
-
-    messages = ["hello", "hello"]
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_one_notifier_on_two_nodes():
-    events_b = []
-    messages = ["hello", "hello"]
-
-    async def my_stream_handler(stream):
-        # Ensure the connected and opened_stream events were hit in Notifee obj
-        # and that the stream passed into opened_stream matches the stream created on
-        # node_b
-        assert events_b == [
-            ["connectedb", stream.muxed_conn],
-            ["opened_streamb", stream],
-        ]
-        for message in messages:
-            read_string = (await stream.read(len(message))).decode()
-
-            resp = ACK + read_string
-            await stream.write(resp.encode())
-
-    node_a, node_b = await perform_two_host_set_up(my_stream_handler)
-
-    # Add notifee for node_a
-    events_a = []
-    assert node_a.get_network().notify(MyNotifee(events_a, "a"))
-
-    # Add notifee for node_b
-    assert node_b.get_network().notify(MyNotifee(events_b, "b"))
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in MyNotifee obj
-    # and that stream passed into opened_stream matches the stream created on
-    # node_a
-    assert events_a == [["connecteda", stream.muxed_conn], ["opened_streama", stream]]
-
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_one_notifier_on_two_nodes_with_listen():
-    events_b = []
-    messages = ["hello", "hello"]
-
-    node_a_key_pair = create_new_key_pair()
-    node_a_transport_opt = ["/ip4/127.0.0.1/tcp/0"]
-    node_a = await new_node(node_a_key_pair, transport_opt=node_a_transport_opt)
-    await node_a.get_network().listen(multiaddr.Multiaddr(node_a_transport_opt[0]))
-
-    # Set up node_b swarm to pass into host
-    node_b_key_pair = create_new_key_pair()
-    node_b_transport_opt = ["/ip4/127.0.0.1/tcp/0"]
-    node_b_multiaddr = multiaddr.Multiaddr(node_b_transport_opt[0])
-    node_b_swarm = initialize_default_swarm(
-        node_b_key_pair, transport_opt=node_b_transport_opt
-    )
-    node_b = BasicHost(node_b_swarm)
-
-    async def my_stream_handler(stream):
-        # Ensure the listened, connected and opened_stream events were hit in Notifee obj
-        # and that the stream passed into opened_stream matches the stream created on
-        # node_b
-        assert events_b == [
-            ["listenedb", node_b_multiaddr],
-            ["connectedb", stream.muxed_conn],
-            ["opened_streamb", stream],
-        ]
-        for message in messages:
-            read_string = (await stream.read(len(message))).decode()
-            resp = ACK + read_string
-            await stream.write(resp.encode())
-
-    # Add notifee for node_a
-    events_a = []
-    assert node_a.get_network().notify(MyNotifee(events_a, "a"))
-
-    # Add notifee for node_b
-    assert node_b.get_network().notify(MyNotifee(events_b, "b"))
-
-    # start listen on node_b_swarm
-    await node_b.get_network().listen(node_b_multiaddr)
-
-    node_b.set_stream_handler("/echo/1.0.0", my_stream_handler)
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in MyNotifee obj
-    # and that stream passed into opened_stream matches the stream created on
-    # node_a
-    assert events_a == [["connecteda", stream.muxed_conn], ["opened_streama", stream]]
-
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_two_notifiers():
-    node_a, node_b = await perform_two_host_set_up()
-
-    # Add notifee for node_a
-    events0 = []
-    assert node_a.get_network().notify(MyNotifee(events0, "0"))
-
-    events1 = []
-    assert node_a.get_network().notify(MyNotifee(events1, "1"))
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in both Notifee objs
-    # and that the stream passed into opened_stream matches the stream created on
-    # node_a
-    assert events0 == [["connected0", stream.muxed_conn], ["opened_stream0", stream]]
-    assert events1 == [["connected1", stream.muxed_conn], ["opened_stream1", stream]]
-
-    messages = ["hello", "hello"]
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_ten_notifiers():
-    num_notifiers = 10
-
-    node_a, node_b = await perform_two_host_set_up()
-
-    # Add notifee for node_a
-    events_lst = []
-    for i in range(num_notifiers):
-        events_lst.append([])
-        assert node_a.get_network().notify(MyNotifee(events_lst[i], str(i)))
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in both Notifee objs
-    # and that the stream passed into opened_stream matches the stream created on
-    # node_a
-    for i in range(num_notifiers):
-        assert events_lst[i] == [
-            ["connected" + str(i), stream.muxed_conn],
-            ["opened_stream" + str(i), stream],
-        ]
-
-    messages = ["hello", "hello"]
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_ten_notifiers_on_two_nodes():
-    num_notifiers = 10
-    events_lst_b = []
-
-    async def my_stream_handler(stream):
-        # Ensure the connected and opened_stream events were hit in all Notifee objs
-        # and that the stream passed into opened_stream matches the stream created on
-        # node_b
-        for i in range(num_notifiers):
-            assert events_lst_b[i] == [
-                ["connectedb" + str(i), stream.muxed_conn],
-                ["opened_streamb" + str(i), stream],
-            ]
-        while True:
-            read_string = (await stream.read(MAX_READ_LEN)).decode()
-
-            resp = ACK + read_string
-            await stream.write(resp.encode())
-
-    node_a, node_b = await perform_two_host_set_up(my_stream_handler)
-
-    # Add notifee for node_a and node_b
-    events_lst_a = []
-    for i in range(num_notifiers):
-        events_lst_a.append([])
-        events_lst_b.append([])
-        assert node_a.get_network().notify(MyNotifee(events_lst_a[i], "a" + str(i)))
-        assert node_b.get_network().notify(MyNotifee(events_lst_b[i], "b" + str(i)))
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # Ensure the connected and opened_stream events were hit in all Notifee objs
-    # and that the stream passed into opened_stream matches the stream created on
-    # node_a
-    for i in range(num_notifiers):
-        assert events_lst_a[i] == [
-            ["connecteda" + str(i), stream.muxed_conn],
-            ["opened_streama" + str(i), stream],
-        ]
-
-    messages = ["hello", "hello"]
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
-
-
-@pytest.mark.asyncio
-async def test_invalid_notifee():
-    num_notifiers = 10
-
-    node_a, node_b = await perform_two_host_set_up()
-
-    # Add notifee for node_a
-    events_lst = []
-    for _ in range(num_notifiers):
-        events_lst.append([])
-        assert not node_a.get_network().notify(InvalidNotifee())
-
-    stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
-
-    # If this point is reached, this implies that the InvalidNotifee instance
-    # did not assert false, i.e. no functions of InvalidNotifee were called (which is correct
-    # given that InvalidNotifee should not have been added as a notifee)
-    messages = ["hello", "hello"]
-    for message in messages:
-        expected_resp = ACK + message
-        await stream.write(message.encode())
-
-        response = (await stream.read(len(expected_resp))).decode()
-
-        assert response == expected_resp
-
-    # Success, terminate pending tasks.
+async def test_notify(is_host_secure):
+    swarms = [SwarmFactory(is_host_secure) for _ in range(2)]
+
+    events_0_0 = []
+    events_1_0 = []
+    events_0_without_listen = []
+    swarms[0].register_notifee(MyNotifee(events_0_0))
+    swarms[1].register_notifee(MyNotifee(events_1_0))
+    # Listen
+    await asyncio.gather(*[swarm.listen(LISTEN_MADDR) for swarm in swarms])
+
+    swarms[0].register_notifee(MyNotifee(events_0_without_listen))
+
+    # Connected
+    await connect_swarm(swarms[0], swarms[1])
+    # OpenedStream: first
+    await swarms[0].new_stream(swarms[1].get_peer_id())
+    # OpenedStream: second
+    await swarms[0].new_stream(swarms[1].get_peer_id())
+    # OpenedStream: third, but different direction.
+    await swarms[1].new_stream(swarms[0].get_peer_id())
+
+    await asyncio.sleep(0.01)
+
+    # TODO: Check `ClosedStream` and `ListenClose` events after they are ready.
+
+    # Disconnected
+    await swarms[0].close_peer(swarms[1].get_peer_id())
+    await asyncio.sleep(0.01)
+
+    # Connected again, but different direction.
+    await connect_swarm(swarms[1], swarms[0])
+    await asyncio.sleep(0.01)
+
+    # Disconnected again, but different direction.
+    await swarms[1].close_peer(swarms[0].get_peer_id())
+    await asyncio.sleep(0.01)
+
+    expected_events_without_listen = [
+        Event.Connected,
+        Event.OpenedStream,
+        Event.OpenedStream,
+        Event.OpenedStream,
+        Event.Disconnected,
+        Event.Connected,
+        Event.Disconnected,
+    ]
+    expected_events = [Event.Listen] + expected_events_without_listen
+
+    assert events_0_0 == expected_events
+    assert events_1_0 == expected_events
+    assert events_0_without_listen == expected_events_without_listen
+
+    # Clean up
+    await asyncio.gather(*[swarm.close() for swarm in swarms])
