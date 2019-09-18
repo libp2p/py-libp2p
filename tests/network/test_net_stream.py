@@ -53,11 +53,9 @@ async def test_net_stream_read_until_eof(net_stream_pair):
 @pytest.mark.asyncio
 async def test_net_stream_read_after_remote_closed(net_stream_pair):
     stream_0, stream_1 = net_stream_pair
-    assert not stream_1.muxed_stream.event_remote_closed.is_set()
     await stream_0.write(DATA)
     await stream_0.close()
     await asyncio.sleep(0.01)
-    assert stream_1.muxed_stream.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(StreamEOF):
         await stream_1.read(MAX_READ_LEN)

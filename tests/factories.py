@@ -16,6 +16,7 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
 from libp2p.transport.typing import TMuxerOptions
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
@@ -149,12 +150,28 @@ async def swarm_conn_pair_factory(
     return conn_0, swarms[0], conn_1, swarms[1]
 
 
-async def mplex_conn_pair_factory(is_secure):
+async def mplex_conn_pair_factory(is_secure: bool) -> Tuple[Mplex, Swarm, Mplex, Swarm]:
     muxer_opt = {MPLEX_PROTOCOL_ID: Mplex}
     conn_0, swarm_0, conn_1, swarm_1 = await swarm_conn_pair_factory(
         is_secure, muxer_opt=muxer_opt
     )
     return conn_0.conn, swarm_0, conn_1.conn, swarm_1
+
+
+async def mplex_stream_pair_factory(
+    is_secure: bool
+) -> Tuple[MplexStream, Swarm, MplexStream, Swarm]:
+    mplex_conn_0, swarm_0, mplex_conn_1, swarm_1 = await mplex_conn_pair_factory(
+        is_secure
+    )
+    stream_0 = await mplex_conn_0.open_stream()
+    await asyncio.sleep(0.01)
+    stream_1: MplexStream
+    async with mplex_conn_1.streams_lock:
+        if len(mplex_conn_1.streams) != 1:
+            raise Exception("Mplex should not have any stream upon connection")
+        stream_1 = tuple(mplex_conn_1.streams.values())[0]
+    return stream_0, swarm_0, stream_1, swarm_1
 
 
 async def net_stream_pair_factory(
