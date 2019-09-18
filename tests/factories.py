@@ -15,6 +15,8 @@ from libp2p.pubsub.pubsub import Pubsub
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.transport.typing import TMuxerOptions
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
 from tests.pubsub.configs import (
@@ -34,10 +36,10 @@ def security_transport_factory(
         return {secio.ID: secio.Transport(key_pair)}
 
 
-def SwarmFactory(is_secure: bool) -> Swarm:
+def SwarmFactory(is_secure: bool, muxer_opt: TMuxerOptions = None) -> Swarm:
     key_pair = generate_new_rsa_identity()
-    sec_opt = security_transport_factory(False, key_pair)
-    return initialize_default_swarm(key_pair, sec_opt=sec_opt)
+    sec_opt = security_transport_factory(is_secure, key_pair)
+    return initialize_default_swarm(key_pair, sec_opt=sec_opt, muxer_opt=muxer_opt)
 
 
 class ListeningSwarmFactory(factory.Factory):
@@ -45,17 +47,22 @@ class ListeningSwarmFactory(factory.Factory):
         model = Swarm
 
     @classmethod
-    async def create_and_listen(cls, is_secure: bool) -> Swarm:
-        swarm = SwarmFactory(is_secure)
+    async def create_and_listen(
+        cls, is_secure: bool, muxer_opt: TMuxerOptions = None
+    ) -> Swarm:
+        swarm = SwarmFactory(is_secure, muxer_opt=muxer_opt)
         await swarm.listen(LISTEN_MADDR)
         return swarm
 
     @classmethod
     async def create_batch_and_listen(
-        cls, is_secure: bool, number: int
+        cls, is_secure: bool, number: int, muxer_opt: TMuxerOptions = None
     ) -> Tuple[Swarm, ...]:
         return await asyncio.gather(
-            *[cls.create_and_listen(is_secure) for _ in range(number)]
+            *[
+                cls.create_and_listen(is_secure, muxer_opt=muxer_opt)
+                for _ in range(number)
+            ]
         )
 
 
@@ -112,8 +119,12 @@ class PubsubFactory(factory.Factory):
     cache_size = None
 
 
-async def swarm_pair_factory(is_secure: bool) -> Tuple[Swarm, Swarm]:
-    swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, 2)
+async def swarm_pair_factory(
+    is_secure: bool, muxer_opt: TMuxerOptions = None
+) -> Tuple[Swarm, Swarm]:
+    swarms = await ListeningSwarmFactory.create_batch_and_listen(
+        is_secure, 2, muxer_opt=muxer_opt
+    )
     await connect_swarm(swarms[0], swarms[1])
     return swarms[0], swarms[1]
 
@@ -130,12 +141,20 @@ async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
 
 
 async def swarm_conn_pair_factory(
-    is_secure
+    is_secure: bool, muxer_opt: TMuxerOptions = None
 ) -> Tuple[SwarmConn, Swarm, SwarmConn, Swarm]:
     swarms = await swarm_pair_factory(is_secure)
     conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
     conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
     return conn_0, swarms[0], conn_1, swarms[1]
+
+
+async def mplex_conn_pair_factory(is_secure):
+    muxer_opt = {MPLEX_PROTOCOL_ID: Mplex}
+    conn_0, swarm_0, conn_1, swarm_1 = await swarm_conn_pair_factory(
+        is_secure, muxer_opt=muxer_opt
+    )
+    return conn_0.conn, swarm_0, conn_1.conn, swarm_1
 
 
 async def net_stream_pair_factory(
