@@ -38,7 +38,6 @@ class Mplex(IMuxedConn):
 
     _tasks: List["asyncio.Future[Any]"]
 
-    # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
         create a new muxed connection

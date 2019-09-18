@@ -10,6 +10,8 @@ async def mplex_conn_pair(is_host_secure):
     mplex_conn_0, swarm_0, mplex_conn_1, swarm_1 = await mplex_conn_pair_factory(
         is_host_secure
     )
+    assert mplex_conn_0.initiator
+    assert not mplex_conn_1.initiator
     try:
         yield mplex_conn_0, mplex_conn_1
     finally:
