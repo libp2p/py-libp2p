@@ -41,3 +41,5 @@ async def test_swarm_conn_streams(swarm_conn_pair):
     assert len(await conn_0.get_streams()) == 1
     conn_0.remove_stream(stream_0_1)
     assert len(await conn_0.get_streams()) == 0
+    # Nothing happen if `stream_0_1` is not present or already removed.
+    conn_0.remove_stream(stream_0_1)

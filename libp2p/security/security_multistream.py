@@ -1,6 +1,5 @@
 from abc import ABC
 from collections import OrderedDict
-from typing import Mapping
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -9,6 +8,7 @@ from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.transport.typing import TSecurityOptions
 from libp2p.typing import TProtocol
 
 
@@ -31,15 +31,14 @@ class SecurityMultistream(ABC):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(
-        self, secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport]
-    ) -> None:
+    def __init__(self, secure_transports_by_protocol: TSecurityOptions = None) -> None:
         self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
 
-        for protocol, transport in secure_transports_by_protocol.items():
-            self.add_transport(protocol, transport)
+        if secure_transports_by_protocol is not None:
+            for protocol, transport in secure_transports_by_protocol.items():
+                self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
         """

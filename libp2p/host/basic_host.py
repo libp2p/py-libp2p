@@ -141,4 +141,4 @@ class BasicHost(IHost):
             MultiselectCommunicator(net_stream)
         )
         net_stream.set_protocol(protocol)
-        asyncio.ensure_future(handler(net_stream))
+        await handler(net_stream)

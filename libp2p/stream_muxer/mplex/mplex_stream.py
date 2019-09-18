@@ -24,6 +24,7 @@ class MplexStream(IMuxedStream):
 
     close_lock: asyncio.Lock
 
+    # NOTE: `dataIn` is size of 8 in Go implementation.
     incoming_data: "asyncio.Queue[bytes]"
 
     event_local_closed: asyncio.Event

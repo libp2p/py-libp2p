@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from typing import Mapping, Type
 
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -7,11 +6,10 @@ from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.transport.typing import TMuxerClass, TMuxerOptions
 from libp2p.typing import TProtocol
 
 from .abc import IMuxedConn
-
-MuxerClassType = Type[IMuxedConn]
 
 # FIXME: add negotiate timeout to `MuxerMultistream`
 DEFAULT_NEGOTIATE_TIMEOUT = 60
@@ -24,20 +22,19 @@ class MuxerMultistream:
     """
 
     # NOTE: Can be changed to `typing.OrderedDict` since Python 3.7.2.
-    transports: "OrderedDict[TProtocol, MuxerClassType]"
+    transports: "OrderedDict[TProtocol, TMuxerClass]"
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(
-        self, muxer_transports_by_protocol: Mapping[TProtocol, MuxerClassType]
-    ) -> None:
+    def __init__(self, muxer_transports_by_protocol: TMuxerOptions = None) -> None:
         self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
-        for protocol, transport in muxer_transports_by_protocol.items():
-            self.add_transport(protocol, transport)
+        if muxer_transports_by_protocol is not None:
+            for protocol, transport in muxer_transports_by_protocol.items():
+                self.add_transport(protocol, transport)
 
-    def add_transport(self, protocol: TProtocol, transport: MuxerClassType) -> None:
+    def add_transport(self, protocol: TProtocol, transport: TMuxerClass) -> None:
         """
         Add a protocol and its corresponding transport to multistream-select(multiselect).
         The order that a protocol is added is exactly the precedence it is negotiated in
@@ -51,7 +48,7 @@ class MuxerMultistream:
         self.transports[protocol] = transport
         self.multiselect.add_handler(protocol, None)
 
-    async def select_transport(self, conn: IRawConnection) -> MuxerClassType:
+    async def select_transport(self, conn: IRawConnection) -> TMuxerClass:
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on
