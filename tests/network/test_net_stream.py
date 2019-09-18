@@ -7,9 +7,6 @@ from tests.constants import MAX_READ_LEN
 
 DATA = b"data_123"
 
-# TODO: Move `muxed_stream` specific(currently we are using `MplexStream`) tests to its
-#   own file, after `generic_protocol_handler` is refactored out of `Mplex`.
-
 
 @pytest.mark.asyncio
 async def test_net_stream_read_write(net_stream_pair):
