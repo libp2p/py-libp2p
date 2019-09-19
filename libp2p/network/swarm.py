@@ -173,6 +173,7 @@ class Swarm(INetwork):
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
+        :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
         logger.debug(

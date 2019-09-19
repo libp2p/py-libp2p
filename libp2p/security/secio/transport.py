@@ -400,6 +400,8 @@ async def create_secure_session(
     Attempt the initial `secio` handshake with the remote peer.
     If successful, return an object that provides secure communication to the
     ``remote_peer``.
+    Raise `SecioException` when `conn` closed.
+    Raise `InconsistentNonce` when handshake failed
     """
     msg_io = MsgIOReadWriter(conn)
     try:

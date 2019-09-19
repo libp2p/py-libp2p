@@ -63,6 +63,7 @@ class TCP(ITransport):
         dial a transport to peer listening on multiaddr
         :param maddr: multiaddr of peer
         :return: `RawConnection` if successful
+        :raise OpenConnectionError: raised when failed to open connection
         """
         self.host = maddr.value_for_protocol("ip4")
         self.port = int(maddr.value_for_protocol("tcp"))

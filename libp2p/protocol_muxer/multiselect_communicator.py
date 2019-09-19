@@ -14,6 +14,9 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         self.read_writer = read_writer
 
     async def write(self, msg_str: str) -> None:
+        """
+        :raise MultiselectCommunicatorError: raised when failed to write to underlying reader
+        """
         msg_bytes = encode_delim(msg_str.encode())
         try:
             await self.read_writer.write(msg_bytes)
@@ -23,6 +26,9 @@ class MultiselectCommunicator(IMultiselectCommunicator):
             )
 
     async def read(self) -> str:
+        """
+        :raise MultiselectCommunicatorError: raised when failed to read from underlying reader
+        """
         try:
             data = await read_delim(self.read_writer)
         # `IOException` includes `IncompleteReadError` and `StreamError`

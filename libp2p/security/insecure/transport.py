@@ -45,6 +45,9 @@ class InsecureSession(BaseSession):
         await self.conn.close()
 
     async def run_handshake(self) -> None:
+        """
+        Raise `HandshakeFailure` when handshake failed
+        """
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)

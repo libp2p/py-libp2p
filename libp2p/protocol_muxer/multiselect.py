@@ -37,7 +37,7 @@ class Multiselect(IMultiselectMuxer):
         Negotiate performs protocol selection
         :param stream: stream to negotiate on
         :return: selected protocol name, handler function
-        :raise Exception: negotiation failed exception
+        :raise MultiselectError: raised when negotiation failed
         """
 
         # Perform handshake to ensure multiselect protocol IDs match
@@ -49,7 +49,7 @@ class Multiselect(IMultiselectMuxer):
             try:
                 command = await communicator.read()
             except MultiselectCommunicatorError as error:
-                raise MultiselectError(str(error))
+                raise MultiselectError(error)
 
             # Command is ls or a protocol
             if command == "ls":
@@ -76,7 +76,7 @@ class Multiselect(IMultiselectMuxer):
         """
         Perform handshake to agree on multiselect protocol
         :param communicator: communicator to use
-        :raise Exception: error in handshake
+        :raise MultiselectError: raised when handshake failed
         """
 
         # TODO: Use format used by go repo for messages
@@ -91,7 +91,7 @@ class Multiselect(IMultiselectMuxer):
         try:
             handshake_contents = await communicator.read()
         except MultiselectCommunicatorError as error:
-            raise MultiselectError(str(error))
+            raise MultiselectError(error)
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):

@@ -21,7 +21,7 @@ class MultiselectClient(IMultiselectClient):
         Ensure that the client and multiselect
         are both using the same multiselect protocol
         :param stream: stream to communicate with multiselect over
-        :raise Exception: multiselect protocol ID mismatch
+        :raise MultiselectClientError: raised when handshake failed
         """
 
         # TODO: Use format used by go repo for messages
@@ -54,6 +54,7 @@ class MultiselectClient(IMultiselectClient):
         :param protocol: protocol to select
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
+        :raise MultiselectClientError: raised when protocol negotiation failed
         """
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
@@ -77,7 +78,7 @@ class MultiselectClient(IMultiselectClient):
         Try to select the given protocol or raise exception if fails
         :param communicator: communicator to use to communicate with counterparty
         :param protocol: protocol to select
-        :raise Exception: error in protocol selection
+        :raise MultiselectClientError: raised when protocol negotiation failed
         :return: selected protocol
         """
 

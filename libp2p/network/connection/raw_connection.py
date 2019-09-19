@@ -24,10 +24,13 @@ class RawConnection(IRawConnection):
         self._drain_lock = asyncio.Lock()
 
     async def write(self, data: bytes) -> None:
+        """
+        Raise `RawConnError` if the underlying connection breaks
+        """
         try:
             self.writer.write(data)
-        except ConnectionResetError:
-            raise RawConnError()
+        except ConnectionResetError as error:
+            raise RawConnError(error)
         # Reference: https://github.com/ethereum/lahja/blob/93610b2eb46969ff1797e0748c7ac2595e130aef/lahja/asyncio/endpoint.py#L99-L102  # noqa: E501
         # Use a lock to serialize drain() calls. Circumvents this bug:
         # https://bugs.python.org/issue29930
@@ -41,11 +44,13 @@ class RawConnection(IRawConnection):
         """
         Read up to ``n`` bytes from the underlying stream.
         This call is delegated directly to the underlying ``self.reader``.
+
+        Raise `RawConnError` if the underlying connection breaks
         """
         try:
             return await self.reader.read(n)
-        except ConnectionResetError:
-            raise RawConnError()
+        except ConnectionResetError as error:
+            raise RawConnError(error)
 
     async def close(self) -> None:
         self.writer.close()
