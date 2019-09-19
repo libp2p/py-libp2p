@@ -65,10 +65,6 @@ def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
 async def read_varint_prefixed_bytes(reader: Reader) -> bytes:
     len_msg = await decode_uvarint_from_stream(reader)
     data = await read_exactly(reader, len_msg)
-    if len(data) != len_msg:
-        raise ValueError(
-            f"failed to read enough bytes: len_msg={len_msg}, data={data!r}"
-        )
     return data
 
 

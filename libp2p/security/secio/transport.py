@@ -16,6 +16,7 @@ from libp2p.crypto.ecc import ECCPublicKey
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.io.exceptions import IOException
 from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
@@ -24,8 +25,8 @@ from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
 
 from .exceptions import (
-    HandshakeFailed,
     IncompatibleChoices,
+    InconsistentNonce,
     InvalidSignatureOnExchange,
     PeerMismatchException,
     SecioException,
@@ -399,6 +400,8 @@ async def create_secure_session(
     Attempt the initial `secio` handshake with the remote peer.
     If successful, return an object that provides secure communication to the
     ``remote_peer``.
+    Raise `SecioException` when `conn` closed.
+    Raise `InconsistentNonce` when handshake failed
     """
     msg_io = MsgIOReadWriter(conn)
     try:
@@ -408,14 +411,21 @@ async def create_secure_session(
     except SecioException as e:
         await conn.close()
         raise e
+    # `IOException` includes errors raised while read from/write to raw connection
+    except IOException:
+        raise SecioException("connection closed")
 
     initiator = remote_peer is not None
     session = _mk_session_from(local_private_key, session_parameters, msg_io, initiator)
 
-    received_nonce = await _finish_handshake(session, remote_nonce)
+    try:
+        received_nonce = await _finish_handshake(session, remote_nonce)
+    # `IOException` includes errors raised while read from/write to raw connection
+    except IOException:
+        raise SecioException("connection closed")
     if received_nonce != local_nonce:
         await conn.close()
-        raise HandshakeFailed()
+        raise InconsistentNonce()
 
     return session
 

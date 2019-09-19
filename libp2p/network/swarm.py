@@ -7,12 +7,17 @@ from multiaddr import Multiaddr
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.protocol_muxer.exceptions import MultiselectClientError
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
-from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+    OpenConnectionError,
+    SecurityUpgradeFailure,
+)
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
@@ -117,7 +122,13 @@ class Swarm(INetwork):
             multiaddr = self.router.find_peer(peer_id)
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
-        raw_conn = await self.transport.dial(multiaddr)
+        try:
+            raw_conn = await self.transport.dial(multiaddr)
+        except OpenConnectionError as error:
+            logger.debug("fail to dial peer %s over base transport", peer_id)
+            raise SwarmException(
+                "fail to open connection to peer %s", peer_id
+            ) from error
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
@@ -162,6 +173,7 @@ class Swarm(INetwork):
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
+        :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
         logger.debug(
@@ -176,9 +188,16 @@ class Swarm(INetwork):
         muxed_stream = await muxed_conn.open_stream()
 
         # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids), MultiselectCommunicator(muxed_stream)
-        )
+        try:
+            selected_protocol = await self.multiselect_client.select_one_of(
+                list(protocol_ids), MultiselectCommunicator(muxed_stream)
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await muxed_stream.reset()
+            raise SwarmException(
+                "failt to open a stream to peer %s", peer_id
+            ) from error
 
         # Create a net stream with the selected protocol
         net_stream = NetStream(muxed_stream)

@@ -2,8 +2,11 @@ import asyncio
 from typing import Any  # noqa: F401
 from typing import Dict, List, Optional, Tuple
 
+from libp2p.exceptions import ParseError
+from libp2p.io.exceptions import IncompleteReadError
 from libp2p.network.typing import GenericProtocolHandlerFn
 from libp2p.peer.id import ID
+from libp2p.protocol_muxer.exceptions import MultiselectError
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
 from libp2p.typing import TProtocol
@@ -125,7 +128,13 @@ class Mplex(IMuxedConn):
         """
         stream = await self._initialize_stream(stream_id, name)
         # Perform protocol negotiation for the stream.
-        self._tasks.append(asyncio.ensure_future(self.generic_protocol_handler(stream)))
+        try:
+            await self.generic_protocol_handler(stream)
+        except MultiselectError:
+            # Un-register and reset the stream
+            del self.streams[stream_id]
+            await stream.reset()
+            return
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -178,7 +187,11 @@ class Mplex(IMuxedConn):
                         # `NewStream` for the same id is received twice...
                         # TODO: Shutdown
                         pass
-                    await self.accept_stream(stream_id, message.decode())
+                    self._tasks.append(
+                        asyncio.ensure_future(
+                            self.accept_stream(stream_id, message.decode())
+                        )
+                    )
                 elif flag in (
                     HeaderTags.MessageInitiator.value,
                     HeaderTags.MessageReceiver.value,
@@ -248,13 +261,15 @@ class Mplex(IMuxedConn):
         # FIXME: No timeout is used in Go implementation.
         # Timeout is set to a relatively small value to alleviate wait time to exit
         #  loop in handle_incoming
-        header = await decode_uvarint_from_stream(self.secured_conn)
-        # TODO: Handle the case of EOF and other exceptions?
+        try:
+            header = await decode_uvarint_from_stream(self.secured_conn)
+        except ParseError:
+            return None, None, None
         try:
             message = await asyncio.wait_for(
                 read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
-        except asyncio.TimeoutError:
+        except (ParseError, IncompleteReadError, asyncio.TimeoutError):
             # TODO: Investigate what we should do if time is out.
             return None, None, None
 

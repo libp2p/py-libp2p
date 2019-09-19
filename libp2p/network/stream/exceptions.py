@@ -1,7 +1,7 @@
-from libp2p.exceptions import BaseLibp2pError
+from libp2p.io.exceptions import IOException
 
 
-class StreamError(BaseLibp2pError):
+class StreamError(IOException):
     pass
 
 
