@@ -278,7 +278,6 @@ class Swarm(INetwork):
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
-        print(f"!@# remove_conn: {swarm_conn}")
         peer_id = swarm_conn.conn.peer_id
         # TODO: Should be changed to remove the exact connection,
         #   if we have several connections per peer in the future.
