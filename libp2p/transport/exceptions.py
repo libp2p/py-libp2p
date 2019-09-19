@@ -1,7 +1,10 @@
 from libp2p.exceptions import BaseLibp2pError
 
 
-# TODO: Add `BaseLibp2pError` and `UpgradeFailure` can inherit from it?
+class OpenConnectionError(BaseLibp2pError):
+    pass
+
+
 class UpgradeFailure(BaseLibp2pError):
     pass
 
