@@ -6,6 +6,7 @@ from multiaddr import Multiaddr
 
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
@@ -66,7 +67,10 @@ class TCP(ITransport):
         self.host = maddr.value_for_protocol("ip4")
         self.port = int(maddr.value_for_protocol("tcp"))
 
-        reader, writer = await asyncio.open_connection(self.host, self.port)
+        try:
+            reader, writer = await asyncio.open_connection(self.host, self.port)
+        except (ConnectionAbortedError, ConnectionRefusedError) as error:
+            raise OpenConnectionError(error)
 
         return RawConnection(reader, writer, True)
 
