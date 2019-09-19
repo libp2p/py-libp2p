@@ -59,12 +59,18 @@ class Multiselect(IMultiselectMuxer):
                 protocol = TProtocol(command)
                 if protocol in self.handlers:
                     # Tell counterparty we have decided on a protocol
-                    await communicator.write(protocol)
+                    try:
+                        await communicator.write(protocol)
+                    except MultiselectCommunicatorError as error:
+                        raise MultiselectError(error)
 
                     # Return the decided on protocol
                     return protocol, self.handlers[protocol]
                 # Tell counterparty this protocol was not found
-                await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                try:
+                    await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectError(error)
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
@@ -76,7 +82,10 @@ class Multiselect(IMultiselectMuxer):
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to other party
-        await communicator.write(MULTISELECT_PROTOCOL_ID)
+        try:
+            await communicator.write(MULTISELECT_PROTOCOL_ID)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectError(error)
 
         # Read in the protocol ID from other party
         try:

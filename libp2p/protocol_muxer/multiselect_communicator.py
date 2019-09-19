@@ -15,7 +15,12 @@ class MultiselectCommunicator(IMultiselectCommunicator):
 
     async def write(self, msg_str: str) -> None:
         msg_bytes = encode_delim(msg_str.encode())
-        await self.read_writer.write(msg_bytes)
+        try:
+            await self.read_writer.write(msg_bytes)
+        except IOException:
+            raise MultiselectCommunicatorError(
+                "fail to write to multiselect communicator"
+            )
 
     async def read(self) -> str:
         try:

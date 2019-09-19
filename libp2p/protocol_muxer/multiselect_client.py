@@ -27,7 +27,10 @@ class MultiselectClient(IMultiselectClient):
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to counterparty
-        await communicator.write(MULTISELECT_PROTOCOL_ID)
+        try:
+            await communicator.write(MULTISELECT_PROTOCOL_ID)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(error)
 
         # Read in the protocol ID from other party
         try:
@@ -79,7 +82,10 @@ class MultiselectClient(IMultiselectClient):
         """
 
         # Tell counterparty we want to use protocol
-        await communicator.write(protocol)
+        try:
+            await communicator.write(protocol)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(error)
 
         # Get what counterparty says in response
         try:
