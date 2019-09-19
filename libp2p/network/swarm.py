@@ -145,10 +145,8 @@ class Swarm(INetwork):
             protocol_ids,
         )
 
-        print(f"!@# swarm.new_stream: 0")
         swarm_conn = await self.dial_peer(peer_id)
 
-        print(f"!@# swarm.new_stream: 1")
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream

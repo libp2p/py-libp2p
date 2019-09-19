@@ -97,7 +97,6 @@ class Mplex(IMuxedConn):
         stream = MplexStream(name, stream_id, self)
         async with self.streams_lock:
             self.streams[stream_id] = stream
-        print(f"!@# _initialize_stream: stream_id={stream_id}, name={name}")
         return stream
 
     async def open_stream(self) -> IMuxedStream:

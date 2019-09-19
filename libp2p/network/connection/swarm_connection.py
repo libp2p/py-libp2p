@@ -44,7 +44,6 @@ class SwarmConn(INetConn):
     async def _handle_new_streams(self) -> None:
         # TODO: Break the loop when anything wrong in the connection.
         while True:
-            print("!@# SwarmConn._handle_new_streams")
             stream = await self.conn.accept_stream()
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             await self.run_task(self._handle_muxed_stream(stream))
@@ -57,7 +56,6 @@ class SwarmConn(INetConn):
             await self.run_task(self.swarm.common_stream_handler(net_stream))
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        print("!@# SwarmConn._add_stream:", muxed_stream)
         net_stream = NetStream(muxed_stream)
         # Call notifiers since event occurred
         for notifee in self.swarm.notifees:
@@ -65,7 +63,6 @@ class SwarmConn(INetConn):
         return net_stream
 
     async def start(self) -> None:
-        print("!@# SwarmConn.start")
         await self.run_task(self._handle_new_streams())
 
     async def run_task(self, coro: Awaitable[Any]) -> None:
