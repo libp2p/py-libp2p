@@ -1,4 +1,4 @@
-# py-libp2p [![Build Status](https://travis-ci.com/libp2p/py-libp2p.svg?branch=master)](https://travis-ci.com/libp2p/py-libp2p)  [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby)[![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23libp2p)
+# py-libp2p [![Build Status](https://travis-ci.com/libp2p/py-libp2p.svg?branch=master)](https://travis-ci.com/libp2p/py-libp2p)  [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby) [![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg)](https://webchat.freenode.net/?channels=%23libp2p) [![Datrix](https://img.shields.io/badge/matrix-%23libp2p%3Apermaweb.io-blue.svg)](https://riot.permaweb.io/#/room/#libp2p:matrix.org) [![Discord](https://img.shields.io/discord/475789330380488707?color=blueviolet&label=discord)](https://discord.gg/66KBrm2)
 
 
 
