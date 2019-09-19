@@ -137,11 +137,7 @@ class Swarm(INetwork):
         :param protocol_id: protocol id
         :return: net stream instance
         """
-        logger.debug(
-            "attempting to open a stream to peer %s, over one of the protocols %s",
-            peer_id,
-            protocol_ids,
-        )
+        logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
 
