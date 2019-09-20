@@ -99,7 +99,13 @@ class Swarm(INetwork):
             multiaddr = self.router.find_peer(peer_id)
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
-        raw_conn = await self.transport.dial(multiaddr)
+        try:
+            raw_conn = await self.transport.dial(multiaddr)
+        except OpenConnectionError as error:
+            logger.debug("fail to dial peer %s over base transport", peer_id)
+            raise SwarmException(
+                "fail to open connection to peer %s", peer_id
+            ) from error
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
@@ -137,6 +143,7 @@ class Swarm(INetwork):
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
+        :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
         logger.debug(

@@ -4,12 +4,13 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.utils import pubkey_from_protobuf
 from libp2p.io.abc import ReadWriteCloser
+from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
+from libp2p.security.exceptions import HandshakeFailure
 from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.transport.exceptions import HandshakeFailure
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_fixedint_prefixed, read_fixedint_prefixed
 
@@ -44,12 +45,21 @@ class InsecureSession(BaseSession):
         await self.conn.close()
 
     async def run_handshake(self) -> None:
+        """
+        Raise `HandshakeFailure` when handshake failed
+        """
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
-        await self.write(encoded_msg_bytes)
+        try:
+            await self.write(encoded_msg_bytes)
+        except RawConnError:
+            raise HandshakeFailure("connection closed")
 
-        remote_msg_bytes = await read_fixedint_prefixed(self.conn)
+        try:
+            remote_msg_bytes = await read_fixedint_prefixed(self.conn)
+        except RawConnError:
+            raise HandshakeFailure("connection closed")
         remote_msg = plaintext_pb2.Exchange()
         remote_msg.ParseFromString(remote_msg_bytes)
         received_peer_id = ID(remote_msg.id)

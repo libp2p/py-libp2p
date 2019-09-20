@@ -2,7 +2,7 @@ from typing import Sequence
 
 from libp2p.typing import TProtocol
 
-from .exceptions import MultiselectClientError
+from .exceptions import MultiselectClientError, MultiselectCommunicatorError
 from .multiselect_client_interface import IMultiselectClient
 from .multiselect_communicator_interface import IMultiselectCommunicator
 
@@ -21,16 +21,22 @@ class MultiselectClient(IMultiselectClient):
         Ensure that the client and multiselect
         are both using the same multiselect protocol
         :param stream: stream to communicate with multiselect over
-        :raise Exception: multiselect protocol ID mismatch
+        :raise MultiselectClientError: raised when handshake failed
         """
 
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to counterparty
-        await communicator.write(MULTISELECT_PROTOCOL_ID)
+        try:
+            await communicator.write(MULTISELECT_PROTOCOL_ID)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(error)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read()
+        try:
+            handshake_contents = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(str(error))
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
@@ -48,6 +54,7 @@ class MultiselectClient(IMultiselectClient):
         :param protocol: protocol to select
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
+        :raise MultiselectClientError: raised when protocol negotiation failed
         """
         # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
@@ -71,15 +78,21 @@ class MultiselectClient(IMultiselectClient):
         Try to select the given protocol or raise exception if fails
         :param communicator: communicator to use to communicate with counterparty
         :param protocol: protocol to select
-        :raise Exception: error in protocol selection
+        :raise MultiselectClientError: raised when protocol negotiation failed
         :return: selected protocol
         """
 
         # Tell counterparty we want to use protocol
-        await communicator.write(protocol)
+        try:
+            await communicator.write(protocol)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(error)
 
         # Get what counterparty says in response
-        response = await communicator.read()
+        try:
+            response = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError(str(error))
 
         # Return protocol if response is equal to protocol or raise error
         if response == protocol:
