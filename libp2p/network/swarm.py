@@ -10,7 +10,11 @@ from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn
-from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+    OpenConnectionError,
+    SecurityUpgradeFailure,
+)
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader

@@ -1,21 +1,21 @@
 import asyncio
-from typing import List, Sequence
 import logging
+from typing import List, Sequence
 
 import multiaddr
 
+from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.typing import StreamHandlerFn, TProtocol
-from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
-from libp2p.host.exceptions import StreamFailure
 
 from .host_interface import IHost
 
