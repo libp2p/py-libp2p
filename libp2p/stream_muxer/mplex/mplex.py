@@ -4,6 +4,7 @@ from typing import Awaitable, Dict, List, Optional, Tuple
 
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
+from libp2p.network.connection.exceptions import RawConnError
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
@@ -203,8 +204,7 @@ class Mplex(IMuxedConn):
             message = await asyncio.wait_for(
                 read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
-        # TODO: Catch RawConnError?
-        except (ParseError, IncompleteReadError) as error:
+        except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
                 "failed to read messages correctly from the underlying connection"
             ) from error
