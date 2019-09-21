@@ -1,12 +1,15 @@
+import logging
 from typing import List, Sequence
 
 import multiaddr
 
+from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
@@ -19,6 +22,10 @@ from .host_interface import IHost
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
+
+
+logger = logging.getLogger("libp2p.network.basic_host")
+logger.setLevel(logging.DEBUG)
 
 
 class BasicHost(IHost):
@@ -102,9 +109,14 @@ class BasicHost(IHost):
         net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
-        selected_protocol = await self.multiselect_client.select_one_of(
-            list(protocol_ids), MultiselectCommunicator(net_stream)
-        )
+        try:
+            selected_protocol = await self.multiselect_client.select_one_of(
+                list(protocol_ids), MultiselectCommunicator(net_stream)
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await net_stream.reset()
+            raise StreamFailure("failt to open a stream to peer %s", peer_id) from error
 
         net_stream.set_protocol(selected_protocol)
         return net_stream
@@ -136,8 +148,12 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
-        protocol, handler = await self.multiselect.negotiate(
-            MultiselectCommunicator(net_stream)
-        )
+        try:
+            protocol, handler = await self.multiselect.negotiate(
+                MultiselectCommunicator(net_stream)
+            )
+        except MultiselectError:
+            await net_stream.reset()
+            return
         net_stream.set_protocol(protocol)
         await handler(net_stream)
