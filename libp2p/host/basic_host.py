@@ -30,6 +30,10 @@ logger.setLevel(logging.DEBUG)
 
 
 class BasicHost(IHost):
+    """
+    BasicHost is a wrapper of a `INetwork` implementation. It performs protocol negotiation
+    on a stream with multistream-select right after a stream is initialized.
+    """
 
     _network: INetwork
     _router: KadmeliaPeerRouter
@@ -38,7 +42,6 @@ class BasicHost(IHost):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    # default options constructor
     def __init__(self, network: INetwork, router: KadmeliaPeerRouter = None) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -76,6 +79,7 @@ class BasicHost(IHost):
         """
         :return: all the multiaddr addresses this host is listening to
         """
+        # TODO: We don't need "/p2p/{peer_id}" postfix actually.
         p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_id().pretty()))
 
         addrs: List[multiaddr.Multiaddr] = []
@@ -94,8 +98,6 @@ class BasicHost(IHost):
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
 
-    # `protocol_ids` can be a list of `protocol_id`
-    # stream will decide which `protocol_id` to run on
     async def new_stream(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> INetStream:

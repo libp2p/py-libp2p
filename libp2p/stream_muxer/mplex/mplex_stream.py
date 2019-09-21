@@ -204,7 +204,11 @@ class MplexStream(IMuxedStream):
             self.event_remote_closed.set()
 
         async with self.mplex_conn.streams_lock:
-            del self.mplex_conn.streams[self.stream_id]
+            if (
+                self.mplex_conn.streams is not None
+                and self.stream_id in self.mplex_conn.streams
+            ):
+                del self.mplex_conn.streams[self.stream_id]
 
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:

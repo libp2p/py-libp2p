@@ -1,9 +1,10 @@
 import asyncio
 from typing import Any  # noqa: F401
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Dict, List, Optional, Tuple
 
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
+from libp2p.network.connection.exceptions import RawConnError
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
@@ -17,6 +18,7 @@ from libp2p.utils import (
 
 from .constants import HeaderTags
 from .datastructures import StreamID
+from .exceptions import MplexUnavailable
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
@@ -36,7 +38,8 @@ class Mplex(IMuxedConn):
     streams: Dict[StreamID, MplexStream]
     streams_lock: asyncio.Lock
     new_stream_queue: "asyncio.Queue[IMuxedStream]"
-    shutdown: asyncio.Event
+    event_shutting_down: asyncio.Event
+    event_closed: asyncio.Event
 
     _tasks: List["asyncio.Future[Any]"]
 
@@ -60,7 +63,8 @@ class Mplex(IMuxedConn):
         self.streams = {}
         self.streams_lock = asyncio.Lock()
         self.new_stream_queue = asyncio.Queue()
-        self.shutdown = asyncio.Event()
+        self.event_shutting_down = asyncio.Event()
+        self.event_closed = asyncio.Event()
 
         self._tasks = []
 
@@ -75,16 +79,20 @@ class Mplex(IMuxedConn):
         """
         close the stream muxer and underlying secured connection
         """
-        for task in self._tasks:
-            task.cancel()
+        if self.event_shutting_down.is_set():
+            return
+        # Set the `event_shutting_down`, to allow graceful shutdown.
+        self.event_shutting_down.set()
         await self.secured_conn.close()
+        # Blocked until `close` is finally set.
+        await self.event_closed.wait()
 
     def is_closed(self) -> bool:
         """
         check connection is fully closed
         :return: true if successful
         """
-        raise NotImplementedError()
+        return self.event_closed.is_set()
 
     def _get_next_channel_id(self) -> int:
         """
@@ -114,11 +122,29 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
+    async def _wait_until_shutting_down_or_closed(self, coro: Awaitable[Any]) -> Any:
+        task_coro = asyncio.ensure_future(coro)
+        task_wait_closed = asyncio.ensure_future(self.event_closed.wait())
+        task_wait_shutting_down = asyncio.ensure_future(self.event_shutting_down.wait())
+        done, pending = await asyncio.wait(
+            [task_coro, task_wait_closed, task_wait_shutting_down],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for fut in pending:
+            fut.cancel()
+        if task_wait_closed in done:
+            raise MplexUnavailable("Mplex is closed")
+        if task_wait_shutting_down in done:
+            raise MplexUnavailable("Mplex is shutting down")
+        return task_coro.result()
+
     async def accept_stream(self) -> IMuxedStream:
         """
         accepts a muxed stream opened by the other end
         """
-        return await self.new_stream_queue.get()
+        return await self._wait_until_shutting_down_or_closed(
+            self.new_stream_queue.get()
+        )
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -137,7 +163,9 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        return await self.write_to_stream(_bytes)
+        return await self._wait_until_shutting_down_or_closed(
+            self.write_to_stream(_bytes)
+        )
 
     async def write_to_stream(self, _bytes: bytes) -> int:
         """
@@ -152,89 +180,17 @@ class Mplex(IMuxedConn):
         """
         Read a message off of the secured connection and add it to the corresponding message buffer
         """
-        # TODO Deal with other types of messages using flag (currently _)
 
         while True:
-            channel_id, flag, message = await self.read_message()
-            if channel_id is not None and flag is not None and message is not None:
-                stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
-                is_stream_id_seen: bool
-                stream: MplexStream
-                async with self.streams_lock:
-                    is_stream_id_seen = stream_id in self.streams
-                    if is_stream_id_seen:
-                        stream = self.streams[stream_id]
-                # Other consequent stream message should wait until the stream get accepted
-                # TODO: Handle more tags, and refactor `HeaderTags`
-                if flag == HeaderTags.NewStream.value:
-                    if is_stream_id_seen:
-                        # `NewStream` for the same id is received twice...
-                        # TODO: Shutdown
-                        pass
-                    mplex_stream = await self._initialize_stream(
-                        stream_id, message.decode()
-                    )
-                    # TODO: Check if `self` is shutdown.
-                    await self.new_stream_queue.put(mplex_stream)
-                elif flag in (
-                    HeaderTags.MessageInitiator.value,
-                    HeaderTags.MessageReceiver.value,
-                ):
-                    if not is_stream_id_seen:
-                        # We receive a message of the stream `stream_id` which is not accepted
-                        #   before. It is abnormal. Possibly disconnect?
-                        # TODO: Warn and emit logs about this.
-                        continue
-                    async with stream.close_lock:
-                        if stream.event_remote_closed.is_set():
-                            # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
-                            continue
-                    await stream.incoming_data.put(message)
-                elif flag in (
-                    HeaderTags.CloseInitiator.value,
-                    HeaderTags.CloseReceiver.value,
-                ):
-                    if not is_stream_id_seen:
-                        continue
-                    # NOTE: If remote is already closed, then return: Technically a bug
-                    #   on the other side. We should consider killing the connection.
-                    async with stream.close_lock:
-                        if stream.event_remote_closed.is_set():
-                            continue
-                    is_local_closed: bool
-                    async with stream.close_lock:
-                        stream.event_remote_closed.set()
-                        is_local_closed = stream.event_local_closed.is_set()
-                    # If local is also closed, both sides are closed. Then, we should clean up
-                    #   the entry of this stream, to avoid others from accessing it.
-                    if is_local_closed:
-                        async with self.streams_lock:
-                            del self.streams[stream_id]
-                elif flag in (
-                    HeaderTags.ResetInitiator.value,
-                    HeaderTags.ResetReceiver.value,
-                ):
-                    if not is_stream_id_seen:
-                        # This is *ok*. We forget the stream on reset.
-                        continue
-                    async with stream.close_lock:
-                        if not stream.event_remote_closed.is_set():
-                            # TODO: Why? Only if remote is not closed before then reset.
-                            stream.event_reset.set()
-
-                            stream.event_remote_closed.set()
-                        # If local is not closed, we should close it.
-                        if not stream.event_local_closed.is_set():
-                            stream.event_local_closed.set()
-                    async with self.streams_lock:
-                        del self.streams[stream_id]
-                else:
-                    # TODO: logging
-                    if is_stream_id_seen:
-                        await stream.reset()
-
+            try:
+                await self._handle_incoming_message()
+            except MplexUnavailable:
+                break
             # Force context switch
             await asyncio.sleep(0)
+        # If we enter here, it means this connection is shutting down.
+        # We should clean things up.
+        await self._cleanup()
 
     async def read_message(self) -> Tuple[int, int, bytes]:
         """
@@ -243,21 +199,130 @@ class Mplex(IMuxedConn):
         """
 
         # FIXME: No timeout is used in Go implementation.
-        # Timeout is set to a relatively small value to alleviate wait time to exit
-        #  loop in handle_incoming
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-        except ParseError:
-            return None, None, None
-        try:
             message = await asyncio.wait_for(
                 read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
-        except (ParseError, IncompleteReadError, asyncio.TimeoutError):
-            # TODO: Investigate what we should do if time is out.
-            return None, None, None
+        except (ParseError, RawConnError, IncompleteReadError) as error:
+            raise MplexUnavailable(
+                "failed to read messages correctly from the underlying connection"
+            ) from error
+        except asyncio.TimeoutError as error:
+            raise MplexUnavailable(
+                "failed to read more message body within the timeout"
+            ) from error
 
         flag = header & 0x07
         channel_id = header >> 3
 
         return channel_id, flag, message
+
+    async def _handle_incoming_message(self) -> None:
+        """
+        Read and handle a new incoming message.
+        :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
+        """
+        channel_id, flag, message = await self._wait_until_shutting_down_or_closed(
+            self.read_message()
+        )
+        stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
+
+        if flag == HeaderTags.NewStream.value:
+            await self._handle_new_stream(stream_id, message)
+        elif flag in (
+            HeaderTags.MessageInitiator.value,
+            HeaderTags.MessageReceiver.value,
+        ):
+            await self._handle_message(stream_id, message)
+        elif flag in (HeaderTags.CloseInitiator.value, HeaderTags.CloseReceiver.value):
+            await self._handle_close(stream_id)
+        elif flag in (HeaderTags.ResetInitiator.value, HeaderTags.ResetReceiver.value):
+            await self._handle_reset(stream_id)
+        else:
+            # Receives messages with an unknown flag
+            # TODO: logging
+            async with self.streams_lock:
+                if stream_id in self.streams:
+                    stream = self.streams[stream_id]
+                    await stream.reset()
+
+    async def _handle_new_stream(self, stream_id: StreamID, message: bytes) -> None:
+        async with self.streams_lock:
+            if stream_id in self.streams:
+                # `NewStream` for the same id is received twice...
+                raise MplexUnavailable(
+                    f"received NewStream message for existing stream: {stream_id}"
+                )
+        mplex_stream = await self._initialize_stream(stream_id, message.decode())
+        await self._wait_until_shutting_down_or_closed(
+            self.new_stream_queue.put(mplex_stream)
+        )
+
+    async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
+        async with self.streams_lock:
+            if stream_id not in self.streams:
+                # We receive a message of the stream `stream_id` which is not accepted
+                #   before. It is abnormal. Possibly disconnect?
+                # TODO: Warn and emit logs about this.
+                return
+            stream = self.streams[stream_id]
+        async with stream.close_lock:
+            if stream.event_remote_closed.is_set():
+                # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
+                return
+        await self._wait_until_shutting_down_or_closed(
+            stream.incoming_data.put(message)
+        )
+
+    async def _handle_close(self, stream_id: StreamID) -> None:
+        async with self.streams_lock:
+            if stream_id not in self.streams:
+                # Ignore unmatched messages for now.
+                return
+            stream = self.streams[stream_id]
+        # NOTE: If remote is already closed, then return: Technically a bug
+        #   on the other side. We should consider killing the connection.
+        async with stream.close_lock:
+            if stream.event_remote_closed.is_set():
+                return
+        is_local_closed: bool
+        async with stream.close_lock:
+            stream.event_remote_closed.set()
+            is_local_closed = stream.event_local_closed.is_set()
+        # If local is also closed, both sides are closed. Then, we should clean up
+        #   the entry of this stream, to avoid others from accessing it.
+        if is_local_closed:
+            async with self.streams_lock:
+                del self.streams[stream_id]
+
+    async def _handle_reset(self, stream_id: StreamID) -> None:
+        async with self.streams_lock:
+            if stream_id not in self.streams:
+                # This is *ok*. We forget the stream on reset.
+                return
+            stream = self.streams[stream_id]
+
+        async with stream.close_lock:
+            if not stream.event_remote_closed.is_set():
+                stream.event_reset.set()
+
+                stream.event_remote_closed.set()
+            # If local is not closed, we should close it.
+            if not stream.event_local_closed.is_set():
+                stream.event_local_closed.set()
+        async with self.streams_lock:
+            del self.streams[stream_id]
+
+    async def _cleanup(self) -> None:
+        if not self.event_shutting_down.is_set():
+            self.event_shutting_down.set()
+        async with self.streams_lock:
+            for stream in self.streams.values():
+                async with stream.close_lock:
+                    if not stream.event_remote_closed.is_set():
+                        stream.event_remote_closed.set()
+                        stream.event_reset.set()
+                        stream.event_local_closed.set()
+            self.streams = None
+        self.event_closed.set()

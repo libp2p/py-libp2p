@@ -1,6 +1,6 @@
 from libp2p.stream_muxer.exceptions import (
     MuxedConnError,
-    MuxedConnShutdown,
+    MuxedConnUnavailable,
     MuxedStreamClosed,
     MuxedStreamEOF,
     MuxedStreamReset,
@@ -11,7 +11,7 @@ class MplexError(MuxedConnError):
     pass
 
 
-class MplexShutdown(MuxedConnShutdown):
+class MplexUnavailable(MuxedConnUnavailable):
     pass
 
 

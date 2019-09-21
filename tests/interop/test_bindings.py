@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from .utils import connect
@@ -21,4 +23,5 @@ async def test_connect(hosts, p2pds):
     # Test: `disconnect` from Go
     await p2pd.control.disconnect(host.get_id())
     # FIXME: Failed to handle disconnect
-    # assert len(host.get_network().connections) == 0
+    await asyncio.sleep(0.01)
+    assert len(host.get_network().connections) == 0
