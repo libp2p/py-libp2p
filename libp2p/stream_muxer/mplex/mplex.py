@@ -2,6 +2,7 @@ import asyncio
 from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
+from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -197,14 +198,13 @@ class Mplex(IMuxedConn):
         """
 
         # FIXME: No timeout is used in Go implementation.
-        # Timeout is set to a relatively small value to alleviate wait time to exit
-        #  loop in handle_incoming
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
             message = await asyncio.wait_for(
                 read_varint_prefixed_bytes(self.secured_conn), timeout=5
             )
-        except (ConnectionResetError, IncompleteReadError) as error:
+        # TODO: Catch RawConnError?
+        except (ParseError, IncompleteReadError) as error:
             raise MplexUnavailable(
                 "failed to read messages correctly from the underlying connection"
             ) from error

@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 from libp2p.typing import StreamHandlerFn, TProtocol
 
-from .exceptions import MultiselectError
+from .exceptions import MultiselectCommunicatorError, MultiselectError
 from .multiselect_communicator_interface import IMultiselectCommunicator
 from .multiselect_muxer_interface import IMultiselectMuxer
 
@@ -37,7 +37,7 @@ class Multiselect(IMultiselectMuxer):
         Negotiate performs protocol selection
         :param stream: stream to negotiate on
         :return: selected protocol name, handler function
-        :raise Exception: negotiation failed exception
+        :raise MultiselectError: raised when negotiation failed
         """
 
         # Perform handshake to ensure multiselect protocol IDs match
@@ -46,7 +46,10 @@ class Multiselect(IMultiselectMuxer):
         # Read and respond to commands until a valid protocol ID is sent
         while True:
             # Read message
-            command = await communicator.read()
+            try:
+                command = await communicator.read()
+            except MultiselectCommunicatorError as error:
+                raise MultiselectError(error)
 
             # Command is ls or a protocol
             if command == "ls":
@@ -56,27 +59,39 @@ class Multiselect(IMultiselectMuxer):
                 protocol = TProtocol(command)
                 if protocol in self.handlers:
                     # Tell counterparty we have decided on a protocol
-                    await communicator.write(protocol)
+                    try:
+                        await communicator.write(protocol)
+                    except MultiselectCommunicatorError as error:
+                        raise MultiselectError(error)
 
                     # Return the decided on protocol
                     return protocol, self.handlers[protocol]
                 # Tell counterparty this protocol was not found
-                await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                try:
+                    await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectError(error)
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Perform handshake to agree on multiselect protocol
         :param communicator: communicator to use
-        :raise Exception: error in handshake
+        :raise MultiselectError: raised when handshake failed
         """
 
         # TODO: Use format used by go repo for messages
 
         # Send our MULTISELECT_PROTOCOL_ID to other party
-        await communicator.write(MULTISELECT_PROTOCOL_ID)
+        try:
+            await communicator.write(MULTISELECT_PROTOCOL_ID)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectError(error)
 
         # Read in the protocol ID from other party
-        handshake_contents = await communicator.read()
+        try:
+            handshake_contents = await communicator.read()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectError(error)
 
         # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
