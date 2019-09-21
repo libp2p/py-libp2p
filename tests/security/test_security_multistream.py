@@ -53,8 +53,8 @@ async def perform_simple_test(
     node2_conn = node2.get_network().connections[peer_id_for_node(node1)]
 
     # Perform assertion
-    assertion_func(node1_conn.secured_conn)
-    assertion_func(node2_conn.secured_conn)
+    assertion_func(node1_conn.conn.secured_conn)
+    assertion_func(node2_conn.conn.secured_conn)
 
     # Success, terminate pending tasks.
 

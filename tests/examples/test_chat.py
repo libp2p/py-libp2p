@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from libp2p.network.exceptions import SwarmException
+from libp2p.host.exceptions import StreamFailure
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from tests.utils import set_up_nodes_by_transport_opt
 
@@ -84,7 +84,7 @@ async def no_common_protocol(host_a, host_b):
     host_a.set_stream_handler(PROTOCOL_ID, stream_handler)
 
     # try to creates a new new with a procotol not known by the other host
-    with pytest.raises(SwarmException):
+    with pytest.raises(StreamFailure):
         await host_b.new_stream(host_a.get_id(), ["/fakeproto/0.0.1"])
 
 

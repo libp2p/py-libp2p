@@ -1,12 +1,19 @@
-from typing import Any, List, Sequence
+import asyncio
+import logging
+from typing import List, Sequence
 
 import multiaddr
 
+from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore_interface import IPeerStore
+from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
+from libp2p.protocol_muxer.multiselect import Multiselect
+from libp2p.protocol_muxer.multiselect_client import MultiselectClient
+from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.typing import StreamHandlerFn, TProtocol
 
@@ -18,17 +25,28 @@ from .host_interface import IHost
 # telling it to listen on the given listen addresses.
 
 
+logger = logging.getLogger("libp2p.network.basic_host")
+logger.setLevel(logging.DEBUG)
+
+
 class BasicHost(IHost):
 
     _network: INetwork
     _router: KadmeliaPeerRouter
     peerstore: IPeerStore
 
+    multiselect: Multiselect
+    multiselect_client: MultiselectClient
+
     # default options constructor
     def __init__(self, network: INetwork, router: KadmeliaPeerRouter = None) -> None:
         self._network = network
+        self._network.set_stream_handler(self._swarm_stream_handler)
         self._router = router
         self.peerstore = self._network.peerstore
+        # Protocol muxing
+        self.multiselect = Multiselect()
+        self.multiselect_client = MultiselectClient()
 
     def get_id(self) -> ID:
         """
@@ -48,11 +66,11 @@ class BasicHost(IHost):
         """
         return self.peerstore
 
-    # FIXME: Replace with correct return type
-    def get_mux(self) -> Any:
+    def get_mux(self) -> Multiselect:
         """
         :return: mux instance of host
         """
+        return self.multiselect
 
     def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """
@@ -74,7 +92,7 @@ class BasicHost(IHost):
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
         """
-        self._network.set_stream_handler(protocol_id, stream_handler)
+        self.multiselect.add_handler(protocol_id, stream_handler)
 
     # `protocol_ids` can be a list of `protocol_id`
     # stream will decide which `protocol_id` to run on
@@ -86,7 +104,21 @@ class BasicHost(IHost):
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
-        return await self._network.new_stream(peer_id, protocol_ids)
+
+        net_stream = await self._network.new_stream(peer_id, protocol_ids)
+
+        # Perform protocol muxing to determine protocol to use
+        try:
+            selected_protocol = await self.multiselect_client.select_one_of(
+                list(protocol_ids), MultiselectCommunicator(net_stream)
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await net_stream.reset()
+            raise StreamFailure("failt to open a stream to peer %s", peer_id) from error
+
+        net_stream.set_protocol(selected_protocol)
+        return net_stream
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
@@ -111,3 +143,16 @@ class BasicHost(IHost):
 
     async def close(self) -> None:
         await self._network.close()
+
+    # Reference: `BasicHost.newStreamHandler` in Go.
+    async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
+        # Perform protocol muxing to determine protocol to use
+        try:
+            protocol, handler = await self.multiselect.negotiate(
+                MultiselectCommunicator(net_stream)
+            )
+        except MultiselectError:
+            await net_stream.reset()
+            return
+        net_stream.set_protocol(protocol)
+        asyncio.ensure_future(handler(net_stream))

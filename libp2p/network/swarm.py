@@ -1,18 +1,15 @@
 import asyncio
 import logging
-from typing import Callable, Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from multiaddr import Multiaddr
 
+from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.protocol_muxer.exceptions import MultiselectClientError
-from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     OpenConnectionError,
@@ -24,12 +21,11 @@ from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .connection.raw_connection import RawConnection
+from .connection.swarm_connection import SwarmConn
 from .exceptions import SwarmException
 from .network_interface import INetwork
 from .notifee_interface import INotifee
-from .stream.net_stream import NetStream
 from .stream.net_stream_interface import INetStream
-from .typing import GenericProtocolHandlerFn
 
 logger = logging.getLogger("libp2p.network.swarm")
 logger.setLevel(logging.DEBUG)
@@ -44,12 +40,9 @@ class Swarm(INetwork):
     router: IPeerRouting
     # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
     #   whereas in Go one `peer_id` may point to multiple connections.
-    connections: Dict[ID, IMuxedConn]
+    connections: Dict[ID, INetConn]
     listeners: Dict[str, IListener]
-    stream_handlers: Dict[INetStream, Callable[[INetStream], None]]
-
-    multiselect: Multiselect
-    multiselect_client: MultiselectClient
+    common_stream_handler: Optional[StreamHandlerFn]
 
     notifees: List[INotifee]
 
@@ -68,31 +61,19 @@ class Swarm(INetwork):
         self.router = router
         self.connections = dict()
         self.listeners = dict()
-        self.stream_handlers = dict()
-
-        # Protocol muxing
-        self.multiselect = Multiselect()
-        self.multiselect_client = MultiselectClient()
 
         # Create Notifee array
         self.notifees = []
 
-        # Create generic protocol handler
-        self.generic_protocol_handler = create_generic_protocol_handler(self)
+        self.common_stream_handler = None
 
     def get_peer_id(self) -> ID:
         return self.self_id
 
-    def set_stream_handler(
-        self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
-    ) -> None:
-        """
-        :param protocol_id: protocol id used on stream
-        :param stream_handler: a stream handler instance
-        """
-        self.multiselect.add_handler(protocol_id, stream_handler)
+    def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
+        self.common_stream_handler = stream_handler
 
-    async def dial_peer(self, peer_id: ID) -> IMuxedConn:
+    async def dial_peer(self, peer_id: ID) -> INetConn:
         """
         dial_peer try to create a connection to peer_id
         :param peer_id: peer if we want to dial
@@ -145,9 +126,7 @@ class Swarm(INetwork):
         logger.debug("upgraded security for peer %s", peer_id)
 
         try:
-            muxed_conn = await self.upgrader.upgrade_connection(
-                secured_conn, self.generic_protocol_handler, peer_id
-            )
+            muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
         except MuxerUpgradeFailure as error:
             error_msg = "fail to upgrade mux for peer %s"
             logger.debug(error_msg, peer_id)
@@ -156,20 +135,15 @@ class Swarm(INetwork):
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
-        # Store muxed connection in connections
-        self.connections[peer_id] = muxed_conn
-
-        # Call notifiers since event occurred
-        for notifee in self.notifees:
-            await notifee.connected(self, muxed_conn)
+        swarm_conn = await self.add_conn(muxed_conn)
 
         logger.debug("successfully dialed peer %s", peer_id)
 
-        return muxed_conn
+        return swarm_conn
 
     async def new_stream(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
-    ) -> NetStream:
+    ) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
@@ -182,37 +156,10 @@ class Swarm(INetwork):
             protocol_ids,
         )
 
-        muxed_conn = await self.dial_peer(peer_id)
+        swarm_conn = await self.dial_peer(peer_id)
 
-        # Use muxed conn to open stream, which returns a muxed stream
-        muxed_stream = await muxed_conn.open_stream()
-
-        # Perform protocol muxing to determine protocol to use
-        try:
-            selected_protocol = await self.multiselect_client.select_one_of(
-                list(protocol_ids), MultiselectCommunicator(muxed_stream)
-            )
-        except MultiselectClientError as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await muxed_stream.reset()
-            raise SwarmException(
-                "failt to open a stream to peer %s", peer_id
-            ) from error
-
-        # Create a net stream with the selected protocol
-        net_stream = NetStream(muxed_stream)
-        net_stream.set_protocol(selected_protocol)
-
-        logger.debug(
-            "successfully opened a stream to peer %s, over protocol %s",
-            peer_id,
-            selected_protocol,
-        )
-
-        # Call notifiers since event occurred
-        for notifee in self.notifees:
-            await notifee.opened_stream(self, net_stream)
-
+        net_stream = await swarm_conn.new_stream()
+        logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
 
     async def listen(self, *multiaddrs: Multiaddr) -> bool:
@@ -262,7 +209,7 @@ class Swarm(INetwork):
 
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
-                        secured_conn, self.generic_protocol_handler, peer_id
+                        secured_conn, peer_id
                     )
                 except MuxerUpgradeFailure as error:
                     error_msg = "fail to upgrade mux for peer %s"
@@ -270,11 +217,8 @@ class Swarm(INetwork):
                     await secured_conn.close()
                     raise SwarmException(error_msg % peer_id) from error
                 logger.debug("upgraded mux for peer %s", peer_id)
-                # Store muxed_conn with peer id
-                self.connections[peer_id] = muxed_conn
-                # Call notifiers since event occurred
-                for notifee in self.notifees:
-                    await notifee.connected(self, muxed_conn)
+
+                await self.add_conn(muxed_conn)
 
                 logger.debug("successfully opened connection to peer %s", peer_id)
 
@@ -334,30 +278,13 @@ class Swarm(INetwork):
 
         logger.debug("successfully close the connection to peer %s", peer_id)
 
-
-def create_generic_protocol_handler(swarm: Swarm) -> GenericProtocolHandlerFn:
-    """
-    Create a generic protocol handler from the given swarm. We use swarm
-    to extract the multiselect module so that generic_protocol_handler
-    can use multiselect when generic_protocol_handler is called
-    from a different class
-    """
-    multiselect = swarm.multiselect
-
-    async def generic_protocol_handler(muxed_stream: IMuxedStream) -> None:
-        # Perform protocol muxing to determine protocol to use
-        protocol, handler = await multiselect.negotiate(
-            MultiselectCommunicator(muxed_stream)
-        )
-
-        net_stream = NetStream(muxed_stream)
-        net_stream.set_protocol(protocol)
-
+    async def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
+        swarm_conn = SwarmConn(muxed_conn, self)
+        # Store muxed_conn with peer id
+        self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
-        for notifee in swarm.notifees:
-            await notifee.opened_stream(swarm, net_stream)
-
-        # Give to stream handler
-        asyncio.ensure_future(handler(net_stream))
-
-    return generic_protocol_handler
+        for notifee in self.notifees:
+            # TODO: Call with other type of conn?
+            await notifee.connected(self, muxed_conn)
+        await swarm_conn.start()
+        return swarm_conn
