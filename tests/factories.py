@@ -155,7 +155,7 @@ async def mplex_conn_pair_factory(is_secure: bool) -> Tuple[Mplex, Swarm, Mplex,
     conn_0, swarm_0, conn_1, swarm_1 = await swarm_conn_pair_factory(
         is_secure, muxer_opt=muxer_opt
     )
-    return conn_0.conn, swarm_0, conn_1.conn, swarm_1
+    return conn_0.muxed_conn, swarm_0, conn_1.muxed_conn, swarm_1
 
 
 async def mplex_stream_pair_factory(

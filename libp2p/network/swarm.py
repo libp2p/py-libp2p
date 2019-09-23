@@ -279,7 +279,7 @@ class Swarm(INetwork):
         """
         Simply remove the connection from Swarm's records, without closing the connection.
         """
-        peer_id = swarm_conn.conn.peer_id
+        peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return
         # TODO: Should be changed to remove the exact connection,

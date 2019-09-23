@@ -1,3 +1,5 @@
+from typing import Optional
+
 from libp2p.stream_muxer.abc import IMuxedStream
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
@@ -16,7 +18,7 @@ from .net_stream_interface import INetStream
 class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
-    protocol_id: TProtocol
+    protocol_id: Optional[TProtocol]
 
     def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream

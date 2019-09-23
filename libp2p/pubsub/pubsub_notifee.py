@@ -36,7 +36,7 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.initiator_peers_queue.put(conn.conn.peer_id)
+        await self.initiator_peers_queue.put(conn.muxed_conn.peer_id)
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         pass

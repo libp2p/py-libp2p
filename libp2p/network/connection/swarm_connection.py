@@ -16,15 +16,15 @@ Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee
 
 
 class SwarmConn(INetConn):
-    conn: IMuxedConn
+    muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: Set[NetStream]
     event_closed: asyncio.Event
 
     _tasks: List["asyncio.Future[Any]"]
 
-    def __init__(self, conn: IMuxedConn, swarm: "Swarm") -> None:
-        self.conn = conn
+    def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
+        self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
         self.event_closed = asyncio.Event()
@@ -37,7 +37,7 @@ class SwarmConn(INetConn):
         self.event_closed.set()
         self.swarm.remove_conn(self)
 
-        await self.conn.close()
+        await self.muxed_conn.close()
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
@@ -56,7 +56,7 @@ class SwarmConn(INetConn):
     async def _handle_new_streams(self) -> None:
         while True:
             try:
-                stream = await self.conn.accept_stream()
+                stream = await self.muxed_conn.accept_stream()
             except MuxedConnUnavailable:
                 # If there is anything wrong in the MuxedConn,
                 # we should break the loop and close the connection.
@@ -96,7 +96,7 @@ class SwarmConn(INetConn):
         self._tasks.append(asyncio.ensure_future(coro))
 
     async def new_stream(self) -> NetStream:
-        muxed_stream = await self.conn.open_stream()
+        muxed_stream = await self.muxed_conn.open_stream()
         return self._add_stream(muxed_stream)
 
     async def get_streams(self) -> Tuple[NetStream, ...]:
