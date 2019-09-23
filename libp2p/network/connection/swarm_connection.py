@@ -51,7 +51,7 @@ class SwarmConn(INetConn):
             except asyncio.CancelledError:
                 pass
         # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
-        asyncio.ensure_future(self._notify_disconnected())
+        self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
         while True:
@@ -76,20 +76,18 @@ class SwarmConn(INetConn):
             self.remove_stream(net_stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
-        net_stream = await self._add_stream(muxed_stream)
+        net_stream = self._add_stream(muxed_stream)
         if self.swarm.common_stream_handler is not None:
             await self.run_task(self._call_stream_handler(net_stream))
 
-    async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
+    def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
-        for notifee in self.swarm.notifees:
-            await notifee.opened_stream(self.swarm, net_stream)
+        self.swarm.notify_opened_stream(net_stream)
         return net_stream
 
-    async def _notify_disconnected(self) -> None:
-        for notifee in self.swarm.notifees:
-            await notifee.disconnected(self.swarm, self)
+    def _notify_disconnected(self) -> None:
+        self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
         await self.run_task(self._handle_new_streams())
@@ -99,12 +97,11 @@ class SwarmConn(INetConn):
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.conn.open_stream()
-        return await self._add_stream(muxed_stream)
+        return self._add_stream(muxed_stream)
 
     async def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)
 
-    # TODO: Called by `Stream` whenever it is time to remove the stream.
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:
             return
