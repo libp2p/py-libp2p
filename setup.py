@@ -9,8 +9,6 @@ extras_require = {
         "pytest>=4.6.3,<5.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
         "pexpect>=4.6,<5",
-        # FIXME: Master branch. Use PyPI instead after it is released.
-        "p2pclient @ git+https://git@github.com/mhchia/py-libp2p-daemon-bindings@628266f",
     ],
     "lint": [
         "mypy>=0.701,<1.0",
