@@ -22,6 +22,5 @@ async def test_connect(hosts, p2pds):
     assert len(host.get_network().connections) == 1
     # Test: `disconnect` from Go
     await p2pd.control.disconnect(host.get_id())
-    # FIXME: Failed to handle disconnect
     await asyncio.sleep(0.01)
     assert len(host.get_network().connections) == 0

@@ -73,9 +73,8 @@ def encode_delim(msg: bytes) -> bytes:
 
 async def read_delim(reader: Reader) -> bytes:
     msg_bytes = await read_varint_prefixed_bytes(reader)
-    # TODO: Investigate if it is possible to have empty `msg_bytes`
-    if len(msg_bytes) != 0 and msg_bytes[-1:] != b"\n":
-        raise ValueError(f'msg_bytes is not delimited by b"\\n": msg_bytes={msg_bytes}')
+    if len(msg_bytes) == 0 or msg_bytes[-1:] != b"\n":
+        raise ParseError(f'msg_bytes is not delimited by b"\\n": msg_bytes={msg_bytes}')
     return msg_bytes[:-1]
 
 

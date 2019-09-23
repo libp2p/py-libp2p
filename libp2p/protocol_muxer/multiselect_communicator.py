@@ -20,10 +20,10 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         msg_bytes = encode_delim(msg_str.encode())
         try:
             await self.read_writer.write(msg_bytes)
-        except IOException:
+        except IOException as error:
             raise MultiselectCommunicatorError(
                 "fail to write to multiselect communicator"
-            )
+            ) from error
 
     async def read(self) -> str:
         """
@@ -32,8 +32,8 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         try:
             data = await read_delim(self.read_writer)
         # `IOException` includes `IncompleteReadError` and `StreamError`
-        except (ParseError, IOException, ValueError):
+        except (ParseError, IOException) as error:
             raise MultiselectCommunicatorError(
                 "fail to read from multiselect communicator"
-            )
+            ) from error
         return data.decode()
