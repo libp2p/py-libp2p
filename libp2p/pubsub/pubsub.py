@@ -98,7 +98,7 @@ class Pubsub:
 
         # Register a notifee
         self.peer_queue = asyncio.Queue()
-        self.host.get_network().notify(PubsubNotifee(self.peer_queue))
+        self.host.get_network().register_notifee(PubsubNotifee(self.peer_queue))
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols
@@ -154,7 +154,7 @@ class Pubsub:
         messages from other nodes
         :param stream: stream to continously read from
         """
-        peer_id = stream.mplex_conn.peer_id
+        peer_id = stream.muxed_conn.peer_id
 
         while True:
             try:

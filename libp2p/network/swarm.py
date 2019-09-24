@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional
 
 from multiaddr import Multiaddr
 
@@ -18,7 +18,7 @@ from libp2p.transport.exceptions import (
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import StreamHandlerFn
 
 from .connection.raw_connection import RawConnection
 from .connection.swarm_connection import SwarmConn
@@ -141,20 +141,14 @@ class Swarm(INetwork):
 
         return swarm_conn
 
-    async def new_stream(
-        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
-    ) -> INetStream:
+    async def new_stream(self, peer_id: ID) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
         :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
-        logger.debug(
-            "attempting to open a stream to peer %s, over one of the protocols %s",
-            peer_id,
-            protocol_ids,
-        )
+        logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
 
@@ -229,8 +223,7 @@ class Swarm(INetwork):
                 await listener.listen(maddr)
 
                 # Call notifiers since event occurred
-                for notifee in self.notifees:
-                    await notifee.listen(self, maddr)
+                self.notify_listen(maddr)
 
                 return True
             except IOError:
@@ -238,16 +231,6 @@ class Swarm(INetwork):
                 logger.debug("fail to listen on: " + str(maddr))
 
         # No maddr succeeded
-        return False
-
-    def notify(self, notifee: INotifee) -> bool:
-        """
-        :param notifee: object implementing Notifee interface
-        :return: true if notifee registered successfully, false otherwise
-        """
-        if isinstance(notifee, INotifee):
-            self.notifees.append(notifee)
-            return True
         return False
 
     def add_router(self, router: IPeerRouting) -> None:
@@ -288,9 +271,7 @@ class Swarm(INetwork):
         # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
-        for notifee in self.notifees:
-            # TODO: Call with other type of conn?
-            await notifee.connected(self, muxed_conn)
+        self.notify_connected(swarm_conn)
         await swarm_conn.start()
         return swarm_conn
 
@@ -298,9 +279,38 @@ class Swarm(INetwork):
         """
         Simply remove the connection from Swarm's records, without closing the connection.
         """
-        peer_id = swarm_conn.conn.peer_id
+        peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return
         # TODO: Should be changed to remove the exact connection,
         #   if we have several connections per peer in the future.
         del self.connections[peer_id]
+
+    # Notifee
+
+    # TODO: Remeber the spawn notifying tasks and clean them up when closing.
+
+    def register_notifee(self, notifee: INotifee) -> None:
+        """
+        :param notifee: object implementing Notifee interface
+        :return: true if notifee registered successfully, false otherwise
+        """
+        self.notifees.append(notifee)
+
+    def notify_opened_stream(self, stream: INetStream) -> None:
+        asyncio.gather(
+            *[notifee.opened_stream(self, stream) for notifee in self.notifees]
+        )
+
+    # TODO: `notify_closed_stream`
+
+    def notify_connected(self, conn: INetConn) -> None:
+        asyncio.gather(*[notifee.connected(self, conn) for notifee in self.notifees])
+
+    def notify_disconnected(self, conn: INetConn) -> None:
+        asyncio.gather(*[notifee.disconnected(self, conn) for notifee in self.notifees])
+
+    def notify_listen(self, multiaddr: Multiaddr) -> None:
+        asyncio.gather(*[notifee.listen(self, multiaddr) for notifee in self.notifees])
+
+    # TODO: `notify_listen_close`

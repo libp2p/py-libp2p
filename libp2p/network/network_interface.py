@@ -7,7 +7,7 @@ from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.transport.listener_interface import IListener
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import StreamHandlerFn
 
 from .stream.net_stream_interface import INetStream
 
@@ -38,9 +38,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def new_stream(
-        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
-    ) -> INetStream:
+    async def new_stream(self, peer_id: ID) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_ids: available protocol ids to use for stream
@@ -61,7 +59,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    def notify(self, notifee: "INotifee") -> bool:
+    def register_notifee(self, notifee: "INotifee") -> None:
         """
         :param notifee: object implementing Notifee interface
         :return: true if notifee registered successfully, false otherwise

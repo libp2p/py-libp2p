@@ -1,5 +1,5 @@
 import asyncio
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.rsa import create_new_key_pair
@@ -15,10 +15,9 @@ from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
-from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
-from libp2p.stream_muxer.muxer_multistream import MuxerClassType
 from libp2p.transport.tcp.tcp import TCP
+from libp2p.transport.typing import TMuxerOptions, TSecurityOptions
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
 
@@ -74,8 +73,8 @@ def initialize_default_swarm(
     key_pair: KeyPair,
     id_opt: ID = None,
     transport_opt: Sequence[str] = None,
-    muxer_opt: Mapping[TProtocol, MuxerClassType] = None,
-    sec_opt: Mapping[TProtocol, ISecureTransport] = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
 ) -> Swarm:
@@ -114,8 +113,8 @@ async def new_node(
     key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
     transport_opt: Sequence[str] = None,
-    muxer_opt: Mapping[TProtocol, MuxerClassType] = None,
-    sec_opt: Mapping[TProtocol, ISecureTransport] = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
 ) -> BasicHost:

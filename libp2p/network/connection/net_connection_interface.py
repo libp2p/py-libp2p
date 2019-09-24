@@ -7,7 +7,7 @@ from libp2p.stream_muxer.abc import IMuxedConn
 
 
 class INetConn(Closer):
-    conn: IMuxedConn
+    muxed_conn: IMuxedConn
 
     @abstractmethod
     async def new_stream(self) -> INetStream:

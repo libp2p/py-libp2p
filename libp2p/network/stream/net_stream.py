@@ -1,4 +1,6 @@
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
+from typing import Optional
+
+from libp2p.stream_muxer.abc import IMuxedStream
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
@@ -16,13 +18,11 @@ from .net_stream_interface import INetStream
 class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
-    # TODO: Why we expose `mplex_conn` here?
-    mplex_conn: IMuxedConn
-    protocol_id: TProtocol
+    protocol_id: Optional[TProtocol]
 
     def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream
-        self.mplex_conn = muxed_stream.mplex_conn
+        self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
 
     def get_protocol(self) -> TProtocol:
@@ -68,3 +68,7 @@ class NetStream(INetStream):
 
     async def reset(self) -> None:
         await self.muxed_stream.reset()
+
+    # TODO: `remove`: Called by close and write when the stream is in specific states.
+    #   It notifies `ClosedStream` after `SwarmConn.remove_stream` is called.
+    # Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501

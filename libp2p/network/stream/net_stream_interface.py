@@ -7,7 +7,7 @@ from libp2p.typing import TProtocol
 
 class INetStream(ReadWriteCloser):
 
-    mplex_conn: IMuxedConn
+    muxed_conn: IMuxedConn
 
     @abstractmethod
     def get_protocol(self) -> TProtocol:

@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 
+from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.network_interface import INetwork
 from libp2p.network.notifee_interface import INotifee
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.stream_muxer.abc import IMuxedConn
 
 if TYPE_CHECKING:
     import asyncio  # noqa: F401
@@ -29,16 +29,16 @@ class PubsubNotifee(INotifee):
     async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
         pass
 
-    async def connected(self, network: INetwork, conn: IMuxedConn) -> None:
+    async def connected(self, network: INetwork, conn: INetConn) -> None:
         """
         Add peer_id to initiator_peers_queue, so that this peer_id can be used to
         create a stream and we only want to have one pubsub stream with each peer.
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.initiator_peers_queue.put(conn.peer_id)
+        await self.initiator_peers_queue.put(conn.muxed_conn.peer_id)
 
-    async def disconnected(self, network: INetwork, conn: IMuxedConn) -> None:
+    async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         pass
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:

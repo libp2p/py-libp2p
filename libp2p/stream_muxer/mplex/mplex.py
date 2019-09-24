@@ -31,9 +31,6 @@ class Mplex(IMuxedConn):
 
     secured_conn: ISecureConn
     peer_id: ID
-    # TODO: `dataIn` in go implementation. Should be size of 8.
-    # TODO: Also, `dataIn` is closed indicating EOF in Go. We don't have similar strategies
-    #   to let the `MplexStream`s know that EOF arrived (#235).
     next_channel_id: int
     streams: Dict[StreamID, MplexStream]
     streams_lock: asyncio.Lock
@@ -43,7 +40,6 @@ class Mplex(IMuxedConn):
 
     _tasks: List["asyncio.Future[Any]"]
 
-    # TODO: `generic_protocol_handler` should be refactored out of mplex conn.
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
         create a new muxed connection

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import List, Sequence
 
@@ -107,7 +106,7 @@ class BasicHost(IHost):
         :return: stream: new stream created
         """
 
-        net_stream = await self._network.new_stream(peer_id, protocol_ids)
+        net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
         try:
@@ -157,4 +156,4 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
         net_stream.set_protocol(protocol)
-        asyncio.ensure_future(handler(net_stream))
+        await handler(net_stream)

@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 
+from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.stream_muxer.abc import IMuxedConn
 
 if TYPE_CHECKING:
     from .network_interface import INetwork  # noqa: F401
@@ -26,14 +26,14 @@ class INotifee(ABC):
         """
 
     @abstractmethod
-    async def connected(self, network: "INetwork", conn: IMuxedConn) -> None:
+    async def connected(self, network: "INetwork", conn: INetConn) -> None:
         """
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
 
     @abstractmethod
-    async def disconnected(self, network: "INetwork", conn: IMuxedConn) -> None:
+    async def disconnected(self, network: "INetwork", conn: INetConn) -> None:
         """
         :param network: network the connection was closed on
         :param conn: connection that was closed
