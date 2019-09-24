@@ -1,6 +1,4 @@
 import asyncio
-import gc
-from pprint import pprint
 
 import pytest
 

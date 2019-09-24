@@ -1,8 +1,6 @@
 import asyncio
-from typing import Awaitable, Any
-
+from typing import Any, Awaitable
 from weakref import WeakSet
-
 
 # Ref: https://github.com/ethereum/trinity/blob/master/p2p/service.py#L39
 
