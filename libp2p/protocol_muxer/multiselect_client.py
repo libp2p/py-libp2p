@@ -23,26 +23,18 @@ class MultiselectClient(IMultiselectClient):
         :param stream: stream to communicate with multiselect over
         :raise MultiselectClientError: raised when handshake failed
         """
-
-        # TODO: Use format used by go repo for messages
-
-        # Send our MULTISELECT_PROTOCOL_ID to counterparty
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError(error)
 
-        # Read in the protocol ID from other party
         try:
             handshake_contents = await communicator.read()
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError(str(error))
 
-        # Confirm that the protocols are the same
         if not validate_handshake(handshake_contents):
             raise MultiselectClientError("multiselect protocol ID mismatch")
-
-        # Handshake succeeded if this point is reached
 
     async def select_one_of(
         self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
@@ -56,11 +48,8 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
-        # Perform handshake to ensure multiselect protocol IDs match
         await self.handshake(communicator)
 
-        # For each protocol, attempt to select that protocol
-        # and return the first protocol selected
         for protocol in protocols:
             try:
                 selected_protocol = await self.try_select(communicator, protocol)
@@ -68,7 +57,6 @@ class MultiselectClient(IMultiselectClient):
             except MultiselectClientError:
                 pass
 
-        # No protocols were found, so return no protocols supported error
         raise MultiselectClientError("protocols not supported")
 
     async def try_select(
@@ -81,20 +69,16 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         :return: selected protocol
         """
-
-        # Tell counterparty we want to use protocol
         try:
             await communicator.write(protocol)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError(error)
 
-        # Get what counterparty says in response
         try:
             response = await communicator.read()
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError(str(error))
 
-        # Return protocol if response is equal to protocol or raise error
         if response == protocol:
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
@@ -108,7 +92,4 @@ def validate_handshake(handshake_contents: str) -> bool:
     :param handshake_contents: contents of handshake message
     :return: true if handshake is complete, false otherwise
     """
-
-    # TODO: Modify this when format used by go repo for messages
-    # is added
     return handshake_contents == MULTISELECT_PROTOCOL_ID
