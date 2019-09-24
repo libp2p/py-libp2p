@@ -47,6 +47,11 @@ class Ed25519PrivateKey(PrivateKey):
     def to_bytes(self) -> bytes:
         return bytes(self.impl)
 
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "Ed25519PrivateKey":
+        impl = PrivateKeyImpl(data)
+        return cls(impl)
+
     def get_type(self) -> KeyType:
         return KeyType.Ed25519
 
