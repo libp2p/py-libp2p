@@ -165,6 +165,8 @@ async def py_to_daemon_stream_pair(hosts, p2pds, is_to_fail_daemon_stream):
         event_stream_handled.set()
 
     await p2pd.control.stream_handler(protocol_id, daemon_stream_handler)
+    # Sleep for a while to wait for the handler being registered.
+    await asyncio.sleep(0.01)
 
     if is_to_fail_daemon_stream:
         # FIXME: This is a workaround to make daemon reset the stream.
@@ -180,5 +182,5 @@ async def py_to_daemon_stream_pair(hosts, p2pds, is_to_fail_daemon_stream):
     stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
     if not is_to_fail_daemon_stream:
         await event_stream_handled.wait()
-    # NOTE: If `is_to_fail_daemon_stream == True`, `stream_daemon == None`.
+    # NOTE: If `is_to_fail_daemon_stream == True`, then `stream_daemon == None`.
     yield stream_py, stream_daemon
