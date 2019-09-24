@@ -114,8 +114,8 @@ async def new_node(
     key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
     transport_opt: Sequence[str] = None,
-    muxer_opt: Mapping[TProtocol, TMuxerClass] = None,
-    sec_opt: Mapping[TProtocol, ISecureTransport] = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
 ) -> BasicHost:
