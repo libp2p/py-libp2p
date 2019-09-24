@@ -31,14 +31,13 @@ class SecurityMultistream(ABC):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self, secure_transports_by_protocol: TSecurityOptions = None) -> None:
+    def __init__(self, secure_transports_by_protocol: TSecurityOptions) -> None:
         self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
 
-        if secure_transports_by_protocol is not None:
-            for protocol, transport in secure_transports_by_protocol.items():
-                self.add_transport(protocol, transport)
+        for protocol, transport in secure_transports_by_protocol.items():
+            self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
         """

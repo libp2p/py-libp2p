@@ -26,13 +26,12 @@ class MuxerMultistream:
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self, muxer_transports_by_protocol: TMuxerOptions = None) -> None:
+    def __init__(self, muxer_transports_by_protocol: TMuxerOptions) -> None:
         self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multiselect_client = MultiselectClient()
-        if muxer_transports_by_protocol is not None:
-            for protocol, transport in muxer_transports_by_protocol.items():
-                self.add_transport(protocol, transport)
+        for protocol, transport in muxer_transports_by_protocol.items():
+            self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: TMuxerClass) -> None:
         """
