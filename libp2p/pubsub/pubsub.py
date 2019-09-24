@@ -195,7 +195,11 @@ class Pubsub:
             #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
             if rpc_incoming.HasField("control"):
                 # Pass rpc to router so router could perform custom logic
-                logger.debug("received `control` message %s from peer %s", peer_id)
+                logger.debug(
+                    "received `control` message %s from peer %s",
+                    rpc_incoming.control,
+                    peer_id,
+                )
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
             # Force context switch
