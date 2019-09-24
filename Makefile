@@ -1,4 +1,4 @@
-FILES_TO_LINT = libp2p tests examples setup.py
+FILES_TO_LINT = libp2p tests tests_interop examples setup.py
 PB = libp2p/crypto/pb/crypto.proto libp2p/pubsub/pb/rpc.proto libp2p/security/insecure/pb/plaintext.proto libp2p/security/secio/pb/spipe.proto
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)
