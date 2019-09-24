@@ -2,7 +2,7 @@ from typing import Optional
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
-from libp2p.crypto.utils import pubkey_from_protobuf
+from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection_interface import IRawConnection
@@ -75,7 +75,9 @@ class InsecureSession(BaseSession):
 
         # Verify if the given `pubkey` matches the given `peer_id`
         try:
-            received_pubkey = pubkey_from_protobuf(remote_msg.pubkey)
+            received_pubkey = deserialize_public_key(
+                remote_msg.pubkey.SerializeToString()
+            )
         except ValueError:
             raise HandshakeFailure(
                 f"unknown `key_type` of remote_msg.pubkey={remote_msg.pubkey}"
