@@ -38,7 +38,7 @@ async def p2pd_subscribe(p2pd, topic) -> "asyncio.Queue[rpc_pb2.Message]":
             ps_msg.ParseFromString(msg_bytes)
             # Fill in the message used in py-libp2p
             msg = rpc_pb2.Message(
-                from_id=ps_msg.from_field,
+                from_id=ps_msg.from_id,
                 data=ps_msg.data,
                 seqno=ps_msg.seqno,
                 topicIDs=ps_msg.topicIDs,

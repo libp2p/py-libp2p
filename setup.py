@@ -8,7 +8,6 @@ extras_require = {
         "factory-boy>=2.12.0,<3.0.0",
         "pytest>=4.6.3,<5.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
-        "pexpect>=4.6,<5",
     ],
     "lint": [
         "mypy>=0.701,<1.0",
