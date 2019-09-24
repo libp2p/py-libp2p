@@ -245,7 +245,7 @@ class Pubsub:
             await self.continuously_read_stream(stream)
         except (StreamEOF, StreamReset) as error:
             logger.debug("fail to read from stream, error=%s", error)
-            stream.reset()
+            await stream.reset()
             # TODO: what to do when the stream is terminated?
             # disconnect the peer?
 
