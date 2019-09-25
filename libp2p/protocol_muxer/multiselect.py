@@ -19,7 +19,11 @@ class Multiselect(IMultiselectMuxer):
 
     handlers: Dict[TProtocol, StreamHandlerFn]
 
-    def __init__(self, default_handlers: Dict[TProtocol, StreamHandlerFn] = {}) -> None:
+    def __init__(
+        self, default_handlers: Dict[TProtocol, StreamHandlerFn] = None
+    ) -> None:
+        if not default_handlers:
+            default_handlers = {}
         self.handlers = default_handlers
 
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
