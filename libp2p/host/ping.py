@@ -1,8 +1,9 @@
+import asyncio
 import logging
 
 from libp2p.network.stream.exceptions import StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.id import ID
+from libp2p.peer.id import ID as PeerID
 
 ID = "/ipfs/ping/1.0.0"
 PING_LENGTH = 32
@@ -11,7 +12,7 @@ RESP_TIMEOUT = 60
 logger = logging.getLogger("libp2p.host.ping")
 
 
-async def _handle_ping(stream: INetStream, peer_id: ID) -> None:
+async def _handle_ping(stream: INetStream, peer_id: PeerID) -> None:
     try:
         payload = await asyncio.wait_for(stream.read(PING_LENGTH), RESP_TIMEOUT)
     except asyncio.TimeoutError as error:
@@ -31,7 +32,7 @@ async def _handle_ping(stream: INetStream, peer_id: ID) -> None:
     await stream.write(payload)
 
 
-async def handle_ping(self, stream: INetStream) -> None:
+async def handle_ping(stream: INetStream) -> None:
     """
     ``handle_ping`` responds to incoming ping requests until one side
     errors or closes the ``stream``.
