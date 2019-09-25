@@ -1,5 +1,6 @@
 import logging
 
+from libp2p.network.stream.exceptions import StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 
@@ -16,7 +17,11 @@ async def _handle_ping(stream: INetStream, peer_id: ID) -> None:
     except asyncio.TimeoutError as error:
         logger.debug("Timed out waiting for ping from %s: %s", peer_id, error)
         raise
-    # TODO: handle the other end closing the stream
+    except (StreamEOF, StreamReset) as error:
+        logger.debug(
+            "Other side closed while waiting for ping from %s: %s", peer_id, error
+        )
+        raise
     except Exception as error:
         logger.debug("Error while waiting to read ping for %s: %s", peer_id, error)
         raise
