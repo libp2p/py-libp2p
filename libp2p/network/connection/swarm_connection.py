@@ -1,6 +1,7 @@
 import asyncio
-from typing import TYPE_CHECKING, Any, Awaitable, List, Set, Tuple
+from typing import TYPE_CHECKING, Set, Tuple
 
+from libp2p.cancellable import Cancellable
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.stream.net_stream import NetStream
 from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
@@ -15,21 +16,19 @@ Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee
 """
 
 
-class SwarmConn(INetConn):
+class SwarmConn(Cancellable, INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: Set[NetStream]
     event_closed: asyncio.Event
 
-    _tasks: List["asyncio.Future[Any]"]
-
     def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
+        super().__init__()
+
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
         self.event_closed = asyncio.Event()
-
-        self._tasks = []
 
     async def close(self) -> None:
         if self.event_closed.is_set():
@@ -44,12 +43,8 @@ class SwarmConn(INetConn):
         for stream in self.streams:
             await stream.reset()
 
-        for task in self._tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        # Cancel all tasks.
+        await self.cancel()
         # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
         self._notify_disconnected()
 
@@ -61,8 +56,7 @@ class SwarmConn(INetConn):
                 # If there is anything wrong in the MuxedConn,
                 # we should break the loop and close the connection.
                 break
-            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
-            await self.run_task(self._handle_muxed_stream(stream))
+            self._handle_muxed_stream(stream)
 
         await self.close()
 
@@ -75,10 +69,11 @@ class SwarmConn(INetConn):
             # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
             self.remove_stream(net_stream)
 
-    async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+    def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         net_stream = self._add_stream(muxed_stream)
         if self.swarm.common_stream_handler is not None:
-            await self.run_task(self._call_stream_handler(net_stream))
+            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+            self.run_task(self._call_stream_handler(net_stream))
 
     def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
@@ -89,11 +84,8 @@ class SwarmConn(INetConn):
     def _notify_disconnected(self) -> None:
         self.swarm.notify_disconnected(self)
 
-    async def start(self) -> None:
-        await self.run_task(self._handle_new_streams())
-
-    async def run_task(self, coro: Awaitable[Any]) -> None:
-        self._tasks.append(asyncio.ensure_future(coro))
+    def start(self) -> None:
+        self.run_task(self._handle_new_streams())
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()

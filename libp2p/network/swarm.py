@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from multiaddr import Multiaddr
 
+from libp2p.cancellable import Cancellable
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
@@ -31,7 +32,7 @@ logger = logging.getLogger("libp2p.network.swarm")
 logger.setLevel(logging.DEBUG)
 
 
-class Swarm(INetwork):
+class Swarm(Cancellable, INetwork):
 
     self_id: ID
     peerstore: IPeerStore
@@ -54,6 +55,8 @@ class Swarm(INetwork):
         transport: ITransport,
         router: IPeerRouting,
     ):
+        super().__init__()
+
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
@@ -135,7 +138,7 @@ class Swarm(INetwork):
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
-        swarm_conn = await self.add_conn(muxed_conn)
+        swarm_conn = self.add_conn(muxed_conn)
 
         logger.debug("successfully dialed peer %s", peer_id)
 
@@ -212,7 +215,7 @@ class Swarm(INetwork):
                     raise SwarmException(error_msg % peer_id) from error
                 logger.debug("upgraded mux for peer %s", peer_id)
 
-                await self.add_conn(muxed_conn)
+                self.add_conn(muxed_conn)
 
                 logger.debug("successfully opened connection to peer %s", peer_id)
 
@@ -262,7 +265,7 @@ class Swarm(INetwork):
 
         logger.debug("successfully close the connection to peer %s", peer_id)
 
-    async def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
+    def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
         """
         Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
         and start to monitor the connection for its new streams and disconnection.
@@ -272,7 +275,7 @@ class Swarm(INetwork):
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
         self.notify_connected(swarm_conn)
-        await swarm_conn.start()
+        swarm_conn.start()
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
