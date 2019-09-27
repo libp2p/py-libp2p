@@ -26,14 +26,18 @@ async def i_raise_example_exception() -> None:
 @pytest.mark.asyncio
 async def test_cancellable():
     e = Example()
-    assert not e._is_cancelled()
+    assert not e._is_cancelled
     assert len(e._tasks) == 0
     e.run_task(i_am_blocked_forever())
     assert len(e._tasks) == 1
     task = tuple(e._tasks)[0]
+
     await e.cancel()
     assert task.done()
-    assert e._is_cancelled()
+    assert e._is_cancelled
+
+    # Test: Fail to run task when it is cancelled.
+    e.run_task(i_am_blocked_forever)
 
 
 @pytest.mark.asyncio
