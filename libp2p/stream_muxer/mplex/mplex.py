@@ -1,7 +1,8 @@
 import asyncio
 from typing import Any  # noqa: F401
-from typing import Awaitable, Dict, List, Optional, Tuple
+from typing import Awaitable, Dict, Optional, Tuple
 
+from libp2p.cancellable import Cancellable
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
 from libp2p.network.connection.exceptions import RawConnError
@@ -24,7 +25,7 @@ from .mplex_stream import MplexStream
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 
 
-class Mplex(IMuxedConn):
+class Mplex(Cancellable, IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
@@ -38,8 +39,6 @@ class Mplex(IMuxedConn):
     event_shutting_down: asyncio.Event
     event_closed: asyncio.Event
 
-    _tasks: List["asyncio.Future[Any]"]
-
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
         create a new muxed connection
@@ -48,6 +47,8 @@ class Mplex(IMuxedConn):
         for new muxed streams
         :param peer_id: peer_id of peer the connection is to
         """
+        super().__init__()
+
         self.secured_conn = secured_conn
 
         self.next_channel_id = 0
@@ -62,10 +63,8 @@ class Mplex(IMuxedConn):
         self.event_shutting_down = asyncio.Event()
         self.event_closed = asyncio.Event()
 
-        self._tasks = []
-
         # Kick off reading
-        self._tasks.append(asyncio.ensure_future(self.handle_incoming()))
+        self.run_task(self.handle_incoming())
 
     @property
     def initiator(self) -> bool:
@@ -82,6 +81,8 @@ class Mplex(IMuxedConn):
         await self.secured_conn.close()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
+
+        await self.cancel()
 
     def is_closed(self) -> bool:
         """
@@ -128,6 +129,10 @@ class Mplex(IMuxedConn):
         )
         for fut in pending:
             fut.cancel()
+            try:
+                await fut
+            except asyncio.CancelledError:
+                pass
         if task_wait_closed in done:
             raise MplexUnavailable("Mplex is closed")
         if task_wait_shutting_down in done:

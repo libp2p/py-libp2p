@@ -67,6 +67,10 @@ class MplexStream(IMuxedStream):
         )
         for fut in pending:
             fut.cancel()
+            try:
+                await fut
+            except asyncio.CancelledError:
+                pass
 
         if task_event_reset in done:
             if self.event_reset.is_set():
