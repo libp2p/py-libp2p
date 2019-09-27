@@ -253,6 +253,8 @@ class Swarm(Cancellable, INetwork):
             *[connection.close() for connection in self.connections.values()]
         )
 
+        await self.cancel()
+
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:
@@ -291,8 +293,6 @@ class Swarm(Cancellable, INetwork):
 
     # Notifee
 
-    # TODO: Remeber the spawn notifying tasks and clean them up when closing.
-
     def register_notifee(self, notifee: INotifee) -> None:
         """
         :param notifee: object implementing Notifee interface
@@ -301,19 +301,33 @@ class Swarm(Cancellable, INetwork):
         self.notifees.append(notifee)
 
     def notify_opened_stream(self, stream: INetStream) -> None:
-        asyncio.gather(
-            *[notifee.opened_stream(self, stream) for notifee in self.notifees]
+        self.run_task(
+            asyncio.gather(
+                *[notifee.opened_stream(self, stream) for notifee in self.notifees]
+            )
         )
 
     # TODO: `notify_closed_stream`
 
     def notify_connected(self, conn: INetConn) -> None:
-        asyncio.gather(*[notifee.connected(self, conn) for notifee in self.notifees])
+        self.run_task(
+            asyncio.gather(
+                *[notifee.connected(self, conn) for notifee in self.notifees]
+            )
+        )
 
     def notify_disconnected(self, conn: INetConn) -> None:
-        asyncio.gather(*[notifee.disconnected(self, conn) for notifee in self.notifees])
+        self.run_task(
+            asyncio.gather(
+                *[notifee.disconnected(self, conn) for notifee in self.notifees]
+            )
+        )
 
     def notify_listen(self, multiaddr: Multiaddr) -> None:
-        asyncio.gather(*[notifee.listen(self, multiaddr) for notifee in self.notifees])
+        self.run_task(
+            asyncio.gather(
+                *[notifee.listen(self, multiaddr) for notifee in self.notifees]
+            )
+        )
 
     # TODO: `notify_listen_close`
