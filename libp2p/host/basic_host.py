@@ -25,7 +25,6 @@ from .host_interface import IHost
 
 
 logger = logging.getLogger("libp2p.network.basic_host")
-logger.setLevel(logging.DEBUG)
 
 
 class BasicHost(IHost):

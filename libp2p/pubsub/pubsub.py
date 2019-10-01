@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("libp2p.pubsub")
-logger.setLevel(logging.DEBUG)
 
 
 def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:

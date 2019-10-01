@@ -17,7 +17,6 @@ from .pubsub_router_interface import IPubsubRouter
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
-logger.setLevel(logging.DEBUG)
 
 
 class GossipSub(IPubsubRouter):
