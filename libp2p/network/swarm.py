@@ -28,7 +28,6 @@ from .notifee_interface import INotifee
 from .stream.net_stream_interface import INetStream
 
 logger = logging.getLogger("libp2p.network.swarm")
-logger.setLevel(logging.DEBUG)
 
 
 class Swarm(INetwork):

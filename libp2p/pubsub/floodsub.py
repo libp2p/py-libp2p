@@ -12,7 +12,6 @@ from .pubsub_router_interface import IPubsubRouter
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
 logger = logging.getLogger("libp2p.pubsub.floodsub")
-logger.setLevel(logging.DEBUG)
 
 
 class FloodSub(IPubsubRouter):
