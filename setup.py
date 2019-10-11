@@ -27,7 +27,7 @@ extras_require["dev"] = (
 setuptools.setup(
     name="libp2p",
     description="libp2p implementation written in python",
-    version="0.0.1",
+    version="0.1.1",
     license="MIT/APACHE2.0",
     platforms=["unix", "linux", "osx"],
     classifiers=classifiers,
