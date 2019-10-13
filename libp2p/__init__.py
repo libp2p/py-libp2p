@@ -4,6 +4,7 @@ from typing import Sequence
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
+from libp2p.host.routed_host import RoutedHost
 from libp2p.kademlia.network import KademliaServer
 from libp2p.kademlia.storage import IStorage
 from libp2p.network.network_interface import INetwork
@@ -106,7 +107,7 @@ def initialize_default_swarm(
 
     peerstore = peerstore_opt or PeerStore()
     # TODO: Initialize discovery if not presented
-    return Swarm(id_opt, peerstore, upgrader, transport, disc_opt)
+    return Swarm(id_opt, peerstore, upgrader, transport)
 
 
 async def new_node(
@@ -149,7 +150,11 @@ async def new_node(
 
     # TODO enable support for other host type
     # TODO routing unimplemented
-    host = BasicHost(swarm_opt)
+    if disc_opt:
+        host = RoutedHost(swarm_opt, disc_opt)
+    else:
+        host = BasicHost(swarm_opt)
+
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())

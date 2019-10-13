@@ -1,0 +1,36 @@
+from libp2p.host.basic_host import BasicHost
+from libp2p.network.network_interface import INetwork
+from libp2p.peer.peerinfo import PeerInfo
+from libp2p.routing.interfaces import IPeerRouting
+
+
+# RoutedHost is a p2p Host that includes a routing system.
+# This allows the Host to find the addresses for peers when it does not have them.
+class RoutedHost(BasicHost):
+    _router: IPeerRouting
+
+    def __init__(self, network: INetwork, router: IPeerRouting):
+        super().__init__(network)
+        self._router = router
+
+    async def connect(self, peer_info: PeerInfo) -> None:
+        """
+        connect ensures there is a connection between this host and the peer with
+        given `peer_info.peer_id`. See (basic_host).connect for more information.
+
+        RoutedHost's Connect differs in that if the host has no addresses for a
+        given peer, it will use its routing system to try to find some.
+
+        :param peer_info: peer_info of the peer we want to connect to
+        :type peer_info: peer.peerinfo.PeerInfo
+        """
+        # check if we were given some addresses, otherwise, find some with the routing system.
+        if not peer_info.addrs:
+            peer_info.addrs = (await self._router.find_peer(peer_info.peer_id)).addrs
+        self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+
+        # there is already a connection to this peer
+        if peer_info.peer_id in self._network.connections:
+            return
+
+        await self._network.dial_peer(peer_info.peer_id)
