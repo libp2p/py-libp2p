@@ -1,4 +1,5 @@
 from libp2p.host.basic_host import BasicHost
+from libp2p.host.exceptions import ConnectionFailure
 from libp2p.network.network_interface import INetwork
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.routing.interfaces import IPeerRouting
@@ -26,7 +27,10 @@ class RoutedHost(BasicHost):
         """
         # check if we were given some addresses, otherwise, find some with the routing system.
         if not peer_info.addrs:
-            peer_info.addrs = (await self._router.find_peer(peer_info.peer_id)).addrs
+            found_peer_info = await self._router.find_peer(peer_info.peer_id)
+            if not found_peer_info:
+                raise ConnectionFailure("Unable to find Peer address")
+            peer_info.addrs = found_peer_info.addrs
         self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
 
         # there is already a connection to this peer

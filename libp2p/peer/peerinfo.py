@@ -1,3 +1,4 @@
+import json
 from typing import List, Sequence
 
 import multiaddr
@@ -13,6 +14,17 @@ class PeerInfo:
     def __init__(self, peer_id: ID, addrs: Sequence[multiaddr.Multiaddr]) -> None:
         self.peer_id = peer_id
         self.addrs = list(addrs)
+
+    def to_string(self) -> str:
+        return json.dumps([self.peer_id.to_string(), list(map(lambda a: str(a), self.addrs))])
+
+    def __eq__(self, other):
+        return isinstance(other, PeerInfo) and self.peer_id == other.peer_id and self.addrs == other.addrs
+
+    @classmethod
+    def info_from_string(cls, info: str) -> "PeerInfo":
+        peer_id, raw_addrs = json.loads(info)
+        return PeerInfo(ID.from_base58(peer_id), list(map(lambda a: multiaddr.Multiaddr(a), raw_addrs)))
 
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:

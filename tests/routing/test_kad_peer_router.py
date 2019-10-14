@@ -15,11 +15,11 @@ async def test_simple_two_nodes():
 
     node_a_value = await node_b.bootstrap([("127.0.0.1", 5678)])
     node_a_kad_peerinfo = node_a_value[0]
-    await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
+    await node_a.set(node_a_kad_peerinfo.xor_id, node_a_kad_peerinfo.to_string())
 
     router = KadmeliaPeerRouter(node_b)
     returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
-    assert repr(returned_info) == repr(node_a_kad_peerinfo)
+    assert returned_info == node_a_kad_peerinfo
 
 
 @pytest.mark.asyncio
@@ -37,11 +37,11 @@ async def test_simple_three_nodes():
     node_a_kad_peerinfo = node_a_value[0]
 
     await node_c.bootstrap([("127.0.0.1", 5702)])
-    await node_a.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
+    await node_a.set(node_a_kad_peerinfo.xor_id, node_a_kad_peerinfo.to_string())
 
     router = KadmeliaPeerRouter(node_c)
     returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
-    assert str(returned_info) == str(node_a_kad_peerinfo)
+    assert returned_info == node_a_kad_peerinfo
 
 
 @pytest.mark.asyncio
@@ -65,8 +65,8 @@ async def test_simple_four_nodes():
 
     await node_d.bootstrap([("127.0.0.1", 5803)])
 
-    await node_b.set(node_a_kad_peerinfo.xor_id, repr(node_a_kad_peerinfo))
+    await node_b.set(node_a_kad_peerinfo.xor_id, node_a_kad_peerinfo.to_string())
 
     router = KadmeliaPeerRouter(node_d)
     returned_info = await router.find_peer(ID(node_a_kad_peerinfo.peer_id_bytes))
-    assert str(returned_info) == str(node_a_kad_peerinfo)
+    assert returned_info == node_a_kad_peerinfo
