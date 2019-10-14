@@ -26,7 +26,9 @@ class PeerData(IPeerData):
         self.protocols = list(protocols)
 
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
-        self.addrs.extend(addrs)
+        for addr in addrs:
+            if addr not in self.addrs:
+                self.addrs.append(addr)
 
     def get_addrs(self) -> List[Multiaddr]:
         return self.addrs
