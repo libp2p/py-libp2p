@@ -18,7 +18,7 @@ class PeerInfo:
     def to_string(self) -> str:
         return json.dumps([self.peer_id.to_string(), list(map(lambda a: str(a), self.addrs))])
 
-    def __eq__(self, other):
+    def __eq__(self, other: Any) -> bool:
         return isinstance(other, PeerInfo) and self.peer_id == other.peer_id and self.addrs == other.addrs
 
     @classmethod
