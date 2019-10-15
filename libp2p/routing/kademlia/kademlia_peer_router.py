@@ -20,4 +20,6 @@ class KadmeliaPeerRouter(IPeerRouting):
         xor_id = peer_id.xor_id
         # ignore type for kad
         value = await self.server.get(xor_id)  # type: ignore
-        return PeerInfo.info_from_string(value) if value else None  # TODO: should raise error if None?
+        return (
+            PeerInfo.info_from_string(value) if value else None
+        )  # TODO: should raise error if None?

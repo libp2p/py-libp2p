@@ -14,6 +14,7 @@ from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 from libp2p.typing import StreamHandlerFn, TProtocol
+
 from .host_interface import IHost
 
 # Upon host creation, host takes in options,
@@ -83,7 +84,7 @@ class BasicHost(IHost):
         return addrs
 
     def set_stream_handler(
-            self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
+        self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
     ) -> None:
         """
         set stream handler for given `protocol_id`
@@ -93,7 +94,7 @@ class BasicHost(IHost):
         self.multiselect.add_handler(protocol_id, stream_handler)
 
     async def new_stream(
-            self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
