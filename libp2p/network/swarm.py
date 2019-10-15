@@ -16,6 +16,7 @@ from libp2p.transport.exceptions import (
     SecurityUpgradeFailure,
 )
 from libp2p.transport.listener_interface import IListener
+from libp2p.transport.stream_interface import IStreamReader, IStreamWriter
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn
@@ -174,7 +175,7 @@ class Swarm(INetwork):
                 return True
 
             async def conn_handler(
-                reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+                reader: IStreamReader, writer: IStreamWriter
             ) -> None:
                 connection_info = writer.get_extra_info("peername")
                 # TODO make a proper multiaddr

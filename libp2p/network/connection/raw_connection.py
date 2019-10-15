@@ -1,21 +1,20 @@
 import asyncio
 
+from libp2p.transport.stream_interface import IStreamReader, IStreamWriter
+
 from .exceptions import RawConnError
 from .raw_connection_interface import IRawConnection
 
 
 class RawConnection(IRawConnection):
-    reader: asyncio.StreamReader
-    writer: asyncio.StreamWriter
+    reader: IStreamReader
+    writer: IStreamWriter
     initiator: bool
 
     _drain_lock: asyncio.Lock
 
     def __init__(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-        initiator: bool,
+        self, reader: IStreamReader, writer: IStreamWriter, initiator: bool
     ) -> None:
         self.reader = reader
         self.writer = writer
@@ -27,16 +26,14 @@ class RawConnection(IRawConnection):
         """
         Raise `RawConnError` if the underlying connection breaks
         """
-        try:
-            self.writer.write(data)
-        except ConnectionResetError as error:
-            raise RawConnError(error)
         # Reference: https://github.com/ethereum/lahja/blob/93610b2eb46969ff1797e0748c7ac2595e130aef/lahja/asyncio/endpoint.py#L99-L102  # noqa: E501
         # Use a lock to serialize drain() calls. Circumvents this bug:
         # https://bugs.python.org/issue29930
         async with self._drain_lock:
             try:
-                await self.writer.drain()
+                await self.writer.write(
+                    data
+                )  # We call it inside the drain lock, because write() calls drain
             except ConnectionResetError as error:
                 raise RawConnError(error)
 
@@ -53,5 +50,4 @@ class RawConnection(IRawConnection):
             raise RawConnError(error)
 
     async def close(self) -> None:
-        self.writer.close()
-        await self.writer.wait_closed()
+        await self.writer.close()

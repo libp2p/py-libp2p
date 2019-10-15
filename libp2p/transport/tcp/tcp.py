@@ -1,6 +1,6 @@
 import asyncio
 from socket import socket
-from typing import List
+from typing import Awaitable, Callable, List
 
 from multiaddr import Multiaddr
 
@@ -8,8 +8,22 @@ from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
+from libp2p.transport.tcp.tcp_stream import TCPStream
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
+
+
+# function needed for because asyncio.start_server accepts handlers that receive just TCP Stream,
+# instead we use a generic inteface (IStreamReader, IStreamWriter)
+def streams_handler_wrapper(
+    handler: THandler
+) -> Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]:
+    async def wrapper(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        return await handler(*TCPStream.from_asyncio_streams(reader, writer))
+
+    return wrapper
 
 
 class TCPListener(IListener):
@@ -28,7 +42,7 @@ class TCPListener(IListener):
         :return: return True if successful
         """
         self.server = await asyncio.start_server(
-            self.handler,
+            streams_handler_wrapper(self.handler),
             maddr.value_for_protocol("ip4"),
             maddr.value_for_protocol("tcp"),
         )
@@ -73,7 +87,9 @@ class TCP(ITransport):
         except (ConnectionAbortedError, ConnectionRefusedError) as error:
             raise OpenConnectionError(error)
 
-        return RawConnection(reader, writer, True)
+        stream_reader, stream_writer = TCPStream.from_asyncio_streams(reader, writer)
+
+        return RawConnection(stream_reader, stream_writer, True)
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """
