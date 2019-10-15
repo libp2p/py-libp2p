@@ -48,7 +48,7 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
 
 
 def initialize_default_kademlia_router(
-        ksize: int = 20, alpha: int = 3, id_opt: ID = None, storage: IStorage = None
+    ksize: int = 20, alpha: int = 3, id_opt: ID = None, storage: IStorage = None
 ) -> KadmeliaPeerRouter:
     """
     initialize kadmelia router when no kademlia router is passed in
@@ -72,13 +72,13 @@ def initialize_default_kademlia_router(
 
 
 def initialize_default_swarm(
-        key_pair: KeyPair,
-        id_opt: ID = None,
-        transport_opt: Sequence[str] = None,
-        muxer_opt: TMuxerOptions = None,
-        sec_opt: TSecurityOptions = None,
-        peerstore_opt: IPeerStore = None,
-        disc_opt: IPeerRouting = None,
+    key_pair: KeyPair,
+    id_opt: ID = None,
+    transport_opt: Sequence[str] = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
+    peerstore_opt: IPeerStore = None,
+    disc_opt: IPeerRouting = None,
 ) -> Swarm:
     """
     initialize swarm when no swarm is passed in
@@ -112,13 +112,13 @@ def initialize_default_swarm(
 
 
 async def new_node(
-        key_pair: KeyPair = None,
-        swarm_opt: INetwork = None,
-        transport_opt: Sequence[str] = None,
-        muxer_opt: TMuxerOptions = None,
-        sec_opt: TSecurityOptions = None,
-        peerstore_opt: IPeerStore = None,
-        disc_opt: IPeerRouting = None,
+    key_pair: KeyPair = None,
+    swarm_opt: INetwork = None,
+    transport_opt: Sequence[str] = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
+    peerstore_opt: IPeerStore = None,
+    disc_opt: IPeerRouting = None,
 ) -> IHost:
     """
     create new libp2p node
