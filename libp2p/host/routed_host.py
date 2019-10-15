@@ -30,7 +30,7 @@ class RoutedHost(BasicHost):
             found_peer_info = await self._router.find_peer(peer_info.peer_id)
             if not found_peer_info:
                 raise ConnectionFailure("Unable to find Peer address")
-            peer_info.addrs = found_peer_info.addrs
+            self.peerstore.add_addrs(peer_info.peer_id, found_peer_info.addrs, 10)
         self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
 
         # there is already a connection to this peer

@@ -4,6 +4,7 @@ import pytest
 
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.peer.peerinfo import PeerInfo
+from libp2p.routing.kademlia.kademlia_peer_router import peer_info_to_str
 from tests.utils import (
     set_up_nodes_by_transport_and_disc_opt,
     set_up_nodes_by_transport_opt,
@@ -23,11 +24,11 @@ async def test_host_routing_success():
     # Set routing info
     await routers[0].server.set(
         host_a.get_id().xor_id,
-        PeerInfo(host_a.get_id(), host_a.get_addrs()).to_string(),
+        peer_info_to_str(PeerInfo(host_a.get_id(), host_a.get_addrs())),
     )
     await routers[1].server.set(
         host_b.get_id().xor_id,
-        PeerInfo(host_b.get_id(), host_b.get_addrs()).to_string(),
+        peer_info_to_str(PeerInfo(host_b.get_id(), host_b.get_addrs())),
     )
 
     # forces to use routing as no addrs are provided
@@ -54,11 +55,11 @@ async def test_host_routing_fail():
     # Set routing info
     await routers[0].server.set(
         host_a.get_id().xor_id,
-        PeerInfo(host_a.get_id(), host_a.get_addrs()).to_string(),
+        peer_info_to_str(PeerInfo(host_a.get_id(), host_a.get_addrs())),
     )
     await routers[1].server.set(
         host_b.get_id().xor_id,
-        PeerInfo(host_b.get_id(), host_b.get_addrs()).to_string(),
+        peer_info_to_str(PeerInfo(host_b.get_id(), host_b.get_addrs())),
     )
 
     # routing fails because host_c does not use routing
