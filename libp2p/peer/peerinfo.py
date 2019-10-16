@@ -1,4 +1,4 @@
-from typing import List, Sequence
+from typing import Any, List, Sequence
 
 import multiaddr
 
@@ -6,13 +6,19 @@ from .id import ID
 
 
 class PeerInfo:
-
     peer_id: ID
     addrs: List[multiaddr.Multiaddr]
 
     def __init__(self, peer_id: ID, addrs: Sequence[multiaddr.Multiaddr]) -> None:
         self.peer_id = peer_id
         self.addrs = list(addrs)
+
+    def __eq__(self, other: Any) -> bool:
+        return (
+            isinstance(other, PeerInfo)
+            and self.peer_id == other.peer_id
+            and self.addrs == other.addrs
+        )
 
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
