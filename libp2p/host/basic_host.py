@@ -13,7 +13,6 @@ from libp2p.protocol_muxer.exceptions import MultiselectClientError, Multiselect
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import MultiselectClient
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
-from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .host_interface import IHost
@@ -34,16 +33,14 @@ class BasicHost(IHost):
     """
 
     _network: INetwork
-    _router: KadmeliaPeerRouter
     peerstore: IPeerStore
 
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
-    def __init__(self, network: INetwork, router: KadmeliaPeerRouter = None) -> None:
+    def __init__(self, network: INetwork) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
-        self._router = router
         self.peerstore = self._network.peerstore
         # Protocol muxing
         self.multiselect = Multiselect()

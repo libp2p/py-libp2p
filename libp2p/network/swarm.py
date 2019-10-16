@@ -8,7 +8,6 @@ from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.routing.interfaces import IPeerRouting
 from libp2p.stream_muxer.abc import IMuxedConn
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
@@ -36,7 +35,6 @@ class Swarm(INetwork):
     peerstore: IPeerStore
     upgrader: TransportUpgrader
     transport: ITransport
-    router: IPeerRouting
     # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
     #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, INetConn]
@@ -51,13 +49,11 @@ class Swarm(INetwork):
         peerstore: IPeerStore,
         upgrader: TransportUpgrader,
         transport: ITransport,
-        router: IPeerRouting,
     ):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.transport = transport
-        self.router = router
         self.connections = dict()
         self.listeners = dict()
 
@@ -96,10 +92,7 @@ class Swarm(INetwork):
         if not addrs:
             raise SwarmException(f"No known addresses to peer {peer_id}")
 
-        if not self.router:
-            multiaddr = addrs[0]
-        else:
-            multiaddr = self.router.find_peer(peer_id)
+        multiaddr = addrs[0]
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
@@ -231,9 +224,6 @@ class Swarm(INetwork):
 
         # No maddr succeeded
         return False
-
-    def add_router(self, router: IPeerRouting) -> None:
-        self.router = router
 
     async def close(self) -> None:
         # TODO: Prevent from new listeners and conns being added.

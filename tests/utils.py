@@ -1,7 +1,9 @@
 import multiaddr
 
 from libp2p import new_node
+from libp2p.kademlia.network import KademliaServer
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from tests.constants import MAX_READ_LEN
 
 
@@ -34,6 +36,29 @@ async def set_up_nodes_by_transport_opt(transport_opt_list):
         await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
         nodes_list.append(node)
     return tuple(nodes_list)
+
+
+async def set_up_nodes_by_transport_and_disc_opt(transport_disc_opt_list):
+    nodes_list = []
+    for transport_opt, disc_opt in transport_disc_opt_list:
+        node = await new_node(transport_opt=transport_opt, disc_opt=disc_opt)
+        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
+        nodes_list.append(node)
+    return tuple(nodes_list)
+
+
+async def set_up_routers(router_confs):
+    bootstrap_node = KademliaServer()
+    await bootstrap_node.listen(router_confs[0])
+
+    routers = [KadmeliaPeerRouter(bootstrap_node)]
+    for port in router_confs[1:]:
+        node = KademliaServer()
+        await node.listen(port)
+
+        await node.bootstrap_node(("127.0.0.1", router_confs[0]))
+        routers.append(KadmeliaPeerRouter(node))
+    return routers
 
 
 async def echo_stream_handler(stream):
