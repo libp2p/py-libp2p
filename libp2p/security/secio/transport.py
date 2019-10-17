@@ -4,6 +4,7 @@ import itertools
 from typing import Optional, Tuple
 
 import multihash
+from crypto.authenticated_encryption import InvalidMACException
 
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
@@ -16,7 +17,7 @@ from libp2p.crypto.ecc import ECCPublicKey
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import DecryptionFailedException, IOException
 from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
@@ -122,7 +123,11 @@ class SecureSession(BaseSession):
 
     async def read_msg(self) -> bytes:
         msg = await self.conn.read_msg()
-        return self.remote_encrypter.decrypt_if_valid(msg)
+        try:
+            decrypted_msg = self.remote_encrypter.decrypt_if_valid(msg)
+        except InvalidMACException:
+            raise DecryptionFailedException
+        return decrypted_msg
 
     async def write(self, data: bytes) -> int:
         await self.write_msg(data)
