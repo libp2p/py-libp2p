@@ -22,5 +22,6 @@ class MissingLengthException(MsgioException):
 class MissingMessageException(MsgioException):
     pass
 
+
 class DecryptionFailedException(MsgioException):
     pass

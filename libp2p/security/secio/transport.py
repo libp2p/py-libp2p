@@ -3,8 +3,8 @@ import io
 import itertools
 from typing import Optional, Tuple
 
-import multihash
 from crypto.authenticated_encryption import InvalidMACException
+import multihash
 
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
