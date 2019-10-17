@@ -14,6 +14,7 @@ from libp2p.crypto.authenticated_encryption import (
 )
 from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import ECCPublicKey
+from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
@@ -31,6 +32,7 @@ from .exceptions import (
     InvalidSignatureOnExchange,
     PeerMismatchException,
     SecioException,
+    SedesException,
     SelfEncryption,
 )
 from .pb.spipe_pb2 import Exchange, Propose
@@ -168,7 +170,10 @@ class Proposal:
 
         nonce = protobuf.rand
         public_key_protobuf_bytes = protobuf.public_key
-        public_key = deserialize_public_key(public_key_protobuf_bytes)
+        try:
+            public_key = deserialize_public_key(public_key_protobuf_bytes)
+        except MissingDeserializerError as error:
+            raise SedesException(error)
         exchanges = protobuf.exchanges
         ciphers = protobuf.ciphers
         hashes = protobuf.hashes
