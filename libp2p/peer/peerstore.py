@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from multiaddr import Multiaddr
 
 from .id import ID
-from .peerdata import PeerData
+from .peerdata import PeerData, PeerDataError
 from .peerinfo import PeerInfo
 from .peerstore_interface import IPeerStore
 
@@ -54,7 +54,10 @@ class PeerStore(IPeerStore):
 
     def get(self, peer_id: ID, key: str) -> Any:
         if peer_id in self.peer_map:
-            val = self.peer_map[peer_id].get_metadata(key)
+            try:
+                val = self.peer_map[peer_id].get_metadata(key)
+            except PeerDataError as error:
+                raise PeerStoreError(error)
             return val
         raise PeerStoreError("peer ID not found")
 
