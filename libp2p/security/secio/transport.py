@@ -3,7 +3,6 @@ import io
 import itertools
 from typing import Optional, Tuple
 
-from crypto.authenticated_encryption import InvalidMACException
 import multihash
 
 from libp2p.crypto.authenticated_encryption import (
@@ -12,6 +11,7 @@ from libp2p.crypto.authenticated_encryption import (
 from libp2p.crypto.authenticated_encryption import (
     initialize_pair as initialize_pair_for_encryption,
 )
+from libp2p.crypto.authenticated_encryption import InvalidMACException
 from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import ECCPublicKey
 from libp2p.crypto.exceptions import MissingDeserializerError
