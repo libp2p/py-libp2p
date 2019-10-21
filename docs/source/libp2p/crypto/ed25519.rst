@@ -1,0 +1,7 @@
+libp2p.crypto.ed25519
+======================
+
+.. automodule:: libp2p.crypto.ed25519
+    :members:
+    :undoc-members:
+    :show-inheritance:
