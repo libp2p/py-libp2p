@@ -153,14 +153,17 @@ class Swarm(INetwork):
         :param multiaddrs: one or many multiaddrs to start listening on
         :return: true if at least one success
 
-        For each multiaddr
-            Check if a listener for multiaddr exists already
-            If listener already exists, continue
-            Otherwise:
-                Capture multiaddr in conn handler
-                Have conn handler delegate to stream handler
-                Call listener listen with the multiaddr
-                Map multiaddr to listener
+        ::
+
+            For each multiaddr
+                Check if a listener for multiaddr exists already
+                If listener already exists, continue
+                Otherwise:
+                    Capture multiaddr in conn handler
+                    Have conn handler delegate to stream handler
+                    Call listener listen with the multiaddr
+                    Map multiaddr to listener
+
         """
         for maddr in multiaddrs:
             if str(maddr) in self.listeners:
