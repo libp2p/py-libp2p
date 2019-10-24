@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict, Tuple
 
 import factory
+
 from libp2p import generate_new_rsa_identity, initialize_default_swarm
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
