@@ -6,4 +6,4 @@ class IRawConnection(ReadWriteCloser):
     A Raw Connection provides a Reader and a Writer
     """
 
-    initiator: bool
+    is_initiator: bool
