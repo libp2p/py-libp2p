@@ -69,7 +69,7 @@ class Mplex(IMuxedConn):
 
     @property
     def is_initiator(self) -> bool:
-        return self.secured_conn.initiator
+        return self.secured_conn.is_initiator
 
     async def close(self) -> None:
         """
