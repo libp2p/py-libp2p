@@ -146,7 +146,7 @@ class MplexStream(IMuxedStream):
         :return: number of bytes written
         """
         if self.event_local_closed.is_set():
-            raise MplexStreamClosed(f"cannot write to closed stream: data={data}")
+            raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
         flag = (
             HeaderTags.MessageInitiator
             if self.is_initiator

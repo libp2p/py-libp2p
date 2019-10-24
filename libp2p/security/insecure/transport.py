@@ -1,5 +1,6 @@
 from typing import Optional
 
+from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.serialization import deserialize_public_key
@@ -82,6 +83,8 @@ class InsecureSession(BaseSession):
             raise HandshakeFailure(
                 f"unknown `key_type` of remote_msg.pubkey={remote_msg.pubkey}"
             )
+        except MissingDeserializerError as error:
+            raise HandshakeFailure(error)
         peer_id_from_received_pubkey = ID.from_pubkey(received_pubkey)
         if peer_id_from_received_pubkey != received_peer_id:
             raise HandshakeFailure(

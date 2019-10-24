@@ -28,3 +28,7 @@ class IncompatibleChoices(SecioException):
 
 class InconsistentNonce(SecioException):
     pass
+
+
+class SedesException(SecioException):
+    pass
