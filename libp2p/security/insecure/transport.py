@@ -29,10 +29,10 @@ class InsecureSession(BaseSession):
         local_peer: ID,
         local_private_key: PrivateKey,
         conn: ReadWriteCloser,
-        initiator: bool,
+        is_initiator: bool,
         peer_id: Optional[ID] = None,
     ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, peer_id)
+        super().__init__(local_peer, local_private_key, is_initiator, peer_id)
         self.conn = conn
 
     async def write(self, data: bytes) -> int:
@@ -68,7 +68,7 @@ class InsecureSession(BaseSession):
         # Verify if the receive `ID` matches the one we originally initialize the session.
         # We only need to check it when we are the initiator, because only in that condition
         # we possibly knows the `ID` of the remote.
-        if self.initiator and self.remote_peer_id != received_peer_id:
+        if self.is_initiator and self.remote_peer_id != received_peer_id:
             raise HandshakeFailure(
                 "remote peer sent unexpected peer ID. "
                 f"expected={self.remote_peer_id} received={received_peer_id}"
@@ -97,7 +97,7 @@ class InsecureSession(BaseSession):
         self.remote_permanent_pubkey = received_pubkey
         # Only need to set peer's id when we don't know it before,
         # i.e. we are not the connection initiator.
-        if not self.initiator:
+        if not self.is_initiator:
             self.remote_peer_id = received_peer_id
 
         # TODO: Store `pubkey` and `peer_id` to `PeerStore`
