@@ -136,10 +136,8 @@ class SecureSession(BaseSession):
 
 @dataclass(frozen=True)
 class Proposal:
-    """
-    A ``Proposal`` represents the set of session parameters one peer in a pair of
-    peers attempting to negotiate a `secio` channel prefers.
-    """
+    """A ``Proposal`` represents the set of session parameters one peer in a
+    pair of peers attempting to negotiate a `secio` channel prefers."""
 
     nonce: bytes
     public_key: PublicKey
@@ -396,11 +394,10 @@ async def create_secure_session(
     conn: IRawConnection,
     remote_peer: PeerID = None,
 ) -> ISecureConn:
-    """
-    Attempt the initial `secio` handshake with the remote peer.
-    If successful, return an object that provides secure communication to the
-    ``remote_peer``.
-    Raise `SecioException` when `conn` closed.
+    """Attempt the initial `secio` handshake with the remote peer.
+
+    If successful, return an object that provides secure communication
+    to the ``remote_peer``. Raise `SecioException` when `conn` closed.
     Raise `InconsistentNonce` when handshake failed
     """
     msg_io = MsgIOReadWriter(conn)
@@ -431,18 +428,17 @@ async def create_secure_session(
 
 
 class Transport(BaseSecureTransport):
-    """
-    ``Transport`` provides a security upgrader for a ``IRawConnection``,
-    following the `secio` protocol defined in the libp2p specs.
-    """
+    """``Transport`` provides a security upgrader for a ``IRawConnection``,
+    following the `secio` protocol defined in the libp2p specs."""
 
     def get_nonce(self) -> bytes:
         return self.secure_bytes_provider(NONCE_SIZE)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are not the initiator)
+        """Secure the connection, either locally or by communicating with
+        opposing node via conn, for an inbound connection (i.e. we are not the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         local_nonce = self.get_nonce()
@@ -456,9 +452,10 @@ class Transport(BaseSecureTransport):
     async def secure_outbound(
         self, conn: IRawConnection, peer_id: PeerID
     ) -> ISecureConn:
-        """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are the initiator)
+        """Secure the connection, either locally or by communicating with
+        opposing node via conn, for an inbound connection (i.e. we are the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         local_nonce = self.get_nonce()

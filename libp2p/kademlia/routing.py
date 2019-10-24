@@ -8,13 +8,10 @@ from .utils import OrderedSet, bytes_to_bit_string, shared_prefix
 
 
 class KBucket:
-    """
-    each node keeps a list of (ip, udp_port, node_id)
-    for nodes of distance between 2^i and 2^(i+1)
-    this list that every node keeps is a k-bucket
-    each k-bucket implements a last seen eviction
-    policy except that live nodes are never removed
-    """
+    """each node keeps a list of (ip, udp_port, node_id) for nodes of distance
+    between 2^i and 2^(i+1) this list that every node keeps is a k-bucket each
+    k-bucket implements a last seen eviction policy except that live nodes are
+    never removed."""
 
     def __init__(self, rangeLower, rangeUpper, ksize):
         self.range = (rangeLower, rangeUpper)
@@ -55,9 +52,8 @@ class KBucket:
         return node.peer_id_bytes not in self.nodes
 
     def add_node(self, node):
-        """
-        Add a C{Node} to the C{KBucket}.  Return True if successful,
-        False if the bucket is full.
+        """Add a C{Node} to the C{KBucket}.  Return True if successful, False
+        if the bucket is full.
 
         If the bucket is full, keep track of node in a replacement list,
         per section 4.1 of the paper.
@@ -100,9 +96,7 @@ class TableTraverser:
         return self
 
     def __next__(self):
-        """
-        Pop an item from the left subtree, then right, then left, etc.
-        """
+        """Pop an item from the left subtree, then right, then left, etc."""
         if self.current_nodes:
             return self.current_nodes.pop()
 
@@ -140,10 +134,7 @@ class RoutingTable:
         self.buckets.insert(index + 1, two)
 
     def lonely_buckets(self):
-        """
-        Get all of the buckets that haven't been updated in over
-        an hour.
-        """
+        """Get all of the buckets that haven't been updated in over an hour."""
         hrago = time.monotonic() - 3600
         return [b for b in self.buckets if b.last_updated < hrago]
 
@@ -172,9 +163,7 @@ class RoutingTable:
             asyncio.ensure_future(self.protocol.call_ping(bucket.head()))
 
     def get_bucket_for(self, node):
-        """
-        Get the index of the bucket that the given node would fall into.
-        """
+        """Get the index of the bucket that the given node would fall into."""
         for index, bucket in enumerate(self.buckets):
             if node.xor_id < bucket.range[1]:
                 return index

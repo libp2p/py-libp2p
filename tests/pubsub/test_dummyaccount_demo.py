@@ -16,9 +16,9 @@ def create_setup_in_new_thread_func(dummy_node):
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
-    """
-    Helper function to allow for easy construction of custom tests for dummy account nodes
-    in various network topologies
+    """Helper function to allow for easy construction of custom tests for dummy
+    account nodes in various network topologies.
+
     :param num_nodes: number of nodes in the test
     :param adjacency_map: adjacency map defining each node and its list of neighbors
     :param action_func: function to execute that includes actions by the nodes,

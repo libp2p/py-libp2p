@@ -6,48 +6,44 @@ import time
 
 
 class IStorage(ABC):
-    """
-    Local storage for this node.
-    IStorage implementations of get must return the same type as put in by set
+    """Local storage for this node.
+
+    IStorage implementations of get must return the same type as put in
+    by set
     """
 
     @abstractmethod
     def __setitem__(self, key, value):
-        """
-        Set a key to the given value.
-        """
+        """Set a key to the given value."""
 
     @abstractmethod
     def __getitem__(self, key):
-        """
-        Get the given key.  If item doesn't exist, raises C{KeyError}
+        """Get the given key.
+
+        If item doesn't exist, raises C{KeyError}
         """
 
     @abstractmethod
     def get(self, key, default=None):
-        """
-        Get given key.  If not found, return default.
+        """Get given key.
+
+        If not found, return default.
         """
 
     @abstractmethod
     def iter_older_than(self, seconds_old):
-        """
-        Return the an iterator over (key, value) tuples for items older
-        than the given seconds_old.
-        """
+        """Return the an iterator over (key, value) tuples for items older than
+        the given seconds_old."""
 
     @abstractmethod
     def __iter__(self):
-        """
-        Get the iterator for this storage, should yield tuple of (key, value)
-        """
+        """Get the iterator for this storage, should yield tuple of (key,
+        value)"""
 
 
 class ForgetfulStorage(IStorage):
     def __init__(self, ttl=604800):
-        """
-        By default, max age is a week.
-        """
+        """By default, max age is a week."""
         self.data = OrderedDict()
         self.ttl = ttl
 

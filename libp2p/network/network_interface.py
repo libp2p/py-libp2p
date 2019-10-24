@@ -29,8 +29,7 @@ class INetwork(ABC):
 
     @abstractmethod
     async def dial_peer(self, peer_id: ID) -> INetConn:
-        """
-        dial_peer try to create a connection to peer_id
+        """dial_peer try to create a connection to peer_id.
 
         :param peer_id: peer if we want to dial
         :raises SwarmException: raised when an error occurs
@@ -47,9 +46,7 @@ class INetwork(ABC):
 
     @abstractmethod
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        """
-        Set the stream handler for all incoming streams.
-        """
+        """Set the stream handler for all incoming streams."""
 
     @abstractmethod
     async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:

@@ -12,8 +12,8 @@ class IAddrBook(ABC):
 
     @abstractmethod
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
-        """
-        Calls add_addrs(peer_id, [addr], ttl)
+        """Calls add_addrs(peer_id, [addr], ttl)
+
         :param peer_id: the peer to add address for
         :param addr: multiaddress of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid)
@@ -21,10 +21,11 @@ class IAddrBook(ABC):
 
     @abstractmethod
     def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
-        """
-        Adds addresses for a given peer all with the same time-to-live. If one of the
-        addresses already exists for the peer and has a longer TTL, no operation should take place.
-        If one of the addresses exists with a shorter TTL, extend the TTL to equal param ttl.
+        """Adds addresses for a given peer all with the same time-to-live. If
+        one of the addresses already exists for the peer and has a longer TTL,
+        no operation should take place. If one of the addresses exists with a
+        shorter TTL, extend the TTL to equal param ttl.
+
         :param peer_id: the peer to add address for
         :param addr: multiaddresses of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid
@@ -39,8 +40,8 @@ class IAddrBook(ABC):
 
     @abstractmethod
     def clear_addrs(self, peer_id: ID) -> None:
-        """
-        Removes all previously stored addresses
+        """Removes all previously stored addresses.
+
         :param peer_id: peer to remove addresses of
         """
 

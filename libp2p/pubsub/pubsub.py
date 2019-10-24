@@ -81,12 +81,14 @@ class Pubsub:
     def __init__(
         self, host: IHost, router: "IPubsubRouter", my_id: ID, cache_size: int = None
     ) -> None:
-        """
-        Construct a new Pubsub object, which is responsible for handling all
+        """Construct a new Pubsub object, which is responsible for handling all
         Pubsub-related messages and relaying messages as appropriate to the
-        Pubsub router (which is responsible for choosing who to send messages to).
+        Pubsub router (which is responsible for choosing who to send messages
+        to).
+
         Since the logic for choosing peers to send pubsub messages to is
-        in the router, the same Pubsub impl can back floodsub, gossipsub, etc.
+        in the router, the same Pubsub impl can back floodsub,
+        gossipsub, etc.
         """
         self.host = host
         self.router = router
@@ -136,10 +138,8 @@ class Pubsub:
         asyncio.ensure_future(self.handle_peer_queue())
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
-        """
-        Generate subscription message with all topics we are subscribed to
-        only send hello packet if we have subscribed topics
-        """
+        """Generate subscription message with all topics we are subscribed to
+        only send hello packet if we have subscribed topics."""
         packet = rpc_pb2.RPC()
         for topic_id in self.my_topics:
             packet.subscriptions.extend(
@@ -148,9 +148,9 @@ class Pubsub:
         return packet
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
-        """
-        Read from input stream in an infinite loop. Process
-        messages from other nodes
+        """Read from input stream in an infinite loop. Process messages from
+        other nodes.
+
         :param stream: stream to continously read from
         """
         peer_id = stream.muxed_conn.peer_id
@@ -207,8 +207,9 @@ class Pubsub:
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
     ) -> None:
-        """
-        Register a validator under the given topic. One topic can only have one validtor.
+        """Register a validator under the given topic. One topic can only have
+        one validtor.
+
         :param topic: the topic to register validator under
         :param validator: the validator used to validate messages published to the topic
         :param is_async_validator: indicate if the validator is an asynchronous validator
@@ -216,16 +217,16 @@ class Pubsub:
         self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
 
     def remove_topic_validator(self, topic: str) -> None:
-        """
-        Remove the validator from the given topic.
+        """Remove the validator from the given topic.
+
         :param topic: the topic to remove validator from
         """
         if topic in self.topic_validators:
             del self.topic_validators[topic]
 
     def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
-        """
-        Get all validators corresponding to the topics in the message.
+        """Get all validators corresponding to the topics in the message.
+
         :param msg: the message published to the topic
         """
         return tuple(
@@ -235,9 +236,9 @@ class Pubsub:
         )
 
     async def stream_handler(self, stream: INetStream) -> None:
-        """
-        Stream handler for pubsub. Gets invoked whenever a new stream is created
-        on one of the supported pubsub protocols.
+        """Stream handler for pubsub. Gets invoked whenever a new stream is
+        created on one of the supported pubsub protocols.
+
         :param stream: newly created stream
         """
         try:
@@ -290,10 +291,10 @@ class Pubsub:
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
     ) -> None:
-        """
-        Handle an incoming subscription message from a peer. Update internal
+        """Handle an incoming subscription message from a peer. Update internal
         mapping to mark the peer as subscribed or unsubscribed to topics as
-        defined in the subscription message
+        defined in the subscription message.
+
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
@@ -310,8 +311,8 @@ class Pubsub:
 
     # FIXME(mhchia): Change the function name?
     async def handle_talk(self, publish_message: rpc_pb2.Message) -> None:
-        """
-        Put incoming message from a peer onto my blocking queue
+        """Put incoming message from a peer onto my blocking queue.
+
         :param publish_message: RPC.Message format
         """
 
@@ -324,8 +325,8 @@ class Pubsub:
                 await self.my_topics[topic].put(publish_message)
 
     async def subscribe(self, topic_id: str) -> "asyncio.Queue[rpc_pb2.Message]":
-        """
-        Subscribe ourself to a topic
+        """Subscribe ourself to a topic.
+
         :param topic_id: topic_id to subscribe to
         """
 
@@ -354,8 +355,8 @@ class Pubsub:
         return self.my_topics[topic_id]
 
     async def unsubscribe(self, topic_id: str) -> None:
-        """
-        Unsubscribe ourself from a topic
+        """Unsubscribe ourself from a topic.
+
         :param topic_id: topic_id to unsubscribe from
         """
 
@@ -380,8 +381,8 @@ class Pubsub:
         await self.router.leave(topic_id)
 
     async def message_all_peers(self, raw_msg: bytes) -> None:
-        """
-        Broadcast a message to peers
+        """Broadcast a message to peers.
+
         :param raw_msg: raw contents of the message to broadcast
         """
 
@@ -391,8 +392,8 @@ class Pubsub:
             await stream.write(encode_varint_prefixed(raw_msg))
 
     async def publish(self, topic_id: str, data: bytes) -> None:
-        """
-        Publish data to a topic
+        """Publish data to a topic.
+
         :param topic_id: topic which we are going to publish the data to
         :param data: data which we are publishing
         """
@@ -411,8 +412,8 @@ class Pubsub:
         logger.debug("successfully published message %s", msg)
 
     async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
-        """
-        Validate the received message
+        """Validate the received message.
+
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
@@ -440,8 +441,8 @@ class Pubsub:
                 raise ValidationError(f"Validation failed for msg={msg}")
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
-        """
-        Push a pubsub message to others.
+        """Push a pubsub message to others.
+
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message we are going to push out.
         """
@@ -481,9 +482,7 @@ class Pubsub:
         await self.router.publish(msg_forwarder, msg)
 
     def _next_seqno(self) -> bytes:
-        """
-        Make the next message sequence id.
-        """
+        """Make the next message sequence id."""
         self.counter += 1
         return self.counter.to_bytes(8, "big")
 

@@ -1,6 +1,4 @@
-"""
-Package for interacting on the network at a high level.
-"""
+"""Package for interacting on the network at a high level."""
 import asyncio
 import logging
 import pickle
@@ -15,16 +13,17 @@ log = logging.getLogger(__name__)
 
 
 class KademliaServer:
-    """
-    High level view of a node instance.  This is the object that should be
-    created to start listening as an active node on the network.
+    """High level view of a node instance.
+
+    This is the object that should be created to start listening as an
+    active node on the network.
     """
 
     protocol_class = KademliaProtocol
 
     def __init__(self, ksize=20, alpha=3, node_id=None, storage=None):
-        """
-        Create a server instance.  This will start listening on the given port.
+        """Create a server instance.  This will start listening on the given
+        port.
 
         Args:
             ksize (int): The k parameter from the paper
@@ -56,8 +55,7 @@ class KademliaServer:
         return self.protocol_class(self.node, self.storage, self.ksize)
 
     async def listen(self, port, interface="0.0.0.0"):
-        """
-        Start listening on the given port.
+        """Start listening on the given port.
 
         Provide interface="::" to accept ipv6 address
         """
@@ -77,10 +75,8 @@ class KademliaServer:
         self.refresh_loop = loop.call_later(3600, self.refresh_table)
 
     async def _refresh_table(self):
-        """
-        Refresh buckets that haven't had any lookups in the last hour
-        (per section 2.3 of the paper).
-        """
+        """Refresh buckets that haven't had any lookups in the last hour (per
+        section 2.3 of the paper)."""
         results = []
         for node_id in self.protocol.get_refresh_ids():
             node = create_kad_peerinfo(node_id)
@@ -98,8 +94,7 @@ class KademliaServer:
             await self.set_digest(dkey, value)
 
     def bootstrappable_neighbors(self):
-        """
-        Get a :class:`list` of (ip, port) :class:`tuple` pairs suitable for
+        """Get a :class:`list` of (ip, port) :class:`tuple` pairs suitable for
         use as an argument to the bootstrap method.
 
         The server should have been bootstrapped
@@ -111,8 +106,8 @@ class KademliaServer:
         return [tuple(n)[-2:] for n in neighbors]
 
     async def bootstrap(self, addrs):
-        """
-        Bootstrap the server by connecting to other known nodes in the network.
+        """Bootstrap the server by connecting to other known nodes in the
+        network.
 
         Args:
             addrs: A `list` of (ip, port) `tuple` pairs.  Note that only IP
@@ -132,8 +127,7 @@ class KademliaServer:
         return create_kad_peerinfo(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):
-        """
-        Get a key if the network has it.
+        """Get a key if the network has it.
 
         Returns:
             :class:`None` if not found, the value otherwise.
@@ -153,9 +147,7 @@ class KademliaServer:
         return await spider.find()
 
     async def set(self, key, value):
-        """
-        Set the given string key to the given value in the network.
-        """
+        """Set the given string key to the given value in the network."""
         if not check_dht_value_type(value):
             raise TypeError("Value must be of type int, float, bool, str, or bytes")
         log.info("setting '%s' = '%s' on network", key, value)
@@ -163,9 +155,7 @@ class KademliaServer:
         return await self.set_digest(dkey, value)
 
     async def provide(self, key):
-        """
-        publish to the network that it provides for a particular key
-        """
+        """publish to the network that it provides for a particular key."""
         neighbors = self.protocol.router.find_neighbors(self.node)
         return [
             await self.protocol.call_add_provider(n, key, self.node.peer_id_bytes)
@@ -173,17 +163,13 @@ class KademliaServer:
         ]
 
     async def get_providers(self, key):
-        """
-        get the list of providers for a key
-        """
+        """get the list of providers for a key."""
         neighbors = self.protocol.router.find_neighbors(self.node)
         return [await self.protocol.call_get_providers(n, key) for n in neighbors]
 
     async def set_digest(self, dkey, value):
-        """
-        Set the given SHA1 digest key (bytes) to the given value in the
-        network.
-        """
+        """Set the given SHA1 digest key (bytes) to the given value in the
+        network."""
         node = create_kad_peerinfo(dkey)
 
         nearest = self.protocol.router.find_neighbors(node)
@@ -204,10 +190,8 @@ class KademliaServer:
         return any(await asyncio.gather(*results))
 
     def save_state(self, fname):
-        """
-        Save the state of this node (the alpha/ksize/id/immediate neighbors)
-        to a cache file with the given fname.
-        """
+        """Save the state of this node (the alpha/ksize/id/immediate neighbors)
+        to a cache file with the given fname."""
         log.info("Saving state to %s", fname)
         data = {
             "ksize": self.ksize,
@@ -223,10 +207,8 @@ class KademliaServer:
 
     @classmethod
     def load_state(cls, fname):
-        """
-        Load the state of this node (the alpha/ksize/id/immediate neighbors)
-        from a cache file with the given fname.
-        """
+        """Load the state of this node (the alpha/ksize/id/immediate neighbors)
+        from a cache file with the given fname."""
         log.info("Loading state from %s", fname)
         with open(fname, "rb") as file:
             data = pickle.load(file)
@@ -236,8 +218,7 @@ class KademliaServer:
         return svr
 
     def save_state_regularly(self, fname, frequency=600):
-        """
-        Save the state of node with a given regularity to the given
+        """Save the state of node with a given regularity to the given
         filename.
 
         Args:
@@ -253,9 +234,7 @@ class KademliaServer:
 
 
 def check_dht_value_type(value):
-    """
-    Checks to see if the type of the value is a valid type for
-    placing in the dht.
-    """
+    """Checks to see if the type of the value is a valid type for placing in
+    the dht."""
     typeset = [int, float, bool, str, bytes]
     return type(value) in typeset

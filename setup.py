@@ -16,7 +16,7 @@ extras_require = {
         "isort==4.3.21",
         "flake8>=3.7.7,<4.0.0",
     ],
-    "dev": ["tox>=3.13.2,<4.0.0"],
+    "dev": ["tox>=3.13.2,<4.0.0", "docformatter"],
 }
 
 extras_require["dev"] = (

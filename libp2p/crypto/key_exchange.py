@@ -9,9 +9,7 @@ SharedKeyGenerator = Callable[[bytes], bytes]
 
 
 def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGenerator]:
-    """
-    Facilitates ECDH key exchange.
-    """
+    """Facilitates ECDH key exchange."""
     if curve_type != "P-256":
         raise NotImplementedError()
 

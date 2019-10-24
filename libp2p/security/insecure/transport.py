@@ -45,9 +45,7 @@ class InsecureSession(BaseSession):
         await self.conn.close()
 
     async def run_handshake(self) -> None:
-        """
-        Raise `HandshakeFailure` when handshake failed
-        """
+        """Raise `HandshakeFailure` when handshake failed."""
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
@@ -101,15 +99,15 @@ class InsecureSession(BaseSession):
 
 
 class InsecureTransport(BaseSecureTransport):
-    """
-    ``InsecureTransport`` provides the "identity" upgrader for a ``IRawConnection``,
-    i.e. the upgraded transport does not add any additional security.
-    """
+    """``InsecureTransport`` provides the "identity" upgrader for a
+    ``IRawConnection``, i.e. the upgraded transport does not add any additional
+    security."""
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are not the initiator)
+        """Secure the connection, either locally or by communicating with
+        opposing node via conn, for an inbound connection (i.e. we are not the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         session = InsecureSession(self.local_peer, self.local_private_key, conn, False)
@@ -117,9 +115,10 @@ class InsecureTransport(BaseSecureTransport):
         return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
-        """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are the initiator)
+        """Secure the connection, either locally or by communicating with
+        opposing node via conn, for an inbound connection (i.e. we are the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         session = InsecureSession(

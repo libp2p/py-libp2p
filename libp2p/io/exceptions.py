@@ -6,9 +6,7 @@ class IOException(BaseLibp2pError):
 
 
 class IncompleteReadError(IOException):
-    """
-    Fewer bytes were read than requested.
-    """
+    """Fewer bytes were read than requested."""
 
 
 class MsgioException(IOException):

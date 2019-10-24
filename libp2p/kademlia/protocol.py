@@ -11,15 +11,11 @@ log = logging.getLogger(__name__)
 
 
 class KademliaProtocol(RPCProtocol):
-    """
-    There are four main RPCs in the Kademlia protocol
-    PING, STORE, FIND_NODE, FIND_VALUE
-    PING probes if a node is still online
-    STORE instructs a node to store (key, value)
-    FIND_NODE takes a 160-bit ID and gets back
-    (ip, udp_port, node_id) for k closest nodes to target
-    FIND_VALUE behaves like FIND_NODE unless a value is stored
-    """
+    """There are four main RPCs in the Kademlia protocol PING, STORE,
+    FIND_NODE, FIND_VALUE PING probes if a node is still online STORE instructs
+    a node to store (key, value) FIND_NODE takes a 160-bit ID and gets back
+    (ip, udp_port, node_id) for k closest nodes to target FIND_VALUE behaves
+    like FIND_NODE unless a value is stored."""
 
     def __init__(self, source_node, storage, ksize):
         RPCProtocol.__init__(self)
@@ -28,9 +24,7 @@ class KademliaProtocol(RPCProtocol):
         self.source_node = source_node
 
     def get_refresh_ids(self):
-        """
-        Get ids to search for to keep old buckets up to date.
-        """
+        """Get ids to search for to keep old buckets up to date."""
         ids = []
         for bucket in self.router.lonely_buckets():
             rid = random.randint(*bucket.range).to_bytes(20, byteorder="big")
@@ -75,12 +69,10 @@ class KademliaProtocol(RPCProtocol):
         return {"value": value}
 
     def rpc_add_provider(self, sender, nodeid, key, provider_id):
-        """
-        rpc when receiving an add_provider call
-        should validate received PeerInfo matches sender nodeid
-        if it does, receipient must store a record in its datastore
-        we store a map of content_id to peer_id (non xor)
-        """
+        """rpc when receiving an add_provider call should validate received
+        PeerInfo matches sender nodeid if it does, receipient must store a
+        record in its datastore we store a map of content_id to peer_id (non
+        xor)"""
         if nodeid == provider_id:
             log.info(
                 "adding provider %s for key %s in local table", provider_id, str(key)
@@ -90,11 +82,9 @@ class KademliaProtocol(RPCProtocol):
         return False
 
     def rpc_get_providers(self, sender, key):
-        """
-        rpc when receiving a get_providers call
-        should look up key in data store and respond with records
-        plus a list of closer peers in its routing table
-        """
+        """rpc when receiving a get_providers call should look up key in data
+        store and respond with records plus a list of closer peers in its
+        routing table."""
         providers = []
         record = self.storage.get(key, None)
 
@@ -147,8 +137,7 @@ class KademliaProtocol(RPCProtocol):
         return self.handle_call_response(result, node_to_ask)
 
     def welcome_if_new(self, node):
-        """
-        Given a new node, send it all the keys/values it should be storing,
+        """Given a new node, send it all the keys/values it should be storing,
         then add it to the routing table.
 
         @param node: A new node that just joined (or that we just found out
@@ -177,9 +166,10 @@ class KademliaProtocol(RPCProtocol):
         self.router.add_contact(node)
 
     def handle_call_response(self, result, node):
-        """
-        If we get a response, add the node to the routing table.  If
-        we get no response, make sure it's removed from the routing table.
+        """If we get a response, add the node to the routing table.
+
+        If we get no response, make sure it's removed from the routing
+        table.
         """
         if not result[0]:
             log.warning("no response from %s, removing from router", node)
