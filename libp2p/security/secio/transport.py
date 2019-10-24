@@ -61,9 +61,9 @@ class SecureSession(BaseSession):
         remote_peer: PeerID,
         remote_encryption_parameters: AuthenticatedEncryptionParameters,
         conn: MsgIOReadWriter,
-        initiator: bool,
+        is_initiator: bool,
     ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, remote_peer)
+        super().__init__(local_peer, local_private_key, is_initiator, remote_peer)
         self.conn = conn
 
         self.local_encryption_parameters = local_encryption_parameters
@@ -371,7 +371,7 @@ def _mk_session_from(
     local_private_key: PrivateKey,
     session_parameters: SessionParameters,
     conn: MsgIOReadWriter,
-    initiator: bool,
+    is_initiator: bool,
 ) -> SecureSession:
     key_set1, key_set2 = initialize_pair_for_encryption(
         session_parameters.local_encryption_parameters.cipher_type,
@@ -389,7 +389,7 @@ def _mk_session_from(
         session_parameters.remote_peer,
         key_set2,
         conn,
-        initiator,
+        is_initiator,
     )
     return session
 
@@ -425,8 +425,8 @@ async def create_secure_session(
     except IOException:
         raise SecioException("connection closed")
 
-    initiator = remote_peer is not None
-    session = _mk_session_from(local_private_key, session_parameters, msg_io, initiator)
+    is_initiator = remote_peer is not None
+    session = _mk_session_from(local_private_key, session_parameters, msg_io, is_initiator)
 
     try:
         received_nonce = await _finish_handshake(session, remote_nonce)
