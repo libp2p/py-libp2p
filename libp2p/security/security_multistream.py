@@ -76,18 +76,18 @@ class SecurityMultistream(ABC):
         return secure_conn
 
     async def select_transport(
-        self, conn: IRawConnection, initiator: bool
+        self, conn: IRawConnection, is_initiator: bool
     ) -> ISecureTransport:
         """
         Select a transport that both us and the node on the
         other end of conn support and agree on
         :param conn: conn to choose a transport over
-        :param initiator: true if we are the initiator, false otherwise
+        :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
         protocol: TProtocol
         communicator = MultiselectCommunicator(conn)
-        if initiator:
+        if is_initiator:
             # Select protocol if initiator
             protocol = await self.multiselect_client.select_one_of(
                 list(self.transports.keys()), communicator
