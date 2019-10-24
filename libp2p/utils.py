@@ -75,7 +75,7 @@ async def read_delim(reader: Reader) -> bytes:
         raise ParseError(f"`len(msg_bytes)` should not be 0")
     if msg_bytes[-1:] != b"\n":
         raise ParseError(
-            f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes}'
+            f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes!r}'
         )
     return msg_bytes[:-1]
 
