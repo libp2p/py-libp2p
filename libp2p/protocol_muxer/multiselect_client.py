@@ -33,7 +33,7 @@ class MultiselectClient(IMultiselectClient):
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError(str(error))
 
-        if not validate_handshake(handshake_contents):
+        if not is_valid_handshake(handshake_contents):
             raise MultiselectClientError("multiselect protocol ID mismatch")
 
     async def select_one_of(
@@ -86,7 +86,7 @@ class MultiselectClient(IMultiselectClient):
         raise MultiselectClientError("unrecognized response: " + response)
 
 
-def validate_handshake(handshake_contents: str) -> bool:
+def is_valid_handshake(handshake_contents: str) -> bool:
     """
     Determine if handshake is valid and should be confirmed
     :param handshake_contents: contents of handshake message

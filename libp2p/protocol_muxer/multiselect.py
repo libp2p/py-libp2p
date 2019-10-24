@@ -84,14 +84,14 @@ class Multiselect(IMultiselectMuxer):
         except MultiselectCommunicatorError as error:
             raise MultiselectError(error)
 
-        if not validate_handshake(handshake_contents):
+        if not is_valid_handshake(handshake_contents):
             raise MultiselectError(
                 "multiselect protocol ID mismatch: "
                 f"received handshake_contents={handshake_contents}"
             )
 
 
-def validate_handshake(handshake_contents: str) -> bool:
+def is_valid_handshake(handshake_contents: str) -> bool:
     """
     Determine if handshake is valid and should be confirmed
     :param handshake_contents: contents of handshake message
