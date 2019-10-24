@@ -9,7 +9,7 @@ message RPC {
 	repeated Message publish = 2;
 
 	message SubOpts {
-		optional bool subscribe = 1; // subscribe or unsubcribe
+		optional bool subscribe = 1; // subscribe or unsubscribe
 		optional string topicid = 2;
 	}
 
