@@ -8,7 +8,8 @@ from libp2p.peer.peerinfo import PeerInfo
 class IContentRouting(ABC):
     @abstractmethod
     def provide(self, cid: bytes, announce: bool = True) -> None:
-        """Provide adds the given cid to the content routing system.
+        """
+        Provide adds the given cid to the content routing system.
 
         If announce is True, it also announces it, otherwise it is just
         kept in the local accounting of which objects are being

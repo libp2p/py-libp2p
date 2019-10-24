@@ -394,7 +394,8 @@ async def create_secure_session(
     conn: IRawConnection,
     remote_peer: PeerID = None,
 ) -> ISecureConn:
-    """Attempt the initial `secio` handshake with the remote peer.
+    """
+    Attempt the initial `secio` handshake with the remote peer.
 
     If successful, return an object that provides secure communication
     to the ``remote_peer``. Raise `SecioException` when `conn` closed.
@@ -435,8 +436,9 @@ class Transport(BaseSecureTransport):
         return self.secure_bytes_provider(NONCE_SIZE)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are not the
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are not the
         initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
@@ -452,9 +454,9 @@ class Transport(BaseSecureTransport):
     async def secure_outbound(
         self, conn: IRawConnection, peer_id: PeerID
     ) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are the
-        initiator)
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are the initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
         """

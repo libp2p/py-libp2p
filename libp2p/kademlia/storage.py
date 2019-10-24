@@ -6,7 +6,8 @@ import time
 
 
 class IStorage(ABC):
-    """Local storage for this node.
+    """
+    Local storage for this node.
 
     IStorage implementations of get must return the same type as put in
     by set
@@ -18,14 +19,16 @@ class IStorage(ABC):
 
     @abstractmethod
     def __getitem__(self, key):
-        """Get the given key.
+        """
+        Get the given key.
 
         If item doesn't exist, raises C{KeyError}
         """
 
     @abstractmethod
     def get(self, key, default=None):
-        """Get given key.
+        """
+        Get given key.
 
         If not found, return default.
         """

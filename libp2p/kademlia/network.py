@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 
 
 class KademliaServer:
-    """High level view of a node instance.
+    """
+    High level view of a node instance.
 
     This is the object that should be created to start listening as an
     active node on the network.
@@ -22,8 +23,8 @@ class KademliaServer:
     protocol_class = KademliaProtocol
 
     def __init__(self, ksize=20, alpha=3, node_id=None, storage=None):
-        """Create a server instance.  This will start listening on the given
-        port.
+        """
+        Create a server instance.  This will start listening on the given port.
 
         Args:
             ksize (int): The k parameter from the paper
@@ -55,7 +56,8 @@ class KademliaServer:
         return self.protocol_class(self.node, self.storage, self.ksize)
 
     async def listen(self, port, interface="0.0.0.0"):
-        """Start listening on the given port.
+        """
+        Start listening on the given port.
 
         Provide interface="::" to accept ipv6 address
         """
@@ -94,8 +96,9 @@ class KademliaServer:
             await self.set_digest(dkey, value)
 
     def bootstrappable_neighbors(self):
-        """Get a :class:`list` of (ip, port) :class:`tuple` pairs suitable for
-        use as an argument to the bootstrap method.
+        """
+        Get a :class:`list` of (ip, port) :class:`tuple` pairs suitable for use
+        as an argument to the bootstrap method.
 
         The server should have been bootstrapped
         already - this is just a utility for getting some neighbors and then
@@ -106,8 +109,8 @@ class KademliaServer:
         return [tuple(n)[-2:] for n in neighbors]
 
     async def bootstrap(self, addrs):
-        """Bootstrap the server by connecting to other known nodes in the
-        network.
+        """
+        Bootstrap the server by connecting to other known nodes in the network.
 
         Args:
             addrs: A `list` of (ip, port) `tuple` pairs.  Note that only IP
@@ -127,7 +130,8 @@ class KademliaServer:
         return create_kad_peerinfo(result[1], addr[0], addr[1]) if result[0] else None
 
     async def get(self, key):
-        """Get a key if the network has it.
+        """
+        Get a key if the network has it.
 
         Returns:
             :class:`None` if not found, the value otherwise.
@@ -218,8 +222,8 @@ class KademliaServer:
         return svr
 
     def save_state_regularly(self, fname, frequency=600):
-        """Save the state of node with a given regularity to the given
-        filename.
+        """
+        Save the state of node with a given regularity to the given filename.
 
         Args:
             fname: File name to save retularly to

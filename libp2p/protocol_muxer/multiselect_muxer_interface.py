@@ -15,7 +15,8 @@ class IMultiselectMuxer(ABC):
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
-        """Store the handler with the given protocol.
+        """
+        Store the handler with the given protocol.
 
         :param protocol: protocol name
         :param handler: handler function
@@ -25,7 +26,8 @@ class IMultiselectMuxer(ABC):
     async def negotiate(
         self, communicator: IMultiselectCommunicator
     ) -> Tuple[TProtocol, StreamHandlerFn]:
-        """Negotiate performs protocol selection.
+        """
+        Negotiate performs protocol selection.
 
         :param stream: stream to negotiate on
         :return: selected protocol name, handler function

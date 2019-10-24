@@ -16,8 +16,9 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 class ISecureTransport(ABC):
     @abstractmethod
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are not the
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are not the
         initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
@@ -25,9 +26,9 @@ class ISecureTransport(ABC):
 
     @abstractmethod
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are the
-        initiator)
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are the initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
         """

@@ -137,7 +137,8 @@ class KademliaProtocol(RPCProtocol):
         return self.handle_call_response(result, node_to_ask)
 
     def welcome_if_new(self, node):
-        """Given a new node, send it all the keys/values it should be storing,
+        """
+        Given a new node, send it all the keys/values it should be storing,
         then add it to the routing table.
 
         @param node: A new node that just joined (or that we just found out
@@ -166,7 +167,8 @@ class KademliaProtocol(RPCProtocol):
         self.router.add_contact(node)
 
     def handle_call_response(self, result, node):
-        """If we get a response, add the node to the routing table.
+        """
+        If we get a response, add the node to the routing table.
 
         If we get no response, make sure it's removed from the routing
         table.

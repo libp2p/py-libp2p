@@ -1,5 +1,6 @@
-"""Test Notify and Notifee by ensuring that the proper events get called, and
-that the stream passed into opened_stream is correct.
+"""
+Test Notify and Notifee by ensuring that the proper events get called, and that
+the stream passed into opened_stream is correct.
 
 Note: Listen event does not get hit because MyNotifee is passed
 into network after network has already started listening

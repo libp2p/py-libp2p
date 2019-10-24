@@ -13,7 +13,8 @@ class CacheEntry:
     """
 
     def __init__(self, mid: Tuple[bytes, bytes], topics: Sequence[str]) -> None:
-        """Constructor.
+        """
+        Constructor.
 
         :param mid: (seqno, from_id) of the msg
         :param topics: list of topics this message was sent on
@@ -32,7 +33,8 @@ class MessageCache:
     history: List[List[CacheEntry]]
 
     def __init__(self, window_size: int, history_size: int) -> None:
-        """Constructor.
+        """
+        Constructor.
 
         :param window_size: Size of the window desired.
         :param history_size: Size of the history desired.
@@ -49,7 +51,8 @@ class MessageCache:
         self.history = [[] for _ in range(history_size)]
 
     def put(self, msg: rpc_pb2.Message) -> None:
-        """Put a message into the mcache.
+        """
+        Put a message into the mcache.
 
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
@@ -59,7 +62,8 @@ class MessageCache:
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
     def get(self, mid: Tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
-        """Get a message from the mcache.
+        """
+        Get a message from the mcache.
 
         :param mid: (seqno, from_id) of the message to get.
         :return: The rpc message associated with this mid
@@ -70,7 +74,8 @@ class MessageCache:
         return None
 
     def window(self, topic: str) -> List[Tuple[bytes, bytes]]:
-        """Get the window for this topic.
+        """
+        Get the window for this topic.
 
         :param topic: Topic whose message ids we desire.
         :return: List of mids in the current window.

@@ -61,7 +61,8 @@ class Secp256k1PrivateKey(PrivateKey):
 
 
 def create_new_key_pair(secret: bytes = None) -> KeyPair:
-    """Returns a new Secp256k1 keypair derived from the provided ``secret``, a
+    """
+    Returns a new Secp256k1 keypair derived from the provided ``secret``, a
     sequence of bytes corresponding to some integer between 0 and the group
     order.
 

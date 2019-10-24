@@ -34,7 +34,8 @@ class MplexStream(IMuxedStream):
     _buf: bytearray
 
     def __init__(self, name: str, stream_id: StreamID, muxed_conn: "Mplex") -> None:
-        """create new MuxedStream in muxer.
+        """
+        create new MuxedStream in muxer.
 
         :param stream_id: stream id of this stream
         :param muxed_conn: muxed connection of this muxed_stream
@@ -112,7 +113,8 @@ class MplexStream(IMuxedStream):
         return bytes(payload)
 
     async def read(self, n: int = -1) -> bytes:
-        """Read up to n bytes. Read possibly returns fewer than `n` bytes, if
+        """
+        Read up to n bytes. Read possibly returns fewer than `n` bytes, if
         there are not enough bytes in the Mplex buffer. If `n == -1`, read
         until EOF.
 
@@ -141,7 +143,8 @@ class MplexStream(IMuxedStream):
         return bytes(payload)
 
     async def write(self, data: bytes) -> int:
-        """write to stream.
+        """
+        write to stream.
 
         :return: number of bytes written
         """
@@ -212,7 +215,8 @@ class MplexStream(IMuxedStream):
 
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:
-        """set deadline for muxed stream.
+        """
+        set deadline for muxed stream.
 
         :return: True if successful
         """
@@ -221,7 +225,8 @@ class MplexStream(IMuxedStream):
         return True
 
     def set_read_deadline(self, ttl: int) -> bool:
-        """set read deadline for muxed stream.
+        """
+        set read deadline for muxed stream.
 
         :return: True if successful
         """
@@ -229,7 +234,8 @@ class MplexStream(IMuxedStream):
         return True
 
     def set_write_deadline(self, ttl: int) -> bool:
-        """set write deadline for muxed stream.
+        """
+        set write deadline for muxed stream.
 
         :return: True if successful
         """

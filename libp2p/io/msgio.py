@@ -1,4 +1,5 @@
-"""``msgio`` is an implementation of `https://github.com/libp2p/go-msgio`.
+"""
+``msgio`` is an implementation of `https://github.com/libp2p/go-msgio`.
 
 from that repo: "a simple package to r/w length-delimited slices."
 

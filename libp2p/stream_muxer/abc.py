@@ -14,7 +14,8 @@ class IMuxedConn(ABC):
 
     @abstractmethod
     def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
-        """create a new muxed connection.
+        """
+        create a new muxed connection.
 
         :param conn: an instance of secured connection
         for new muxed streams
@@ -32,14 +33,16 @@ class IMuxedConn(ABC):
 
     @abstractmethod
     def is_closed(self) -> bool:
-        """check connection is fully closed.
+        """
+        check connection is fully closed.
 
         :return: true if successful
         """
 
     @abstractmethod
     async def open_stream(self) -> "IMuxedStream":
-        """creates a new muxed_stream.
+        """
+        creates a new muxed_stream.
 
         :return: a new ``IMuxedStream`` stream
         """
@@ -59,7 +62,8 @@ class IMuxedStream(ReadWriteCloser):
 
     @abstractmethod
     def set_deadline(self, ttl: int) -> bool:
-        """set deadline for muxed stream.
+        """
+        set deadline for muxed stream.
 
         :return: a new stream
         """

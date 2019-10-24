@@ -17,7 +17,8 @@ class PeerStore(IPeerStore):
         self.peer_map = {}
 
     def __create_or_get_peer(self, peer_id: ID) -> PeerData:
-        """Returns the peer data for peer_id or creates a new peer data (and
+        """
+        Returns the peer data for peer_id or creates a new peer data (and
         stores it in peer_map) if peer data for peer_id does not yet exist.
 
         :param peer_id: peer ID

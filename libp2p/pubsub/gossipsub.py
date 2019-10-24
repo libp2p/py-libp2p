@@ -94,8 +94,9 @@ class GossipSub(IPubsubRouter):
         return self.protocols
 
     def attach(self, pubsub: Pubsub) -> None:
-        """Attach is invoked by the PubSub constructor to attach the router to
-        a freshly initialized PubSub instance.
+        """
+        Attach is invoked by the PubSub constructor to attach the router to a
+        freshly initialized PubSub instance.
 
         :param pubsub: pubsub instance to attach to
         """
@@ -108,7 +109,8 @@ class GossipSub(IPubsubRouter):
         asyncio.ensure_future(self.heartbeat())
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
-        """Notifies the router that a new peer has been connected.
+        """
+        Notifies the router that a new peer has been connected.
 
         :param peer_id: id of peer to add
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
@@ -129,7 +131,8 @@ class GossipSub(IPubsubRouter):
         self.peers_to_protocol[peer_id] = protocol_id
 
     def remove_peer(self, peer_id: ID) -> None:
-        """Notifies the router that a peer has been disconnected.
+        """
+        Notifies the router that a peer has been disconnected.
 
         :param peer_id: id of peer to remove
         """
@@ -144,8 +147,9 @@ class GossipSub(IPubsubRouter):
             del self.peers_to_protocol[peer_id]
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
-        """Invoked to process control messages in the RPC envelope. It is
-        invoked after subscriptions and payload messages have been processed.
+        """
+        Invoked to process control messages in the RPC envelope. It is invoked
+        after subscriptions and payload messages have been processed.
 
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
@@ -189,7 +193,8 @@ class GossipSub(IPubsubRouter):
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
     ) -> Iterable[ID]:
-        """Get the eligible peers to send the data to.
+        """
+        Get the eligible peers to send the data to.
 
         :param msg_forwarder: the peer id of the peer who forwards the message to me.
         :param origin: peer id of the peer the message originate from.
@@ -231,8 +236,9 @@ class GossipSub(IPubsubRouter):
 
     async def join(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec
-        """Join notifies the router that we want to receive and forward
-        messages in a topic. It is invoked after the subscription announcement.
+        """
+        Join notifies the router that we want to receive and forward messages
+        in a topic. It is invoked after the subscription announcement.
 
         :param topic: topic to join
         """
@@ -268,8 +274,9 @@ class GossipSub(IPubsubRouter):
 
     async def leave(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec
-        """Leave notifies the router that we are no longer interested in a
-        topic. It is invoked after the unsubscription announcement.
+        """
+        Leave notifies the router that we are no longer interested in a topic.
+        It is invoked after the unsubscription announcement.
 
         :param topic: topic to leave
         """
@@ -286,7 +293,8 @@ class GossipSub(IPubsubRouter):
 
     # Heartbeat
     async def heartbeat(self) -> None:
-        """Call individual heartbeats.
+        """
+        Call individual heartbeats.
 
         Note: the heartbeats are called with awaits because each heartbeat depends on the
         state changes in the preceding heartbeat

@@ -15,7 +15,8 @@ class MultiselectClient(IMultiselectClient):
     select a protocol id to communicate over."""
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
-        """Ensure that the client and multiselect are both using the same
+        """
+        Ensure that the client and multiselect are both using the same
         multiselect protocol.
 
         :param stream: stream to communicate with multiselect over
@@ -37,8 +38,9 @@ class MultiselectClient(IMultiselectClient):
     async def select_one_of(
         self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
     ) -> TProtocol:
-        """For each protocol, send message to multiselect selecting protocol
-        and fail if multiselect does not return same protocol. Returns first
+        """
+        For each protocol, send message to multiselect selecting protocol and
+        fail if multiselect does not return same protocol. Returns first
         protocol that multiselect agrees on (i.e. that multiselect selects)
 
         :param protocol: protocol to select
@@ -60,7 +62,8 @@ class MultiselectClient(IMultiselectClient):
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
     ) -> TProtocol:
-        """Try to select the given protocol or raise exception if fails.
+        """
+        Try to select the given protocol or raise exception if fails.
 
         :param communicator: communicator to use to communicate with counterparty
         :param protocol: protocol to select
@@ -85,7 +88,8 @@ class MultiselectClient(IMultiselectClient):
 
 
 def validate_handshake(handshake_contents: str) -> bool:
-    """Determine if handshake is valid and should be confirmed.
+    """
+    Determine if handshake is valid and should be confirmed.
 
     :param handshake_contents: contents of handshake message
     :return: true if handshake is complete, false otherwise

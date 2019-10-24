@@ -21,7 +21,8 @@ Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interfa
 
 
 class SecurityMultistream(ABC):
-    """SSMuxer is a multistream stream security transport multiplexer.
+    """
+    SSMuxer is a multistream stream security transport multiplexer.
 
     Go implementation: github.com/libp2p/go-conn-security-multistream/ssms.go
     """
@@ -40,7 +41,8 @@ class SecurityMultistream(ABC):
             self.add_transport(protocol, transport)
 
     def add_transport(self, protocol: TProtocol, transport: ISecureTransport) -> None:
-        """Add a protocol and its corresponding transport to multistream-
+        """
+        Add a protocol and its corresponding transport to multistream-
         select(multiselect). The order that a protocol is added is exactly the
         precedence it is negotiated in multiselect.
 
@@ -56,8 +58,9 @@ class SecurityMultistream(ABC):
         self.multiselect.add_handler(protocol, None)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are not the
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are not the
         initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
@@ -67,9 +70,9 @@ class SecurityMultistream(ABC):
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
-        """Secure the connection, either locally or by communicating with
-        opposing node via conn, for an inbound connection (i.e. we are the
-        initiator)
+        """
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are the initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
         """
@@ -80,8 +83,9 @@ class SecurityMultistream(ABC):
     async def select_transport(
         self, conn: IRawConnection, initiator: bool
     ) -> ISecureTransport:
-        """Select a transport that both us and the node on the other end of
-        conn support and agree on.
+        """
+        Select a transport that both us and the node on the other end of conn
+        support and agree on.
 
         :param conn: conn to choose a transport over
         :param initiator: true if we are the initiator, false otherwise

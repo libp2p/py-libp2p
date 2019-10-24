@@ -39,7 +39,8 @@ class RawConnection(IRawConnection):
                 raise RawConnError(error)
 
     async def read(self, n: int = -1) -> bytes:
-        """Read up to ``n`` bytes from the underlying stream. This call is
+        """
+        Read up to ``n`` bytes from the underlying stream. This call is
         delegated directly to the underlying ``self.reader``.
 
         Raise `RawConnError` if the underlying connection breaks

@@ -41,7 +41,8 @@ class Mplex(IMuxedConn):
     _tasks: List["asyncio.Future[Any]"]
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
-        """create a new muxed connection.
+        """
+        create a new muxed connection.
 
         :param secured_conn: an instance of ``ISecureConn``
         :param generic_protocol_handler: generic protocol handler
@@ -82,14 +83,16 @@ class Mplex(IMuxedConn):
         await self.event_closed.wait()
 
     def is_closed(self) -> bool:
-        """check connection is fully closed.
+        """
+        check connection is fully closed.
 
         :return: true if successful
         """
         return self.event_closed.is_set()
 
     def _get_next_channel_id(self) -> int:
-        """Get next available stream id.
+        """
+        Get next available stream id.
 
         :return: next available stream id for the connection
         """
@@ -104,7 +107,8 @@ class Mplex(IMuxedConn):
         return stream
 
     async def open_stream(self) -> IMuxedStream:
-        """creates a new muxed_stream.
+        """
+        creates a new muxed_stream.
 
         :return: a new ``MplexStream``
         """
@@ -141,7 +145,8 @@ class Mplex(IMuxedConn):
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
     ) -> int:
-        """sends a message over the connection.
+        """
+        sends a message over the connection.
 
         :param header: header to use
         :param data: data to send in the message
@@ -160,7 +165,8 @@ class Mplex(IMuxedConn):
         )
 
     async def write_to_stream(self, _bytes: bytes) -> int:
-        """writes a byte array to a secured connection.
+        """
+        writes a byte array to a secured connection.
 
         :param _bytes: byte array to write
         :return: length written
@@ -184,7 +190,8 @@ class Mplex(IMuxedConn):
         await self._cleanup()
 
     async def read_message(self) -> Tuple[int, int, bytes]:
-        """Read a single message off of the secured connection.
+        """
+        Read a single message off of the secured connection.
 
         :return: stream_id, flag, message contents
         """
@@ -210,7 +217,8 @@ class Mplex(IMuxedConn):
         return channel_id, flag, message
 
     async def _handle_incoming_message(self) -> None:
-        """Read and handle a new incoming message.
+        """
+        Read and handle a new incoming message.
 
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """

@@ -17,7 +17,8 @@ def digest(string):
 
 
 class OrderedSet(list):
-    """Acts like a list in all ways, except in the behavior of the.
+    """
+    Acts like a list in all ways, except in the behavior of the.
 
     :meth:`push` method.
     """
@@ -33,7 +34,8 @@ class OrderedSet(list):
 
 
 def shared_prefix(args):
-    """Find the shared prefix between the strings.
+    """
+    Find the shared prefix between the strings.
 
     For instance:
 

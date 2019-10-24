@@ -48,7 +48,8 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
 def initialize_default_kademlia_router(
     ksize: int = 20, alpha: int = 3, id_opt: ID = None, storage: IStorage = None
 ) -> KadmeliaPeerRouter:
-    """initialize kadmelia router when no kademlia router is passed in.
+    """
+    initialize kadmelia router when no kademlia router is passed in.
 
     :param ksize: The k parameter from the paper
     :param alpha: The alpha parameter from the paper
@@ -78,7 +79,8 @@ def initialize_default_swarm(
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
 ) -> Swarm:
-    """initialize swarm when no swarm is passed in.
+    """
+    initialize swarm when no swarm is passed in.
 
     :param id_opt: optional id for host
     :param transport_opt: optional choice of transport upgrade
@@ -118,7 +120,8 @@ async def new_node(
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
 ) -> IHost:
-    """create new libp2p node.
+    """
+    create new libp2p node.
 
     :param key_pair: key pair for deriving an identity
     :param swarm_opt: optional swarm

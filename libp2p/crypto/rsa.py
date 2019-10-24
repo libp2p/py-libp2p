@@ -56,7 +56,8 @@ class RSAPrivateKey(PrivateKey):
 
 
 def create_new_key_pair(bits: int = 2048, e: int = 65537) -> KeyPair:
-    """Returns a new RSA keypair with the requested key size (``bits``) and the
+    """
+    Returns a new RSA keypair with the requested key size (``bits``) and the
     given public exponent ``e``.
 
     Sane defaults are provided for both values.

@@ -38,7 +38,8 @@ class NetStream(INetStream):
         self.protocol_id = protocol_id
 
     async def read(self, n: int = -1) -> bytes:
-        """reads from stream.
+        """
+        reads from stream.
 
         :param n: number of bytes to read
         :return: bytes of input
@@ -51,7 +52,8 @@ class NetStream(INetStream):
             raise StreamReset from error
 
     async def write(self, data: bytes) -> int:
-        """write to stream.
+        """
+        write to stream.
 
         :return: number of bytes written
         """

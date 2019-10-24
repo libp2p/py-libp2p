@@ -11,7 +11,8 @@ class SpiderCrawl:
     """Crawl the network and look for given 160-bit keys."""
 
     def __init__(self, protocol, node, peers, ksize, alpha):
-        """Create a new C{SpiderCrawl}er.
+        """
+        Create a new C{SpiderCrawl}er.
 
         Args:
             protocol: A :class:`~kademlia.protocol.KademliaProtocol` instance.
@@ -32,7 +33,8 @@ class SpiderCrawl:
         self.nearest.push(peers)
 
     async def _find(self, rpcmethod):
-        """Get either a value or list of nodes.
+        """
+        Get either a value or list of nodes.
 
         Args:
             rpcmethod: The protocol's callfindValue or call_find_node.
@@ -98,7 +100,8 @@ class ValueSpiderCrawl(SpiderCrawl):
         return await self.find()
 
     async def _handle_found_values(self, values):
-        """We got some values!
+        """
+        We got some values!
 
         Exciting.  But let's make sure they're all the same or freak out
         a little bit.  Also, make sure we tell the nearest node that
@@ -140,7 +143,8 @@ class NodeSpiderCrawl(SpiderCrawl):
 
 class RPCFindResponse:
     def __init__(self, response):
-        """A wrapper for the result of a RPC find.
+        """
+        A wrapper for the result of a RPC find.
 
         Args:
             response: This will be a tuple of (<response received>, <value>)
@@ -160,7 +164,8 @@ class RPCFindResponse:
         return self.response[1]["value"]
 
     def get_node_list(self):
-        """Get the node list in the response.
+        """
+        Get the node list in the response.
 
         If there's no value, this should be set.
         """

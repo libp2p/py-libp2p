@@ -15,7 +15,8 @@ class RoutedHost(BasicHost):
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:
-        """connect ensures there is a connection between this host and the peer
+        """
+        connect ensures there is a connection between this host and the peer
         with given `peer_info.peer_id`. See (basic_host).connect for more
         information.
 

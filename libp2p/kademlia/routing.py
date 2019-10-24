@@ -52,8 +52,9 @@ class KBucket:
         return node.peer_id_bytes not in self.nodes
 
     def add_node(self, node):
-        """Add a C{Node} to the C{KBucket}.  Return True if successful, False
-        if the bucket is full.
+        """
+        Add a C{Node} to the C{KBucket}.  Return True if successful, False if
+        the bucket is full.
 
         If the bucket is full, keep track of node in a replacement list,
         per section 4.1 of the paper.

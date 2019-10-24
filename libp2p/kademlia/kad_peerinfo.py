@@ -57,7 +57,8 @@ class KadPeerHeap:
     """A heap of peers ordered by distance to a given node."""
 
     def __init__(self, node, maxsize):
-        """Constructor.
+        """
+        Constructor.
 
         @param node: The node to measure all distnaces from.
         @param maxsize: The maximum size that this heap can grow to.
@@ -68,7 +69,8 @@ class KadPeerHeap:
         self.maxsize = maxsize
 
     def remove(self, peers):
-        """Remove a list of peer ids from this heap.
+        """
+        Remove a list of peer ids from this heap.
 
         Note that while this heap retains a constant visible size (based
         on the iterator), it's actual size may be quite a bit larger
@@ -104,7 +106,8 @@ class KadPeerHeap:
         return heapq.heappop(self.heap)[1] if self else None
 
     def push(self, nodes):
-        """Push nodes onto heap.
+        """
+        Push nodes onto heap.
 
         @param nodes: This can be a single item or a C{list}.
         """

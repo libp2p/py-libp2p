@@ -7,7 +7,8 @@ from tests.utils import connect
 
 
 def message_id_generator(start_val):
-    """Generate a unique message id.
+    """
+    Generate a unique message id.
 
     :param start_val: value to start generating messages at
     :return: message id

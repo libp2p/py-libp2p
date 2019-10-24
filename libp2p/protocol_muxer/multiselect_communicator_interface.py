@@ -8,7 +8,8 @@ class IMultiselectCommunicator(ABC):
 
     @abstractmethod
     async def write(self, msg_str: str) -> None:
-        """Write message to stream.
+        """
+        Write message to stream.
 
         :param msg_str: message to write
         """
