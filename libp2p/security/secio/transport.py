@@ -426,7 +426,9 @@ async def create_secure_session(
         raise SecioException("connection closed")
 
     is_initiator = remote_peer is not None
-    session = _mk_session_from(local_private_key, session_parameters, msg_io, is_initiator)
+    session = _mk_session_from(
+        local_private_key, session_parameters, msg_io, is_initiator
+    )
 
     try:
         received_nonce = await _finish_handshake(session, remote_nonce)
