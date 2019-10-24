@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, List, Sequence
 
 import multiaddr
 
-from libp2p.host.defaults import DEFAULT_HOST_PROTOCOLS
+from libp2p.host.defaults import get_default_protocols
 from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
@@ -45,12 +45,13 @@ class BasicHost(IHost):
     def __init__(
         self,
         network: INetwork,
-        default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = DEFAULT_HOST_PROTOCOLS,
+        default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         # Protocol muxing
+        default_protocols = default_protocols or get_default_protocols()
         self.multiselect = Multiselect(default_protocols)
         self.multiselect_client = MultiselectClient()
 
