@@ -68,7 +68,7 @@ class Mplex(IMuxedConn):
         self._tasks.append(asyncio.ensure_future(self.handle_incoming()))
 
     @property
-    def initiator(self) -> bool:
+    def is_initiator(self) -> bool:
         return self.secured_conn.initiator
 
     async def close(self) -> None:

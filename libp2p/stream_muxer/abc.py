@@ -23,7 +23,7 @@ class IMuxedConn(ABC):
 
     @property
     @abstractmethod
-    def initiator(self) -> bool:
+    def is_initiator(self) -> bool:
         pass
 
     @abstractmethod
