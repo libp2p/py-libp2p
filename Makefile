@@ -9,7 +9,7 @@ all: protobufs
 format:
 	black $(FILES_TO_LINT)
 	isort --recursive $(FILES_TO_LINT)
-	docformatter -ir $(FILES_TO_LINT)
+	docformatter -ir --pre-summary-newline $(FILES_TO_LINT)
 
 lintroll:
 	mypy -p libp2p -p examples --config-file mypy.ini
