@@ -61,7 +61,7 @@ class MplexStream(IMuxedStream):
         task_event_remote_closed = asyncio.ensure_future(
             self.event_remote_closed.wait()
         )
-        done, pending = await asyncio.wait(  # type: ignore
+        done, pending = await asyncio.wait(
             [  # type: ignore
                 task_event_reset,
                 task_incoming_data_get,
