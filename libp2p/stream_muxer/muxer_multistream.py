@@ -56,7 +56,7 @@ class MuxerMultistream:
         """
         protocol: TProtocol
         communicator = MultiselectCommunicator(conn)
-        if conn.initiator:
+        if conn.is_initiator:
             protocol = await self.multiselect_client.select_one_of(
                 tuple(self.transports.keys()), communicator
             )
