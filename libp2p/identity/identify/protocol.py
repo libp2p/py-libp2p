@@ -24,7 +24,8 @@ def identify_handler_for(
     public_key: PublicKey, laddrs: Sequence[Multiaddr], protocols: Sequence[TProtocol]
 ) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
-        logger.debug("received a request for % from %", ID, stream.mplex_conn.peer_id)
+        peer_id = stream.muxed_conn.peer_id
+        logger.debug("received a request for % from %", ID, peer_id)
 
         protobuf = Identify(
             protocol_version=PROTOCOL_VERSION,
@@ -39,8 +40,6 @@ def identify_handler_for(
 
         await stream.write(response)
         await stream.close()
-        logger.debug(
-            "succesfully handled request for % from %", ID, stream.mplex_conn.peer_id
-        )
+        logger.debug("succesfully handled request for % from %", ID, peer_id)
 
     return handle_identify
