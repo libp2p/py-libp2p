@@ -16,7 +16,8 @@ extras_require = {
         "isort==4.3.21",
         "flake8>=3.7.7,<4.0.0",
     ],
-    "dev": ["tox>=3.13.2,<4.0.0", "Sphinx>=2.2.0,<3.0.0", "sphinx-rtd-theme"],
+    "dev": ["tox>=3.13.2,<4.0.0"],
+    "doc": ["Sphinx>=2.2.0,<3.0.0", "sphinx-rtd-theme"],
 }
 
 extras_require["dev"] = (
