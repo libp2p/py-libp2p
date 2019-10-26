@@ -21,7 +21,10 @@ extras_require = {
 }
 
 extras_require["dev"] = (
-    extras_require["test"] + extras_require["lint"] + extras_require["dev"]
+    extras_require["test"]
+    + extras_require["lint"]
+    + extras_require["dev"]
+    + extras_require["doc"]
 )
 
 
