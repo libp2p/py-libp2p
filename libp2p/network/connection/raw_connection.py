@@ -7,7 +7,7 @@ from .raw_connection_interface import IRawConnection
 class RawConnection(IRawConnection):
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
-    initiator: bool
+    is_initiator: bool
 
     _drain_lock: asyncio.Lock
 
@@ -19,7 +19,7 @@ class RawConnection(IRawConnection):
     ) -> None:
         self.reader = reader
         self.writer = writer
-        self.initiator = initiator
+        self.is_initiator = initiator
 
         self._drain_lock = asyncio.Lock()
 

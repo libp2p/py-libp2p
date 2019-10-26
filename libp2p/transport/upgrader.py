@@ -33,13 +33,13 @@ class TransportUpgrader:
         pass
 
     async def upgrade_security(
-        self, raw_conn: IRawConnection, peer_id: ID, initiator: bool
+        self, raw_conn: IRawConnection, peer_id: ID, is_initiator: bool
     ) -> ISecureConn:
         """
         Upgrade conn to a secured connection
         """
         try:
-            if initiator:
+            if is_initiator:
                 return await self.security_multistream.secure_outbound(
                     raw_conn, peer_id
                 )
