@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Sequence
 
 import multiaddr
 
+from libp2p.crypto.keys import PublicKey
 from libp2p.host.defaults import get_default_protocols
 from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork

@@ -1,12 +1,10 @@
 import logging
-from typing import Sequence
 
 from multiaddr import Multiaddr
 
-from libp2p.crypto.keys import PublicKey
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import StreamHandlerFn
 
 from .pb.identify_pb2 import Identify
 
