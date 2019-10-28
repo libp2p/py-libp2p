@@ -14,6 +14,7 @@ import enum
 
 import pytest
 
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.network.notifee_interface import INotifee
 from tests.configs import LISTEN_MADDR
 from tests.factories import SwarmFactory
@@ -56,7 +57,7 @@ class MyNotifee(INotifee):
 
 @pytest.mark.asyncio
 async def test_notify(is_host_secure):
-    swarms = [SwarmFactory(is_host_secure) for _ in range(2)]
+    swarms = [SwarmFactory(is_host_secure, create_new_key_pair()) for _ in range(2)]
 
     events_0_0 = []
     events_1_0 = []
