@@ -9,7 +9,10 @@ from tests.utils import connect_swarm
 
 @pytest.mark.asyncio
 async def test_swarm_dial_peer(is_host_secure):
-    swarms = await ListeningSwarmFactory.create_batch_and_listen(is_host_secure, 3)
+    swarms_and_keys = await ListeningSwarmFactory.create_batch_and_listen(
+        is_host_secure, 3
+    )
+    swarms = tuple(swarm for swarm, _key_pair in swarms_and_keys)
     # Test: No addr found.
     with pytest.raises(SwarmException):
         await swarms[0].dial_peer(swarms[1].get_peer_id())
@@ -41,7 +44,10 @@ async def test_swarm_dial_peer(is_host_secure):
 
 @pytest.mark.asyncio
 async def test_swarm_close_peer(is_host_secure):
-    swarms = await ListeningSwarmFactory.create_batch_and_listen(is_host_secure, 3)
+    swarms_and_keys = await ListeningSwarmFactory.create_batch_and_listen(
+        is_host_secure, 3
+    )
+    swarms = tuple(swarm for swarm, _key_pair in swarms_and_keys)
     # 0 <> 1 <> 2
     await connect_swarm(swarms[0], swarms[1])
     await connect_swarm(swarms[1], swarms[2])
