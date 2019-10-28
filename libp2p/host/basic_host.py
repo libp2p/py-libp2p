@@ -55,7 +55,7 @@ class BasicHost(IHost):
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         # Protocol muxing
-        default_protocols = default_protocols or get_default_protocols()
+        default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(default_protocols)
         self.multiselect_client = MultiselectClient()
 
