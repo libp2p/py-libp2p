@@ -154,9 +154,9 @@ async def new_node(
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
     if disc_opt:
-        host = RoutedHost(swarm_opt, disc_opt)
+        host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
     else:
-        host = BasicHost(swarm_opt)
+        host = BasicHost(key_pair.public_key, swarm_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())
