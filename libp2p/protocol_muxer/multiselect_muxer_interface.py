@@ -22,6 +22,9 @@ class IMultiselectMuxer(ABC):
         :param handler: handler function
         """
 
+    def get_protocols(self) -> Tuple[TProtocol, ...]:
+        return tuple(self.handlers.keys())
+
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
