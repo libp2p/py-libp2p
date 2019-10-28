@@ -15,6 +15,7 @@ class CacheEntry:
     def __init__(self, mid: Tuple[bytes, bytes], topics: Sequence[str]) -> None:
         """
         Constructor.
+
         :param mid: (seqno, from_id) of the msg
         :param topics: list of topics this message was sent on
         """
@@ -34,6 +35,7 @@ class MessageCache:
     def __init__(self, window_size: int, history_size: int) -> None:
         """
         Constructor.
+
         :param window_size: Size of the window desired.
         :param history_size: Size of the history desired.
         :return: the MessageCache
@@ -51,6 +53,7 @@ class MessageCache:
     def put(self, msg: rpc_pb2.Message) -> None:
         """
         Put a message into the mcache.
+
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
         mid: Tuple[bytes, bytes] = (msg.seqno, msg.from_id)
@@ -61,6 +64,7 @@ class MessageCache:
     def get(self, mid: Tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
         """
         Get a message from the mcache.
+
         :param mid: (seqno, from_id) of the message to get.
         :return: The rpc message associated with this mid
         """
@@ -72,6 +76,7 @@ class MessageCache:
     def window(self, topic: str) -> List[Tuple[bytes, bytes]]:
         """
         Get the window for this topic.
+
         :param topic: Topic whose message ids we desire.
         :return: List of mids in the current window.
         """
@@ -86,9 +91,8 @@ class MessageCache:
         return mids
 
     def shift(self) -> None:
-        """
-        Shift the window over by 1 position, dropping the last element of the history.
-        """
+        """Shift the window over by 1 position, dropping the last element of
+        the history."""
         last_entries: List[CacheEntry] = self.history[len(self.history) - 1]
 
         for entry in last_entries:

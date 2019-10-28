@@ -8,9 +8,7 @@ log = logging.getLogger(__name__)
 
 
 class SpiderCrawl:
-    """
-    Crawl the network and look for given 160-bit keys.
-    """
+    """Crawl the network and look for given 160-bit keys."""
 
     def __init__(self, protocol, node, peers, ksize, alpha):
         """
@@ -75,15 +73,11 @@ class ValueSpiderCrawl(SpiderCrawl):
         self.nearest_without_value = KadPeerHeap(self.node, 1)
 
     async def find(self):
-        """
-        Find either the closest nodes or the value requested.
-        """
+        """Find either the closest nodes or the value requested."""
         return await self._find(self.protocol.call_find_value)
 
     async def _nodes_found(self, responses):
-        """
-        Handle the result of an iteration in _find.
-        """
+        """Handle the result of an iteration in _find."""
         toremove = []
         found_values = []
         for peerid, response in responses.items():
@@ -107,10 +101,11 @@ class ValueSpiderCrawl(SpiderCrawl):
 
     async def _handle_found_values(self, values):
         """
-        We got some values!  Exciting.  But let's make sure
-        they're all the same or freak out a little bit.  Also,
-        make sure we tell the nearest node that *didn't* have
-        the value to store it.
+        We got some values!
+
+        Exciting.  But let's make sure they're all the same or freak out
+        a little bit.  Also, make sure we tell the nearest node that
+        *didn't* have the value to store it.
         """
         value_counts = Counter(values)
         if len(value_counts) != 1:
@@ -127,15 +122,11 @@ class ValueSpiderCrawl(SpiderCrawl):
 
 class NodeSpiderCrawl(SpiderCrawl):
     async def find(self):
-        """
-        Find the closest nodes.
-        """
+        """Find the closest nodes."""
         return await self._find(self.protocol.call_find_node)
 
     async def _nodes_found(self, responses):
-        """
-        Handle the result of an iteration in _find.
-        """
+        """Handle the result of an iteration in _find."""
         toremove = []
         for peerid, response in responses.items():
             response = RPCFindResponse(response)
@@ -163,9 +154,7 @@ class RPCFindResponse:
         self.response = response
 
     def happened(self):
-        """
-        Did the other host actually respond?
-        """
+        """Did the other host actually respond?"""
         return self.response[0]
 
     def has_value(self):
@@ -176,8 +165,9 @@ class RPCFindResponse:
 
     def get_node_list(self):
         """
-        Get the node list in the response.  If there's no value, this should
-        be set.
+        Get the node list in the response.
+
+        If there's no value, this should be set.
         """
         nodelist = self.response[1] or []
         return [create_kad_peerinfo(*nodeple) for nodeple in nodelist]

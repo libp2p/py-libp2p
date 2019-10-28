@@ -15,22 +15,16 @@ class KeyType(Enum):
 
 
 class Key(ABC):
-    """
-    A ``Key`` represents a cryptographic key.
-    """
+    """A ``Key`` represents a cryptographic key."""
 
     @abstractmethod
     def to_bytes(self) -> bytes:
-        """
-        Returns the byte representation of this key.
-        """
+        """Returns the byte representation of this key."""
         ...
 
     @abstractmethod
     def get_type(self) -> KeyType:
-        """
-        Returns the ``KeyType`` for ``self``.
-        """
+        """Returns the ``KeyType`` for ``self``."""
         ...
 
     def __eq__(self, other: object) -> bool:
@@ -40,30 +34,23 @@ class Key(ABC):
 
 
 class PublicKey(Key):
-    """
-    A ``PublicKey`` represents a cryptographic public key.
-    """
+    """A ``PublicKey`` represents a cryptographic public key."""
 
     @abstractmethod
     def verify(self, data: bytes, signature: bytes) -> bool:
-        """
-        Verify that ``signature`` is the cryptographic signature of the hash of ``data``.
-        """
+        """Verify that ``signature`` is the cryptographic signature of the hash
+        of ``data``."""
         ...
 
     def _serialize_to_protobuf(self) -> protobuf.PublicKey:
-        """
-        Return the protobuf representation of this ``Key``.
-        """
+        """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
         protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
-        """
-        Return the canonical serialization of this ``Key``.
-        """
+        """Return the canonical serialization of this ``Key``."""
         return self._serialize_to_protobuf().SerializeToString()
 
     @classmethod
@@ -72,9 +59,7 @@ class PublicKey(Key):
 
 
 class PrivateKey(Key):
-    """
-    A ``PrivateKey`` represents a cryptographic private key.
-    """
+    """A ``PrivateKey`` represents a cryptographic private key."""
 
     @abstractmethod
     def sign(self, data: bytes) -> bytes:
@@ -85,18 +70,14 @@ class PrivateKey(Key):
         ...
 
     def _serialize_to_protobuf(self) -> protobuf.PrivateKey:
-        """
-        Return the protobuf representation of this ``Key``.
-        """
+        """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
         protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
-        """
-        Return the canonical serialization of this ``Key``.
-        """
+        """Return the canonical serialization of this ``Key``."""
         return self._serialize_to_protobuf().SerializeToString()
 
     @classmethod

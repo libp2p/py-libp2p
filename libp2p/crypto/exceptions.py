@@ -6,9 +6,7 @@ class CryptographyError(BaseLibp2pError):
 
 
 class MissingDeserializerError(CryptographyError):
-    """
-    Raise if the requested deserialization routine is missing for
-    some type of cryptographic key.
-    """
+    """Raise if the requested deserialization routine is missing for some type
+    of cryptographic key."""
 
     pass

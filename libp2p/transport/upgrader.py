@@ -26,18 +26,14 @@ class TransportUpgrader:
         self.muxer_multistream = MuxerMultistream(muxer_transports_by_protocol)
 
     def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
-        """
-        Upgrade multiaddr listeners to libp2p-transport listeners
-        """
+        """Upgrade multiaddr listeners to libp2p-transport listeners."""
         # TODO: Figure out what to do with this function.
         pass
 
     async def upgrade_security(
         self, raw_conn: IRawConnection, peer_id: ID, is_initiator: bool
     ) -> ISecureConn:
-        """
-        Upgrade conn to a secured connection
-        """
+        """Upgrade conn to a secured connection."""
         try:
             if is_initiator:
                 return await self.security_multistream.secure_outbound(
@@ -54,9 +50,7 @@ class TransportUpgrader:
             ) from error
 
     async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
-        """
-        Upgrade secured connection to a muxed connection
-        """
+        """Upgrade secured connection to a muxed connection."""
         try:
             return await self.muxer_multistream.new_conn(conn, peer_id)
         except (MultiselectError, MultiselectClientError) as error:

@@ -61,12 +61,9 @@ class MacAndCipher:
 def initialize_pair(
     cipher_type: str, hash_type: str, secret: bytes
 ) -> Tuple[EncryptionParameters, EncryptionParameters]:
-    """
-    Return a pair of ``Keys`` for use in securing a
-    communications channel with authenticated encryption
-    derived from the ``secret`` and using the
-    requested ``cipher_type`` and ``hash_type``.
-    """
+    """Return a pair of ``Keys`` for use in securing a communications channel
+    with authenticated encryption derived from the ``secret`` and using the
+    requested ``cipher_type`` and ``hash_type``."""
     if cipher_type != "AES-128":
         raise NotImplementedError()
     if hash_type != "SHA256":

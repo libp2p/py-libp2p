@@ -42,7 +42,8 @@ class Mplex(IMuxedConn):
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
-        create a new muxed connection
+        create a new muxed connection.
+
         :param secured_conn: an instance of ``ISecureConn``
         :param generic_protocol_handler: generic protocol handler
         for new muxed streams
@@ -72,9 +73,7 @@ class Mplex(IMuxedConn):
         return self.secured_conn.is_initiator
 
     async def close(self) -> None:
-        """
-        close the stream muxer and underlying secured connection
-        """
+        """close the stream muxer and underlying secured connection."""
         if self.event_shutting_down.is_set():
             return
         # Set the `event_shutting_down`, to allow graceful shutdown.
@@ -85,14 +84,16 @@ class Mplex(IMuxedConn):
 
     def is_closed(self) -> bool:
         """
-        check connection is fully closed
+        check connection is fully closed.
+
         :return: true if successful
         """
         return self.event_closed.is_set()
 
     def _get_next_channel_id(self) -> int:
         """
-        Get next available stream id
+        Get next available stream id.
+
         :return: next available stream id for the connection
         """
         next_id = self.next_channel_id
@@ -107,7 +108,8 @@ class Mplex(IMuxedConn):
 
     async def open_stream(self) -> IMuxedStream:
         """
-        creates a new muxed_stream
+        creates a new muxed_stream.
+
         :return: a new ``MplexStream``
         """
         channel_id = self._get_next_channel_id()
@@ -135,9 +137,7 @@ class Mplex(IMuxedConn):
         return task_coro.result()
 
     async def accept_stream(self) -> IMuxedStream:
-        """
-        accepts a muxed stream opened by the other end
-        """
+        """accepts a muxed stream opened by the other end."""
         return await self._wait_until_shutting_down_or_closed(
             self.new_stream_queue.get()
         )
@@ -146,7 +146,8 @@ class Mplex(IMuxedConn):
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
     ) -> int:
         """
-        sends a message over the connection
+        sends a message over the connection.
+
         :param header: header to use
         :param data: data to send in the message
         :param stream_id: stream the message is in
@@ -165,7 +166,8 @@ class Mplex(IMuxedConn):
 
     async def write_to_stream(self, _bytes: bytes) -> int:
         """
-        writes a byte array to a secured connection
+        writes a byte array to a secured connection.
+
         :param _bytes: byte array to write
         :return: length written
         """
@@ -173,9 +175,8 @@ class Mplex(IMuxedConn):
         return len(_bytes)
 
     async def handle_incoming(self) -> None:
-        """
-        Read a message off of the secured connection and add it to the corresponding message buffer
-        """
+        """Read a message off of the secured connection and add it to the
+        corresponding message buffer."""
 
         while True:
             try:
@@ -190,7 +191,8 @@ class Mplex(IMuxedConn):
 
     async def read_message(self) -> Tuple[int, int, bytes]:
         """
-        Read a single message off of the secured connection
+        Read a single message off of the secured connection.
+
         :return: stream_id, flag, message contents
         """
 
@@ -217,6 +219,7 @@ class Mplex(IMuxedConn):
     async def _handle_incoming_message(self) -> None:
         """
         Read and handle a new incoming message.
+
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """
         channel_id, flag, message = await self._wait_until_shutting_down_or_closed(

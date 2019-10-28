@@ -12,12 +12,12 @@ def default_secure_bytes_provider(n: int) -> bytes:
 
 class BaseSecureTransport(ISecureTransport):
     """
-    ``BaseSecureTransport`` is not fully instantiated from its abstract classes as it
-    is only meant to be used in clases that derive from it.
+    ``BaseSecureTransport`` is not fully instantiated from its abstract classes
+    as it is only meant to be used in clases that derive from it.
 
-    Clients can provide a strategy to get cryptographically secure bytes of a given length.
-    A default implementation is provided using the ``secrets`` module from the
-    standard library.
+    Clients can provide a strategy to get cryptographically secure bytes
+    of a given length. A default implementation is provided using the
+    ``secrets`` module from the standard library.
     """
 
     def __init__(

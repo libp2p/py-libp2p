@@ -16,7 +16,8 @@ class KadmeliaPeerRouter(IPeerRouting):
 
     async def find_peer(self, peer_id: ID) -> PeerInfo:
         """
-        Find a specific peer
+        Find a specific peer.
+
         :param peer_id: peer to search for
         :return: PeerInfo of specified peer
         """

@@ -9,11 +9,13 @@ all: protobufs
 format:
 	black $(FILES_TO_LINT)
 	isort --recursive $(FILES_TO_LINT)
+	docformatter -ir --pre-summary-newline $(FILES_TO_LINT)
 
 lintroll:
 	mypy -p libp2p -p examples --config-file mypy.ini
 	black --check $(FILES_TO_LINT)
 	isort --recursive --check-only $(FILES_TO_LINT)
+	docformatter --pre-summary-newline --check --recursive $(FILES_TO_LINT)
 	flake8 $(FILES_TO_LINT)
 
 protobufs: $(PY)

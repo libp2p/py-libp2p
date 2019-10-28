@@ -16,8 +16,9 @@ class RoutedHost(BasicHost):
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer with
-        given `peer_info.peer_id`. See (basic_host).connect for more information.
+        connect ensures there is a connection between this host and the peer
+        with given `peer_info.peer_id`. See (basic_host).connect for more
+        information.
 
         RoutedHost's Connect differs in that if the host has no addresses for a
         given peer, it will use its routing system to try to find some.

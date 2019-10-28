@@ -44,4 +44,4 @@ class PeerData(IPeerData):
 
 
 class PeerDataError(KeyError):
-    """Raised when a key is not found in peer metadata"""
+    """Raised when a key is not found in peer metadata."""

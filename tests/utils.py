@@ -21,9 +21,7 @@ async def connect_swarm(swarm_0, swarm_1):
 
 
 async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
+    """Connect node1 to node2."""
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node1.connect(info)

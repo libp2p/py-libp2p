@@ -19,7 +19,7 @@ SHIFT_64_BIT_MAX = int(math.ceil(64 / 7)) * 7
 
 
 def encode_uvarint(number: int) -> bytes:
-    """Pack `number` into varint bytes"""
+    """Pack `number` into varint bytes."""
     buf = b""
     while True:
         towrite = number & 0x7F
@@ -33,9 +33,7 @@ def encode_uvarint(number: int) -> bytes:
 
 
 async def decode_uvarint_from_stream(reader: Reader) -> int:
-    """
-    https://en.wikipedia.org/wiki/LEB128
-    """
+    """https://en.wikipedia.org/wiki/LEB128."""
     res = 0
     for shift in itertools.count(0, 7):
         if shift > SHIFT_64_BIT_MAX:

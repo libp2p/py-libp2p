@@ -11,15 +11,14 @@ PROTOCOL_NOT_FOUND_MSG = "na"
 
 
 class MultiselectClient(IMultiselectClient):
-    """
-    Client for communicating with receiver's multiselect
-    module in order to select a protocol id to communicate over
-    """
+    """Client for communicating with receiver's multiselect module in order to
+    select a protocol id to communicate over."""
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
-        Ensure that the client and multiselect
-        are both using the same multiselect protocol
+        Ensure that the client and multiselect are both using the same
+        multiselect protocol.
+
         :param stream: stream to communicate with multiselect over
         :raise MultiselectClientError: raised when handshake failed
         """
@@ -40,9 +39,10 @@ class MultiselectClient(IMultiselectClient):
         self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
     ) -> TProtocol:
         """
-        For each protocol, send message to multiselect selecting protocol
-        and fail if multiselect does not return same protocol. Returns first
+        For each protocol, send message to multiselect selecting protocol and
+        fail if multiselect does not return same protocol. Returns first
         protocol that multiselect agrees on (i.e. that multiselect selects)
+
         :param protocol: protocol to select
         :param stream: stream to communicate with multiselect over
         :return: selected protocol
@@ -63,7 +63,8 @@ class MultiselectClient(IMultiselectClient):
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
     ) -> TProtocol:
         """
-        Try to select the given protocol or raise exception if fails
+        Try to select the given protocol or raise exception if fails.
+
         :param communicator: communicator to use to communicate with counterparty
         :param protocol: protocol to select
         :raise MultiselectClientError: raised when protocol negotiation failed
@@ -88,7 +89,8 @@ class MultiselectClient(IMultiselectClient):
 
 def is_valid_handshake(handshake_contents: str) -> bool:
     """
-    Determine if handshake is valid and should be confirmed
+    Determine if handshake is valid and should be confirmed.
+
     :param handshake_contents: contents of handshake message
     :return: true if handshake is complete, false otherwise
     """
