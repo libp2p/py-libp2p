@@ -11,11 +11,16 @@ log = logging.getLogger(__name__)
 
 
 class KademliaProtocol(RPCProtocol):
-    """There are four main RPCs in the Kademlia protocol PING, STORE,
-    FIND_NODE, FIND_VALUE PING probes if a node is still online STORE instructs
-    a node to store (key, value) FIND_NODE takes a 160-bit ID and gets back
-    (ip, udp_port, node_id) for k closest nodes to target FIND_VALUE behaves
-    like FIND_NODE unless a value is stored."""
+    """
+    There are four main RPCs in the Kademlia protocol PING, STORE, FIND_NODE,
+    FIND_VALUE.
+
+    - PING probes if a node is still online
+    - STORE instructs a node to store (key, value)
+    - FIND_NODE takes a 160-bit ID and gets back
+      (ip, udp_port, node_id) for k closest nodes to target
+    - FIND_VALUE behaves like FIND_NODE unless a value is stored.
+    """
 
     def __init__(self, source_node, storage, ksize):
         RPCProtocol.__init__(self)
