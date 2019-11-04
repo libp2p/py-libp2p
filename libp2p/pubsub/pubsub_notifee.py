@@ -49,7 +49,14 @@ class PubsubNotifee(INotifee):
         await self.initiator_peers_queue.put(conn.muxed_conn.peer_id)
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
-        pass
+        """
+        Add peer_id to dead_peers_queue, so that pubsub and its router can
+        remove this peer_id and close the stream inbetween.
+
+        :param network: network the connection was opened on
+        :param conn: connection that was opened
+        """
+        await self.dead_peers_queue.put(conn.muxed_conn.peer_id)
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         pass
