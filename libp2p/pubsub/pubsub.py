@@ -141,6 +141,7 @@ class Pubsub:
 
         # Call handle peer to keep waiting for updates to peer queue
         asyncio.ensure_future(self.handle_peer_queue())
+        asyncio.ensure_future(self.handle_dead_peer_queue())
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
         """Generate subscription message with all topics we are subscribed to
