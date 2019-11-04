@@ -15,13 +15,21 @@ if TYPE_CHECKING:
 class PubsubNotifee(INotifee):
 
     initiator_peers_queue: "asyncio.Queue[ID]"
+    dead_peers_queue: "asyncio.Queue[ID]"
 
-    def __init__(self, initiator_peers_queue: "asyncio.Queue[ID]") -> None:
+    def __init__(
+        self,
+        initiator_peers_queue: "asyncio.Queue[ID]",
+        dead_peers_queue: "asyncio.Queue[ID]",
+    ) -> None:
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub
         can process new peers after we connect to them
+        :param dead_peers_queue: queue to add dead peers to so that pubsub
+        can process dead peers after we disconnect from each other
         """
         self.initiator_peers_queue = initiator_peers_queue
+        self.dead_peers_queue = dead_peers_queue
 
     async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
         pass

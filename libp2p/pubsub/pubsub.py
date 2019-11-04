@@ -60,6 +60,7 @@ class Pubsub:
     router: "IPubsubRouter"
 
     peer_queue: "asyncio.Queue[ID]"
+    dead_peer_queue: "asyncio.Queue[ID]"
 
     protocols: List[TProtocol]
 
@@ -100,7 +101,10 @@ class Pubsub:
 
         # Register a notifee
         self.peer_queue = asyncio.Queue()
-        self.host.get_network().register_notifee(PubsubNotifee(self.peer_queue))
+        self.dead_peer_queue = asyncio.Queue()
+        self.host.get_network().register_notifee(
+            PubsubNotifee(self.peer_queue, self.dead_peer_queue)
+        )
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols
