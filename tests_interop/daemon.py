@@ -32,7 +32,9 @@ async def try_until_success(coro_func, timeout=TIMEOUT_DURATION):
             break
         if (time.monotonic() - t_start) >= timeout:
             # timeout
-            assert False, f"{coro_func} is still failing after `{timeout}` seconds"
+            raise AssertionError(
+                f"{coro_func} is still failing after `{timeout}` seconds"
+            )
         await asyncio.sleep(0.01)
 
 
