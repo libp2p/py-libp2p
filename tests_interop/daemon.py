@@ -5,6 +5,7 @@ from typing import Any, List
 import multiaddr
 from multiaddr import Multiaddr
 from p2pclient import Client
+import pytest
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
@@ -32,9 +33,7 @@ async def try_until_success(coro_func, timeout=TIMEOUT_DURATION):
             break
         if (time.monotonic() - t_start) >= timeout:
             # timeout
-            raise AssertionError(
-                f"{coro_func} is still failing after `{timeout}` seconds"
-            )
+            pytest.fail(f"{coro_func} is still failing after `{timeout}` seconds")
         await asyncio.sleep(0.01)
 
 
