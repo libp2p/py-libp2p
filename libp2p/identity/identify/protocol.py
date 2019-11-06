@@ -25,7 +25,7 @@ def identify_handler_for(
 ) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         peer_id = stream.muxed_conn.peer_id
-        logger.debug("received a request for % from %", ID, peer_id)
+        logger.debug("received a request for %s from %s", ID, peer_id)
 
         protobuf = Identify(
             protocol_version=PROTOCOL_VERSION,
@@ -40,6 +40,6 @@ def identify_handler_for(
 
         await stream.write(response)
         await stream.close()
-        logger.debug("succesfully handled request for % from %", ID, peer_id)
+        logger.debug("successfully handled request for %s from %s", ID, peer_id)
 
     return handle_identify
