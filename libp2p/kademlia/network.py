@@ -55,7 +55,7 @@ class KademliaServer:
     def _create_protocol(self):
         return self.protocol_class(self.node, self.storage, self.ksize)
 
-    async def listen(self, port, interface="0.0.0.0"):
+    async def listen(self, port=0, interface="0.0.0.0"):
         """
         Start listening on the given port.
 
@@ -65,8 +65,15 @@ class KademliaServer:
         listen = loop.create_datagram_endpoint(
             self._create_protocol, local_addr=(interface, port)
         )
-        log.info("Node %i listening on %s:%i", self.node.xor_id, interface, port)
         self.transport, self.protocol = await listen
+        socket = self.transport.get_extra_info("socket")
+        self.address = socket.getsockname()
+        log.info(
+            "Node %i listening on %s:%i",
+            self.node.xor_id,
+            self.address[0],
+            self.address[1],
+        )
         # finally, schedule refreshing table
         self.refresh_table()
 
