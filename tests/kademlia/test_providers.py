@@ -6,11 +6,11 @@ from libp2p.kademlia.network import KademliaServer
 @pytest.mark.asyncio
 async def test_example():
     node_a = KademliaServer()
-    await node_a.listen(5801)
+    await node_a.listen()
 
     node_b = KademliaServer()
-    await node_b.listen(5802)
-    await node_b.bootstrap([("127.0.0.1", 5801)])
+    await node_b.listen()
+    await node_b.bootstrap([node_a.address])
 
     key = "hello"
     value = "world"

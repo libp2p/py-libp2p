@@ -6,15 +6,15 @@ from libp2p.kademlia.network import KademliaServer
 @pytest.mark.asyncio
 async def test_example():
     node_a = KademliaServer()
-    await node_a.listen(5678)
+    await node_a.listen()
 
     node_b = KademliaServer()
-    await node_b.listen(5679)
+    await node_b.listen()
 
     # Bootstrap the node by connecting to other known nodes, in this case
     # replace 123.123.123.123 with the IP of another node and optionally
     # give as many ip/port combos as you can for other nodes.
-    await node_b.bootstrap([("127.0.0.1", 5678)])
+    await node_b.bootstrap([node_a.address])
 
     # set a value for the key "my-key" on the network
     value = "my-value"
