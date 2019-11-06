@@ -13,9 +13,8 @@ logger = logging.getLogger("libp2p.host.ping")
 
 
 async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
-    """
-    Return a boolean indicating if we expect more pings from the peer at ``peer_id``.
-    """
+    """Return a boolean indicating if we expect more pings from the peer at
+    ``peer_id``."""
     try:
         payload = await asyncio.wait_for(stream.read(PING_LENGTH), RESP_TIMEOUT)
     except asyncio.TimeoutError as error:
@@ -40,10 +39,8 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
 
 
 async def handle_ping(stream: INetStream) -> None:
-    """
-    ``handle_ping`` responds to incoming ping requests until one side
-    errors or closes the ``stream``.
-    """
+    """``handle_ping`` responds to incoming ping requests until one side errors
+    or closes the ``stream``."""
     peer_id = stream.muxed_conn.peer_id
 
     while True:
