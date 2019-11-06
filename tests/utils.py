@@ -46,9 +46,8 @@ async def set_up_nodes_by_transport_and_disc_opt(transport_disc_opt_list):
 
 
 async def set_up_routers(router_confs=[0, 0]):
-    """
-    The default ``router_confs`` selects two free ports local to this machine.
-    """
+    """The default ``router_confs`` selects two free ports local to this
+    machine."""
     bootstrap_node = KademliaServer()
     await bootstrap_node.listen(router_confs[0])
 
