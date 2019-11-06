@@ -39,6 +39,7 @@ class BasicHost(IHost):
     right after a stream is initialized.
     """
 
+    _public_key: PublicKey
     _network: INetwork
     peerstore: IPeerStore
 
