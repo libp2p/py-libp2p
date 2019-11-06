@@ -4,8 +4,9 @@ import logging
 from libp2p.network.stream.exceptions import StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID as PeerID
+from libp2p.typing import TProtocol
 
-ID = "/ipfs/ping/1.0.0"
+ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 RESP_TIMEOUT = 60
 
