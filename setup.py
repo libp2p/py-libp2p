@@ -16,6 +16,7 @@ extras_require = {
         "black==19.3b0",
         "isort==4.3.21",
         "flake8>=3.7.7,<4.0.0",
+        "flake8-bugbear",
     ],
     "dev": ["tox>=3.13.2,<4.0.0", "docformatter"],
 }
