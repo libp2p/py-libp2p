@@ -11,4 +11,6 @@ def test_default_protocols():
 
     mux = host.get_mux()
     handlers = mux.handlers
-    assert handlers == get_default_protocols(host)
+    # NOTE: comparing keys for equality as handlers may be closures that do not compare in the way
+    # this test is concerned with
+    assert handlers.keys() == get_default_protocols(host).keys()

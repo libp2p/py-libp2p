@@ -4,11 +4,11 @@ from multiaddr import Multiaddr
 
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.typing import StreamHandlerFn
+from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .pb.identify_pb2 import Identify
 
-ID = "/ipfs/id/1.0.0"
+ID = TProtocol("/ipfs/id/1.0.0")
 PROTOCOL_VERSION = "ipfs/0.1.0"
 # TODO dynamically generate the agent version
 AGENT_VERSION = "py-libp2p/alpha"
