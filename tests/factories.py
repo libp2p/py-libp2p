@@ -3,12 +3,13 @@ from typing import Dict, Tuple
 
 import factory
 
-from libp2p import generate_new_rsa_identity, initialize_default_swarm
+from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
+from libp2p.peer.peerstore import PeerStore
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
@@ -17,7 +18,9 @@ from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTr
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
 from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
+from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.typing import TMuxerOptions
+from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
 from tests.configs import LISTEN_MADDR
 from tests.pubsub.configs import (
@@ -37,21 +40,37 @@ def security_transport_factory(
         return {secio.ID: secio.Transport(key_pair)}
 
 
-def SwarmFactory(is_secure: bool, muxer_opt: TMuxerOptions = None) -> Swarm:
-    key_pair = generate_new_rsa_identity()
-    sec_opt = security_transport_factory(is_secure, key_pair)
-    return initialize_default_swarm(key_pair, sec_opt=sec_opt, muxer_opt=muxer_opt)
-
-
-class ListeningSwarmFactory(factory.Factory):
+class SwarmFactory(factory.Factory):
     class Meta:
         model = Swarm
 
+    class Params:
+        is_secure = False
+        key_pair = factory.LazyFunction(generate_new_rsa_identity)
+        muxer_opt = {MPLEX_PROTOCOL_ID: Mplex}
+
+    peer_id = factory.LazyAttribute(lambda o: generate_peer_id_from(o.key_pair))
+    peerstore = factory.LazyFunction(PeerStore)
+    upgrader = factory.LazyAttribute(
+        lambda o: TransportUpgrader(
+            security_transport_factory(o.is_secure, o.key_pair), o.muxer_opt
+        )
+    )
+    transport = factory.LazyFunction(TCP)
+
     @classmethod
     async def create_and_listen(
-        cls, is_secure: bool, muxer_opt: TMuxerOptions = None
+        cls, is_secure: bool, key_pair: KeyPair = None, muxer_opt: TMuxerOptions = None
     ) -> Swarm:
-        swarm = SwarmFactory(is_secure, muxer_opt=muxer_opt)
+        # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
+        # an argument explicitly with `None`. If an argument is `None`, we don't pass it to
+        # `factory.Factory.__init__`, in order to let the function initialize it.
+        optional_kwargs = {}
+        if key_pair is not None:
+            optional_kwargs["key_pair"] = key_pair
+        if muxer_opt is not None:
+            optional_kwargs["muxer_opt"] = muxer_opt
+        swarm = cls(is_secure=is_secure, **optional_kwargs)
         await swarm.listen(LISTEN_MADDR)
         return swarm
 
@@ -61,7 +80,7 @@ class ListeningSwarmFactory(factory.Factory):
     ) -> Tuple[Swarm, ...]:
         return await asyncio.gather(
             *[
-                cls.create_and_listen(is_secure, muxer_opt=muxer_opt)
+                cls.create_and_listen(is_secure=is_secure, muxer_opt=muxer_opt)
                 for _ in range(number)
             ]
         )
@@ -73,20 +92,28 @@ class HostFactory(factory.Factory):
 
     class Params:
         is_secure = False
+        key_pair = factory.LazyFunction(generate_new_rsa_identity)
 
-    network = factory.LazyAttribute(lambda o: SwarmFactory(o.is_secure))
-
-    @classmethod
-    async def create_and_listen(cls, is_secure: bool) -> BasicHost:
-        swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, 1)
-        return BasicHost(swarms[0])
+    public_key = factory.LazyAttribute(lambda o: o.key_pair.public_key)
+    network = factory.LazyAttribute(
+        lambda o: SwarmFactory(is_secure=o.is_secure, key_pair=o.key_pair)
+    )
 
     @classmethod
     async def create_batch_and_listen(
         cls, is_secure: bool, number: int
     ) -> Tuple[BasicHost, ...]:
-        swarms = await ListeningSwarmFactory.create_batch_and_listen(is_secure, number)
-        return tuple(BasicHost(swarm) for swarm in range(swarms))
+        key_pairs = [generate_new_rsa_identity() for _ in range(number)]
+        swarms = await asyncio.gather(
+            *[
+                SwarmFactory.create_and_listen(is_secure, key_pair)
+                for key_pair in key_pairs
+            ]
+        )
+        return tuple(
+            BasicHost(key_pair.public_key, swarm)
+            for key_pair, swarm in zip(key_pairs, swarms)
+        )
 
 
 class FloodsubFactory(factory.Factory):
@@ -123,7 +150,7 @@ class PubsubFactory(factory.Factory):
 async def swarm_pair_factory(
     is_secure: bool, muxer_opt: TMuxerOptions = None
 ) -> Tuple[Swarm, Swarm]:
-    swarms = await ListeningSwarmFactory.create_batch_and_listen(
+    swarms = await SwarmFactory.create_batch_and_listen(
         is_secure, 2, muxer_opt=muxer_opt
     )
     await connect_swarm(swarms[0], swarms[1])
@@ -131,12 +158,7 @@ async def swarm_pair_factory(
 
 
 async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
-    hosts = await asyncio.gather(
-        *[
-            HostFactory.create_and_listen(is_secure),
-            HostFactory.create_and_listen(is_secure),
-        ]
-    )
+    hosts = await HostFactory.create_batch_and_listen(is_secure, 2)
     await connect(hosts[0], hosts[1])
     return hosts[0], hosts[1]
 

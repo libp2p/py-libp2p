@@ -1,3 +1,4 @@
+from libp2p.crypto.keys import PublicKey
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.network.network_interface import INetwork
@@ -10,8 +11,8 @@ from libp2p.routing.interfaces import IPeerRouting
 class RoutedHost(BasicHost):
     _router: IPeerRouting
 
-    def __init__(self, network: INetwork, router: IPeerRouting):
-        super().__init__(network)
+    def __init__(self, public_key: PublicKey, network: INetwork, router: IPeerRouting):
+        super().__init__(public_key, network)
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:

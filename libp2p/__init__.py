@@ -77,7 +77,6 @@ def initialize_default_swarm(
     muxer_opt: TMuxerOptions = None,
     sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
-    disc_opt: IPeerRouting = None,
 ) -> Swarm:
     """
     initialize swarm when no swarm is passed in.
@@ -87,7 +86,6 @@ def initialize_default_swarm(
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
-    :param disc_opt: optional discovery
     :return: return a default swarm instance
     """
 
@@ -147,16 +145,15 @@ async def new_node(
             muxer_opt=muxer_opt,
             sec_opt=sec_opt,
             peerstore_opt=peerstore_opt,
-            disc_opt=disc_opt,
         )
 
     # TODO enable support for other host type
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
     if disc_opt:
-        host = RoutedHost(swarm_opt, disc_opt)
+        host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
     else:
-        host = BasicHost(swarm_opt)
+        host = BasicHost(key_pair.public_key, swarm_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())

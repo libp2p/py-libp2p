@@ -1,11 +1,10 @@
 import logging
-from typing import Sequence
 
 from multiaddr import Multiaddr
 
-from libp2p.crypto.keys import PublicKey
+from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import StreamHandlerFn
 
 from .pb.identify_pb2 import Identify
 
@@ -20,12 +19,14 @@ def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
     return maddr.to_bytes()
 
 
-def identify_handler_for(
-    public_key: PublicKey, laddrs: Sequence[Multiaddr], protocols: Sequence[TProtocol]
-) -> StreamHandlerFn:
+def identify_handler_for(host: IHost) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         peer_id = stream.muxed_conn.peer_id
         logger.debug("received a request for %s from %s", ID, peer_id)
+
+        public_key = host.get_public_key()
+        laddrs = host.get_addrs()
+        protocols = host.get_mux().get_protocols()
 
         protobuf = Identify(
             protocol_version=PROTOCOL_VERSION,

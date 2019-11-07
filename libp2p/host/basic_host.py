@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, List, Sequence
 
 import multiaddr
 
+from libp2p.crypto.keys import PublicKey
 from libp2p.host.defaults import get_default_protocols
 from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
@@ -38,6 +39,7 @@ class BasicHost(IHost):
     right after a stream is initialized.
     """
 
+    _public_key: PublicKey
     _network: INetwork
     peerstore: IPeerStore
 
@@ -46,14 +48,16 @@ class BasicHost(IHost):
 
     def __init__(
         self,
+        public_key: PublicKey,
         network: INetwork,
         default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
     ) -> None:
+        self._public_key = public_key
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         # Protocol muxing
-        default_protocols = default_protocols or get_default_protocols()
+        default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(default_protocols)
         self.multiselect_client = MultiselectClient()
 
@@ -62,6 +66,9 @@ class BasicHost(IHost):
         :return: peer_id of host
         """
         return self._network.get_peer_id()
+
+    def get_public_key(self) -> PublicKey:
+        return self._public_key
 
     def get_network(self) -> INetwork:
         """
