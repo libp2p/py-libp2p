@@ -111,6 +111,9 @@ class SecureSession(BaseSession):
         self.high_watermark = len(msg)
 
     async def read(self, n: int = -1) -> bytes:
+        if n == 0:
+            return bytes()
+
         data_from_buffer = self._drain(n)
         if len(data_from_buffer) > 0:
             return data_from_buffer
