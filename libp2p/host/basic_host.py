@@ -168,7 +168,11 @@ class BasicHost(IHost):
             protocol, handler = await self.multiselect.negotiate(
                 MultiselectCommunicator(net_stream)
             )
-        except MultiselectError:
+        except MultiselectError as error:
+            peer_id = net_stream.muxed_conn.peer_id
+            logger.debug(
+                "failed to accept a stream from peer %s, error=%s", peer_id, error
+            )
             await net_stream.reset()
             return
         net_stream.set_protocol(protocol)

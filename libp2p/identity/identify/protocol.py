@@ -19,24 +19,28 @@ def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
     return maddr.to_bytes()
 
 
+def _mk_identify_protobuf(host: IHost) -> Identify:
+    public_key = host.get_public_key()
+    laddrs = host.get_addrs()
+    protocols = host.get_mux().get_protocols()
+
+    return Identify(
+        protocol_version=PROTOCOL_VERSION,
+        agent_version=AGENT_VERSION,
+        public_key=public_key.serialize(),
+        listen_addrs=map(_multiaddr_to_bytes, laddrs),
+        # TODO send observed address from ``stream``
+        observed_addr=b"",
+        protocols=protocols,
+    )
+
+
 def identify_handler_for(host: IHost) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         peer_id = stream.muxed_conn.peer_id
         logger.debug("received a request for %s from %s", ID, peer_id)
 
-        public_key = host.get_public_key()
-        laddrs = host.get_addrs()
-        protocols = host.get_mux().get_protocols()
-
-        protobuf = Identify(
-            protocol_version=PROTOCOL_VERSION,
-            agent_version=AGENT_VERSION,
-            public_key=public_key.serialize(),
-            listen_addrs=map(_multiaddr_to_bytes, laddrs),
-            # TODO send observed address from ``stream``
-            observed_addr=b"",
-            protocols=protocols,
-        )
+        protobuf = _mk_identify_protobuf(host)
         response = protobuf.SerializeToString()
 
         await stream.write(response)

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Dict, Tuple
 
 import factory
@@ -161,6 +162,14 @@ async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
     hosts = await HostFactory.create_batch_and_listen(is_secure, 2)
     await connect(hosts[0], hosts[1])
     return hosts[0], hosts[1]
+
+
+@asynccontextmanager
+async def pair_of_connected_hosts(is_secure=True):
+    a, b = await host_pair_factory(is_secure)
+    yield a, b
+    close_tasks = (a.close(), b.close())
+    await asyncio.gather(*close_tasks)
 
 
 async def swarm_conn_pair_factory(
