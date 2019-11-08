@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
@@ -22,6 +23,8 @@ from .exceptions import MplexUnavailable
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
+
+logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
 
 
 class Mplex(IMuxedConn):
@@ -181,7 +184,8 @@ class Mplex(IMuxedConn):
         while True:
             try:
                 await self._handle_incoming_message()
-            except MplexUnavailable:
+            except MplexUnavailable as e:
+                logger.debug("mplex unavailable while waiting for incoming: %s", e)
                 break
             # Force context switch
             await asyncio.sleep(0)
