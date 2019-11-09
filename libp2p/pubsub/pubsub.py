@@ -32,6 +32,7 @@ from .validators import signature_validator
 
 if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter  # noqa: F401
+    from typing import Any  # noqa: F401
 
 
 logger = logging.getLogger("libp2p.pubsub")
@@ -177,7 +178,11 @@ class Pubsub:
                     logger.debug(
                         "received `publish` message %s from peer %s", msg, peer_id
                     )
-                    self._tasks.append(asyncio.ensure_future(self.push_msg(msg_forwarder=peer_id, msg=msg)))
+                    self._tasks.append(
+                        asyncio.ensure_future(
+                            self.push_msg(msg_forwarder=peer_id, msg=msg)
+                        )
+                    )
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -311,10 +316,8 @@ class Pubsub:
             self._tasks.append(asyncio.ensure_future(self._handle_new_peer(peer_id)))
 
     async def handle_dead_peer_queue(self) -> None:
-        """
-        Continuously read from dead peer queue and close the stream between that peer and
-        remove peer info from pubsub and pubsub router.
-        """
+        """Continuously read from dead peer queue and close the stream between
+        that peer and remove peer info from pubsub and pubsub router."""
         while True:
             peer_id: ID = await self.dead_peer_queue.get()
             # Remove Peer
