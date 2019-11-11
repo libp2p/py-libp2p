@@ -24,18 +24,6 @@ from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
 
 
-async def cleanup_done_tasks() -> None:
-    """clean up asyncio done tasks to free up resources."""
-    while True:
-        for task in asyncio.all_tasks():
-            if task.done():
-                await task
-
-        # Need not run often
-        # Some sleep necessary to context switch
-        await asyncio.sleep(3)
-
-
 def generate_new_rsa_identity() -> KeyPair:
     return create_new_key_pair()
 
@@ -154,8 +142,5 @@ async def new_node(
         host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
     else:
         host = BasicHost(key_pair.public_key, swarm_opt)
-
-    # Kick off cleanup job
-    asyncio.ensure_future(cleanup_done_tasks())
 
     return host

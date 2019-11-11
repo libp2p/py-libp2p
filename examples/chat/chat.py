@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import trio_asyncio
+import trio
 import sys
 import urllib.request
 
@@ -74,6 +76,10 @@ async def run(port: int, destination: str, localhost: bool) -> None:
         asyncio.ensure_future(write_data(stream))
         print("Connected to peer %s" % info.addrs[0])
 
+async def async_main_wrapper(*args):
+    async with trio_asyncio.open_loop() as loop:
+        assert loop == asyncio.get_event_loop()
+        await run(*args)
 
 def main() -> None:
     description = """
@@ -112,15 +118,7 @@ def main() -> None:
     if not args.port:
         raise RuntimeError("was not able to determine a local port")
 
-    loop = asyncio.get_event_loop()
-    try:
-        asyncio.ensure_future(run(args.port, args.destination, args.localhost))
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
-
+    trio.run(async_main_wrapper, *(args.port, args.destination, args.localhost))
 
 if __name__ == "__main__":
     main()
