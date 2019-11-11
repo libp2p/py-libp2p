@@ -79,7 +79,10 @@ async def run(port: int, destination: str, localhost: bool) -> None:
 async def async_main_wrapper(*args):
     async with trio_asyncio.open_loop() as loop:
         assert loop == asyncio.get_event_loop()
-        await run(*args)
+        stopped_event = trio.Event()
+        await trio_asyncio.run_asyncio(run, *args)
+        await stopped_event.wait()
+
 
 def main() -> None:
     description = """
