@@ -3,6 +3,7 @@ import logging
 from multiaddr import Multiaddr
 
 from libp2p.host.host_interface import IHost
+from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.typing import StreamHandlerFn, TProtocol
 
@@ -43,8 +44,12 @@ def identify_handler_for(host: IHost) -> StreamHandlerFn:
         protobuf = _mk_identify_protobuf(host)
         response = protobuf.SerializeToString()
 
-        await stream.write(response)
-        await stream.close()
-        logger.debug("successfully handled request for %s from %s", ID, peer_id)
+        try:
+            await stream.write(response)
+        except StreamClosed:
+            logger.debug("Fail to respond to %s request: stream closed", ID)
+        else:
+            await stream.close()
+            logger.debug("successfully handled request for %s from %s", ID, peer_id)
 
     return handle_identify
