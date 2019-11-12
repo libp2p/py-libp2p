@@ -23,7 +23,8 @@ class TCPListener(IListener):
 
     async def listen(self, maddr: Multiaddr) -> bool:
         """
-        put listener in listening mode and wait for incoming connections
+        put listener in listening mode and wait for incoming connections.
+
         :param maddr: maddr of peer
         :return: return True if successful
         """
@@ -39,17 +40,16 @@ class TCPListener(IListener):
 
     def get_addrs(self) -> List[Multiaddr]:
         """
-        retrieve list of addresses the listener is listening on
+        retrieve list of addresses the listener is listening on.
+
         :return: return list of addrs
         """
         # TODO check if server is listening
         return self.multiaddrs
 
     async def close(self) -> None:
-        """
-        close the listener such that no more connections
-        can be open on this transport instance
-        """
+        """close the listener such that no more connections can be open on this
+        transport instance."""
         if self.server is None:
             return
         self.server.close()
@@ -60,7 +60,8 @@ class TCPListener(IListener):
 class TCP(ITransport):
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
-        dial a transport to peer listening on multiaddr
+        dial a transport to peer listening on multiaddr.
+
         :param maddr: multiaddr of peer
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
@@ -77,9 +78,10 @@ class TCP(ITransport):
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """
-        create listener on transport
+        create listener on transport.
+
         :param handler_function: a function called when a new connection is received
-        that takes a connection as argument which implements interface-connection
+            that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
         return TCPListener(handler_function)

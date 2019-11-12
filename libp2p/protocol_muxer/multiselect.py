@@ -11,20 +11,23 @@ PROTOCOL_NOT_FOUND_MSG = "na"
 
 
 class Multiselect(IMultiselectMuxer):
-    """
-    Multiselect module that is responsible for responding to
-    a multiselect client and deciding on
-    a specific protocol and handler pair to use for communication
-    """
+    """Multiselect module that is responsible for responding to a multiselect
+    client and deciding on a specific protocol and handler pair to use for
+    communication."""
 
     handlers: Dict[TProtocol, StreamHandlerFn]
 
-    def __init__(self) -> None:
-        self.handlers = {}
+    def __init__(
+        self, default_handlers: Dict[TProtocol, StreamHandlerFn] = None
+    ) -> None:
+        if not default_handlers:
+            default_handlers = {}
+        self.handlers = default_handlers
 
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
         """
-        Store the handler with the given protocol
+        Store the handler with the given protocol.
+
         :param protocol: protocol name
         :param handler: handler function
         """
@@ -34,7 +37,8 @@ class Multiselect(IMultiselectMuxer):
         self, communicator: IMultiselectCommunicator
     ) -> Tuple[TProtocol, StreamHandlerFn]:
         """
-        Negotiate performs protocol selection
+        Negotiate performs protocol selection.
+
         :param stream: stream to negotiate on
         :return: selected protocol name, handler function
         :raise MultiselectError: raised when negotiation failed
@@ -66,7 +70,8 @@ class Multiselect(IMultiselectMuxer):
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
-        Perform handshake to agree on multiselect protocol
+        Perform handshake to agree on multiselect protocol.
+
         :param communicator: communicator to use
         :raise MultiselectError: raised when handshake failed
         """
@@ -80,16 +85,17 @@ class Multiselect(IMultiselectMuxer):
         except MultiselectCommunicatorError as error:
             raise MultiselectError(error)
 
-        if not validate_handshake(handshake_contents):
+        if not is_valid_handshake(handshake_contents):
             raise MultiselectError(
                 "multiselect protocol ID mismatch: "
                 f"received handshake_contents={handshake_contents}"
             )
 
 
-def validate_handshake(handshake_contents: str) -> bool:
+def is_valid_handshake(handshake_contents: str) -> bool:
     """
-    Determine if handshake is valid and should be confirmed
+    Determine if handshake is valid and should be confirmed.
+
     :param handshake_contents: contents of handshake message
     :return: true if handshake is complete, false otherwise
     """

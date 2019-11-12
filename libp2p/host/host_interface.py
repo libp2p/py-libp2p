@@ -3,6 +3,7 @@ from typing import Any, List, Sequence
 
 import multiaddr
 
+from libp2p.crypto.keys import PublicKey
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
@@ -15,6 +16,12 @@ class IHost(ABC):
     def get_id(self) -> ID:
         """
         :return: peer_id of host
+        """
+
+    @abstractmethod
+    def get_public_key(self) -> PublicKey:
+        """
+        :return: the public key belonging to the peer
         """
 
     @abstractmethod
@@ -41,7 +48,8 @@ class IHost(ABC):
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
     ) -> None:
         """
-        set stream handler for host
+        set stream handler for host.
+
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
         """
@@ -61,10 +69,11 @@ class IHost(ABC):
     @abstractmethod
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer with
-        given peer_info.peer_id. connect will absorb the addresses in peer_info into its internal
-        peerstore. If there is not an active connection, connect will issue a
-        dial, and block until a connection is opened, or an error is returned.
+        connect ensures there is a connection between this host and the peer
+        with given peer_info.peer_id. connect will absorb the addresses in
+        peer_info into its internal peerstore. If there is not an active
+        connection, connect will issue a dial, and block until a connection is
+        opened, or an error is returned.
 
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo

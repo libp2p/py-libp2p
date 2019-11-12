@@ -1,5 +1,6 @@
 from typing import Optional
 
+from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.serialization import deserialize_public_key
@@ -28,10 +29,10 @@ class InsecureSession(BaseSession):
         local_peer: ID,
         local_private_key: PrivateKey,
         conn: ReadWriteCloser,
-        initiator: bool,
+        is_initiator: bool,
         peer_id: Optional[ID] = None,
     ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, peer_id)
+        super().__init__(local_peer, local_private_key, is_initiator, peer_id)
         self.conn = conn
 
     async def write(self, data: bytes) -> int:
@@ -45,9 +46,7 @@ class InsecureSession(BaseSession):
         await self.conn.close()
 
     async def run_handshake(self) -> None:
-        """
-        Raise `HandshakeFailure` when handshake failed
-        """
+        """Raise `HandshakeFailure` when handshake failed."""
         msg = make_exchange_message(self.local_private_key.get_public_key())
         msg_bytes = msg.SerializeToString()
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
@@ -67,7 +66,7 @@ class InsecureSession(BaseSession):
         # Verify if the receive `ID` matches the one we originally initialize the session.
         # We only need to check it when we are the initiator, because only in that condition
         # we possibly knows the `ID` of the remote.
-        if self.initiator and self.remote_peer_id != received_peer_id:
+        if self.is_initiator and self.remote_peer_id != received_peer_id:
             raise HandshakeFailure(
                 "remote peer sent unexpected peer ID. "
                 f"expected={self.remote_peer_id} received={received_peer_id}"
@@ -82,6 +81,8 @@ class InsecureSession(BaseSession):
             raise HandshakeFailure(
                 f"unknown `key_type` of remote_msg.pubkey={remote_msg.pubkey}"
             )
+        except MissingDeserializerError as error:
+            raise HandshakeFailure(error)
         peer_id_from_received_pubkey = ID.from_pubkey(received_pubkey)
         if peer_id_from_received_pubkey != received_peer_id:
             raise HandshakeFailure(
@@ -94,22 +95,23 @@ class InsecureSession(BaseSession):
         self.remote_permanent_pubkey = received_pubkey
         # Only need to set peer's id when we don't know it before,
         # i.e. we are not the connection initiator.
-        if not self.initiator:
+        if not self.is_initiator:
             self.remote_peer_id = received_peer_id
 
         # TODO: Store `pubkey` and `peer_id` to `PeerStore`
 
 
 class InsecureTransport(BaseSecureTransport):
-    """
-    ``InsecureTransport`` provides the "identity" upgrader for a ``IRawConnection``,
-    i.e. the upgraded transport does not add any additional security.
-    """
+    """``InsecureTransport`` provides the "identity" upgrader for a
+    ``IRawConnection``, i.e. the upgraded transport does not add any additional
+    security."""
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are not the initiator)
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are not the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         session = InsecureSession(self.local_peer, self.local_private_key, conn, False)
@@ -118,8 +120,9 @@ class InsecureTransport(BaseSecureTransport):
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are the initiator)
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are the initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         session = InsecureSession(

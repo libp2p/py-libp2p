@@ -97,6 +97,7 @@ class GossipSub(IPubsubRouter):
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.
+
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
@@ -109,7 +110,8 @@ class GossipSub(IPubsubRouter):
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
-        Notifies the router that a new peer has been connected
+        Notifies the router that a new peer has been connected.
+
         :param peer_id: id of peer to add
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
@@ -130,7 +132,8 @@ class GossipSub(IPubsubRouter):
 
     def remove_peer(self, peer_id: ID) -> None:
         """
-        Notifies the router that a peer has been disconnected
+        Notifies the router that a peer has been disconnected.
+
         :param peer_id: id of peer to remove
         """
         logger.debug("removing peer %s", peer_id)
@@ -145,8 +148,9 @@ class GossipSub(IPubsubRouter):
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
-        Invoked to process control messages in the RPC envelope.
-        It is invoked after subscriptions and payload messages have been processed
+        Invoked to process control messages in the RPC envelope. It is invoked
+        after subscriptions and payload messages have been processed.
+
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
         """
@@ -167,9 +171,7 @@ class GossipSub(IPubsubRouter):
                 await self.handle_prune(prune, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
-        """
-        Invoked to forward a new message that has been validated.
-        """
+        """Invoked to forward a new message that has been validated."""
         self.mcache.put(pubsub_msg)
 
         peers_gen = self._get_peers_to_send(
@@ -193,6 +195,7 @@ class GossipSub(IPubsubRouter):
     ) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
+
         :param msg_forwarder: the peer id of the peer who forwards the message to me.
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
@@ -234,9 +237,9 @@ class GossipSub(IPubsubRouter):
     async def join(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec
         """
-        Join notifies the router that we want to receive and
-        forward messages in a topic. It is invoked after the
-        subscription announcement
+        Join notifies the router that we want to receive and forward messages
+        in a topic. It is invoked after the subscription announcement.
+
         :param topic: topic to join
         """
         logger.debug("joining topic %s", topic)
@@ -274,6 +277,7 @@ class GossipSub(IPubsubRouter):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
+
         :param topic: topic to leave
         """
         logger.debug("leaving topic %s", topic)
@@ -291,6 +295,7 @@ class GossipSub(IPubsubRouter):
     async def heartbeat(self) -> None:
         """
         Call individual heartbeats.
+
         Note: the heartbeats are called with awaits because each heartbeat depends on the
         state changes in the preceding heartbeat
         """
@@ -453,9 +458,8 @@ class GossipSub(IPubsubRouter):
     async def handle_ihave(
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
-        """
-        Checks the seen set and requests unknown messages with an IWANT message.
-        """
+        """Checks the seen set and requests unknown messages with an IWANT
+        message."""
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in seen_messages cache
         seen_seqnos_and_peers = [
             seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()
@@ -477,9 +481,8 @@ class GossipSub(IPubsubRouter):
     async def handle_iwant(
         self, iwant_msg: rpc_pb2.ControlIWant, sender_peer_id: ID
     ) -> None:
-        """
-        Forwards all request messages that are present in mcache to the requesting peer.
-        """
+        """Forwards all request messages that are present in mcache to the
+        requesting peer."""
         # FIXME: Update type of message ID
         # FIXME: Find a better way to parse the msg ids
         msg_ids: List[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
@@ -536,9 +539,7 @@ class GossipSub(IPubsubRouter):
     # RPC emitters
 
     async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
-        """
-        Emit ihave message, sent to to_peer, for topic and msg_ids
-        """
+        """Emit ihave message, sent to to_peer, for topic and msg_ids."""
 
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
         ihave_msg.messageIDs.extend(msg_ids)
@@ -550,9 +551,7 @@ class GossipSub(IPubsubRouter):
         await self.emit_control_message(control_msg, to_peer)
 
     async def emit_iwant(self, msg_ids: Any, to_peer: ID) -> None:
-        """
-        Emit iwant message, sent to to_peer, for msg_ids
-        """
+        """Emit iwant message, sent to to_peer, for msg_ids."""
 
         iwant_msg: rpc_pb2.ControlIWant = rpc_pb2.ControlIWant()
         iwant_msg.messageIDs.extend(msg_ids)
@@ -563,9 +562,7 @@ class GossipSub(IPubsubRouter):
         await self.emit_control_message(control_msg, to_peer)
 
     async def emit_graft(self, topic: str, to_peer: ID) -> None:
-        """
-        Emit graft message, sent to to_peer, for topic
-        """
+        """Emit graft message, sent to to_peer, for topic."""
 
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
@@ -576,9 +573,7 @@ class GossipSub(IPubsubRouter):
         await self.emit_control_message(control_msg, to_peer)
 
     async def emit_prune(self, topic: str, to_peer: ID) -> None:
-        """
-        Emit graft message, sent to to_peer, for topic
-        """
+        """Emit graft message, sent to to_peer, for topic."""
 
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic

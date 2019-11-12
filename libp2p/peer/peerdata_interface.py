@@ -39,9 +39,7 @@ class IPeerData(ABC):
 
     @abstractmethod
     def clear_addrs(self) -> None:
-        """
-        Clear all addresses
-        """
+        """Clear all addresses."""
 
     @abstractmethod
     def put_metadata(self, key: str, val: Any) -> None:

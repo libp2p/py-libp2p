@@ -1,6 +1,6 @@
 """
-Test Notify and Notifee by ensuring that the proper events get
-called, and that the stream passed into opened_stream is correct
+Test Notify and Notifee by ensuring that the proper events get called, and that
+the stream passed into opened_stream is correct.
 
 Note: Listen event does not get hit because MyNotifee is passed
 into network after network has already started listening
@@ -56,7 +56,7 @@ class MyNotifee(INotifee):
 
 @pytest.mark.asyncio
 async def test_notify(is_host_secure):
-    swarms = [SwarmFactory(is_host_secure) for _ in range(2)]
+    swarms = [SwarmFactory(is_secure=is_host_secure) for _ in range(2)]
 
     events_0_0 = []
     events_1_0 = []

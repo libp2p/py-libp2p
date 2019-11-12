@@ -25,9 +25,7 @@ from libp2p.typing import TProtocol
 
 
 async def cleanup_done_tasks() -> None:
-    """
-    clean up asyncio done tasks to free up resources
-    """
+    """clean up asyncio done tasks to free up resources."""
     while True:
         for task in asyncio.all_tasks():
             if task.done():
@@ -51,7 +49,8 @@ def initialize_default_kademlia_router(
     ksize: int = 20, alpha: int = 3, id_opt: ID = None, storage: IStorage = None
 ) -> KadmeliaPeerRouter:
     """
-    initialize kadmelia router when no kademlia router is passed in
+    initialize kadmelia router when no kademlia router is passed in.
+
     :param ksize: The k parameter from the paper
     :param alpha: The alpha parameter from the paper
     :param id_opt: optional id for host
@@ -78,16 +77,15 @@ def initialize_default_swarm(
     muxer_opt: TMuxerOptions = None,
     sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
-    disc_opt: IPeerRouting = None,
 ) -> Swarm:
     """
-    initialize swarm when no swarm is passed in
+    initialize swarm when no swarm is passed in.
+
     :param id_opt: optional id for host
     :param transport_opt: optional choice of transport upgrade
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
-    :param disc_opt: optional discovery
     :return: return a default swarm instance
     """
 
@@ -121,7 +119,8 @@ async def new_node(
     disc_opt: IPeerRouting = None,
 ) -> IHost:
     """
-    create new libp2p node
+    create new libp2p node.
+
     :param key_pair: key pair for deriving an identity
     :param swarm_opt: optional swarm
     :param id_opt: optional id for host
@@ -146,16 +145,15 @@ async def new_node(
             muxer_opt=muxer_opt,
             sec_opt=sec_opt,
             peerstore_opt=peerstore_opt,
-            disc_opt=disc_opt,
         )
 
     # TODO enable support for other host type
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
     if disc_opt:
-        host = RoutedHost(swarm_opt, disc_opt)
+        host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
     else:
-        host = BasicHost(swarm_opt)
+        host = BasicHost(key_pair.public_key, swarm_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())

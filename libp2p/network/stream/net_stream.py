@@ -39,7 +39,8 @@ class NetStream(INetStream):
 
     async def read(self, n: int = -1) -> bytes:
         """
-        reads from stream
+        reads from stream.
+
         :param n: number of bytes to read
         :return: bytes of input
         """
@@ -52,7 +53,8 @@ class NetStream(INetStream):
 
     async def write(self, data: bytes) -> int:
         """
-        write to stream
+        write to stream.
+
         :return: number of bytes written
         """
         try:
@@ -61,9 +63,7 @@ class NetStream(INetStream):
             raise StreamClosed from error
 
     async def close(self) -> None:
-        """
-        close stream
-        """
+        """close stream."""
         await self.muxed_stream.close()
 
     async def reset(self) -> None:

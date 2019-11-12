@@ -9,11 +9,11 @@ from libp2p.security.secio.transport import NONCE_SIZE, create_secure_session
 
 
 class InMemoryConnection(IRawConnection):
-    def __init__(self, peer, initiator=False):
+    def __init__(self, peer, is_initiator=False):
         self.peer = peer
         self.recv_queue = asyncio.Queue()
         self.send_queue = asyncio.Queue()
-        self.initiator = initiator
+        self.is_initiator = is_initiator
 
         self.current_msg = None
         self.current_position = 0
@@ -73,7 +73,7 @@ async def test_create_secure_session():
     remote_key_pair = create_new_key_pair(b"b")
     remote_peer = ID.from_pubkey(remote_key_pair.public_key)
 
-    local_conn = InMemoryConnection(local_peer, initiator=True)
+    local_conn = InMemoryConnection(local_peer, is_initiator=True)
     remote_conn = InMemoryConnection(remote_peer)
 
     local_pipe_task = asyncio.create_task(create_pipe(local_conn, remote_conn))

@@ -21,9 +21,7 @@ async def connect_swarm(swarm_0, swarm_1):
 
 
 async def connect(node1, node2):
-    """
-    Connect node1 to node2
-    """
+    """Connect node1 to node2."""
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node1.connect(info)
@@ -47,7 +45,9 @@ async def set_up_nodes_by_transport_and_disc_opt(transport_disc_opt_list):
     return tuple(nodes_list)
 
 
-async def set_up_routers(router_confs):
+async def set_up_routers(router_confs=(0, 0)):
+    """The default ``router_confs`` selects two free ports local to this
+    machine."""
     bootstrap_node = KademliaServer()
     await bootstrap_node.listen(router_confs[0])
 
@@ -56,7 +56,7 @@ async def set_up_routers(router_confs):
         node = KademliaServer()
         await node.listen(port)
 
-        await node.bootstrap_node(("127.0.0.1", router_confs[0]))
+        await node.bootstrap_node(bootstrap_node.address)
         routers.append(KadmeliaPeerRouter(node))
     return routers
 

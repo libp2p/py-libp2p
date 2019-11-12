@@ -8,6 +8,7 @@ extras_require = {
         "factory-boy>=2.12.0,<3.0.0",
         "pytest>=4.6.3,<5.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
+        "pytest-xdist>=1.30.0",
     ],
     "lint": [
         "mypy>=0.701,<1.0",
@@ -15,8 +16,9 @@ extras_require = {
         "black==19.3b0",
         "isort==4.3.21",
         "flake8>=3.7.7,<4.0.0",
+        "flake8-bugbear",
     ],
-    "dev": ["tox>=3.13.2,<4.0.0"],
+    "dev": ["tox>=3.13.2,<4.0.0", "docformatter"],
 }
 
 extras_require["dev"] = (

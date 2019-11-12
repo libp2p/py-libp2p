@@ -11,12 +11,14 @@ from libp2p.crypto.authenticated_encryption import (
 from libp2p.crypto.authenticated_encryption import (
     initialize_pair as initialize_pair_for_encryption,
 )
+from libp2p.crypto.authenticated_encryption import InvalidMACException
 from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import ECCPublicKey
+from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import DecryptionFailedException, IOException
 from libp2p.io.msgio import MsgIOReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
@@ -30,6 +32,7 @@ from .exceptions import (
     InvalidSignatureOnExchange,
     PeerMismatchException,
     SecioException,
+    SedesException,
     SelfEncryption,
 )
 from .pb.spipe_pb2 import Exchange, Propose
@@ -58,9 +61,9 @@ class SecureSession(BaseSession):
         remote_peer: PeerID,
         remote_encryption_parameters: AuthenticatedEncryptionParameters,
         conn: MsgIOReadWriter,
-        initiator: bool,
+        is_initiator: bool,
     ) -> None:
-        super().__init__(local_peer, local_private_key, initiator, remote_peer)
+        super().__init__(local_peer, local_private_key, is_initiator, remote_peer)
         self.conn = conn
 
         self.local_encryption_parameters = local_encryption_parameters
@@ -108,6 +111,9 @@ class SecureSession(BaseSession):
         self.high_watermark = len(msg)
 
     async def read(self, n: int = -1) -> bytes:
+        if n == 0:
+            return bytes()
+
         data_from_buffer = self._drain(n)
         if len(data_from_buffer) > 0:
             return data_from_buffer
@@ -122,7 +128,11 @@ class SecureSession(BaseSession):
 
     async def read_msg(self) -> bytes:
         msg = await self.conn.read_msg()
-        return self.remote_encrypter.decrypt_if_valid(msg)
+        try:
+            decrypted_msg = self.remote_encrypter.decrypt_if_valid(msg)
+        except InvalidMACException:
+            raise DecryptionFailedException
+        return decrypted_msg
 
     async def write(self, data: bytes) -> int:
         await self.write_msg(data)
@@ -136,10 +146,8 @@ class SecureSession(BaseSession):
 
 @dataclass(frozen=True)
 class Proposal:
-    """
-    A ``Proposal`` represents the set of session parameters one peer in a pair of
-    peers attempting to negotiate a `secio` channel prefers.
-    """
+    """A ``Proposal`` represents the set of session parameters one peer in a
+    pair of peers attempting to negotiate a `secio` channel prefers."""
 
     nonce: bytes
     public_key: PublicKey
@@ -163,7 +171,10 @@ class Proposal:
 
         nonce = protobuf.rand
         public_key_protobuf_bytes = protobuf.public_key
-        public_key = deserialize_public_key(public_key_protobuf_bytes)
+        try:
+            public_key = deserialize_public_key(public_key_protobuf_bytes)
+        except MissingDeserializerError as error:
+            raise SedesException(error)
         exchanges = protobuf.exchanges
         ciphers = protobuf.ciphers
         hashes = protobuf.hashes
@@ -361,7 +372,7 @@ def _mk_session_from(
     local_private_key: PrivateKey,
     session_parameters: SessionParameters,
     conn: MsgIOReadWriter,
-    initiator: bool,
+    is_initiator: bool,
 ) -> SecureSession:
     key_set1, key_set2 = initialize_pair_for_encryption(
         session_parameters.local_encryption_parameters.cipher_type,
@@ -379,7 +390,7 @@ def _mk_session_from(
         session_parameters.remote_peer,
         key_set2,
         conn,
-        initiator,
+        is_initiator,
     )
     return session
 
@@ -398,9 +409,9 @@ async def create_secure_session(
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.
-    If successful, return an object that provides secure communication to the
-    ``remote_peer``.
-    Raise `SecioException` when `conn` closed.
+
+    If successful, return an object that provides secure communication
+    to the ``remote_peer``. Raise `SecioException` when `conn` closed.
     Raise `InconsistentNonce` when handshake failed
     """
     msg_io = MsgIOReadWriter(conn)
@@ -415,8 +426,10 @@ async def create_secure_session(
     except IOException:
         raise SecioException("connection closed")
 
-    initiator = remote_peer is not None
-    session = _mk_session_from(local_private_key, session_parameters, msg_io, initiator)
+    is_initiator = remote_peer is not None
+    session = _mk_session_from(
+        local_private_key, session_parameters, msg_io, is_initiator
+    )
 
     try:
         received_nonce = await _finish_handshake(session, remote_nonce)
@@ -431,18 +444,18 @@ async def create_secure_session(
 
 
 class Transport(BaseSecureTransport):
-    """
-    ``Transport`` provides a security upgrader for a ``IRawConnection``,
-    following the `secio` protocol defined in the libp2p specs.
-    """
+    """``Transport`` provides a security upgrader for a ``IRawConnection``,
+    following the `secio` protocol defined in the libp2p specs."""
 
     def get_nonce(self) -> bytes:
         return self.secure_bytes_provider(NONCE_SIZE)
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are not the initiator)
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are not the
+        initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         local_nonce = self.get_nonce()
@@ -457,8 +470,9 @@ class Transport(BaseSecureTransport):
         self, conn: IRawConnection, peer_id: PeerID
     ) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing node via conn,
-        for an inbound connection (i.e. we are the initiator)
+        Secure the connection, either locally or by communicating with opposing
+        node via conn, for an inbound connection (i.e. we are the initiator)
+
         :return: secure connection object (that implements secure_conn_interface)
         """
         local_nonce = self.get_nonce()

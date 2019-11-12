@@ -34,33 +34,37 @@ class FloodSub(IPubsubRouter):
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.
+
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
-        Notifies the router that a new peer has been connected
+        Notifies the router that a new peer has been connected.
+
         :param peer_id: id of peer to add
         """
 
     def remove_peer(self, peer_id: ID) -> None:
         """
-        Notifies the router that a peer has been disconnected
+        Notifies the router that a peer has been disconnected.
+
         :param peer_id: id of peer to remove
         """
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
-        Invoked to process control messages in the RPC envelope.
-        It is invoked after subscriptions and payload messages have been processed
+        Invoked to process control messages in the RPC envelope. It is invoked
+        after subscriptions and payload messages have been processed.
+
         :param rpc: rpc message
         """
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
-        Invoked to forward a new message that has been validated.
-        This is where the "flooding" part of floodsub happens
+        Invoked to forward a new message that has been validated. This is where
+        the "flooding" part of floodsub happens.
 
         With flooding, routing is almost trivial: for each incoming message,
         forward to all known peers in the topic. There is a bit of logic,
@@ -89,9 +93,9 @@ class FloodSub(IPubsubRouter):
 
     async def join(self, topic: str) -> None:
         """
-        Join notifies the router that we want to receive and
-        forward messages in a topic. It is invoked after the
-        subscription announcement
+        Join notifies the router that we want to receive and forward messages
+        in a topic. It is invoked after the subscription announcement.
+
         :param topic: topic to join
         """
 
@@ -99,6 +103,7 @@ class FloodSub(IPubsubRouter):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
+
         :param topic: topic to leave
         """
 
@@ -107,6 +112,7 @@ class FloodSub(IPubsubRouter):
     ) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
+
         :param msg_forwarder: peer ID of the peer who forwards the message to us.
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.

@@ -14,7 +14,7 @@ from tests.utils import (
 
 @pytest.mark.asyncio
 async def test_host_routing_success():
-    routers = await set_up_routers([5678, 5679])
+    routers = await set_up_routers()
     transports = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     transport_disc_opt_list = zip(transports, routers)
     (host_a, host_b) = await set_up_nodes_by_transport_and_disc_opt(
@@ -43,7 +43,7 @@ async def test_host_routing_success():
 
 @pytest.mark.asyncio
 async def test_host_routing_fail():
-    routers = await set_up_routers([5678, 5679])
+    routers = await set_up_routers()
     transports = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     transport_disc_opt_list = zip(transports, routers)
     (host_a, host_b) = await set_up_nodes_by_transport_and_disc_opt(

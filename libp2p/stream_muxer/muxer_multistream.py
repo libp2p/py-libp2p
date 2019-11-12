@@ -18,6 +18,7 @@ DEFAULT_NEGOTIATE_TIMEOUT = 60
 class MuxerMultistream:
     """
     MuxerMultistream is a multistream stream muxed transport multiplexer.
+
     go implementation: github.com/libp2p/go-stream-muxer-multistream/multistream.go
     """
 
@@ -35,9 +36,10 @@ class MuxerMultistream:
 
     def add_transport(self, protocol: TProtocol, transport: TMuxerClass) -> None:
         """
-        Add a protocol and its corresponding transport to multistream-select(multiselect).
-        The order that a protocol is added is exactly the precedence it is negotiated in
-        multiselect.
+        Add a protocol and its corresponding transport to multistream-
+        select(multiselect). The order that a protocol is added is exactly the
+        precedence it is negotiated in multiselect.
+
         :param protocol: the protocol name, which is negotiated in multiselect.
         :param transport: the corresponding transportation to the ``protocol``.
         """
@@ -49,14 +51,15 @@ class MuxerMultistream:
 
     async def select_transport(self, conn: IRawConnection) -> TMuxerClass:
         """
-        Select a transport that both us and the node on the
-        other end of conn support and agree on
+        Select a transport that both us and the node on the other end of conn
+        support and agree on.
+
         :param conn: conn to choose a transport over
         :return: selected muxer transport
         """
         protocol: TProtocol
         communicator = MultiselectCommunicator(conn)
-        if conn.initiator:
+        if conn.is_initiator:
             protocol = await self.multiselect_client.select_one_of(
                 tuple(self.transports.keys()), communicator
             )

@@ -22,20 +22,23 @@ class IPubsubRouter(ABC):
         """
         Attach is invoked by the PubSub constructor to attach the router to a
         freshly initialized PubSub instance.
+
         :param pubsub: pubsub instance to attach to
         """
 
     @abstractmethod
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
-        Notifies the router that a new peer has been connected
+        Notifies the router that a new peer has been connected.
+
         :param peer_id: id of peer to add
         """
 
     @abstractmethod
     def remove_peer(self, peer_id: ID) -> None:
         """
-        Notifies the router that a peer has been disconnected
+        Notifies the router that a peer has been disconnected.
+
         :param peer_id: id of peer to remove
         """
 
@@ -54,7 +57,8 @@ class IPubsubRouter(ABC):
     @abstractmethod
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
-        Invoked to forward a new message that has been validated
+        Invoked to forward a new message that has been validated.
+
         :param msg_forwarder: peer_id of message sender
         :param pubsub_msg: pubsub message to forward
         """
@@ -62,9 +66,9 @@ class IPubsubRouter(ABC):
     @abstractmethod
     async def join(self, topic: str) -> None:
         """
-        Join notifies the router that we want to receive and
-        forward messages in a topic. It is invoked after the
-        subscription announcement
+        Join notifies the router that we want to receive and forward messages
+        in a topic. It is invoked after the subscription announcement.
+
         :param topic: topic to join
         """
 
@@ -73,5 +77,6 @@ class IPubsubRouter(ABC):
         """
         Leave notifies the router that we are no longer interested in a topic.
         It is invoked after the unsubscription announcement.
+
         :param topic: topic to leave
         """

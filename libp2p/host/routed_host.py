@@ -1,3 +1,4 @@
+from libp2p.crypto.keys import PublicKey
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.network.network_interface import INetwork
@@ -10,14 +11,15 @@ from libp2p.routing.interfaces import IPeerRouting
 class RoutedHost(BasicHost):
     _router: IPeerRouting
 
-    def __init__(self, network: INetwork, router: IPeerRouting):
-        super().__init__(network)
+    def __init__(self, public_key: PublicKey, network: INetwork, router: IPeerRouting):
+        super().__init__(public_key, network)
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer with
-        given `peer_info.peer_id`. See (basic_host).connect for more information.
+        connect ensures there is a connection between this host and the peer
+        with given `peer_info.peer_id`. See (basic_host).connect for more
+        information.
 
         RoutedHost's Connect differs in that if the host has no addresses for a
         given peer, it will use its routing system to try to find some.

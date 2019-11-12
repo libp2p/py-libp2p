@@ -35,7 +35,8 @@ class MplexStream(IMuxedStream):
 
     def __init__(self, name: str, stream_id: StreamID, muxed_conn: "Mplex") -> None:
         """
-        create new MuxedStream in muxer
+        create new MuxedStream in muxer.
+
         :param stream_id: stream id of this stream
         :param muxed_conn: muxed connection of this muxed_stream
         """
@@ -113,9 +114,10 @@ class MplexStream(IMuxedStream):
 
     async def read(self, n: int = -1) -> bytes:
         """
-        Read up to n bytes. Read possibly returns fewer than `n` bytes,
-        if there are not enough bytes in the Mplex buffer.
-        If `n == -1`, read until EOF.
+        Read up to n bytes. Read possibly returns fewer than `n` bytes, if
+        there are not enough bytes in the Mplex buffer. If `n == -1`, read
+        until EOF.
+
         :param n: number of bytes to read
         :return: bytes actually read
         """
@@ -142,11 +144,12 @@ class MplexStream(IMuxedStream):
 
     async def write(self, data: bytes) -> int:
         """
-        write to stream
+        write to stream.
+
         :return: number of bytes written
         """
         if self.event_local_closed.is_set():
-            raise MplexStreamClosed(f"cannot write to closed stream: data={data}")
+            raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
         flag = (
             HeaderTags.MessageInitiator
             if self.is_initiator
@@ -155,10 +158,8 @@ class MplexStream(IMuxedStream):
         return await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
-        """
-        Closing a stream closes it for writing and closes the remote end for reading
-        but allows writing in the other direction.
-        """
+        """Closing a stream closes it for writing and closes the remote end for
+        reading but allows writing in the other direction."""
         # TODO error handling with timeout
 
         async with self.close_lock:
@@ -182,10 +183,7 @@ class MplexStream(IMuxedStream):
                 del self.muxed_conn.streams[self.stream_id]
 
     async def reset(self) -> None:
-        """
-        closes both ends of the stream
-        tells this remote side to hang up
-        """
+        """closes both ends of the stream tells this remote side to hang up."""
         async with self.close_lock:
             # Both sides have been closed. No need to event_reset.
             if self.event_remote_closed.is_set() and self.event_local_closed.is_set():
@@ -218,7 +216,8 @@ class MplexStream(IMuxedStream):
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:
         """
-        set deadline for muxed stream
+        set deadline for muxed stream.
+
         :return: True if successful
         """
         self.read_deadline = ttl
@@ -227,7 +226,8 @@ class MplexStream(IMuxedStream):
 
     def set_read_deadline(self, ttl: int) -> bool:
         """
-        set read deadline for muxed stream
+        set read deadline for muxed stream.
+
         :return: True if successful
         """
         self.read_deadline = ttl
@@ -235,7 +235,8 @@ class MplexStream(IMuxedStream):
 
     def set_write_deadline(self, ttl: int) -> bool:
         """
-        set write deadline for muxed stream
+        set write deadline for muxed stream.
+
         :return: True if successful
         """
         self.write_deadline = ttl

@@ -6,10 +6,8 @@ class SecioException(HandshakeFailure):
 
 
 class SelfEncryption(SecioException):
-    """
-    Raised to indicate that a host is attempting to encrypt communications
-    with itself.
-    """
+    """Raised to indicate that a host is attempting to encrypt communications
+    with itself."""
 
     pass
 
@@ -27,4 +25,8 @@ class IncompatibleChoices(SecioException):
 
 
 class InconsistentNonce(SecioException):
+    pass
+
+
+class SedesException(SecioException):
     pass

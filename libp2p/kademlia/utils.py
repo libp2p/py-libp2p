@@ -1,6 +1,4 @@
-"""
-General catchall for functions that don't make sense as methods.
-"""
+"""General catchall for functions that don't make sense as methods."""
 import asyncio
 import hashlib
 import operator
@@ -20,7 +18,8 @@ def digest(string):
 
 class OrderedSet(list):
     """
-    Acts like a list in all ways, except in the behavior of the
+    Acts like a list in all ways, except in the behavior of the.
+
     :meth:`push` method.
     """
 

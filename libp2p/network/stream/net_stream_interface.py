@@ -23,6 +23,4 @@ class INetStream(ReadWriteCloser):
 
     @abstractmethod
     async def reset(self) -> None:
-        """
-        Close both ends of the stream.
-        """
+        """Close both ends of the stream."""

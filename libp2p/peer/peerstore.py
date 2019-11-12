@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from multiaddr import Multiaddr
 
 from .id import ID
-from .peerdata import PeerData
+from .peerdata import PeerData, PeerDataError
 from .peerinfo import PeerInfo
 from .peerstore_interface import IPeerStore
 
@@ -18,9 +18,9 @@ class PeerStore(IPeerStore):
 
     def __create_or_get_peer(self, peer_id: ID) -> PeerData:
         """
-        Returns the peer data for peer_id or creates a new
-        peer data (and stores it in peer_map) if peer
-        data for peer_id does not yet exist
+        Returns the peer data for peer_id or creates a new peer data (and
+        stores it in peer_map) if peer data for peer_id does not yet exist.
+
         :param peer_id: peer ID
         :return: peer data
         """
@@ -54,7 +54,10 @@ class PeerStore(IPeerStore):
 
     def get(self, peer_id: ID, key: str) -> Any:
         if peer_id in self.peer_map:
-            val = self.peer_map[peer_id].get_metadata(key)
+            try:
+                val = self.peer_map[peer_id].get_metadata(key)
+            except PeerDataError as error:
+                raise PeerStoreError(error)
             return val
         raise PeerStoreError("peer ID not found")
 
@@ -93,4 +96,4 @@ class PeerStore(IPeerStore):
 
 
 class PeerStoreError(KeyError):
-    """Raised when peer ID is not found in peer store"""
+    """Raised when peer ID is not found in peer store."""

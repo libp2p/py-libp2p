@@ -7,7 +7,7 @@ from .raw_connection_interface import IRawConnection
 class RawConnection(IRawConnection):
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
-    initiator: bool
+    is_initiator: bool
 
     _drain_lock: asyncio.Lock
 
@@ -19,14 +19,12 @@ class RawConnection(IRawConnection):
     ) -> None:
         self.reader = reader
         self.writer = writer
-        self.initiator = initiator
+        self.is_initiator = initiator
 
         self._drain_lock = asyncio.Lock()
 
     async def write(self, data: bytes) -> None:
-        """
-        Raise `RawConnError` if the underlying connection breaks
-        """
+        """Raise `RawConnError` if the underlying connection breaks."""
         try:
             self.writer.write(data)
         except ConnectionResetError as error:
@@ -42,8 +40,8 @@ class RawConnection(IRawConnection):
 
     async def read(self, n: int = -1) -> bytes:
         """
-        Read up to ``n`` bytes from the underlying stream.
-        This call is delegated directly to the underlying ``self.reader``.
+        Read up to ``n`` bytes from the underlying stream. This call is
+        delegated directly to the underlying ``self.reader``.
 
         Raise `RawConnError` if the underlying connection breaks
         """

@@ -19,7 +19,7 @@ SHIFT_64_BIT_MAX = int(math.ceil(64 / 7)) * 7
 
 
 def encode_uvarint(number: int) -> bytes:
-    """Pack `number` into varint bytes"""
+    """Pack `number` into varint bytes."""
     buf = b""
     while True:
         towrite = number & 0x7F
@@ -33,9 +33,7 @@ def encode_uvarint(number: int) -> bytes:
 
 
 async def decode_uvarint_from_stream(reader: Reader) -> int:
-    """
-    https://en.wikipedia.org/wiki/LEB128
-    """
+    """https://en.wikipedia.org/wiki/LEB128."""
     res = 0
     for shift in itertools.count(0, 7):
         if shift > SHIFT_64_BIT_MAX:
@@ -77,7 +75,7 @@ async def read_delim(reader: Reader) -> bytes:
         raise ParseError(f"`len(msg_bytes)` should not be 0")
     if msg_bytes[-1:] != b"\n":
         raise ParseError(
-            f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes}'
+            f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes!r}'
         )
     return msg_bytes[:-1]
 
