@@ -25,18 +25,15 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
         logger.debug("Other side closed while waiting for ping from %s", peer_id)
         return False
     except StreamReset as error:
-        print("peer", peer_id, "ping reset")
         logger.debug(
             "Other side reset while waiting for ping from %s: %s", peer_id, error
         )
         raise
     except Exception as error:
-        print("peer", peer_id, "ping", type(error))
         logger.debug("Error while waiting to read ping for %s: %s", peer_id, error)
         raise
 
     logger.debug("Received ping from %s with data: 0x%s", peer_id, payload.hex())
-    print("receive ping from", peer_id)
 
     try:
         await stream.write(payload)
@@ -51,13 +48,11 @@ async def handle_ping(stream: INetStream) -> None:
     or closes the ``stream``."""
     peer_id = stream.muxed_conn.peer_id
 
-    print("handling ping from", peer_id)
     while True:
         try:
             should_continue = await _handle_ping(stream, peer_id)
             if not should_continue:
                 return
         except Exception:
-            print("error finish ping")
             await stream.reset()
             return

@@ -25,7 +25,7 @@ class RSAPublicKey(PublicKey):
         h = SHA256.new(data)
         try:
             # NOTE: the typing in ``pycryptodome`` is wrong on the arguments to ``verify``.
-            pkcs1_15.new(self.impl).verify(h, signature)  # type: ignore
+            pkcs1_15.new(self.impl).verify(h, signature)
         except (ValueError, TypeError):
             return False
         return True
@@ -49,7 +49,7 @@ class RSAPrivateKey(PrivateKey):
     def sign(self, data: bytes) -> bytes:
         h = SHA256.new(data)
         # NOTE: the typing in ``pycryptodome`` is wrong on the arguments to ``sign``.
-        return pkcs1_15.new(self.impl).sign(h)  # type: ignore
+        return pkcs1_15.new(self.impl).sign(h)
 
     def get_public_key(self) -> PublicKey:
         return RSAPublicKey(self.impl.publickey())
