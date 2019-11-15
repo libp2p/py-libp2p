@@ -1,6 +1,6 @@
 import setuptools
 
-classifiers = [f"Programming Language :: Python :: {version}" for version in ["3.7"]]
+py_classifiers = [f"Programming Language :: Python :: {version}" for version in ["3.7"]]
 
 
 extras_require = {
@@ -18,7 +18,14 @@ extras_require = {
         "flake8>=3.7.7,<4.0.0",
         "flake8-bugbear",
     ],
-    "dev": ["tox>=3.13.2,<4.0.0", "docformatter"],
+    "dev": [
+        "bumpversion>=0.5.3,<1",
+        "docformatter",
+        "setuptools>=36.2.0",
+        "tox>=3.13.2,<4.0.0",
+        "twine",
+        "wheel",
+    ],
 }
 
 extras_require["dev"] = (
@@ -26,13 +33,30 @@ extras_require["dev"] = (
 )
 
 
+with open("./README.md") as readme:
+    long_description = readme.read()
+
+
 setuptools.setup(
     name="libp2p",
     description="libp2p implementation written in python",
     version="0.1.2",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    maintainer="The Ethereum Foundation",
+    maintainer_email="snakecharmers@ethereum.org",
+    url="https://github.com/ethereum/py-libp2p",
     license="MIT/APACHE2.0",
     platforms=["unix", "linux", "osx"],
-    classifiers=classifiers,
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
+        "Natural Language :: English",
+    ]
+    + py_classifiers,
+    python_requires=">=3.7,<4",
     install_requires=[
         "pycryptodome>=3.8.2,<4.0.0",
         "base58>=1.0.3,<2.0.0",
@@ -48,4 +72,5 @@ setuptools.setup(
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
     zip_safe=False,
+    keywords="libp2p p2p",
 )
