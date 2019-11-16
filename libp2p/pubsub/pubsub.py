@@ -440,8 +440,7 @@ class Pubsub:
             except StreamClosed:
                 peer_id = stream.muxed_conn.peer_id
                 logger.debug("Fail to message peer %s: stream closed", peer_id)
-                del self.peers[peer_id]
-                self.router.remove_peer(peer_id)
+                self._handle_dead_peer(peer_id)
 
     async def publish(self, topic_id: str, data: bytes) -> None:
         """

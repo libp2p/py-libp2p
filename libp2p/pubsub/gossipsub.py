@@ -193,8 +193,7 @@ class GossipSub(IPubsubRouter):
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
-                # TODO: also remove peer info from pubsub
-                self.remove_peer(peer_id)
+                self.pubsub._handle_dead_peer(peer_id)
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -521,7 +520,11 @@ class GossipSub(IPubsubRouter):
         try:
             await peer_stream.write(encode_varint_prefixed(rpc_msg))
         except StreamClosed:
-            logger.debug("Fail to responed to iwant request from %s: stream closed", sender_peer_id)
+            logger.debug(
+                "Fail to responed to iwant request from %s: stream closed",
+                sender_peer_id,
+            )
+            self.pubsub._handle_dead_peer(sender_peer_id)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -609,3 +612,4 @@ class GossipSub(IPubsubRouter):
             await peer_stream.write(encode_varint_prefixed(rpc_msg))
         except StreamClosed:
             logger.debug("Fail to emit control message to %s: stream closed", to_peer)
+            self.pubsub._handle_dead_peer(to_peer)
