@@ -518,7 +518,10 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        try:
+            await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        except StreamClosed:
+            logger.debug("Fail to responed to iwant request from %s: stream closed", sender_peer_id)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -602,4 +605,7 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream
-        await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        try:
+            await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        except StreamClosed:
+            logger.debug("Fail to emit control message to %s: stream closed", to_peer)
