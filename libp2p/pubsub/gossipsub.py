@@ -4,6 +4,7 @@ import logging
 import random
 from typing import Any, Dict, Iterable, List, Sequence, Set
 
+from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.peer.id import ID
 from libp2p.pubsub import floodsub
 from libp2p.typing import TProtocol
@@ -188,7 +189,11 @@ class GossipSub(IPubsubRouter):
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
+            try:
+                await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
+            except StreamClosed:
+                logger.debug("Fail to publish message to %s: stream closed", peer_id)
+                self.pubsub._handle_dead_peer(peer_id)
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -512,7 +517,14 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        try:
+            await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        except StreamClosed:
+            logger.debug(
+                "Fail to responed to iwant request from %s: stream closed",
+                sender_peer_id,
+            )
+            self.pubsub._handle_dead_peer(sender_peer_id)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -596,4 +608,8 @@ class GossipSub(IPubsubRouter):
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream
-        await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        try:
+            await peer_stream.write(encode_varint_prefixed(rpc_msg))
+        except StreamClosed:
+            logger.debug("Fail to emit control message to %s: stream closed", to_peer)
+            self.pubsub._handle_dead_peer(to_peer)

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from libp2p.network.stream.exceptions import StreamEOF, StreamReset
+from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID as PeerID
 from libp2p.typing import TProtocol
@@ -35,7 +35,11 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
 
     logger.debug("Received ping from %s with data: 0x%s", peer_id, payload.hex())
 
-    await stream.write(payload)
+    try:
+        await stream.write(payload)
+    except StreamClosed:
+        logger.debug("Fail to respond to ping from %s: stream closed", peer_id)
+        raise
     return True
 
 
