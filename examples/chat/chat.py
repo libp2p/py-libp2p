@@ -40,9 +40,9 @@ async def run(port: int, destination: str, localhost: bool) -> None:
     else:
         ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
     transport_opt = f"/ip4/{ip}/tcp/{port}"
-    host = await new_node(transport_opt=[transport_opt])
+    host = new_node(transport_opt=[transport_opt])
 
-    await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
+    await trio_asyncio.run_asyncio(host.get_network().listen,multiaddr.Multiaddr(transport_opt) )
 
     if not destination:  # its the server
 
@@ -66,22 +66,18 @@ async def run(port: int, destination: str, localhost: bool) -> None:
         maddr = multiaddr.Multiaddr(destination)
         info = info_from_p2p_addr(maddr)
         # Associate the peer with local ip address
-        await host.connect(info)
+        await trio_asyncio.run_asyncio(host.connect, info)
 
         # Start a stream with the destination.
         # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
-        stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
+        stream = await trio_asyncio.run_asyncio(host.new_stream, *(info.peer_id, [PROTOCOL_ID]))
 
         asyncio.ensure_future(read_data(stream))
         asyncio.ensure_future(write_data(stream))
         print("Connected to peer %s" % info.addrs[0])
 
-async def async_main_wrapper(*args):
-    async with trio_asyncio.open_loop() as loop:
-        assert loop == asyncio.get_event_loop()
-        stopped_event = trio.Event()
-        await trio_asyncio.run_asyncio(run, *args)
-        await stopped_event.wait()
+    stopped_event = trio.Event()
+    await stopped_event.wait()
 
 
 def main() -> None:
@@ -121,7 +117,7 @@ def main() -> None:
     if not args.port:
         raise RuntimeError("was not able to determine a local port")
 
-    trio.run(async_main_wrapper, *(args.port, args.destination, args.localhost))
+    trio_asyncio.run(run, *(args.port, args.destination, args.localhost))
 
 if __name__ == "__main__":
     main()
