@@ -97,7 +97,7 @@ def initialize_default_swarm(
     return Swarm(id_opt, peerstore, upgrader, transport)
 
 
-async def new_node(
+def new_node(
     key_pair: KeyPair = None,
     swarm_opt: INetwork = None,
     transport_opt: Sequence[str] = None,
