@@ -9,6 +9,7 @@ extras_require = {
         "pytest>=4.6.3,<5.0.0",
         "pytest-asyncio>=0.10.0,<1.0.0",
         "pytest-xdist>=1.30.0",
+        "pytest-trio>=0.5.2",
     ],
     "lint": [
         "mypy>=0.701,<1.0",
@@ -68,6 +69,8 @@ setuptools.setup(
         "coincurve>=10.0.0,<11.0.0",
         "fastecdsa==1.7.4",
         "pynacl==1.3.0",
+        "trio-asyncio>=0.10.0",
+        "trio>=0.13.0",
     ],
     extras_require=extras_require,
     packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
