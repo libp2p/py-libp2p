@@ -1,4 +1,5 @@
 import asyncio
+import trio
 from socket import socket
 from typing import List
 
@@ -10,6 +11,10 @@ from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
+from libp2p.io.trio import TrioReadWriteCloser
+import logging
+
+logger = logging.getLogger("libp2p.transport.tcp")
 
 
 class TCPListener(IListener):
@@ -21,20 +26,38 @@ class TCPListener(IListener):
         self.server = None
         self.handler = handler_function
 
-    async def listen(self, maddr: Multiaddr) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery) -> bool:
         """
         put listener in listening mode and wait for incoming connections.
 
         :param maddr: maddr of peer
         :return: return True if successful
         """
-        self.server = await asyncio.start_server(
-            self.handler,
-            maddr.value_for_protocol("ip4"),
-            maddr.value_for_protocol("tcp"),
+
+        async def serve_tcp(handler, port, host, task_status=None):
+            logger.debug("serve_tcp %s %s", host, port)
+            await trio.serve_tcp(handler, port, host=host, task_status=task_status)
+
+        async def handler(stream):
+            read_write_closer = TrioReadWriteCloser(stream)
+            await self.handler(read_write_closer)
+
+        listeners = await nursery.start(
+            serve_tcp,
+            *(
+                handler,
+                int(maddr.value_for_protocol("tcp")),
+                maddr.value_for_protocol("ip4"),
+            ),
         )
-        socket = self.server.sockets[0]
+        # self.server = await asyncio.start_server(
+        #     self.handler,
+        #     maddr.value_for_protocol("ip4"),
+        #     maddr.value_for_protocol("tcp"),
+        # )
+        socket = listeners[0].socket
         self.multiaddrs.append(_multiaddr_from_socket(socket))
+        logger.debug("Multiaddrs %s", self.multiaddrs)
 
         return True
 
@@ -69,12 +92,10 @@ class TCP(ITransport):
         self.host = maddr.value_for_protocol("ip4")
         self.port = int(maddr.value_for_protocol("tcp"))
 
-        try:
-            reader, writer = await asyncio.open_connection(self.host, self.port)
-        except (ConnectionAbortedError, ConnectionRefusedError) as error:
-            raise OpenConnectionError(error)
+        stream = await trio.open_tcp_stream(self.host, self.port)
+        read_write_closer = TrioReadWriteCloser(stream)
 
-        return RawConnection(reader, writer, True)
+        return RawConnection(read_write_closer, True)
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """
