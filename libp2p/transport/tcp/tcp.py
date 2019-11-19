@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from socket import socket
 from typing import List

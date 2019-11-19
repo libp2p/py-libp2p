@@ -1,4 +1,3 @@
-import asyncio
 from typing import Sequence
 
 from libp2p.crypto.keys import KeyPair
