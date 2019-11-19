@@ -1,3 +1,4 @@
+import trio
 import asyncio
 from typing import TYPE_CHECKING
 
@@ -22,14 +23,14 @@ class MplexStream(IMuxedStream):
     read_deadline: int
     write_deadline: int
 
-    close_lock: asyncio.Lock
+    close_lock: trio.Lock
 
     # NOTE: `dataIn` is size of 8 in Go implementation.
     incoming_data: "asyncio.Queue[bytes]"
 
-    event_local_closed: asyncio.Event
-    event_remote_closed: asyncio.Event
-    event_reset: asyncio.Event
+    event_local_closed: trio.Event
+    event_remote_closed: trio.Event
+    event_reset: trio.Event
 
     _buf: bytearray
 
@@ -45,10 +46,10 @@ class MplexStream(IMuxedStream):
         self.muxed_conn = muxed_conn
         self.read_deadline = None
         self.write_deadline = None
-        self.event_local_closed = asyncio.Event()
-        self.event_remote_closed = asyncio.Event()
-        self.event_reset = asyncio.Event()
-        self.close_lock = asyncio.Lock()
+        self.event_local_closed = trio.Event()
+        self.event_remote_closed = trio.Event()
+        self.event_reset = trio.Event()
+        self.close_lock = trio.Lock()
         self.incoming_data = asyncio.Queue()
         self._buf = bytearray()
 
@@ -199,10 +200,11 @@ class MplexStream(IMuxedStream):
                     if self.is_initiator
                     else HeaderTags.ResetReceiver
                 )
-                asyncio.ensure_future(
-                    self.muxed_conn.send_message(flag, None, self.stream_id)
-                )
-                await asyncio.sleep(0)
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(
+                        self.muxed_conn.send_message, flag, None, self.stream_id
+                    )
+                await trio.sleep(0)
 
             self.event_local_closed.set()
             self.event_remote_closed.set()

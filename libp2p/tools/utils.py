@@ -1,3 +1,4 @@
+import trio
 from typing import List, Sequence, Tuple
 
 import multiaddr
@@ -37,12 +38,12 @@ async def connect(node1: IHost, node2: IHost) -> None:
 
 
 async def set_up_nodes_by_transport_opt(
-    transport_opt_list: Sequence[Sequence[str]]
+    transport_opt_list: Sequence[Sequence[str]], nursery: trio.Nursery
 ) -> Tuple[BasicHost, ...]:
     nodes_list = []
     for transport_opt in transport_opt_list:
-        node = await new_node(transport_opt=transport_opt)
-        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
+        node = new_node(transport_opt=transport_opt)
+        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]), nursery=nursery)
         nodes_list.append(node)
     return tuple(nodes_list)
 

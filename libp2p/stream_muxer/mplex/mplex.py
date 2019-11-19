@@ -123,27 +123,10 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def _wait_until_shutting_down_or_closed(self, coro: Awaitable[Any]) -> Any:
-        task_coro = asyncio.ensure_future(coro)
-        task_wait_closed = asyncio.ensure_future(self.event_closed.wait())
-        task_wait_shutting_down = asyncio.ensure_future(self.event_shutting_down.wait())
-        done, pending = await asyncio.wait(
-            [task_coro, task_wait_closed, task_wait_shutting_down],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for fut in pending:
-            fut.cancel()
-        if task_wait_closed in done:
-            raise MplexUnavailable("Mplex is closed")
-        if task_wait_shutting_down in done:
-            raise MplexUnavailable("Mplex is shutting down")
-        return task_coro.result()
 
     async def accept_stream(self) -> IMuxedStream:
         """accepts a muxed stream opened by the other end."""
-        return await self._wait_until_shutting_down_or_closed(
-            self.new_stream_queue.get()
-        )
+        return await self.new_stream_queue.get()
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -163,9 +146,7 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        return await self._wait_until_shutting_down_or_closed(
-            self.write_to_stream(_bytes)
-        )
+        return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes: bytes) -> int:
         """
@@ -226,9 +207,7 @@ class Mplex(IMuxedConn):
 
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """
-        channel_id, flag, message = await self._wait_until_shutting_down_or_closed(
-            self.read_message()
-        )
+        channel_id, flag, message = await self.read_message()
         stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
 
         if flag == HeaderTags.NewStream.value:
@@ -258,9 +237,7 @@ class Mplex(IMuxedConn):
                     f"received NewStream message for existing stream: {stream_id}"
                 )
         mplex_stream = await self._initialize_stream(stream_id, message.decode())
-        await self._wait_until_shutting_down_or_closed(
-            self.new_stream_queue.put(mplex_stream)
-        )
+        await self.new_stream_queue.put(mplex_stream)
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
         async with self.streams_lock:
@@ -274,9 +251,7 @@ class Mplex(IMuxedConn):
             if stream.event_remote_closed.is_set():
                 # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                 return
-        await self._wait_until_shutting_down_or_closed(
-            stream.incoming_data.put(message)
-        )
+        await stream.incoming_data.put(message)
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from multiaddr import Multiaddr
 
+from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
@@ -149,7 +150,7 @@ class Swarm(INetwork):
         logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
 
-    async def listen(self, *multiaddrs: Multiaddr) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr, nursery) -> bool:
         """
         :param multiaddrs: one or many multiaddrs to start listening on
         :return: true if at least one success
@@ -167,15 +168,8 @@ class Swarm(INetwork):
             if str(maddr) in self.listeners:
                 return True
 
-            async def conn_handler(
-                reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-            ) -> None:
-                connection_info = writer.get_extra_info("peername")
-                # TODO make a proper multiaddr
-                peer_addr = f"/ip4/{connection_info[0]}/tcp/{connection_info[1]}"
-                logger.debug("inbound connection at %s", peer_addr)
-                # logger.debug("inbound connection request", peer_id)
-                raw_conn = RawConnection(reader, writer, False)
+            async def conn_handler(read_write_closer: ReadWriteCloser) -> None:
+                raw_conn = RawConnection(read_write_closer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
@@ -185,14 +179,10 @@ class Swarm(INetwork):
                         raw_conn, ID(b""), False
                     )
                 except SecurityUpgradeFailure as error:
-                    error_msg = "fail to upgrade security for peer at %s"
-                    logger.debug(error_msg, peer_addr)
                     await raw_conn.close()
-                    raise SwarmException(error_msg % peer_addr) from error
+                    raise SwarmException() from error
                 peer_id = secured_conn.get_remote_peer()
 
-                logger.debug("upgraded security for peer at %s", peer_addr)
-                logger.debug("identified peer at %s as %s", peer_addr, peer_id)
 
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
@@ -213,7 +203,7 @@ class Swarm(INetwork):
                 # Success
                 listener = self.transport.create_listener(conn_handler)
                 self.listeners[str(maddr)] = listener
-                await listener.listen(maddr)
+                await listener.listen(maddr, nursery)
 
                 # Call notifiers since event occurred
                 self.notify_listen(maddr)
