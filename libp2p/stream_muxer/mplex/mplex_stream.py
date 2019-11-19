@@ -1,4 +1,3 @@
-import asyncio
 from typing import TYPE_CHECKING
 
 import trio
