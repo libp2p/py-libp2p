@@ -1,20 +1,31 @@
 import asyncio
 
 import pytest
+import trio
 
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
 )
-from libp2p.tools.constants import MAX_READ_LEN
+from libp2p.tools.constants import MAX_READ_LEN, LISTEN_MADDR
+from libp2p.tools.factories import SwarmFactory
+from libp2p.tools.utils import connect_swarm
 
 DATA = b"data_123"
 
 
-@pytest.mark.asyncio
-async def test_mplex_stream_read_write(mplex_stream_pair):
-    stream_0, stream_1 = mplex_stream_pair
+@pytest.mark.trio
+async def test_mplex_stream_read_write(nursery):
+    swarm0, swarm1 = SwarmFactory(), SwarmFactory()
+    await swarm0.listen(LISTEN_MADDR, nursery=nursery)
+    await swarm1.listen(LISTEN_MADDR, nursery=nursery)
+    await connect_swarm(swarm0, swarm1, nursery)
+    conn_0 = swarm0.connections[swarm1.get_peer_id()]
+    conn_1 = swarm1.connections[swarm0.get_peer_id()]
+    stream_0 = await conn_0.muxed_conn.open_stream()
+    await trio.sleep(1)
+    stream_1 = tuple(conn_1.muxed_conn.streams.values())[0]
     await stream_0.write(DATA)
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 

@@ -17,7 +17,7 @@ from libp2p.typing import StreamHandlerFn, TProtocol
 from .constants import MAX_READ_LEN
 
 
-async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:
+async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm, nursery: trio.Nursery) -> None:
     peer_id = swarm_1.get_peer_id()
     addrs = tuple(
         addr
@@ -25,7 +25,7 @@ async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:
         for addr in transport.get_addrs()
     )
     swarm_0.peerstore.add_addrs(peer_id, addrs, 10000)
-    await swarm_0.dial_peer(peer_id)
+    await swarm_0.dial_peer(peer_id, nursery)
     assert swarm_0.get_peer_id() in swarm_1.connections
     assert swarm_1.get_peer_id() in swarm_0.connections
 
@@ -43,7 +43,9 @@ async def set_up_nodes_by_transport_opt(
     nodes_list = []
     for transport_opt in transport_opt_list:
         node = new_node(transport_opt=transport_opt)
-        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]), nursery=nursery)
+        await node.get_network().listen(
+            multiaddr.Multiaddr(transport_opt[0]), nursery=nursery
+        )
         nodes_list.append(node)
     return tuple(nodes_list)
 

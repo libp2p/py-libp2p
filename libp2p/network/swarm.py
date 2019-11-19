@@ -3,6 +3,7 @@ import logging
 from typing import Dict, List, Optional
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.net_connection_interface import INetConn
@@ -69,7 +70,7 @@ class Swarm(INetwork):
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
         self.common_stream_handler = stream_handler
 
-    async def dial_peer(self, peer_id: ID) -> INetConn:
+    async def dial_peer(self, peer_id: ID, nursery) -> INetConn:
         """
         dial_peer try to create a connection to peer_id.
 
@@ -121,6 +122,7 @@ class Swarm(INetwork):
 
         try:
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            muxed_conn.run(nursery)
         except MuxerUpgradeFailure as error:
             error_msg = "fail to upgrade mux for peer %s"
             logger.debug(error_msg, peer_id)
@@ -135,7 +137,7 @@ class Swarm(INetwork):
 
         return swarm_conn
 
-    async def new_stream(self, peer_id: ID) -> INetStream:
+    async def new_stream(self, peer_id: ID, nursery) -> INetStream:
         """
         :param peer_id: peer_id of destination
         :param protocol_id: protocol id
@@ -144,7 +146,7 @@ class Swarm(INetwork):
         """
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
-        swarm_conn = await self.dial_peer(peer_id)
+        swarm_conn = await self.dial_peer(peer_id, nursery)
 
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
@@ -183,11 +185,11 @@ class Swarm(INetwork):
                     raise SwarmException() from error
                 peer_id = secured_conn.get_remote_peer()
 
-
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
                         secured_conn, peer_id
                     )
+                    muxed_conn.run(nursery)
                 except MuxerUpgradeFailure as error:
                     error_msg = "fail to upgrade mux for peer %s"
                     logger.debug(error_msg, peer_id)
@@ -198,6 +200,8 @@ class Swarm(INetwork):
                 await self.add_conn(muxed_conn)
 
                 logger.debug("successfully opened connection to peer %s", peer_id)
+                event = trio.Event()
+                await event.wait()
 
             try:
                 # Success

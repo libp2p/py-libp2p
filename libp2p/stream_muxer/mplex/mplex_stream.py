@@ -1,8 +1,10 @@
-import trio
 import asyncio
 from typing import TYPE_CHECKING
 
+import trio
+
 from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.utils import IQueue, TrioQueue
 
 from .constants import HeaderTags
 from .datastructures import StreamID
@@ -26,7 +28,7 @@ class MplexStream(IMuxedStream):
     close_lock: trio.Lock
 
     # NOTE: `dataIn` is size of 8 in Go implementation.
-    incoming_data: "asyncio.Queue[bytes]"
+    incoming_data: IQueue[bytes]
 
     event_local_closed: trio.Event
     event_remote_closed: trio.Event
@@ -50,68 +52,12 @@ class MplexStream(IMuxedStream):
         self.event_remote_closed = trio.Event()
         self.event_reset = trio.Event()
         self.close_lock = trio.Lock()
-        self.incoming_data = asyncio.Queue()
+        self.incoming_data = TrioQueue()
         self._buf = bytearray()
 
     @property
     def is_initiator(self) -> bool:
         return self.stream_id.is_initiator
-
-    async def _wait_for_data(self) -> None:
-        task_event_reset = asyncio.ensure_future(self.event_reset.wait())
-        task_incoming_data_get = asyncio.ensure_future(self.incoming_data.get())
-        task_event_remote_closed = asyncio.ensure_future(
-            self.event_remote_closed.wait()
-        )
-        done, pending = await asyncio.wait(  # type: ignore
-            [  # type: ignore
-                task_event_reset,
-                task_incoming_data_get,
-                task_event_remote_closed,
-            ],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for fut in pending:
-            fut.cancel()
-
-        if task_event_reset in done:
-            if self.event_reset.is_set():
-                raise MplexStreamReset
-            else:
-                # However, it is abnormal that `Event.wait` is unblocked without any of the flag
-                #   is set. The task is probably cancelled.
-                raise Exception(
-                    "Should not enter here. "
-                    f"It is probably because {task_event_remote_closed} is cancelled."
-                )
-
-        if task_incoming_data_get in done:
-            data = task_incoming_data_get.result()
-            self._buf.extend(data)
-            return
-
-        if task_event_remote_closed in done:
-            if self.event_remote_closed.is_set():
-                raise MplexStreamEOF
-            else:
-                # However, it is abnormal that `Event.wait` is unblocked without any of the flag
-                #   is set. The task is probably cancelled.
-                raise Exception(
-                    "Should not enter here. "
-                    f"It is probably because {task_event_remote_closed} is cancelled."
-                )
-
-        # TODO: Handle timeout when deadline is used.
-
-    async def _read_until_eof(self) -> bytes:
-        while True:
-            try:
-                await self._wait_for_data()
-            except MplexStreamEOF:
-                break
-        payload = self._buf
-        self._buf = self._buf[len(payload) :]
-        return bytes(payload)
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -128,20 +74,7 @@ class MplexStream(IMuxedStream):
             )
         if self.event_reset.is_set():
             raise MplexStreamReset
-        if n == -1:
-            return await self._read_until_eof()
-        if len(self._buf) == 0 and self.incoming_data.empty():
-            await self._wait_for_data()
-        # Now we are sure we have something to read.
-        # Try to put enough incoming data into `self._buf`.
-        while len(self._buf) < n:
-            try:
-                self._buf.extend(self.incoming_data.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-        payload = self._buf[:n]
-        self._buf = self._buf[len(payload) :]
-        return bytes(payload)
+        return await self.incoming_data.get()
 
     async def write(self, data: bytes) -> int:
         """
