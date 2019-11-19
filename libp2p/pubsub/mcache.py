@@ -96,7 +96,8 @@ class MessageCache:
         last_entries: List[CacheEntry] = self.history[len(self.history) - 1]
 
         for entry in last_entries:
-            del self.msgs[entry.mid]
+            if entry.mid in self.msgs:
+                del self.msgs[entry.mid]
 
         i: int = len(self.history) - 2
 

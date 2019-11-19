@@ -180,7 +180,8 @@ class MplexStream(IMuxedStream):
         if _is_remote_closed:
             # Both sides are closed, we can safely remove the buffer from the dict.
             async with self.muxed_conn.streams_lock:
-                del self.muxed_conn.streams[self.stream_id]
+                if self.stream_id in self.muxed_conn.streams:
+                    del self.muxed_conn.streams[self.stream_id]
 
     async def reset(self) -> None:
         """closes both ends of the stream tells this remote side to hang up."""
