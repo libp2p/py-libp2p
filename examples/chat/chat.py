@@ -1,11 +1,11 @@
 import argparse
 import asyncio
-import trio_asyncio
-import trio
 import sys
 import urllib.request
 
 import multiaddr
+import trio
+import trio_asyncio
 
 from libp2p import new_node
 from libp2p.network.stream.net_stream_interface import INetStream
@@ -42,7 +42,9 @@ async def run(port: int, destination: str, localhost: bool) -> None:
     transport_opt = f"/ip4/{ip}/tcp/{port}"
     host = new_node(transport_opt=[transport_opt])
 
-    await trio_asyncio.run_asyncio(host.get_network().listen,multiaddr.Multiaddr(transport_opt) )
+    await trio_asyncio.run_asyncio(
+        host.get_network().listen, multiaddr.Multiaddr(transport_opt)
+    )
 
     if not destination:  # its the server
 
@@ -70,7 +72,9 @@ async def run(port: int, destination: str, localhost: bool) -> None:
 
         # Start a stream with the destination.
         # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
-        stream = await trio_asyncio.run_asyncio(host.new_stream, *(info.peer_id, [PROTOCOL_ID]))
+        stream = await trio_asyncio.run_asyncio(
+            host.new_stream, *(info.peer_id, [PROTOCOL_ID])
+        )
 
         asyncio.ensure_future(read_data(stream))
         asyncio.ensure_future(write_data(stream))
@@ -118,6 +122,7 @@ def main() -> None:
         raise RuntimeError("was not able to determine a local port")
 
     trio_asyncio.run(run, *(args.port, args.destination, args.localhost))
+
 
 if __name__ == "__main__":
     main()

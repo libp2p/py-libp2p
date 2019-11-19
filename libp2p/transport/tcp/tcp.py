@@ -1,18 +1,18 @@
 import asyncio
-import trio
+import logging
 from socket import socket
 from typing import List
 
 from multiaddr import Multiaddr
+import trio
 
+from libp2p.io.trio import TrioReadWriteCloser
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
-from libp2p.io.trio import TrioReadWriteCloser
-import logging
 
 logger = logging.getLogger("libp2p.transport.tcp")
 
@@ -44,11 +44,9 @@ class TCPListener(IListener):
 
         listeners = await nursery.start(
             serve_tcp,
-            *(
-                handler,
-                int(maddr.value_for_protocol("tcp")),
-                maddr.value_for_protocol("ip4"),
-            ),
+            handler,
+            int(maddr.value_for_protocol("tcp")),
+            maddr.value_for_protocol("ip4"),
         )
         # self.server = await asyncio.start_server(
         #     self.handler,
@@ -57,7 +55,6 @@ class TCPListener(IListener):
         # )
         socket = listeners[0].socket
         self.multiaddrs.append(_multiaddr_from_socket(socket))
-        logger.debug("Multiaddrs %s", self.multiaddrs)
 
         return True
 

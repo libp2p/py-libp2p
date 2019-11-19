@@ -1,9 +1,10 @@
 import trio
 
+from libp2p.io.abc import ReadWriteCloser
 from libp2p.io.exceptions import IOException
+
 from .exceptions import RawConnError
 from .raw_connection_interface import IRawConnection
-from libp2p.io.abc import ReadWriteCloser
 
 
 class RawConnection(IRawConnection):

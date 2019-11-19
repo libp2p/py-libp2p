@@ -3,6 +3,8 @@ import logging
 from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
+import trio
+
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
 from libp2p.network.connection.exceptions import RawConnError
@@ -41,8 +43,6 @@ class Mplex(IMuxedConn):
     event_shutting_down: asyncio.Event
     event_closed: asyncio.Event
 
-    _tasks: List["asyncio.Future[Any]"]
-
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
         create a new muxed connection.
@@ -66,10 +66,8 @@ class Mplex(IMuxedConn):
         self.event_shutting_down = asyncio.Event()
         self.event_closed = asyncio.Event()
 
-        self._tasks = []
-
-        # Kick off reading
-        self._tasks.append(asyncio.ensure_future(self.handle_incoming()))
+    def run(self, nursery):
+        nursery.start_soon(self.handle_incoming)
 
     @property
     def is_initiator(self) -> bool:
@@ -123,7 +121,6 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-
     async def accept_stream(self) -> IMuxedStream:
         """accepts a muxed stream opened by the other end."""
         return await self.new_stream_queue.get()
@@ -169,7 +166,7 @@ class Mplex(IMuxedConn):
                 logger.debug("mplex unavailable while waiting for incoming: %s", e)
                 break
             # Force context switch
-            await asyncio.sleep(0)
+            await trio.sleep(0)
         # If we enter here, it means this connection is shutting down.
         # We should clean things up.
         await self._cleanup()
@@ -184,9 +181,7 @@ class Mplex(IMuxedConn):
         # FIXME: No timeout is used in Go implementation.
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-            message = await asyncio.wait_for(
-                read_varint_prefixed_bytes(self.secured_conn), timeout=5
-            )
+            message = await read_varint_prefixed_bytes(self.secured_conn)
         except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
                 "failed to read messages correctly from the underlying connection"

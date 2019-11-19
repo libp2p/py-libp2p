@@ -1,6 +1,6 @@
-import trio
 import multiaddr
 import pytest
+import trio
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.constants import MAX_READ_LEN
@@ -24,11 +24,11 @@ async def test_simple_messages(nursery):
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
 
-    
     stream = await node_a.new_stream(node_b.get_id(), ["/echo/1.0.0"])
 
     messages = ["hello" + str(x) for x in range(10)]
     for message in messages:
+
         await stream.write(message.encode())
 
         response = (await stream.read(MAX_READ_LEN)).decode()

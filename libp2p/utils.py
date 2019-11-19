@@ -1,13 +1,13 @@
 import itertools
 import math
+from typing import Generic, TypeVar
+
+import trio
 
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
 
 from .io.utils import read_exactly
-
-from typing import Generic, TypeVar
-import trio
 
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py

@@ -1,5 +1,6 @@
-import trio
 import pytest
+import trio
+
 from libp2p.utils import TrioQueue
 
 
@@ -16,4 +17,3 @@ async def test_trio_queue():
         result = await nursery.start(queue_get)
 
     assert result == 123
-
