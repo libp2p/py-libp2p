@@ -48,11 +48,6 @@ class TCPListener(IListener):
             int(maddr.value_for_protocol("tcp")),
             maddr.value_for_protocol("ip4"),
         )
-        # self.server = await asyncio.start_server(
-        #     self.handler,
-        #     maddr.value_for_protocol("ip4"),
-        #     maddr.value_for_protocol("tcp"),
-        # )
         socket = listeners[0].socket
         self.multiaddrs.append(_multiaddr_from_socket(socket))
 
