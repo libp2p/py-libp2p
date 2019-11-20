@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from .utils import connect
+from libp2p.tools.interop.utils import connect
 
 
 @pytest.mark.parametrize("num_hosts", (1,))
