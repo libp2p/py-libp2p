@@ -6,9 +6,8 @@ import pytest
 
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
-from libp2p.utils import read_varint_prefixed_bytes
-
 from libp2p.tools.interop.utils import connect
+from libp2p.utils import read_varint_prefixed_bytes
 
 TOPIC_0 = "ABALA"
 TOPIC_1 = "YOOOO"

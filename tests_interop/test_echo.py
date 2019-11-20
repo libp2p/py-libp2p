@@ -4,10 +4,9 @@ from multiaddr import Multiaddr
 import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.typing import TProtocol
-
 from libp2p.tools.interop.constants import PEXPECT_NEW_LINE
 from libp2p.tools.interop.envs import GO_BIN_PATH
+from libp2p.typing import TProtocol
 
 ECHO_PATH = GO_BIN_PATH / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")

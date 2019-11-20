@@ -7,14 +7,13 @@ import pexpect
 import pytest
 
 from libp2p.io.abc import ReadWriteCloser
-from libp2p.tools.constants import LISTEN_MADDR, GOSSIPSUB_PARAMS
+from libp2p.tools.constants import GOSSIPSUB_PARAMS, LISTEN_MADDR
 from libp2p.tools.factories import (
     FloodsubFactory,
     GossipsubFactory,
     HostFactory,
     PubsubFactory,
 )
-
 from libp2p.tools.interop.daemon import Daemon, make_p2pd
 from libp2p.tools.interop.utils import connect
 
