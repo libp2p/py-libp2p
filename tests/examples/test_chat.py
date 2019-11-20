@@ -4,7 +4,7 @@ import pytest
 
 from libp2p.host.exceptions import StreamFailure
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from tests.utils import set_up_nodes_by_transport_opt
+from libp2p.tools.utils import set_up_nodes_by_transport_opt
 
 PROTOCOL_ID = "/chat/1.0.0"
 

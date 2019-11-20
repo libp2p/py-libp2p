@@ -4,7 +4,7 @@ import secrets
 import pytest
 
 from libp2p.host.ping import ID, PING_LENGTH
-from tests.factories import pair_of_connected_hosts
+from libp2p.tools.factories import pair_of_connected_hosts
 
 
 @pytest.mark.asyncio

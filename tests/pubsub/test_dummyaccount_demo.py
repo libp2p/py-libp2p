@@ -3,7 +3,7 @@ from threading import Thread
 
 import pytest
 
-from tests.utils import connect
+from libp2p.tools.utils import connect
 
 from .dummy_account_node import DummyAccountNode
 

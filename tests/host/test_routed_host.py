@@ -5,7 +5,7 @@ import pytest
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.routing.kademlia.kademlia_peer_router import peer_info_to_str
-from tests.utils import (
+from libp2p.tools.utils import (
     set_up_nodes_by_transport_and_disc_opt,
     set_up_nodes_by_transport_opt,
     set_up_routers,

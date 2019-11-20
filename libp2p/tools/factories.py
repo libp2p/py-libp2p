@@ -23,13 +23,14 @@ from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.typing import TMuxerOptions
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
-from tests.configs import LISTEN_MADDR
-from tests.pubsub.configs import (
+
+from .constants import (
     FLOODSUB_PROTOCOL_ID,
     GOSSIPSUB_PARAMS,
     GOSSIPSUB_PROTOCOL_ID,
+    LISTEN_MADDR,
 )
-from tests.utils import connect, connect_swarm
+from .utils import connect, connect_swarm
 
 
 def security_transport_factory(

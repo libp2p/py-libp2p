@@ -4,7 +4,8 @@ from libp2p import new_node
 from libp2p.kademlia.network import KademliaServer
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from tests.constants import MAX_READ_LEN
+
+from .constants import MAX_READ_LEN
 
 
 async def connect_swarm(swarm_0, swarm_1):

@@ -4,8 +4,8 @@ import uuid
 from libp2p.host.host_interface import IHost
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
-from tests.configs import LISTEN_MADDR
-from tests.factories import FloodsubFactory, PubsubFactory
+from libp2p.tools.constants import LISTEN_MADDR
+from libp2p.tools.factories import FloodsubFactory, PubsubFactory
 
 from .utils import message_id_generator
 

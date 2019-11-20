@@ -3,7 +3,7 @@ from typing import Sequence
 
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
-from tests.utils import connect
+from libp2p.tools.utils import connect
 
 
 def message_id_generator(start_val):

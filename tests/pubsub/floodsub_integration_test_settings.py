@@ -2,11 +2,9 @@ import asyncio
 
 import pytest
 
-from tests.configs import LISTEN_MADDR
-from tests.factories import PubsubFactory
-from tests.utils import connect
-
-from .configs import FLOODSUB_PROTOCOL_ID
+from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID, LISTEN_MADDR
+from libp2p.tools.factories import PubsubFactory
+from libp2p.tools.utils import connect
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 

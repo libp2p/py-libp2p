@@ -7,7 +7,7 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
 )
-from tests.constants import MAX_READ_LEN
+from libp2p.tools.constants import MAX_READ_LEN
 
 DATA = b"data_123"
 

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from tests.factories import (
+from libp2p.tools.factories import (
     net_stream_pair_factory,
     swarm_conn_pair_factory,
     swarm_pair_factory,
