@@ -4,9 +4,8 @@ import random
 import pytest
 
 from libp2p.tools.constants import GossipsubParams
+from libp2p.tools.pubsub.utils import dense_connect, one_to_all_connect
 from libp2p.tools.utils import connect
-
-from .utils import dense_connect, one_to_all_connect
 
 
 @pytest.mark.parametrize(

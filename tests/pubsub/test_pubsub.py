@@ -6,10 +6,9 @@ import pytest
 from libp2p.exceptions import ValidationError
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.tools.pubsub.utils import make_pubsub_msg
 from libp2p.tools.utils import connect
 from libp2p.utils import encode_varint_prefixed
-
-from .utils import make_pubsub_msg
 
 TESTING_TOPIC = "TEST_SUBSCRIBE"
 TESTING_DATA = b"data"
