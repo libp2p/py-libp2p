@@ -232,8 +232,7 @@ class Pubsub:
 
         :param topic: the topic to remove validator from
         """
-        if topic in self.topic_validators:
-            del self.topic_validators[topic]
+        self.topic_validators.pop(topic, None)
 
     def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
         """
@@ -283,7 +282,7 @@ class Pubsub:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
-            del self.peers[peer_id]
+            self.peers.pop(peer_id, None)
             return
         # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
@@ -291,7 +290,7 @@ class Pubsub:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
-            del self.peers[peer_id]
+            self.peers.pop(peer_id, None)
             return
 
         logger.debug("added new peer %s", peer_id)
@@ -299,7 +298,7 @@ class Pubsub:
     def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
             return
-        del self.peers[peer_id]
+        self.peers.pop(peer_id, None)
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
@@ -411,7 +410,7 @@ class Pubsub:
         if topic_id not in self.my_topics:
             return
         # Remove topic_id from map if present
-        del self.my_topics[topic_id]
+        self.my_topics.pop(topic_id, None)
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()

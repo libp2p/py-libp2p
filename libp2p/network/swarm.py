@@ -248,7 +248,7 @@ class Swarm(INetwork):
         # TODO: Should be changed to close multisple connections,
         #   if we have several connections per peer in the future.
         connection = self.connections[peer_id]
-        # NOTE: `connection.close` will perform `del self.connections[peer_id]`
+        # NOTE: `connection.close` will delete `peer_id` from `self.connections`
         # and `notify_disconnected` for us.
         await connection.close()
 
@@ -270,11 +270,9 @@ class Swarm(INetwork):
         """Simply remove the connection from Swarm's records, without closing
         the connection."""
         peer_id = swarm_conn.muxed_conn.peer_id
-        if peer_id not in self.connections:
-            return
         # TODO: Should be changed to remove the exact connection,
         #   if we have several connections per peer in the future.
-        del self.connections[peer_id]
+        self.connections.pop(peer_id, None)
 
     # Notifee
 
