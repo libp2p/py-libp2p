@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, Tuple
+from typing import Any, AsyncIterator, Dict, Tuple, cast
 
 import factory
 
@@ -67,7 +67,7 @@ class SwarmFactory(factory.Factory):
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
         # an argument explicitly with `None`. If an argument is `None`, we don't pass it to
         # `factory.Factory.__init__`, in order to let the function initialize it.
-        optional_kwargs = {}
+        optional_kwargs: Dict[str, Any] = {}
         if key_pair is not None:
             optional_kwargs["key_pair"] = key_pair
         if muxer_opt is not None:
@@ -80,7 +80,8 @@ class SwarmFactory(factory.Factory):
     async def create_batch_and_listen(
         cls, is_secure: bool, number: int, muxer_opt: TMuxerOptions = None
     ) -> Tuple[Swarm, ...]:
-        return await asyncio.gather(
+        # Ignore typing since we are removing asyncio soon
+        return await asyncio.gather(  # type: ignore
             *[
                 cls.create_and_listen(is_secure=is_secure, muxer_opt=muxer_opt)
                 for _ in range(number)
@@ -159,14 +160,16 @@ async def swarm_pair_factory(
     return swarms[0], swarms[1]
 
 
-async def host_pair_factory(is_secure) -> Tuple[BasicHost, BasicHost]:
+async def host_pair_factory(is_secure: bool) -> Tuple[BasicHost, BasicHost]:
     hosts = await HostFactory.create_batch_and_listen(is_secure, 2)
     await connect(hosts[0], hosts[1])
     return hosts[0], hosts[1]
 
 
 @asynccontextmanager
-async def pair_of_connected_hosts(is_secure=True):
+async def pair_of_connected_hosts(
+    is_secure: bool = True
+) -> AsyncIterator[Tuple[BasicHost, BasicHost]]:
     a, b = await host_pair_factory(is_secure)
     yield a, b
     close_tasks = (a.close(), b.close())
@@ -179,7 +182,7 @@ async def swarm_conn_pair_factory(
     swarms = await swarm_pair_factory(is_secure)
     conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
     conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
-    return conn_0, swarms[0], conn_1, swarms[1]
+    return cast(SwarmConn, conn_0), swarms[0], cast(SwarmConn, conn_1), swarms[1]
 
 
 async def mplex_conn_pair_factory(is_secure: bool) -> Tuple[Mplex, Swarm, Mplex, Swarm]:
@@ -187,7 +190,12 @@ async def mplex_conn_pair_factory(is_secure: bool) -> Tuple[Mplex, Swarm, Mplex,
     conn_0, swarm_0, conn_1, swarm_1 = await swarm_conn_pair_factory(
         is_secure, muxer_opt=muxer_opt
     )
-    return conn_0.muxed_conn, swarm_0, conn_1.muxed_conn, swarm_1
+    return (
+        cast(Mplex, conn_0.muxed_conn),
+        swarm_0,
+        cast(Mplex, conn_1.muxed_conn),
+        swarm_1,
+    )
 
 
 async def mplex_stream_pair_factory(
@@ -203,13 +211,13 @@ async def mplex_stream_pair_factory(
         if len(mplex_conn_1.streams) != 1:
             raise Exception("Mplex should not have any stream upon connection")
         stream_1 = tuple(mplex_conn_1.streams.values())[0]
-    return stream_0, swarm_0, stream_1, swarm_1
+    return cast(MplexStream, stream_0), swarm_0, stream_1, swarm_1
 
 
 async def net_stream_pair_factory(
     is_secure: bool
 ) -> Tuple[INetStream, BasicHost, INetStream, BasicHost]:
-    protocol_id = "/example/id/1"
+    protocol_id = TProtocol("/example/id/1")
 
     stream_1: INetStream
 

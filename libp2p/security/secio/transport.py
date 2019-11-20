@@ -25,6 +25,7 @@ from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.typing import TProtocol
 
 from .exceptions import (
     IncompatibleChoices,
@@ -37,7 +38,7 @@ from .exceptions import (
 )
 from .pb.spipe_pb2 import Exchange, Propose
 
-ID = "/secio/1.0.0"
+ID = TProtocol("/secio/1.0.0")
 
 NONCE_SIZE = 16  # bytes
 
