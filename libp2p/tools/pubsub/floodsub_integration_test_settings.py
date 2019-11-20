@@ -1,3 +1,6 @@
+# type: ignore
+# To add typing to this module, it's better to do it after refactoring test cases into classes
+
 import asyncio
 
 import pytest
@@ -140,7 +143,7 @@ floodsub_protocol_pytest_params = [
 ]
 
 
-async def perform_test_from_obj(obj, router_factory):
+async def perform_test_from_obj(obj, router_factory) -> None:
     """
     Perform pubsub tests from a test obj.
     test obj are composed as follows:
