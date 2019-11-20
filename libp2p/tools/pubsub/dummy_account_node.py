@@ -1,4 +1,5 @@
 import asyncio
+from typing import Dict
 import uuid
 
 from libp2p.host.host_interface import IHost
@@ -6,8 +7,6 @@ from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.constants import LISTEN_MADDR
 from libp2p.tools.factories import FloodsubFactory, PubsubFactory
-
-from .utils import message_id_generator
 
 CRYPTO_TOPIC = "ethereum"
 
@@ -36,12 +35,11 @@ class DummyAccountNode:
         self.libp2p_node = libp2p_node
         self.pubsub = pubsub
         self.floodsub = floodsub
-        self.balances = {}
-        self.next_msg_id_func = message_id_generator(0)
+        self.balances: Dict[str, int] = {}
         self.node_id = str(uuid.uuid1())
 
     @classmethod
-    async def create(cls):
+    async def create(cls) -> "DummyAccountNode":
         """
         Create a new DummyAccountNode and attach a libp2p node, a floodsub, and
         a pubsub instance to this new node.
@@ -54,7 +52,7 @@ class DummyAccountNode:
         await pubsub.host.get_network().listen(LISTEN_MADDR)
         return cls(libp2p_node=pubsub.host, pubsub=pubsub, floodsub=pubsub.router)
 
-    async def handle_incoming_msgs(self):
+    async def handle_incoming_msgs(self) -> None:
         """Handle all incoming messages on the CRYPTO_TOPIC from peers."""
         while True:
             incoming = await self.q.get()
@@ -65,14 +63,16 @@ class DummyAccountNode:
             elif msg_comps[0] == "set":
                 self.handle_set_crypto(msg_comps[1], int(msg_comps[2]))
 
-    async def setup_crypto_networking(self):
+    async def setup_crypto_networking(self) -> None:
         """Subscribe to CRYPTO_TOPIC and perform call to function that handles
         all incoming messages on said topic."""
         self.q = await self.pubsub.subscribe(CRYPTO_TOPIC)
 
         asyncio.ensure_future(self.handle_incoming_msgs())
 
-    async def publish_send_crypto(self, source_user, dest_user, amount):
+    async def publish_send_crypto(
+        self, source_user: str, dest_user: str, amount: int
+    ) -> None:
         """
         Create a send crypto message and publish that message to all other
         nodes.
@@ -84,7 +84,7 @@ class DummyAccountNode:
         msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
         await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
-    async def publish_set_crypto(self, user, amount):
+    async def publish_set_crypto(self, user: str, amount: int) -> None:
         """
         Create a set crypto message and publish that message to all other
         nodes.
@@ -95,7 +95,7 @@ class DummyAccountNode:
         msg_contents = "set," + user + "," + str(amount)
         await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
-    def handle_send_crypto(self, source_user, dest_user, amount):
+    def handle_send_crypto(self, source_user: str, dest_user: str, amount: int) -> None:
         """
         Handle incoming send_crypto message.
 
@@ -113,7 +113,7 @@ class DummyAccountNode:
         else:
             self.balances[dest_user] = amount
 
-    def handle_set_crypto(self, dest_user, amount):
+    def handle_set_crypto(self, dest_user: str, amount: int) -> None:
         """
         Handle incoming set_crypto message.
 
@@ -122,7 +122,7 @@ class DummyAccountNode:
         """
         self.balances[dest_user] = amount
 
-    def get_balance(self, user):
+    def get_balance(self, user: str) -> int:
         """
         Get balance in crypto for a particular user.
 

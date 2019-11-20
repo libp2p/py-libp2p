@@ -1,4 +1,3 @@
-import struct
 from typing import Sequence
 
 from libp2p.host.host_interface import IHost

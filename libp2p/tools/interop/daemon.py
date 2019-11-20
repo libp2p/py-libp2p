@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any, List
+from typing import Any, Awaitable, Callable, List
 
 import multiaddr
 from multiaddr import Multiaddr
@@ -19,7 +19,9 @@ P2PD_PATH = GO_BIN_PATH / "p2pd"
 TIMEOUT_DURATION = 30
 
 
-async def try_until_success(coro_func, timeout=TIMEOUT_DURATION):
+async def try_until_success(
+    coro_func: Callable[[], Awaitable[Any]], timeout: int = TIMEOUT_DURATION
+) -> None:
     """
     Keep running ``coro_func`` until either it succeed or time is up.
 
@@ -78,11 +80,11 @@ class P2PDProcess:
 
         self._tasks = []
 
-    async def wait_until_ready(self):
+    async def wait_until_ready(self) -> None:
         lines_head_pattern = (b"Control socket:", b"Peer ID:", b"Peer Addrs:")
         lines_head_occurred = {line: False for line in lines_head_pattern}
 
-        async def read_from_daemon_and_check():
+        async def read_from_daemon_and_check() -> bool:
             line = await self.proc.stdout.readline()
             for head_pattern in lines_head_occurred:
                 if line.startswith(head_pattern):
@@ -166,10 +168,10 @@ async def make_p2pd(
     daemon_control_port: int,
     client_callback_port: int,
     is_secure: bool,
-    is_pubsub_enabled=True,
-    is_gossipsub=True,
-    is_pubsub_signing=False,
-    is_pubsub_signing_strict=False,
+    is_pubsub_enabled: bool = True,
+    is_gossipsub: bool = True,
+    is_pubsub_signing: bool = False,
+    is_pubsub_signing_strict: bool = False,
 ) -> Daemon:
     control_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{daemon_control_port}")
     p2pd_proc = P2PDProcess(
