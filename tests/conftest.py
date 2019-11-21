@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from .configs import LISTEN_MADDR
-from .factories import HostFactory
+from libp2p.tools.constants import LISTEN_MADDR
+from libp2p.tools.factories import HostFactory
 
 
 @pytest.fixture

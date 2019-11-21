@@ -1,12 +1,13 @@
+# type: ignore
+# To add typing to this module, it's better to do it after refactoring test cases into classes
+
 import asyncio
 
 import pytest
 
-from tests.configs import LISTEN_MADDR
-from tests.factories import PubsubFactory
-from tests.utils import connect
-
-from .configs import FLOODSUB_PROTOCOL_ID
+from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID, LISTEN_MADDR
+from libp2p.tools.factories import PubsubFactory
+from libp2p.tools.utils import connect
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 
@@ -142,7 +143,7 @@ floodsub_protocol_pytest_params = [
 ]
 
 
-async def perform_test_from_obj(obj, router_factory):
+async def perform_test_from_obj(obj, router_factory) -> None:
     """
     Perform pubsub tests from a test obj.
     test obj are composed as follows:

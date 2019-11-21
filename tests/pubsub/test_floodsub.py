@@ -3,13 +3,12 @@ import asyncio
 import pytest
 
 from libp2p.peer.id import ID
-from tests.factories import FloodsubFactory
-from tests.utils import connect
-
-from .floodsub_integration_test_settings import (
+from libp2p.tools.factories import FloodsubFactory
+from libp2p.tools.pubsub.floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,
 )
+from libp2p.tools.utils import connect
 
 
 @pytest.mark.parametrize("num_hosts", (2,))

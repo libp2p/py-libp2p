@@ -2,8 +2,8 @@ import multiaddr
 import pytest
 
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from tests.constants import MAX_READ_LEN
-from tests.utils import set_up_nodes_by_transport_opt
+from libp2p.tools.constants import MAX_READ_LEN
+from libp2p.tools.utils import set_up_nodes_by_transport_opt
 
 
 @pytest.mark.asyncio

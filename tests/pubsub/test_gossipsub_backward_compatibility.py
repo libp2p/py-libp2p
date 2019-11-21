@@ -2,10 +2,9 @@ import functools
 
 import pytest
 
-from tests.factories import GossipsubFactory
-
-from .configs import FLOODSUB_PROTOCOL_ID
-from .floodsub_integration_test_settings import (
+from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
+from libp2p.tools.factories import GossipsubFactory
+from libp2p.tools.pubsub.floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,
 )

@@ -1,7 +1,7 @@
 import pytest
 
 from libp2p.host.exceptions import StreamFailure
-from tests.utils import echo_stream_handler, set_up_nodes_by_transport_opt
+from libp2p.tools.utils import echo_stream_handler, set_up_nodes_by_transport_opt
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection

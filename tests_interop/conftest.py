@@ -7,17 +7,15 @@ import pexpect
 import pytest
 
 from libp2p.io.abc import ReadWriteCloser
-from tests.configs import LISTEN_MADDR
-from tests.factories import (
+from libp2p.tools.constants import GOSSIPSUB_PARAMS, LISTEN_MADDR
+from libp2p.tools.factories import (
     FloodsubFactory,
     GossipsubFactory,
     HostFactory,
     PubsubFactory,
 )
-from tests.pubsub.configs import GOSSIPSUB_PARAMS
-
-from .daemon import Daemon, make_p2pd
-from .utils import connect
+from libp2p.tools.interop.daemon import Daemon, make_p2pd
+from libp2p.tools.interop.utils import connect
 
 
 @pytest.fixture

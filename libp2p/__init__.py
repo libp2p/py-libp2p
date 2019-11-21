@@ -117,7 +117,7 @@ async def new_node(
     sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
     disc_opt: IPeerRouting = None,
-) -> IHost:
+) -> BasicHost:
     """
     create new libp2p node.
 

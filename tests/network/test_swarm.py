@@ -3,8 +3,8 @@ import asyncio
 import pytest
 
 from libp2p.network.exceptions import SwarmException
-from tests.factories import SwarmFactory
-from tests.utils import connect_swarm
+from libp2p.tools.factories import SwarmFactory
+from libp2p.tools.utils import connect_swarm
 
 
 @pytest.mark.asyncio

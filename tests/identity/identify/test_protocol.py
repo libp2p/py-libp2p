@@ -2,7 +2,7 @@ import pytest
 
 from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.identity.identify.protocol import ID, _mk_identify_protobuf
-from tests.factories import pair_of_connected_hosts
+from libp2p.tools.factories import pair_of_connected_hosts
 
 
 @pytest.mark.asyncio
