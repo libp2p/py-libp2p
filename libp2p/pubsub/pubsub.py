@@ -298,7 +298,7 @@ class Pubsub:
     def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
             return
-        self.peers.pop(peer_id, None)
+        del self.peers[peer_id]
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:

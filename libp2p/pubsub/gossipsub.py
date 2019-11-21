@@ -353,8 +353,8 @@ class GossipSub(IPubsubRouter):
             # TODO: there's no way time_since_last_publish gets set anywhere yet
             if self.time_since_last_publish[topic] > self.time_to_live:
                 # Remove topic from fanout
-                self.fanout.pop(topic, None)
-                self.time_since_last_publish.pop(topic, None)
+                del self.fanout[topic]
+                del self.time_since_last_publish[topic]
             else:
                 num_fanout_peers_in_topic = len(self.fanout[topic])
 
