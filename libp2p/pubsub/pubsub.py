@@ -20,7 +20,7 @@ from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
 from libp2p.network.exceptions import SwarmException
-from libp2p.network.stream.exceptions import StreamEOF, StreamReset
+from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
@@ -279,13 +279,19 @@ class Pubsub:
 
         # Send hello packet
         hello = self.get_hello_packet()
-        await stream.write(encode_varint_prefixed(hello.SerializeToString()))
+        try:
+            await stream.write(encode_varint_prefixed(hello.SerializeToString()))
+        except StreamClosed:
+            logger.debug("Fail to add new peer %s: stream closed", peer_id)
+            del self.peers[peer_id]
+            return
         # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
+            del self.peers[peer_id]
             return
 
         logger.debug("added new peer %s", peer_id)
@@ -429,7 +435,12 @@ class Pubsub:
         # Broadcast message
         for stream in self.peers.values():
             # Write message to stream
-            await stream.write(encode_varint_prefixed(raw_msg))
+            try:
+                await stream.write(encode_varint_prefixed(raw_msg))
+            except StreamClosed:
+                peer_id = stream.muxed_conn.peer_id
+                logger.debug("Fail to message peer %s: stream closed", peer_id)
+                self._handle_dead_peer(peer_id)
 
     async def publish(self, topic_id: str, data: bytes) -> None:
         """

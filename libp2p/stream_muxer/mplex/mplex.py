@@ -297,7 +297,8 @@ class Mplex(IMuxedConn):
         #   the entry of this stream, to avoid others from accessing it.
         if is_local_closed:
             async with self.streams_lock:
-                del self.streams[stream_id]
+                if stream_id in self.streams:
+                    del self.streams[stream_id]
 
     async def _handle_reset(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
@@ -315,7 +316,8 @@ class Mplex(IMuxedConn):
             if not stream.event_local_closed.is_set():
                 stream.event_local_closed.set()
         async with self.streams_lock:
-            del self.streams[stream_id]
+            if stream_id in self.streams:
+                del self.streams[stream_id]
 
     async def _cleanup(self) -> None:
         if not self.event_shutting_down.is_set():

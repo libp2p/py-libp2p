@@ -5,8 +5,8 @@ import pytest
 from libp2p import new_node
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
-from tests.configs import LISTEN_MADDR
-from tests.utils import connect
+from libp2p.tools.constants import LISTEN_MADDR
+from libp2p.tools.utils import connect
 
 # TODO: Add tests for multiple streams being opened on different
 # protocols through the same connection

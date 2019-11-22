@@ -1,8 +1,7 @@
 import pytest
 
-from tests.factories import FloodsubFactory, GossipsubFactory, PubsubFactory
-
-from .configs import GOSSIPSUB_PARAMS
+from libp2p.tools.constants import GOSSIPSUB_PARAMS
+from libp2p.tools.factories import FloodsubFactory, GossipsubFactory, PubsubFactory
 
 
 def _make_pubsubs(hosts, pubsub_routers, cache_size):

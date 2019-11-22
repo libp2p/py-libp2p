@@ -1,6 +1,7 @@
 import logging
 from typing import Iterable, List, Sequence
 
+from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
@@ -89,7 +90,10 @@ class FloodSub(IPubsubRouter):
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
-            await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
+            try:
+                await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
+            except StreamClosed:
+                logger.debug("Fail to publish message to %s: stream closed", peer_id)
 
     async def join(self, topic: str) -> None:
         """

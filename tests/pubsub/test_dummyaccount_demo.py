@@ -3,9 +3,8 @@ from threading import Thread
 
 import pytest
 
-from tests.utils import connect
-
-from .dummy_account_node import DummyAccountNode
+from libp2p.tools.pubsub.dummy_account_node import DummyAccountNode
+from libp2p.tools.utils import connect
 
 
 def create_setup_in_new_thread_func(dummy_node):

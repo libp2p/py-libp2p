@@ -1,4 +1,4 @@
-FILES_TO_LINT = libp2p tests examples setup.py
+FILES_TO_LINT = libp2p tests tests_interop examples setup.py
 PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/pubsub/pb/rpc.proto \
 	libp2p/security/insecure/pb/plaintext.proto \
@@ -27,7 +27,15 @@ protobufs: $(PY)
 %_pb2.py: %.proto
 	protoc --python_out=. --mypy_out=. $<
 
-.PHONY: clean
+clean-proto:
+	rm -f $(PY) $(PYI)
 
 clean:
-	rm -f $(PY) $(PYI)
+	find . -name '__pycache__' -exec rm -rf {} +
+	rm -fr build/
+	rm -fr dist/
+	rm -fr *.egg-info
+
+package: clean
+	python setup.py sdist bdist_wheel
+	python scripts/release/test_package.py
