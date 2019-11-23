@@ -292,7 +292,7 @@ class GossipSub(IPubsubRouter):
             await self.emit_prune(topic, peer)
 
         # Forget mesh[topic]
-        self.mesh.pop(topic, None)
+        del self.mesh[topic]
 
     # Heartbeat
     async def heartbeat(self) -> None:

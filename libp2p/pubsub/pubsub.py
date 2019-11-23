@@ -282,7 +282,7 @@ class Pubsub:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
-            self.peers.pop(peer_id, None)
+            del self.peers[peer_id]
             return
         # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
@@ -290,7 +290,7 @@ class Pubsub:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
-            self.peers.pop(peer_id, None)
+            del self.peers[peer_id]
             return
 
         logger.debug("added new peer %s", peer_id)
@@ -410,7 +410,7 @@ class Pubsub:
         if topic_id not in self.my_topics:
             return
         # Remove topic_id from map if present
-        self.my_topics.pop(topic_id, None)
+        del self.my_topics[topic_id]
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
