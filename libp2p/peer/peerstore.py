@@ -1,6 +1,8 @@
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from multiaddr import Multiaddr
+
+from libp2p.crypto.keys import PrivateKey, PublicKey
 
 from .id import ID
 from .peerdata import PeerData, PeerDataError
@@ -10,10 +12,14 @@ from .peerstore_interface import IPeerStore
 
 class PeerStore(IPeerStore):
 
+    peer_pubkey_map: Dict[ID, PublicKey]
+    peer_privkey_map: Dict[ID, PrivateKey]
     peer_data_map: Dict[ID, PeerData]
 
     def __init__(self) -> None:
         IPeerStore.__init__(self)
+        self.peer_pubkey_map = {}
+        self.peer_privkey_map = {}
         self.peer_data_map = {}
 
     def __create_or_get_peer(self, peer_id: ID) -> PeerData:
@@ -93,6 +99,29 @@ class PeerStore(IPeerStore):
             if len(self.peer_data_map[peer_id].get_addrs()) >= 1:
                 output.append(peer_id)
         return output
+
+    def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
+        if peer_id in self.peer_pubkey_map:
+            raise PeerStoreError(f"peer ID already has pubkey: {self.peer_pubkey_map[peer_id]}")
+        self.peer_pubkey_map[peer_id] = pubkey
+
+    def pubkey(self, peer_id: ID) -> PublicKey:
+        if peer_id in self.peer_pubkey_map:
+            return self.peer_pubkey_map[peer_id]
+        raise PeerStoreError("peer ID not found")
+
+    def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
+        if peer_id in self.peer_privkey_map:
+            raise PeerStoreError(f"peer ID already has privkey: {self.peer_privkey_map[peer_id]}")
+        self.peer_privkey_map[peer_id] = privkey
+
+    def privkey(self, peer_id: ID) -> PrivateKey:
+        if peer_id in self.peer_pubkey_map:
+            return self.peer_privkey_map[peer_id]
+        raise PeerStoreError("peer ID not found")
+
+    def peers_with_keys(self) -> Tuple[ID]:
+        return set(self.peer_pubkey_map.keys()).union(self.peer_privkey_map.keys())
 
 
 class PeerStoreError(KeyError):
