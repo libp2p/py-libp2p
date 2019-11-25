@@ -67,6 +67,9 @@ class BasicHost(IHost):
     def get_public_key(self) -> PublicKey:
         return self.peerstore.pubkey(self.get_id())
 
+    def get_private_key(self) -> PublicKey:
+        return self.peerstore.privkey(self.get_id())
+
     def get_network(self) -> INetwork:
         """
         :return: network instance of host

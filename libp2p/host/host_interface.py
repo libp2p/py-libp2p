@@ -25,6 +25,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_private_key(self) -> PublicKey:
+        """
+        :return: the private key belonging to the peer
+        """
+
+    @abstractmethod
     def get_network(self) -> INetwork:
         """
         :return: network instance of host
