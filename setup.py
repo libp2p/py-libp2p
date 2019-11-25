@@ -64,7 +64,7 @@ setuptools.setup(
         "multiaddr>=0.0.8,<0.1.0",
         "rpcudp>=3.0.0,<4.0.0",
         "lru-dict>=1.1.6",
-        "protobuf==3.9.0",
+        "protobuf>=3.10.0,<4.0.0",
         "coincurve>=10.0.0,<11.0.0",
         "fastecdsa==1.7.4",
         "pynacl==1.3.0",
