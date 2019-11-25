@@ -105,6 +105,10 @@ def initialize_default_swarm(
     )
 
     peerstore = peerstore_opt or PeerStore()
+    # Store our key pair in peerstore
+    peerstore.add_pubkey(id_opt, key_pair.public_key)
+    peerstore.add_privkey(id_opt, key_pair.private_key)
+
     # TODO: Initialize discovery if not presented
     return Swarm(id_opt, peerstore, upgrader, transport)
 
@@ -151,9 +155,9 @@ async def new_node(
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
     if disc_opt:
-        host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
+        host = RoutedHost(swarm_opt, disc_opt)
     else:
-        host = BasicHost(key_pair.public_key, swarm_opt)
+        host = BasicHost(swarm_opt)
 
     # Kick off cleanup job
     asyncio.ensure_future(cleanup_done_tasks())
