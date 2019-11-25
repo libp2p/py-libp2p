@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Sequence, Set
 
 from multiaddr import Multiaddr
 
@@ -132,7 +132,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def peers_with_keys(self) -> Tuple[ID]:
+    def peers_with_keys(self) -> Set[ID]:
         """
         :return: all of the peer IDs which has pubkey/privkey stored in peer store
         """

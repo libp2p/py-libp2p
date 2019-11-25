@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, List, Sequence
 
 import multiaddr
 
-from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.host.defaults import get_default_protocols
 from libp2p.host.exceptions import StreamFailure
 from libp2p.network.network_interface import INetwork
@@ -67,7 +67,7 @@ class BasicHost(IHost):
     def get_public_key(self) -> PublicKey:
         return self.peerstore.pubkey(self.get_id())
 
-    def get_private_key(self) -> PublicKey:
+    def get_private_key(self) -> PrivateKey:
         return self.peerstore.privkey(self.get_id())
 
     def get_network(self) -> INetwork:

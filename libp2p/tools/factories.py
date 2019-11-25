@@ -34,7 +34,7 @@ from .constants import (
 from .utils import connect, connect_swarm
 
 
-def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair):
+def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> PeerStore:
     peer_store = PeerStore()
     peer_store.add_pubkey(self_id, key_pair.public_key)
     peer_store.add_privkey(self_id, key_pair.private_key)

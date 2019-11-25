@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from multiaddr import Multiaddr
 
@@ -24,7 +24,8 @@ class PeerStore(IPeerStore):
     def __create_or_get_peer(self, peer_id: ID) -> PeerData:
         """
         Returns the peer data for peer_id or creates a new peer data (and
-        stores it in peer_data_map) if peer data for peer_id does not yet exist.
+        stores it in peer_data_map) if peer data for peer_id does not yet
+        exist.
 
         :param peer_id: peer ID
         :return: peer data
@@ -158,7 +159,9 @@ class PeerStore(IPeerStore):
         :raise PeerStoreError: if peer ID already has pubkey set
         """
         if peer_id in self.peer_pubkey_map:
-            raise PeerStoreError(f"peer ID already has pubkey: {self.peer_pubkey_map[peer_id]}")
+            raise PeerStoreError(
+                f"peer ID already has pubkey: {self.peer_pubkey_map[peer_id]}"
+            )
         self.peer_pubkey_map[peer_id] = pubkey
 
     def pubkey(self, peer_id: ID) -> PublicKey:
@@ -178,7 +181,9 @@ class PeerStore(IPeerStore):
         :raise PeerStoreError: if peer ID already has privkey set
         """
         if peer_id in self.peer_privkey_map:
-            raise PeerStoreError(f"peer ID already has privkey: {self.peer_privkey_map[peer_id]}")
+            raise PeerStoreError(
+                f"peer ID already has privkey: {self.peer_privkey_map[peer_id]}"
+            )
         self.peer_privkey_map[peer_id] = privkey
 
     def privkey(self, peer_id: ID) -> PrivateKey:
@@ -191,7 +196,7 @@ class PeerStore(IPeerStore):
             return self.peer_privkey_map[peer_id]
         raise PeerStoreError("peer ID not found")
 
-    def peers_with_keys(self) -> Tuple[ID]:
+    def peers_with_keys(self) -> Set[ID]:
         """
         :return: all of the peer IDs which has pubkey/privkey stored in peer store
         """
