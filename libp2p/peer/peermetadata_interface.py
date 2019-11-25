@@ -5,9 +5,6 @@ from .id import ID
 
 
 class IPeerMetadata(ABC):
-    def __init__(self) -> None:
-        pass
-
     @abstractmethod
     def get(self, peer_id: ID, key: str) -> Any:
         """
