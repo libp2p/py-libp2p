@@ -136,7 +136,6 @@ class MplexStream(IMuxedStream):
                     nursery.start_soon(
                         self.muxed_conn.send_message, flag, None, self.stream_id
                     )
-                await trio.sleep(0)
 
             self.event_local_closed.set()
             self.event_remote_closed.set()

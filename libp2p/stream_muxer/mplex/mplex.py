@@ -4,6 +4,7 @@ from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
 import trio
+from async_service import Service
 
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
@@ -17,6 +18,7 @@ from libp2p.utils import (
     encode_uvarint,
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
+    TrioQueue,
 )
 
 from .constants import HeaderTags
@@ -29,7 +31,7 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
 
 
-class Mplex(IMuxedConn):
+class Mplex(IMuxedConn, Service):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
@@ -38,10 +40,10 @@ class Mplex(IMuxedConn):
     peer_id: ID
     next_channel_id: int
     streams: Dict[StreamID, MplexStream]
-    streams_lock: asyncio.Lock
-    new_stream_queue: "asyncio.Queue[IMuxedStream]"
-    event_shutting_down: asyncio.Event
-    event_closed: asyncio.Event
+    streams_lock: trio.Lock
+    new_stream_queue: "TrioQueue[IMuxedStream]"
+    event_shutting_down: trio.Event
+    event_closed: trio.Event
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
@@ -61,13 +63,14 @@ class Mplex(IMuxedConn):
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.streams = {}
-        self.streams_lock = asyncio.Lock()
-        self.new_stream_queue = asyncio.Queue()
-        self.event_shutting_down = asyncio.Event()
-        self.event_closed = asyncio.Event()
+        self.streams_lock = trio.Lock()
+        self.new_stream_queue = TrioQueue()
+        self.event_shutting_down = trio.Event()
+        self.event_closed = trio.Event()
 
-    def run(self, nursery):
-        nursery.start_soon(self.handle_incoming)
+    async def run(self):
+        self.manager.run_task(self.handle_incoming)
+        await self.manager.wait_finished()
 
     @property
     def is_initiator(self) -> bool:

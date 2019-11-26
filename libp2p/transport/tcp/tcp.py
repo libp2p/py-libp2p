@@ -25,7 +25,7 @@ class TCPListener(IListener):
         self.server = None
         self.handler = handler_function
 
-    async def listen(self, maddr: Multiaddr, nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
         put listener in listening mode and wait for incoming connections.
 
