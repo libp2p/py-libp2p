@@ -144,8 +144,7 @@ class GossipSub(IPubsubRouter):
         elif peer_id in self.peers_floodsub:
             self.peers_floodsub.remove(peer_id)
 
-        if peer_id in self.peers_to_protocol:
-            del self.peers_to_protocol[peer_id]
+        self.peers_to_protocol.pop(peer_id, None)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -274,8 +273,7 @@ class GossipSub(IPubsubRouter):
                 self.mesh[topic].append(peer)
                 await self.emit_graft(topic, peer)
 
-        if topic_in_fanout:
-            del self.fanout[topic]
+        self.fanout.pop(topic, None)
 
     async def leave(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec

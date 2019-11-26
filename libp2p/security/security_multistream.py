@@ -50,8 +50,7 @@ class SecurityMultistream(ABC):
         :param transport: the corresponding transportation to the ``protocol``.
         """
         # If protocol is already added before, remove it and add it again.
-        if protocol in self.transports:
-            del self.transports[protocol]
+        self.transports.pop(protocol, None)
         self.transports[protocol] = transport
         # Note: None is added as the handler for the given protocol since
         # we only care about selecting the protocol, not any handler function

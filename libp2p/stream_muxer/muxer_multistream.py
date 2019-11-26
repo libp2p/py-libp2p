@@ -44,8 +44,7 @@ class MuxerMultistream:
         :param transport: the corresponding transportation to the ``protocol``.
         """
         # If protocol is already added before, remove it and add it again.
-        if protocol in self.transports:
-            del self.transports[protocol]
+        self.transports.pop(protocol, None)
         self.transports[protocol] = transport
         self.multiselect.add_handler(protocol, None)
 

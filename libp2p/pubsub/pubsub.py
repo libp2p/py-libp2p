@@ -232,8 +232,7 @@ class Pubsub:
 
         :param topic: the topic to remove validator from
         """
-        if topic in self.topic_validators:
-            del self.topic_validators[topic]
+        self.topic_validators.pop(topic, None)
 
     def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
         """

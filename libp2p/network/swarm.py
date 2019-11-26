@@ -248,7 +248,7 @@ class Swarm(INetwork):
         # TODO: Should be changed to close multisple connections,
         #   if we have several connections per peer in the future.
         connection = self.connections[peer_id]
-        # NOTE: `connection.close` will perform `del self.connections[peer_id]`
+        # NOTE: `connection.close` will delete `peer_id` from `self.connections`
         # and `notify_disconnected` for us.
         await connection.close()
 
