@@ -1,35 +1,47 @@
-import setuptools
-
-py_classifiers = [f"Programming Language :: Python :: {version}" for version in ["3.7"]]
-
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+from setuptools import (
+    setup,
+    find_packages,
+)
 
 extras_require = {
     "test": [
-        "factory-boy>=2.12.0,<3.0.0",
         "pytest>=4.6.3,<5.0.0",
+        "pytest-xdist>=1.30.0,<2",
         "pytest-asyncio>=0.10.0,<1.0.0",
-        "pytest-xdist>=1.30.0",
+        "factory-boy>=2.12.0,<3.0.0",
     ],
     "lint": [
-        "mypy>=0.701,<1.0",
+        "flake8==3.7.9",  # flake8 is not semver: it has added new warnings at minor releases
+        "isort==4.3.21",
+        "mypy==0.740",  # flake8 is not semver: it has added new warnings at minor releases
         "mypy-protobuf==1.15",
         "black==19.3b0",
-        "isort==4.3.21",
-        "flake8>=3.7.7,<4.0.0",
-        "flake8-bugbear",
+        "flake8-bugbear>=19.8.0,<20",
+        "docformatter>=1.3.1,<2",
+    ],
+    'doc': [
+        "Sphinx>=1.6.5,<2",
+        "sphinx_rtd_theme>=0.4.3,<=1",
+        "towncrier>=19.2.0, <20",
     ],
     "dev": [
         "bumpversion>=0.5.3,<1",
-        "docformatter",
+        "pytest-watch>=4.1.0,<5",
+        "wheel",
+        "twine",
+        "ipython",
         "setuptools>=36.2.0",
         "tox>=3.13.2,<4.0.0",
-        "twine",
-        "wheel",
     ],
 }
 
 extras_require["dev"] = (
-    extras_require["test"] + extras_require["lint"] + extras_require["dev"]
+    extras_require['dev'] +  # noqa: W504
+    extras_require['test'] +  # noqa: W504
+    extras_require['lint'] +  # noqa: W504
+    extras_require['doc']
 )
 
 
@@ -37,26 +49,17 @@ with open("./README.md") as readme:
     long_description = readme.read()
 
 
-setuptools.setup(
+setup(
     name="libp2p",
-    description="libp2p implementation written in python",
+    # *IMPORTANT*: Don't manually change the version here. Use `make bump`, as described in readme
     version="0.1.2",
+    description="libp2p implementation written in python",
     long_description=long_description,
     long_description_content_type="text/markdown",
     maintainer="The Ethereum Foundation",
     maintainer_email="snakecharmers@ethereum.org",
     url="https://github.com/ethereum/py-libp2p",
-    license="MIT/APACHE2.0",
-    platforms=["unix", "linux", "osx"],
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "License :: OSI Approved :: Apache Software License",
-        "Natural Language :: English",
-    ]
-    + py_classifiers,
-    python_requires=">=3.7,<4",
+    include_package_data=True,
     install_requires=[
         "pycryptodome>=3.9.2,<4.0.0",
         "base58>=1.0.3,<2.0.0",
@@ -69,8 +72,21 @@ setuptools.setup(
         "fastecdsa==1.7.4",
         "pynacl==1.3.0",
     ],
+    python_requires=">=3.7,<4",
     extras_require=extras_require,
-    packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
+    py_modules=['<MODULE_NAME>'],
+    license="MIT/APACHE2.0",
     zip_safe=False,
     keywords="libp2p p2p",
+    packages=find_packages(exclude=["tests", "tests.*"]),
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
+        "Natural Language :: English",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+    ],
+    platforms=["unix", "linux", "osx"],
 )
