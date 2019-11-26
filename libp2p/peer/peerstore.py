@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from multiaddr import Multiaddr
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
 
 from .id import ID
 from .peerdata import PeerData, PeerDataError
@@ -34,7 +34,7 @@ class PeerStore(IPeerStore):
             return self.peer_data_map[peer_id]
         data = PeerData()
         self.peer_data_map[peer_id] = data
-        return self.peer_data_map[peer_id]
+        return data
 
     def peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
         """
@@ -195,6 +195,15 @@ class PeerStore(IPeerStore):
         if peer_id in self.peer_pubkey_map:
             return self.peer_privkey_map[peer_id]
         raise PeerStoreError("peer ID not found")
+
+    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
+        """
+        :param peer_id: peer ID to add private key for
+        :param key_pair:
+        :raise PeerStoreError: if peer ID already has pubkey or privkey set
+        """
+        self.add_pubkey(peer_id, key_pair.public_keypubkey)
+        self.add_privkey(peer_id, key_pair.private_key)
 
     def peers_with_keys(self) -> Set[ID]:
         """

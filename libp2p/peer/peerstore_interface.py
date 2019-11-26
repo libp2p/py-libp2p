@@ -3,7 +3,7 @@ from typing import Any, List, Sequence, Set
 
 from multiaddr import Multiaddr
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
 
 from .addrbook_interface import IAddrBook
 from .id import ID
@@ -129,6 +129,14 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param peer_id: peer ID to get private key for
         :return: private key of the peer
         :raise PeerStoreError: if peer ID not found
+        """
+
+    @abstractmethod
+    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
+        """
+        :param peer_id: peer ID to add private key for
+        :param key_pair:
+        :raise PeerStoreError: if peer ID already has pubkey or privkey set
         """
 
     @abstractmethod

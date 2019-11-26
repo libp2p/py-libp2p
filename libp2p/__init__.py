@@ -106,8 +106,7 @@ def initialize_default_swarm(
 
     peerstore = peerstore_opt or PeerStore()
     # Store our key pair in peerstore
-    peerstore.add_pubkey(id_opt, key_pair.public_key)
-    peerstore.add_privkey(id_opt, key_pair.private_key)
+    peerstore.add_key_pair(id_opt, key_pair)
 
     # TODO: Initialize discovery if not presented
     return Swarm(id_opt, peerstore, upgrader, transport)
