@@ -1,1 +1,1 @@
-<PYPI_NAME>[doc]
+libp2p[doc]

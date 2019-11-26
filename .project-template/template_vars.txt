@@ -1,6 +1,6 @@
-<MODULE_NAME>
-<PYPI_NAME>
-<REPO_NAME>
-<RTD_NAME>
-<PROJECT_NAME>
-<SHORT_DESCRIPTION>
+libp2p
+libp2p
+py-libp2p
+py-libp2p
+py-libp2p
+The Python implementation of the libp2p networking stack

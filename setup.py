@@ -55,7 +55,7 @@ setup(
     long_description_content_type="text/markdown",
     maintainer="The Ethereum Foundation",
     maintainer_email="snakecharmers@ethereum.org",
-    url="https://github.com/ethereum/py-libp2p",
+    url="https://github.com/libp2p/py-libp2p",
     include_package_data=True,
     install_requires=[
         "pycryptodome>=3.9.2,<4.0.0",
@@ -71,7 +71,7 @@ setup(
     ],
     python_requires=">=3.7,<4",
     extras_require=extras_require,
-    py_modules=["<MODULE_NAME>"],
+    py_modules=["libp2p"],
     license="MIT/APACHE2.0",
     zip_safe=False,
     keywords="libp2p p2p",

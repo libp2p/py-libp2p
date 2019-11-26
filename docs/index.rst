@@ -1,7 +1,7 @@
-<PROJECT_NAME>
+py-libp2p
 ==============================
 
-<SHORT_DESCRIPTION>
+The Python implementation of the libp2p networking stack
 
 Contents
 --------
@@ -9,7 +9,7 @@ Contents
 .. toctree::
     :maxdepth: 3
 
-    <MODULE_NAME>
+    libp2p
     release_notes
 
 

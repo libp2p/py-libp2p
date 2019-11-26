@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# <PROJECT_NAME> documentation build configuration file, created by
+# py-libp2p documentation build configuration file, created by
 # sphinx-quickstart on Thu Oct 16 20:43:24 2014.
 #
 # This file is execfile()d with the current directory set to its
@@ -53,7 +53,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = '<PROJECT_NAME>'
+project = 'py-libp2p'
 copyright = '2019, The Ethereum Foundation'
 
 __version__ = setup_version
@@ -189,7 +189,7 @@ html_static_path = ['_static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = '<MODULE_NAME>doc'
+htmlhelp_basename = 'libp2pdoc'
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -209,7 +209,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-  ('index', '<MODULE_NAME>.tex', '<PROJECT_NAME> Documentation',
+  ('index', 'libp2p.tex', 'py-libp2p Documentation',
    'The Ethereum Foundation', 'manual'),
 ]
 
@@ -239,7 +239,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', '<MODULE_NAME>', '<PROJECT_NAME> Documentation',
+    ('index', 'libp2p', 'py-libp2p Documentation',
      ['The Ethereum Foundation'], 1)
 ]
 
@@ -253,8 +253,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', '<PROJECT_NAME>', '<PROJECT_NAME> Documentation',
-   'The Ethereum Foundation', '<PROJECT_NAME>', '<SHORT_DESCRIPTION>',
+  ('index', 'py-libp2p', 'py-libp2p Documentation',
+   'The Ethereum Foundation', 'py-libp2p', 'The Python implementation of the libp2p networking stack',
    'Miscellaneous'),
 ]
 
