@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, List, Sequence, Set
+from typing import Any, List, Sequence
 
 from multiaddr import Multiaddr
 
@@ -137,10 +137,4 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param peer_id: peer ID to add private key for
         :param key_pair:
         :raise PeerStoreError: if peer ID already has pubkey or privkey set
-        """
-
-    @abstractmethod
-    def peers_with_keys(self) -> Set[ID]:
-        """
-        :return: all of the peer IDs which has pubkey/privkey stored in peer store
         """

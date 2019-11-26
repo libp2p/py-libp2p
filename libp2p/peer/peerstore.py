@@ -203,8 +203,8 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to add private key for
         :param key_pair:
         """
-        self.add_pubkey(key_pair.public_key)
-        self.add_privkey(key_pair.private_key)
+        self.add_pubkey(peer_id, key_pair.public_key)
+        self.add_privkey(peer_id, key_pair.private_key)
 
 
 class PeerStoreError(KeyError):
