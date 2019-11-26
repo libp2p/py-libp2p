@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # py-libp2p
 
 [![Join the chat at https://gitter.im/py-libp2p/Lobby](https://badges.gitter.im/py-libp2p/Lobby.png)](https://gitter.im/py-libp2p/Lobby)
