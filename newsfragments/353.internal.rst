@@ -1,0 +1,1 @@
+Added Makefile target to test a packaged version of libp2p before release.

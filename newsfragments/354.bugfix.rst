@@ -1,0 +1,2 @@
+Relax the protobuf dependency to play nicely with other libraries. It was pinned to 3.9.0, and now
+permits v3.10 up to (but not including) v4.
