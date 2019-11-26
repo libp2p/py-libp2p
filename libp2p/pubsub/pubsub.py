@@ -16,6 +16,7 @@ from typing import (
 import base58
 from lru import LRU
 
+from libp2p.crypto.keys import PrivateKey
 from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
@@ -82,8 +83,17 @@ class Pubsub:
 
     _tasks: List["asyncio.Future[Any]"]
 
+    # Indicate if we should enforce signature verification
+    strict_signing: bool
+    sign_key: PrivateKey
+
     def __init__(
-        self, host: IHost, router: "IPubsubRouter", my_id: ID, cache_size: int = None
+        self,
+        host: IHost,
+        router: "IPubsubRouter",
+        my_id: ID,
+        cache_size: int = None,
+        strict_signing: bool = True,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -146,6 +156,12 @@ class Pubsub:
         # Call handle peer to keep waiting for updates to peer queue
         self._tasks.append(asyncio.ensure_future(self.handle_peer_queue()))
         self._tasks.append(asyncio.ensure_future(self.handle_dead_peer_queue()))
+
+        self.strict_signing = strict_signing
+        if strict_signing:
+            self.sign_key = self.host.get_private_key()
+        else:
+            self.sign_key = None
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
         """Generate subscription message with all topics we are subscribed to
@@ -455,8 +471,6 @@ class Pubsub:
             from_id=self.host.get_id().to_bytes(),
             seqno=self._next_seqno(),
         )
-
-        # TODO: Sign with our signing key
 
         await self.push_msg(self.host.get_id(), msg)
 
