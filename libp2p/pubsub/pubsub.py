@@ -17,6 +17,7 @@ import base58
 from lru import LRU
 
 from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
@@ -472,6 +473,12 @@ class Pubsub:
             seqno=self._next_seqno(),
         )
 
+        if self.strict_signing:
+            priv_key = self.sign_key
+            signature = priv_key.sign(msg.SerializeToString())
+            msg.key = self.host.get_public_key().serialize()
+            msg.signature = signature
+
         await self.push_msg(self.host.get_id(), msg)
 
         logger.debug("successfully published message %s", msg)
@@ -519,18 +526,20 @@ class Pubsub:
 
         # TODO: Check if the `from` is in the blacklist. If yes, reject.
 
-        # TODO: Check if signing is required and if so signature should be attached.
-
         # If the message is processed before, return(i.e., don't further process the message).
         if self._is_msg_seen(msg):
             return
 
-        # TODO: - Validate the message. If failed, reject it.
-        # Validate the signature of the message
-        # FIXME: `signature_validator` is currently a stub.
-        if not signature_validator(msg.key, msg.SerializeToString()):
-            logger.debug("Signature validation failed for msg: %s", msg)
-            return
+        # Check if signing is required and if so signature should be attached.
+        if self.strict_signing:
+            if msg.signature == b'':
+                logger.debug("Reject because no signature attached for msg: %s", msg)
+                return
+            # Validate the signature of the message
+            if not signature_validator(deserialize_public_key(msg.key), msg):
+                logger.debug("Signature validation failed for msg: %s", msg)
+                return
+
         # Validate the message with registered topic validators.
         # If the validation failed, return(i.e., don't further process the message).
         try:
