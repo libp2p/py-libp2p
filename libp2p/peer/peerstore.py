@@ -95,8 +95,6 @@ class PeerStore(IPeerStore):
         :param key:
         :param value:
         """
-        # <<?>>
-        # This can output an error, not sure what the possible errors are
         peer_data = self.__create_or_get_peer_data(peer_id)
         peer_data.put_metadata(key, val)
 
@@ -152,9 +150,11 @@ class PeerStore(IPeerStore):
         """
         :param peer_id: peer ID to add public key for
         :param pubkey:
+        :raise PeerStoreError: if peer ID and pubkey does not match
         """
         peer_data = self.__create_or_get_peer_data(peer_id)
-        # TODO: Check if pubkey matches peer ID
+        if ID.from_pubkey(pubkey) != peer_id:
+            raise PeerStoreError("peer ID and pubkey does not match")
         peer_data.add_pubkey(pubkey)
 
     def pubkey(self, peer_id: ID) -> PublicKey:
@@ -176,9 +176,11 @@ class PeerStore(IPeerStore):
         """
         :param peer_id: peer ID to add private key for
         :param privkey:
+        :raise PeerStoreError: if peer ID or peer privkey not found
         """
         peer_data = self.__create_or_get_peer_data(peer_id)
-        # TODO: Check if privkey matches peer ID
+        if ID.from_pubkey(privkey.get_public_key()) != peer_id:
+            raise PeerStoreError("peer ID and privkey does not match")
         peer_data.add_privkey(privkey)
 
     def privkey(self, peer_id: ID) -> PrivateKey:
