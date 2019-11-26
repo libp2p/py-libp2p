@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from setuptools import (
-    setup,
-    find_packages,
-)
+from setuptools import find_packages, setup
 
 extras_require = {
     "test": [
@@ -21,7 +18,7 @@ extras_require = {
         "flake8-bugbear>=19.8.0,<20",
         "docformatter>=1.3.1,<2",
     ],
-    'doc': [
+    "doc": [
         "Sphinx>=1.6.5,<2",
         "sphinx_rtd_theme>=0.4.3,<=1",
         "towncrier>=19.2.0, <20",
@@ -38,10 +35,10 @@ extras_require = {
 }
 
 extras_require["dev"] = (
-    extras_require['dev'] +  # noqa: W504
-    extras_require['test'] +  # noqa: W504
-    extras_require['lint'] +  # noqa: W504
-    extras_require['doc']
+    extras_require["dev"]
+    + extras_require["test"]
+    + extras_require["lint"]
+    + extras_require["doc"]
 )
 
 
@@ -74,7 +71,7 @@ setup(
     ],
     python_requires=">=3.7,<4",
     extras_require=extras_require,
-    py_modules=['<MODULE_NAME>'],
+    py_modules=["<MODULE_NAME>"],
     license="MIT/APACHE2.0",
     zip_safe=False,
     keywords="libp2p p2p",
