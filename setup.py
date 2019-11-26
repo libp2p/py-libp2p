@@ -12,7 +12,7 @@ extras_require = {
     "lint": [
         "flake8==3.7.9",  # flake8 is not semver: it has added new warnings at minor releases
         "isort==4.3.21",
-        "mypy==0.740",  # flake8 is not semver: it has added new warnings at minor releases
+        "mypy==0.740",  # mypy is not semver: it has added new warnings at minor releases
         "mypy-protobuf==1.15",
         "black==19.3b0",
         "flake8-bugbear>=19.8.0,<20",
