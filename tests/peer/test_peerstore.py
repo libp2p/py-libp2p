@@ -1,13 +1,14 @@
-from libp2p.peer.peerstore import PeerStore
+import pytest
+
+from libp2p.peer.peerstore import PeerStore, PeerStoreError
 
 # Testing methods from IPeerStore base class.
 
 
 def test_peer_info_empty():
     store = PeerStore()
-    info = store.peer_info("peer")
-
-    assert not info
+    with pytest.raises(PeerStoreError):
+        store.peer_info("peer")
 
 
 def test_peer_info_basic():

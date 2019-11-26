@@ -16,6 +16,8 @@ class PeerData(IPeerData):
     addrs: List[Multiaddr]
 
     def __init__(self) -> None:
+        self.pubkey = None
+        self.privkey = None
         self.metadata = {}
         self.protocols = []
         self.addrs = []
