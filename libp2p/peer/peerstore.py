@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Dict, List, Sequence
 
 from multiaddr import Multiaddr
@@ -15,22 +16,7 @@ class PeerStore(IPeerStore):
     peer_data_map: Dict[ID, PeerData]
 
     def __init__(self) -> None:
-        self.peer_data_map = {}
-
-    def __create_or_get_peer_data(self, peer_id: ID) -> PeerData:
-        """
-        Returns the peer data for peer_id or creates a new peer data (and
-        stores it in peer_data_map) if peer data for peer_id does not yet
-        exist.
-
-        :param peer_id: peer ID
-        :return: peer data
-        """
-        if peer_id in self.peer_data_map:
-            return self.peer_data_map[peer_id]
-        data = PeerData()
-        self.peer_data_map[peer_id] = data
-        return data
+        self.peer_data_map = defaultdict(PeerData)
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -57,7 +43,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to add protocols for
         :param protocols: protocols to add
         """
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         peer_data.add_protocols(list(protocols))
 
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
@@ -65,7 +51,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to set protocols for
         :param protocols: protocols to set
         """
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         peer_data.set_protocols(list(protocols))
 
     def peer_ids(self) -> List[ID]:
@@ -95,7 +81,7 @@ class PeerStore(IPeerStore):
         :param key:
         :param value:
         """
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
 
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
@@ -113,7 +99,7 @@ class PeerStore(IPeerStore):
         :param ttl: time-to-live for the this record
         """
         # Ignore ttl for now
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         peer_data.add_addrs(list(addrs))
 
     def addrs(self, peer_id: ID) -> List[Multiaddr]:
@@ -152,7 +138,7 @@ class PeerStore(IPeerStore):
         :param pubkey:
         :raise PeerStoreError: if peer ID and pubkey does not match
         """
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         if ID.from_pubkey(pubkey) != peer_id:
             raise PeerStoreError("peer ID and pubkey does not match")
         peer_data.add_pubkey(pubkey)
@@ -178,7 +164,7 @@ class PeerStore(IPeerStore):
         :param privkey:
         :raise PeerStoreError: if peer ID or peer privkey not found
         """
-        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data = self.peer_data_map[peer_id]
         if ID.from_pubkey(privkey.get_public_key()) != peer_id:
             raise PeerStoreError("peer ID and privkey does not match")
         peer_data.add_privkey(privkey)
