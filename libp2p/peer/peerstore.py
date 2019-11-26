@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Sequence
 
 from multiaddr import Multiaddr
 
@@ -12,16 +12,12 @@ from .peerstore_interface import IPeerStore
 
 class PeerStore(IPeerStore):
 
-    peer_pubkey_map: Dict[ID, PublicKey]
-    peer_privkey_map: Dict[ID, PrivateKey]
     peer_data_map: Dict[ID, PeerData]
 
     def __init__(self) -> None:
-        self.peer_pubkey_map = {}
-        self.peer_privkey_map = {}
         self.peer_data_map = {}
 
-    def __create_or_get_peer(self, peer_id: ID) -> PeerData:
+    def __create_or_get_peer_data(self, peer_id: ID) -> PeerData:
         """
         Returns the peer data for peer_id or creates a new peer data (and
         stores it in peer_data_map) if peer data for peer_id does not yet
@@ -36,15 +32,15 @@ class PeerStore(IPeerStore):
         self.peer_data_map[peer_id] = data
         return data
 
-    def peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+    def peer_info(self, peer_id: ID) -> PeerInfo:
         """
         :param peer_id: peer ID to get info for
         :return: peer info object
         """
         if peer_id in self.peer_data_map:
             peer_data = self.peer_data_map[peer_id]
-            return PeerInfo(peer_id, peer_data.addrs)
-        return None
+            return PeerInfo(peer_id, peer_data.get_addrs())
+        raise PeerStoreError("peer ID not found")
 
     def get_protocols(self, peer_id: ID) -> List[str]:
         """
@@ -61,16 +57,16 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to add protocols for
         :param protocols: protocols to add
         """
-        peer = self.__create_or_get_peer(peer_id)
-        peer.add_protocols(list(protocols))
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data.add_protocols(list(protocols))
 
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
         """
         :param peer_id: peer ID to set protocols for
         :param protocols: protocols to set
         """
-        peer = self.__create_or_get_peer(peer_id)
-        peer.set_protocols(list(protocols))
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data.set_protocols(list(protocols))
 
     def peer_ids(self) -> List[ID]:
         """
@@ -101,8 +97,8 @@ class PeerStore(IPeerStore):
         """
         # <<?>>
         # This can output an error, not sure what the possible errors are
-        peer = self.__create_or_get_peer(peer_id)
-        peer.put_metadata(key, val)
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data.put_metadata(key, val)
 
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
         """
@@ -119,8 +115,8 @@ class PeerStore(IPeerStore):
         :param ttl: time-to-live for the this record
         """
         # Ignore ttl for now
-        peer = self.__create_or_get_peer(peer_id)
-        peer.add_addrs(list(addrs))
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        peer_data.add_addrs(list(addrs))
 
     def addrs(self, peer_id: ID) -> List[Multiaddr]:
         """
@@ -156,60 +152,57 @@ class PeerStore(IPeerStore):
         """
         :param peer_id: peer ID to add public key for
         :param pubkey:
-        :raise PeerStoreError: if peer ID already has pubkey set
         """
-        if peer_id in self.peer_pubkey_map:
-            raise PeerStoreError(
-                f"peer ID already has pubkey: {self.peer_pubkey_map[peer_id]}"
-            )
-        self.peer_pubkey_map[peer_id] = pubkey
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        # TODO: Check if pubkey matches peer ID
+        peer_data.add_pubkey(pubkey)
 
     def pubkey(self, peer_id: ID) -> PublicKey:
         """
         :param peer_id: peer ID to get public key for
         :return: public key of the peer
-        :raise PeerStoreError: if peer ID not found
+        :raise PeerStoreError: if peer ID or peer pubkey not found
         """
-        if peer_id in self.peer_pubkey_map:
-            return self.peer_pubkey_map[peer_id]
+        if peer_id in self.peer_data_map:
+            peer_data = self.peer_data_map[peer_id]
+            try:
+                pubkey = peer_data.get_pubkey()
+            except PeerDataError:
+                raise PeerStoreError("peer pubkey not found")
+            return pubkey
         raise PeerStoreError("peer ID not found")
 
     def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
         """
         :param peer_id: peer ID to add private key for
         :param privkey:
-        :raise PeerStoreError: if peer ID already has privkey set
         """
-        if peer_id in self.peer_privkey_map:
-            raise PeerStoreError(
-                f"peer ID already has privkey: {self.peer_privkey_map[peer_id]}"
-            )
-        self.peer_privkey_map[peer_id] = privkey
+        peer_data = self.__create_or_get_peer_data(peer_id)
+        # TODO: Check if privkey matches peer ID
+        peer_data.add_privkey(privkey)
 
     def privkey(self, peer_id: ID) -> PrivateKey:
         """
         :param peer_id: peer ID to get private key for
         :return: private key of the peer
-        :raise PeerStoreError: if peer ID not found
+        :raise PeerStoreError: if peer ID or peer privkey not found
         """
-        if peer_id in self.peer_pubkey_map:
-            return self.peer_privkey_map[peer_id]
+        if peer_id in self.peer_data_map:
+            peer_data = self.peer_data_map[peer_id]
+            try:
+                privkey = peer_data.get_privkey()
+            except PeerDataError:
+                raise PeerStoreError("peer privkey not found")
+            return privkey
         raise PeerStoreError("peer ID not found")
 
     def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
         """
         :param peer_id: peer ID to add private key for
         :param key_pair:
-        :raise PeerStoreError: if peer ID already has pubkey or privkey set
         """
-        self.add_pubkey(peer_id, key_pair.public_keypubkey)
-        self.add_privkey(peer_id, key_pair.private_key)
-
-    def peers_with_keys(self) -> Set[ID]:
-        """
-        :return: all of the peer IDs which has pubkey/privkey stored in peer store
-        """
-        return set(self.peer_pubkey_map.keys()).union(self.peer_privkey_map.keys())
+        self.add_pubkey(key_pair.public_key)
+        self.add_privkey(key_pair.private_key)
 
 
 class PeerStoreError(KeyError):
