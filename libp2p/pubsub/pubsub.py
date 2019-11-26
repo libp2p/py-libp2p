@@ -532,7 +532,7 @@ class Pubsub:
 
         # Check if signing is required and if so signature should be attached.
         if self.strict_signing:
-            if msg.signature == b'':
+            if msg.signature == b"":
                 logger.debug("Reject because no signature attached for msg: %s", msg)
                 return
             # Validate the signature of the message

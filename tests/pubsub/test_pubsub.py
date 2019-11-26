@@ -510,3 +510,18 @@ async def test_push_msg(pubsubs_fsub, monkeypatch):
     await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg_2)
     await asyncio.sleep(0.01)
     assert not event.is_set()
+
+
+@pytest.mark.parametrize("num_hosts, is_strict_signing", ((2, True),))
+@pytest.mark.asyncio
+async def test_strict_signing(pubsubs_fsub, hosts, monkeypatch):
+    await connect(hosts[0], hosts[1])
+    await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+    await pubsubs_fsub[1].subscribe(TESTING_TOPIC)
+    await asyncio.sleep(1)
+
+    await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
+    await asyncio.sleep(1)
+
+    assert len(pubsubs_fsub[0].seen_messages) == 1
+    assert len(pubsubs_fsub[1].seen_messages) == 1

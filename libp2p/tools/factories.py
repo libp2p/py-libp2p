@@ -153,6 +153,7 @@ class PubsubFactory(factory.Factory):
     router = None
     my_id = factory.LazyAttribute(lambda obj: obj.host.get_id())
     cache_size = None
+    strict_signing = False
 
 
 async def swarm_pair_factory(
