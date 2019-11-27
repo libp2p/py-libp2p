@@ -328,18 +328,19 @@ async def test_host_connect():
     transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
     (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
 
-    assert not node_a.get_peerstore().peer_ids()
+    # Only our peer ID is stored in peer store
+    assert len(node_a.get_peerstore().peer_ids()) == 1
 
     addr = node_b.get_addrs()[0]
     info = info_from_p2p_addr(addr)
     await node_a.connect(info)
 
-    assert len(node_a.get_peerstore().peer_ids()) == 1
+    assert len(node_a.get_peerstore().peer_ids()) == 2
 
     await node_a.connect(info)
 
     # make sure we don't do double connection
-    assert len(node_a.get_peerstore().peer_ids()) == 1
+    assert len(node_a.get_peerstore().peer_ids()) == 2
 
     assert node_b.get_id() in node_a.get_peerstore().peer_ids()
     ma_node_b = multiaddr.Multiaddr("/p2p/%s" % node_b.get_id().pretty())

@@ -3,6 +3,8 @@ from typing import Any, List, Sequence
 
 from multiaddr import Multiaddr
 
+from libp2p.crypto.keys import PrivateKey, PublicKey
+
 from .peermetadata_interface import IPeerMetadata
 
 
@@ -22,7 +24,7 @@ class IPeerData(ABC):
     @abstractmethod
     def set_protocols(self, protocols: Sequence[str]) -> None:
         """
-        :param protocols: protocols to add
+        :param protocols: protocols to set
         """
 
     @abstractmethod
@@ -46,7 +48,6 @@ class IPeerData(ABC):
         """
         :param key: key in KV pair
         :param val: val to associate with key
-        :raise Exception: unsuccesful put
         """
 
     @abstractmethod
@@ -54,5 +55,31 @@ class IPeerData(ABC):
         """
         :param key: key in KV pair
         :return: val for key
-        :raise Exception: key not found
+        :raise PeerDataError: key not found
+        """
+
+    @abstractmethod
+    def add_pubkey(self, pubkey: PublicKey) -> None:
+        """
+        :param pubkey:
+        """
+
+    @abstractmethod
+    def get_pubkey(self) -> PublicKey:
+        """
+        :return: public key of the peer
+        :raise PeerDataError: if public key not found
+        """
+
+    @abstractmethod
+    def add_privkey(self, privkey: PrivateKey) -> None:
+        """
+        :param privkey:
+        """
+
+    @abstractmethod
+    def get_privkey(self) -> PrivateKey:
+        """
+        :return: private key of the peer
+        :raise PeerDataError: if private key not found
         """

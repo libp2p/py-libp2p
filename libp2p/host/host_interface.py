@@ -3,7 +3,7 @@ from typing import Any, List, Sequence
 
 import multiaddr
 
-from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.network.network_interface import INetwork
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
@@ -22,6 +22,12 @@ class IHost(ABC):
     def get_public_key(self) -> PublicKey:
         """
         :return: the public key belonging to the peer
+        """
+
+    @abstractmethod
+    def get_private_key(self) -> PrivateKey:
+        """
+        :return: the private key belonging to the peer
         """
 
     @abstractmethod
