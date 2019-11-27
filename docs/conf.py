@@ -286,3 +286,19 @@ doctest_default_flags = (0
     | doctest.IGNORE_EXCEPTION_DETAIL
     | doctest.NORMALIZE_WHITESPACE
 )
+
+# -- Mocked dependencies ----------------------------------------
+
+# Mock out dependencies that are unbuildable on readthedocs, as recommended here:
+# https://docs.readthedocs.io/en/rel/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
+
+import sys
+from unittest.mock import MagicMock
+
+# Add new modules to mock here (it should be the same list as those excluded in setup.py)
+MOCK_MODULES = [
+    "fastecdsa",
+    "fastecdsa.encoding",
+    "fastecdsa.encoding.sec1",
+]
+sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)

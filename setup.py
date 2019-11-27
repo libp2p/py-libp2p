@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import os
+
 from setuptools import find_packages, setup
 
 extras_require = {
@@ -46,6 +48,26 @@ with open("./README.md") as readme:
     long_description = readme.read()
 
 
+install_requires = [
+    "pycryptodome>=3.9.2,<4.0.0",
+    "base58>=1.0.3,<2.0.0",
+    "pymultihash>=0.8.2",
+    "multiaddr>=0.0.8,<0.1.0",
+    "rpcudp>=3.0.0,<4.0.0",
+    "lru-dict>=1.1.6",
+    "protobuf>=3.10.0,<4.0.0",
+    "coincurve>=10.0.0,<11.0.0",
+    "pynacl==1.3.0",
+]
+
+
+# NOTE: Some dependencies break RTD builds. We can not install system dependencies on the
+# RTD system so we have to exclude these dependencies when we are in an RTD environment.
+readthedocs_is_building = os.environ.get("READTHEDOCS", False)
+if not readthedocs_is_building:
+    install_requires.append("fastecdsa==1.7.4")
+
+
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. Use `make bump`, as described in readme
@@ -57,18 +79,7 @@ setup(
     maintainer_email="snakecharmers@ethereum.org",
     url="https://github.com/libp2p/py-libp2p",
     include_package_data=True,
-    install_requires=[
-        "pycryptodome>=3.9.2,<4.0.0",
-        "base58>=1.0.3,<2.0.0",
-        "pymultihash>=0.8.2",
-        "multiaddr>=0.0.8,<0.1.0",
-        "rpcudp>=3.0.0,<4.0.0",
-        "lru-dict>=1.1.6",
-        "protobuf>=3.10.0,<4.0.0",
-        "coincurve>=10.0.0,<11.0.0",
-        "fastecdsa==1.7.4",
-        "pynacl==1.3.0",
-    ],
+    install_requires=install_requires,
     python_requires=">=3.7,<4",
     extras_require=extras_require,
     py_modules=["libp2p"],
