@@ -55,7 +55,7 @@ def initialize_default_kademlia_router(
     :param alpha: The alpha parameter from the paper
     :param id_opt: optional id for host
     :param storage: An instance that implements
-        :interface:`~kademlia.storage.IStorage`
+        :class:`~kademlia.storage.IStorage`
     :return: return a default kademlia instance
     """
     if not id_opt:
