@@ -232,10 +232,9 @@ class KademliaServer:
         """
         Save the state of node with a given regularity to the given filename.
 
-        Args:
-            fname: File name to save retularly to
-            frequency: Frequency in seconds that the state should be saved.
-                        By default, 10 minutes.
+        :param fname: File name to save regularly to
+        :param frequency: Frequency in seconds that the state should be saved.
+            By default, 10 minutes.
         """
         self.save_state(fname)
         loop = asyncio.get_event_loop()

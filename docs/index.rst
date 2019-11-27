@@ -11,6 +11,7 @@ Contents
 
     libp2p
     release_notes
+    examples
 
 
 Indices and tables

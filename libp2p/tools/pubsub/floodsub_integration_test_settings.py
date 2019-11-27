@@ -145,31 +145,34 @@ floodsub_protocol_pytest_params = [
 
 async def perform_test_from_obj(obj, router_factory) -> None:
     """
-    Perform pubsub tests from a test obj.
-    test obj are composed as follows:
+    Perform pubsub tests from a test object, which is composed as follows:
 
-    {
-        "supported_protocols": ["supported/protocol/1.0.0",...],
-        "adj_list": {
-            "node1": ["neighbor1_of_node1", "neighbor2_of_node1", ...],
-            "node2": ["neighbor1_of_node2", "neighbor2_of_node2", ...],
-            ...
-        },
-        "topic_map": {
-            "topic1": ["node1_subscribed_to_topic1", "node2_subscribed_to_topic1", ...]
-        },
-        "messages": [
-            {
-                "topics": ["topic1_for_message", "topic2_for_message", ...],
-                "data": b"some contents of the message (newlines are not supported)",
-                "node_id": "message sender node id"
+    .. code-block:: python
+
+        {
+            "supported_protocols": ["supported/protocol/1.0.0",...],
+            "adj_list": {
+                "node1": ["neighbor1_of_node1", "neighbor2_of_node1", ...],
+                "node2": ["neighbor1_of_node2", "neighbor2_of_node2", ...],
+                ...
             },
-            ...
-        ]
-    }
-    NOTE: In adj_list, for any neighbors A and B, only list B as a neighbor of A
-    or B as a neighbor of A once. Do NOT list both A: ["B"] and B:["A"] as the behavior
-    is undefined (even if it may work)
+            "topic_map": {
+                "topic1": ["node1_subscribed_to_topic1", "node2_subscribed_to_topic1", ...]
+            },
+            "messages": [
+                {
+                    "topics": ["topic1_for_message", "topic2_for_message", ...],
+                    "data": b"some contents of the message (newlines are not supported)",
+                    "node_id": "message sender node id"
+                },
+                ...
+            ]
+        }
+
+    .. note::
+        In adj_list, for any neighbors A and B, only list B as a neighbor of A
+        or B as a neighbor of A once. Do NOT list both A: ["B"] and B:["A"] as the behavior
+        is undefined (even if it may work)
     """
 
     # Step 1) Create graph
