@@ -19,7 +19,7 @@ extras_require = {
         "docformatter>=1.3.1,<2",
     ],
     "doc": [
-        "Sphinx>=1.6.5,<2",
+        "Sphinx>=2.2.1,<3",
         "sphinx_rtd_theme>=0.4.3,<=1",
         "towncrier>=19.2.0, <20",
     ],
