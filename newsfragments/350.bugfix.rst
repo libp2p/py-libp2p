@@ -1,2 +1,0 @@
-Handle Stream* errors (like ``StreamClosed``) during calls to ``stream.write()`` and
-``stream.read()``

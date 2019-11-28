@@ -1,2 +1,0 @@
-Fixes KeyError when peer in a stream accidentally closes and resets the stream, because handlers
-for both will try to ``del streams[stream_id]`` without checking if the entry still exists.

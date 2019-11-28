@@ -1,1 +1,0 @@
-Use Sphinx & autodoc to generate docs, now available on py-libp2p.readthedocs.io
