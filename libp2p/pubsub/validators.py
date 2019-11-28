@@ -1,9 +1,7 @@
 from libp2p.crypto.keys import PublicKey
 
-from .pb import rpc_pb2
 
-
-def signature_validator(pubkey: PublicKey, msg: rpc_pb2.Message) -> bool:
+def signature_validator(pubkey: PublicKey, payload: bytes, signature: bytes) -> bool:
     """
     Verify the message against the given public key.
 
@@ -11,7 +9,6 @@ def signature_validator(pubkey: PublicKey, msg: rpc_pb2.Message) -> bool:
     :param msg: the message signed.
     """
     try:
-        pubkey.verify(msg.SerializeToString(), msg.signature)
+        return pubkey.verify(payload, signature)
     except Exception:
         return False
-    return True

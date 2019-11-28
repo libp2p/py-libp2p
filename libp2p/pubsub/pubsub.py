@@ -49,6 +49,8 @@ SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
 AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
 ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 
+PUBSUB_SIGNING_PREFIX = "libp2p-pubsub:"
+
 
 class TopicValidator(NamedTuple):
     validator: ValidatorFn
@@ -475,7 +477,9 @@ class Pubsub:
 
         if self.strict_signing:
             priv_key = self.sign_key
-            signature = priv_key.sign(msg.SerializeToString())
+            signature = priv_key.sign(
+                PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
+            )
             msg.key = self.host.get_public_key().serialize()
             msg.signature = signature
 
@@ -536,7 +540,19 @@ class Pubsub:
                 logger.debug("Reject because no signature attached for msg: %s", msg)
                 return
             # Validate the signature of the message
-            if not signature_validator(deserialize_public_key(msg.key), msg):
+            # First, construct the original payload that's signed by 'msg.key'
+            msg_without_key_sig = rpc_pb2.Message(
+                data=msg.data,
+                topicIDs=msg.topicIDs,
+                from_id=msg.from_id,
+                seqno=msg.seqno,
+            )
+            payload = (
+                PUBSUB_SIGNING_PREFIX.encode() + msg_without_key_sig.SerializeToString()
+            )
+            if not signature_validator(
+                deserialize_public_key(msg.key), payload, msg.signature
+            ):
                 logger.debug("Signature validation failed for msg: %s", msg)
                 return
 
