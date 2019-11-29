@@ -539,6 +539,12 @@ class Pubsub:
             if msg.signature == b"":
                 logger.debug("Reject because no signature attached for msg: %s", msg)
                 return
+            # Validate if message sender matches message signer,
+            # i.e., check if `msg.key` matches `msg.from_id`
+            msg_pubkey = deserialize_public_key(msg.key)
+            if ID.from_pubkey(msg_pubkey) != msg.from_id:
+                logger.debug("Reject because signing key does not match sender ID for msg: %s", msg)
+                return
             # Validate the signature of the message
             # First, construct the original payload that's signed by 'msg.key'
             msg_without_key_sig = rpc_pb2.Message(
@@ -551,7 +557,7 @@ class Pubsub:
                 PUBSUB_SIGNING_PREFIX.encode() + msg_without_key_sig.SerializeToString()
             )
             if not signature_validator(
-                deserialize_public_key(msg.key), payload, msg.signature
+                msg_pubkey, payload, msg.signature
             ):
                 logger.debug("Signature validation failed for msg: %s", msg)
                 return
