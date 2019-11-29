@@ -17,7 +17,6 @@ import base58
 from lru import LRU
 
 from libp2p.crypto.keys import PrivateKey
-from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
@@ -30,7 +29,7 @@ from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
-from .validators import signature_validator
+from .validators import PUBSUB_SIGNING_PREFIX, signature_validator
 
 if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter  # noqa: F401
@@ -48,8 +47,6 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
 SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
 AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
 ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
-
-PUBSUB_SIGNING_PREFIX = "libp2p-pubsub:"
 
 
 class TopicValidator(NamedTuple):
@@ -534,32 +531,10 @@ class Pubsub:
         if self._is_msg_seen(msg):
             return
 
-        # Check if signing is required and if so signature should be attached.
+        # Check if signing is required and if so validate the signature
         if self.strict_signing:
-            if msg.signature == b"":
-                logger.debug("Reject because no signature attached for msg: %s", msg)
-                return
-            # Validate if message sender matches message signer,
-            # i.e., check if `msg.key` matches `msg.from_id`
-            msg_pubkey = deserialize_public_key(msg.key)
-            if ID.from_pubkey(msg_pubkey) != msg.from_id:
-                logger.debug(
-                    "Reject because signing key does not match sender ID for msg: %s",
-                    msg,
-                )
-                return
             # Validate the signature of the message
-            # First, construct the original payload that's signed by 'msg.key'
-            msg_without_key_sig = rpc_pb2.Message(
-                data=msg.data,
-                topicIDs=msg.topicIDs,
-                from_id=msg.from_id,
-                seqno=msg.seqno,
-            )
-            payload = (
-                PUBSUB_SIGNING_PREFIX.encode() + msg_without_key_sig.SerializeToString()
-            )
-            if not signature_validator(msg_pubkey, payload, msg.signature):
+            if not signature_validator(msg):
                 logger.debug("Signature validation failed for msg: %s", msg)
                 return
 
