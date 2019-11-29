@@ -543,7 +543,10 @@ class Pubsub:
             # i.e., check if `msg.key` matches `msg.from_id`
             msg_pubkey = deserialize_public_key(msg.key)
             if ID.from_pubkey(msg_pubkey) != msg.from_id:
-                logger.debug("Reject because signing key does not match sender ID for msg: %s", msg)
+                logger.debug(
+                    "Reject because signing key does not match sender ID for msg: %s",
+                    msg,
+                )
                 return
             # Validate the signature of the message
             # First, construct the original payload that's signed by 'msg.key'
@@ -556,9 +559,7 @@ class Pubsub:
             payload = (
                 PUBSUB_SIGNING_PREFIX.encode() + msg_without_key_sig.SerializeToString()
             )
-            if not signature_validator(
-                msg_pubkey, payload, msg.signature
-            ):
+            if not signature_validator(msg_pubkey, payload, msg.signature):
                 logger.debug("Signature validation failed for msg: %s", msg)
                 return
 

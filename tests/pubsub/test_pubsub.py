@@ -5,8 +5,8 @@ import pytest
 
 from libp2p.exceptions import ValidationError
 from libp2p.peer.id import ID
-from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX
 from libp2p.tools.pubsub.utils import make_pubsub_msg
 from libp2p.tools.utils import connect
 from libp2p.utils import encode_varint_prefixed
@@ -538,9 +538,7 @@ async def test_strict_signing_failed_validation(pubsubs_fsub, hosts, monkeypatch
         seqno=b"\x00" * 8,
     )
     priv_key = pubsubs_fsub[0].sign_key
-    signature = priv_key.sign(
-        PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
-    )
+    signature = priv_key.sign(PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString())
 
     event = asyncio.Event()
 
