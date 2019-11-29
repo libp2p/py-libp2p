@@ -206,8 +206,7 @@ class Swarm(INetwork, Service):
                 logger.debug("successfully opened connection to peer %s", peer_id)
                 # FIXME: This is a intentional barrier to prevent from the handler exiting and
                 #   closing the connection.
-                event = trio.Event()
-                await event.wait()
+                await trio.sleep_forever()
 
             try:
                 # Success
@@ -240,7 +239,7 @@ class Swarm(INetwork, Service):
         # await asyncio.gather(
         #     *[connection.close() for connection in self.connections.values()]
         # )
-        self.manager.stop()
+        await self.manager.stop()
         await self.manager.wait_finished()
         logger.debug("swarm successfully closed")
 

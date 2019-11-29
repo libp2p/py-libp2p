@@ -50,8 +50,11 @@ class SwarmConn(INetConn, Service):
         await self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
-        while True:
+        while self.manager.is_running:
             try:
+                print(
+                    f"!@# SwarmConn._handle_new_streams: {self.muxed_conn._id}: waiting for new streams"
+                )
                 stream = await self.muxed_conn.accept_stream()
             except MuxedConnUnavailable:
                 # If there is anything wrong in the MuxedConn,
@@ -60,6 +63,9 @@ class SwarmConn(INetConn, Service):
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             self.manager.run_task(self._handle_muxed_stream, stream)
 
+        print(
+            f"!@# SwarmConn._handle_new_streams: {self.muxed_conn._id}: out of the loop"
+        )
         await self.close()
 
     async def _call_stream_handler(self, net_stream: NetStream) -> None:

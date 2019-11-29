@@ -205,7 +205,7 @@ async def mplex_stream_pair_factory(is_secure: bool) -> Tuple[MplexStream, Mplex
         stream_1: MplexStream
         async with mplex_conn_1.streams_lock:
             if len(mplex_conn_1.streams) != 1:
-                raise Exception("Mplex should not have any stream upon connection")
+                raise Exception("Mplex should not have any other stream")
             stream_1 = tuple(mplex_conn_1.streams.values())[0]
         yield cast(MplexStream, stream_0), cast(MplexStream, stream_1)
 

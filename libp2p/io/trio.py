@@ -23,6 +23,10 @@ class TrioReadWriteCloser(ReadWriteCloser):
             raise IOException(error)
 
     async def read(self, n: int = -1) -> bytes:
+        if n == 0:
+            # Check point
+            await trio.sleep(0)
+            return b""
         max_bytes = n if n != -1 else None
         try:
             return await self.stream.receive_some(max_bytes)

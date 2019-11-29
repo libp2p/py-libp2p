@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from libp2p.tools.factories import mplex_conn_pair_factory, mplex_stream_pair_factory

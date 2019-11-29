@@ -1,8 +1,5 @@
 import itertools
 import math
-from typing import Generic, TypeVar
-
-import trio
 
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
@@ -98,25 +95,3 @@ async def read_fixedint_prefixed(reader: Reader) -> bytes:
     len_bytes = await reader.read(SIZE_LEN_BYTES)
     len_int = int.from_bytes(len_bytes, "big")
     return await reader.read(len_int)
-
-
-TItem = TypeVar("TItem")
-
-
-class IQueue(Generic[TItem]):
-    async def put(self, item: TItem):
-        ...
-
-    async def get(self) -> TItem:
-        ...
-
-
-class TrioQueue(IQueue):
-    def __init__(self):
-        self.send_channel, self.receive_channel = trio.open_memory_channel(0)
-
-    async def put(self, item: TItem):
-        await self.send_channel.send(item)
-
-    async def get(self) -> TItem:
-        return await self.receive_channel.receive()
