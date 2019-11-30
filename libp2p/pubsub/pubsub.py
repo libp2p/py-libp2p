@@ -316,7 +316,11 @@ class Pubsub:
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
-                self.peer_topics[topic].remove(peer_id)
+                # Delete the entry if no other peers left
+                if len(self.peer_topics[topic]) == 1:
+                    del self.peer_topics[topic]
+                else:
+                    self.peer_topics[topic].remove(peer_id)
 
         self.router.remove_peer(peer_id)
 
@@ -361,7 +365,11 @@ class Pubsub:
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].remove(origin_id)
+                    # Delete the entry if no other peers left
+                    if len(self.peer_topics[sub_message.topicid]) == 1:
+                        del self.peer_topics[sub_message.topicid]
+                    else:
+                        self.peer_topics[sub_message.topicid].remove(origin_id)
 
     # FIXME(mhchia): Change the function name?
     async def handle_talk(self, publish_message: rpc_pb2.Message) -> None:
