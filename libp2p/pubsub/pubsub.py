@@ -78,7 +78,6 @@ class Pubsub:
 
     topic_validators: Dict[str, TopicValidator]
 
-    # TODO: Be sure it is increased atomically everytime.
     counter: int  # uint64
 
     _tasks: List["asyncio.Future[Any]"]
@@ -300,7 +299,6 @@ class Pubsub:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             del self.peers[peer_id]
             return
-        # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
@@ -328,7 +326,6 @@ class Pubsub:
         """
         Continuously read from peer queue and each time a new peer is found,
         open a stream to the peer using a supported pubsub protocol
-        TODO: Handle failure for when the peer does not support any of the
         pubsub protocols we support
         """
         while True:
