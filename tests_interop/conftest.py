@@ -76,7 +76,24 @@ def is_gossipsub():
 
 
 @pytest.fixture
-async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory):
+def is_pubsub_signing():
+    return True
+
+
+@pytest.fixture
+def is_pubsub_signing_strict():
+    return True
+
+
+@pytest.fixture
+async def p2pds(
+    num_p2pds,
+    is_host_secure,
+    is_gossipsub,
+    unused_tcp_port_factory,
+    is_pubsub_signing,
+    is_pubsub_signing_strict,
+):
     p2pds: Union[Daemon, Exception] = await asyncio.gather(
         *[
             make_p2pd(
@@ -84,6 +101,8 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
                 unused_tcp_port_factory(),
                 is_host_secure,
                 is_gossipsub=is_gossipsub,
+                is_pubsub_signing=is_pubsub_signing,
+                is_pubsub_signing_strict=is_pubsub_signing_strict,
             )
             for _ in range(num_p2pds)
         ],
@@ -102,13 +121,14 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
 
 
 @pytest.fixture
-def pubsubs(num_hosts, hosts, is_gossipsub):
+def pubsubs(num_hosts, hosts, is_gossipsub, is_pubsub_signing_strict):
     if is_gossipsub:
         routers = GossipsubFactory.create_batch(num_hosts, **GOSSIPSUB_PARAMS._asdict())
     else:
         routers = FloodsubFactory.create_batch(num_hosts)
     _pubsubs = tuple(
-        PubsubFactory(host=host, router=router) for host, router in zip(hosts, routers)
+        PubsubFactory(host=host, router=router, strict_signing=is_pubsub_signing_strict)
+        for host, router in zip(hosts, routers)
     )
     yield _pubsubs
     # TODO: Clean up

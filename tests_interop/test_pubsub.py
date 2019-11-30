@@ -55,6 +55,9 @@ def validate_pubsub_msg(msg: rpc_pb2.Message, data: bytes, from_peer_id: ID) -> 
     assert msg.data == data and msg.from_id == from_peer_id
 
 
+@pytest.mark.parametrize(
+    "is_pubsub_signing, is_pubsub_signing_strict", ((True, True), (False, False))
+)
 @pytest.mark.parametrize("is_gossipsub", (True, False))
 @pytest.mark.parametrize("num_hosts, num_p2pds", ((1, 2),))
 @pytest.mark.asyncio

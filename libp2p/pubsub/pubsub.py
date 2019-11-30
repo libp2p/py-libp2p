@@ -16,6 +16,7 @@ from typing import (
 import base58
 from lru import LRU
 
+from libp2p.crypto.keys import PrivateKey
 from libp2p.exceptions import ParseError, ValidationError
 from libp2p.host.host_interface import IHost
 from libp2p.io.exceptions import IncompleteReadError
@@ -28,7 +29,7 @@ from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
-from .validators import signature_validator
+from .validators import PUBSUB_SIGNING_PREFIX, signature_validator
 
 if TYPE_CHECKING:
     from .pubsub_router_interface import IPubsubRouter  # noqa: F401
@@ -82,8 +83,17 @@ class Pubsub:
 
     _tasks: List["asyncio.Future[Any]"]
 
+    # Indicate if we should enforce signature verification
+    strict_signing: bool
+    sign_key: PrivateKey
+
     def __init__(
-        self, host: IHost, router: "IPubsubRouter", my_id: ID, cache_size: int = None
+        self,
+        host: IHost,
+        router: "IPubsubRouter",
+        my_id: ID,
+        cache_size: int = None,
+        strict_signing: bool = True,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -146,6 +156,12 @@ class Pubsub:
         # Call handle peer to keep waiting for updates to peer queue
         self._tasks.append(asyncio.ensure_future(self.handle_peer_queue()))
         self._tasks.append(asyncio.ensure_future(self.handle_dead_peer_queue()))
+
+        self.strict_signing = strict_signing
+        if strict_signing:
+            self.sign_key = self.host.get_private_key()
+        else:
+            self.sign_key = None
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
         """Generate subscription message with all topics we are subscribed to
@@ -456,7 +472,13 @@ class Pubsub:
             seqno=self._next_seqno(),
         )
 
-        # TODO: Sign with our signing key
+        if self.strict_signing:
+            priv_key = self.sign_key
+            signature = priv_key.sign(
+                PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
+            )
+            msg.key = self.host.get_public_key().serialize()
+            msg.signature = signature
 
         await self.push_msg(self.host.get_id(), msg)
 
@@ -505,18 +527,17 @@ class Pubsub:
 
         # TODO: Check if the `from` is in the blacklist. If yes, reject.
 
-        # TODO: Check if signing is required and if so signature should be attached.
-
         # If the message is processed before, return(i.e., don't further process the message).
         if self._is_msg_seen(msg):
             return
 
-        # TODO: - Validate the message. If failed, reject it.
-        # Validate the signature of the message
-        # FIXME: `signature_validator` is currently a stub.
-        if not signature_validator(msg.key, msg.SerializeToString()):
-            logger.debug("Signature validation failed for msg: %s", msg)
-            return
+        # Check if signing is required and if so validate the signature
+        if self.strict_signing:
+            # Validate the signature of the message
+            if not signature_validator(msg):
+                logger.debug("Signature validation failed for msg: %s", msg)
+                return
+
         # Validate the message with registered topic validators.
         # If the validation failed, return(i.e., don't further process the message).
         try:
