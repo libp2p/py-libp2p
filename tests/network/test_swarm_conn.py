@@ -1,9 +1,9 @@
-import asyncio
+import trio
 
 import pytest
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_swarm_conn_close(swarm_conn_pair):
     conn_0, conn_1 = swarm_conn_pair
 
@@ -12,7 +12,7 @@ async def test_swarm_conn_close(swarm_conn_pair):
 
     await conn_0.close()
 
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
 
     assert conn_0.event_closed.is_set()
     assert conn_1.event_closed.is_set()
@@ -20,7 +20,7 @@ async def test_swarm_conn_close(swarm_conn_pair):
     assert conn_1 not in conn_1.swarm.connections.values()
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_swarm_conn_streams(swarm_conn_pair):
     conn_0, conn_1 = swarm_conn_pair
 
@@ -28,12 +28,12 @@ async def test_swarm_conn_streams(swarm_conn_pair):
     assert len(await conn_1.get_streams()) == 0
 
     stream_0_0 = await conn_0.new_stream()
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
     assert len(await conn_0.get_streams()) == 1
     assert len(await conn_1.get_streams()) == 1
 
     stream_0_1 = await conn_0.new_stream()
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
     assert len(await conn_0.get_streams()) == 2
     assert len(await conn_1.get_streams()) == 2
 

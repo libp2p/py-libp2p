@@ -8,11 +8,12 @@ into network after network has already started listening
 TODO: Add tests for closed_stream, listen_close when those
 features are implemented in swarm
 """
-
-import asyncio
+import trio
 import enum
 
 import pytest
+
+from async_service import background_trio_service
 
 from libp2p.network.notifee_interface import INotifee
 from libp2p.tools.constants import LISTEN_MADDR
@@ -54,59 +55,63 @@ class MyNotifee(INotifee):
         pass
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_notify(is_host_secure):
     swarms = [SwarmFactory(is_secure=is_host_secure) for _ in range(2)]
 
     events_0_0 = []
     events_1_0 = []
     events_0_without_listen = []
-    swarms[0].register_notifee(MyNotifee(events_0_0))
-    swarms[1].register_notifee(MyNotifee(events_1_0))
-    # Listen
-    await asyncio.gather(*[swarm.listen(LISTEN_MADDR) for swarm in swarms])
+    # Run swarms.
+    async with background_trio_service(swarms[0]), background_trio_service(swarms[1]):
+        # Register events before listening, to allow `MyNotifee` is notified with the event
+        # `listen`.
+        swarms[0].register_notifee(MyNotifee(events_0_0))
+        swarms[1].register_notifee(MyNotifee(events_1_0))
 
-    swarms[0].register_notifee(MyNotifee(events_0_without_listen))
+        # Listen
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(swarms[0].listen, LISTEN_MADDR)
+            nursery.start_soon(swarms[1].listen, LISTEN_MADDR)
 
-    # Connected
-    await connect_swarm(swarms[0], swarms[1])
-    # OpenedStream: first
-    await swarms[0].new_stream(swarms[1].get_peer_id())
-    # OpenedStream: second
-    await swarms[0].new_stream(swarms[1].get_peer_id())
-    # OpenedStream: third, but different direction.
-    await swarms[1].new_stream(swarms[0].get_peer_id())
+        swarms[0].register_notifee(MyNotifee(events_0_without_listen))
 
-    await asyncio.sleep(0.01)
+        # Connected
+        await connect_swarm(swarms[0], swarms[1])
+        # OpenedStream: first
+        await swarms[0].new_stream(swarms[1].get_peer_id())
+        # OpenedStream: second
+        await swarms[0].new_stream(swarms[1].get_peer_id())
+        # OpenedStream: third, but different direction.
+        await swarms[1].new_stream(swarms[0].get_peer_id())
 
-    # TODO: Check `ClosedStream` and `ListenClose` events after they are ready.
+        await trio.sleep(0.01)
 
-    # Disconnected
-    await swarms[0].close_peer(swarms[1].get_peer_id())
-    await asyncio.sleep(0.01)
+        # TODO: Check `ClosedStream` and `ListenClose` events after they are ready.
 
-    # Connected again, but different direction.
-    await connect_swarm(swarms[1], swarms[0])
-    await asyncio.sleep(0.01)
+        # Disconnected
+        await swarms[0].close_peer(swarms[1].get_peer_id())
+        await trio.sleep(0.01)
 
-    # Disconnected again, but different direction.
-    await swarms[1].close_peer(swarms[0].get_peer_id())
-    await asyncio.sleep(0.01)
+        # Connected again, but different direction.
+        await connect_swarm(swarms[1], swarms[0])
+        await trio.sleep(0.01)
 
-    expected_events_without_listen = [
-        Event.Connected,
-        Event.OpenedStream,
-        Event.OpenedStream,
-        Event.OpenedStream,
-        Event.Disconnected,
-        Event.Connected,
-        Event.Disconnected,
-    ]
-    expected_events = [Event.Listen] + expected_events_without_listen
+        # Disconnected again, but different direction.
+        await swarms[1].close_peer(swarms[0].get_peer_id())
+        await trio.sleep(0.01)
 
-    assert events_0_0 == expected_events
-    assert events_1_0 == expected_events
-    assert events_0_without_listen == expected_events_without_listen
+        expected_events_without_listen = [
+            Event.Connected,
+            Event.OpenedStream,
+            Event.OpenedStream,
+            Event.OpenedStream,
+            Event.Disconnected,
+            Event.Connected,
+            Event.Disconnected,
+        ]
+        expected_events = [Event.Listen] + expected_events_without_listen
 
-    # Clean up
-    await asyncio.gather(*[swarm.close() for swarm in swarms])
+        assert events_0_0 == expected_events
+        assert events_1_0 == expected_events
+        assert events_0_without_listen == expected_events_without_listen
