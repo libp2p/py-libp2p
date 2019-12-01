@@ -1,4 +1,4 @@
-from typing import List, Sequence, Tuple
+from typing import Callable, List, Sequence, Tuple
 
 import multiaddr
 import trio
@@ -12,7 +12,6 @@ from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
-from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .constants import MAX_READ_LEN
 
@@ -79,22 +78,12 @@ async def set_up_routers(
     return routers
 
 
-async def echo_stream_handler(stream: INetStream) -> None:
-    while True:
-        read_string = (await stream.read(MAX_READ_LEN)).decode()
+def create_echo_stream_handler(ack_prefix: str) -> Callable[[INetStream], None]:
+    async def echo_stream_handler(stream: INetStream) -> None:
+        while True:
+            read_string = (await stream.read(MAX_READ_LEN)).decode()
 
-        resp = "ack:" + read_string
-        await stream.write(resp.encode())
+            resp = ack_prefix + read_string
+            await stream.write(resp.encode())
 
-
-async def perform_two_host_set_up(
-    handler: StreamHandlerFn = echo_stream_handler
-) -> Tuple[BasicHost, BasicHost]:
-    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
-    (node_a, node_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
-
-    node_b.set_stream_handler(TProtocol("/echo/1.0.0"), handler)
-
-    # Associate the peer with local ip address (see default parameters of Libp2p())
-    node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
-    return node_a, node_b
+    return echo_stream_handler

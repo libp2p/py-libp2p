@@ -8,12 +8,11 @@ into network after network has already started listening
 TODO: Add tests for closed_stream, listen_close when those
 features are implemented in swarm
 """
-import trio
 import enum
 
-import pytest
-
 from async_service import background_trio_service
+import pytest
+import trio
 
 from libp2p.network.notifee_interface import INotifee
 from libp2p.tools.constants import LISTEN_MADDR

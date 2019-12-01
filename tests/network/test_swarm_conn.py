@@ -1,6 +1,5 @@
-import trio
-
 import pytest
+import trio
 
 
 @pytest.mark.trio
