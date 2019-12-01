@@ -61,15 +61,15 @@ async def set_up_nodes_by_transport_and_disc_opt(
 
 
 async def set_up_routers(
-    router_confs: Tuple[int, int] = (0, 0)
+    router_ports: Tuple[int, ...] = (0, 0)
 ) -> List[KadmeliaPeerRouter]:
     """The default ``router_confs`` selects two free ports local to this
     machine."""
     bootstrap_node = KademliaServer()  # type: ignore
-    await bootstrap_node.listen(router_confs[0])
+    await bootstrap_node.listen(router_ports[0])
 
     routers = [KadmeliaPeerRouter(bootstrap_node)]
-    for port in router_confs[1:]:
+    for port in router_ports[1:]:
         node = KademliaServer()  # type: ignore
         await node.listen(port)
 

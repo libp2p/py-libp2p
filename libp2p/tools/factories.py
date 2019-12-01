@@ -8,6 +8,9 @@ import trio
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
+from libp2p.host.routed_host import RoutedHost
+from libp2p.tools.utils import set_up_routers
+from libp2p.kademlia.network import KademliaServer
 from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
@@ -125,6 +128,30 @@ class HostFactory(factory.Factory):
                 for key_pair, swarm in zip(key_pairs, swarms)
             )
             yield hosts
+
+
+class RoutedHostFactory(factory.Factory):
+    class Meta:
+        model = RoutedHost
+
+    public_key = factory.LazyAttribute(lambda o: o.key_pair.public_key)
+    network = factory.LazyAttribute(
+        lambda o: SwarmFactory(is_secure=o.is_secure, key_pair=o.key_pair)
+    )
+    router = factory.LazyFunction(KademliaServer)
+
+    @classmethod
+    @asynccontextmanager
+    async def create_batch_and_listen(
+        cls, is_secure: bool, number: int
+    ) -> Tuple[RoutedHost, ...]:
+        key_pairs = [generate_new_rsa_identity() for _ in range(number)]
+        routers = await set_up_routers((0,) * number)
+        async with SwarmFactory.create_batch_and_listen(is_secure, number) as swarms:
+            yield tuple(
+                RoutedHost(key_pair.public_key, swarm, router)
+                for key_pair, swarm, router in zip(key_pairs, swarms, routers)
+            )
 
 
 class FloodsubFactory(factory.Factory):
