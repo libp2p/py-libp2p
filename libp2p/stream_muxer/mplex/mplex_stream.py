@@ -104,6 +104,7 @@ class MplexStream(IMuxedStream):
             # and then return.
             try:
                 data = self.incoming_data_channel.receive_nowait()
+                self._buf.extend(data)
             except trio.EndOfChannel:
                 raise MplexStreamEOF
             except trio.WouldBlock:
@@ -111,6 +112,7 @@ class MplexStream(IMuxedStream):
                 # catch all kinds of errors here.
                 try:
                     data = await self.incoming_data_channel.receive()
+                    self._buf.extend(data)
                 except trio.EndOfChannel:
                     if self.event_reset.is_set():
                         raise MplexStreamReset
@@ -125,7 +127,6 @@ class MplexStream(IMuxedStream):
                         "`incoming_data_channel` is closed but stream is not reset. "
                         "This should never happen."
                     ) from error
-            self._buf.extend(data)
         self._buf.extend(self._read_return_when_blocked())
         payload = self._buf[:n]
         self._buf = self._buf[len(payload) :]
