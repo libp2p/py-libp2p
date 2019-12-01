@@ -7,10 +7,9 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
 )
-from libp2p.tools.constants import MAX_READ_LEN, LISTEN_MADDR
+from libp2p.tools.constants import LISTEN_MADDR, MAX_READ_LEN
 from libp2p.tools.factories import SwarmFactory
 from libp2p.tools.utils import connect_swarm
-
 
 DATA = b"data_123"
 

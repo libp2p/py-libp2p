@@ -1,7 +1,7 @@
-import trio
 from typing import List, Sequence, Tuple
 
 import multiaddr
+import trio
 
 from libp2p import new_node
 from libp2p.host.basic_host import BasicHost

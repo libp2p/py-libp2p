@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any, Awaitable, List, Set, Tuple
 
-import trio
 from async_service import Service
+import trio
 
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.stream.net_stream import NetStream

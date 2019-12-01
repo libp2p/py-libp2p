@@ -1,11 +1,11 @@
-import math
 import asyncio
 import logging
+import math
 from typing import Any  # noqa: F401
 from typing import Awaitable, Dict, List, Optional, Tuple
 
-import trio
 from async_service import Service
+import trio
 
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError

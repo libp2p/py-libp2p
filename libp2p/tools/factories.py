@@ -1,9 +1,9 @@
-import trio
-from contextlib import asynccontextmanager, AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Tuple, cast
 
-import factory
 from async_service import background_trio_service
+import factory
+import trio
 
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair

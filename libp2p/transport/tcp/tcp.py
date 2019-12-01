@@ -25,7 +25,8 @@ class TCPListener(IListener):
         self.server = None
         self.handler = handler_function
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    # TODO: Fix handling?
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         put listener in listening mode and wait for incoming connections.
 
@@ -50,16 +51,13 @@ class TCPListener(IListener):
         socket = listeners[0].socket
         self.multiaddrs.append(_multiaddr_from_socket(socket))
 
-        return True
-
     def get_addrs(self) -> List[Multiaddr]:
         """
         retrieve list of addresses the listener is listening on.
 
         :return: return list of addrs
         """
-        # TODO check if server is listening
-        return self.multiaddrs
+        return tuple(self.multiaddrs)
 
     async def close(self) -> None:
         """close the listener such that no more connections can be open on this

@@ -1,20 +1,47 @@
-import asyncio
-
+from multiaddr import Multiaddr
 import pytest
+import trio
 
-from libp2p.transport.tcp.tcp import _multiaddr_from_socket
+from libp2p.network.connection.raw_connection import RawConnection
+from libp2p.tools.constants import LISTEN_MADDR, MAX_READ_LEN
+from libp2p.transport.tcp.tcp import TCP
 
 
-@pytest.mark.asyncio
-async def test_multiaddr_from_socket():
-    def handler(r, w):
-        pass
+@pytest.mark.trio
+async def test_tcp_listener(nursery):
+    transport = TCP()
 
-    server = await asyncio.start_server(handler, "127.0.0.1", 8000)
-    assert str(_multiaddr_from_socket(server.sockets[0])) == "/ip4/127.0.0.1/tcp/8000"
+    async def handler(tcp_stream):
+        ...
 
-    server = await asyncio.start_server(handler, "127.0.0.1", 0)
-    addr = _multiaddr_from_socket(server.sockets[0])
-    assert addr.value_for_protocol("ip4") == "127.0.0.1"
-    port = addr.value_for_protocol("tcp")
-    assert int(port) > 0
+    listener = transport.create_listener(handler)
+    assert len(listener.get_addrs()) == 0
+    await listener.listen(LISTEN_MADDR, nursery)
+    assert len(listener.get_addrs()) == 1
+    await listener.listen(LISTEN_MADDR, nursery)
+    assert len(listener.get_addrs()) == 2
+
+
+@pytest.mark.trio
+async def test_tcp_dial(nursery):
+    transport = TCP()
+    raw_conn_other_side = None
+
+    async def handler(tcp_stream):
+        nonlocal raw_conn_other_side
+        raw_conn_other_side = RawConnection(tcp_stream, False)
+        await trio.sleep_forever()
+
+    # Test: OSError is raised when trying to dial to a port which no one is not listening to.
+    with pytest.raises(OSError):
+        await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
+
+    listener = transport.create_listener(handler)
+    await listener.listen(LISTEN_MADDR, nursery)
+    assert len(listener.multiaddrs) == 1
+    listen_addr = listener.multiaddrs[0]
+    raw_conn = await transport.dial(listen_addr)
+
+    data = b"123"
+    await raw_conn_other_side.write(data)
+    assert (await raw_conn.read(len(data))) == data

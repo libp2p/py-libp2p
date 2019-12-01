@@ -2,7 +2,6 @@ import logging
 from typing import Dict, List, Optional
 
 from async_service import Service
-
 from multiaddr import Multiaddr
 import trio
 
@@ -205,7 +204,7 @@ class Swarm(INetwork, Service):
 
                 logger.debug("successfully opened connection to peer %s", peer_id)
                 # FIXME: This is a intentional barrier to prevent from the handler exiting and
-                #   closing the connection.
+                #   closing the connection. Probably change to `Service.manager.wait_finished`?
                 await trio.sleep_forever()
 
             try:
@@ -229,16 +228,6 @@ class Swarm(INetwork, Service):
     async def close(self) -> None:
         # TODO: Prevent from new listeners and conns being added.
         #   Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L124-L134  # noqa: E501
-
-        # Close listeners
-        # await asyncio.gather(
-        #     *[listener.close() for listener in self.listeners.values()]
-        # )
-
-        # # Close connections
-        # await asyncio.gather(
-        #     *[connection.close() for connection in self.connections.values()]
-        # )
         await self.manager.stop()
         await self.manager.wait_finished()
         logger.debug("swarm successfully closed")

@@ -1,5 +1,5 @@
-import trio
 import pytest
+import trio
 from trio.testing import wait_all_tasks_blocked
 
 from libp2p.network.exceptions import SwarmException
