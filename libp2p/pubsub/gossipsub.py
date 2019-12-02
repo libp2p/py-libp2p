@@ -106,8 +106,6 @@ class GossipSub(IPubsubRouter):
         logger.debug("attached to pusub")
 
         # Start heartbeat now that we have a pubsub instance
-        # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # Noqa: E501
-        await asyncio.sleep(0.1)
         asyncio.ensure_future(self.heartbeat())
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
@@ -295,6 +293,8 @@ class GossipSub(IPubsubRouter):
         Note: the heartbeats are called with awaits because each heartbeat depends on the
         state changes in the preceding heartbeat
         """
+        # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # Noqa: E501
+        await asyncio.sleep(0.1)
         while True:
 
             await self.mesh_heartbeat()
