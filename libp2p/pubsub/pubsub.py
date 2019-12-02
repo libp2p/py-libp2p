@@ -150,7 +150,7 @@ class Pubsub:
         # Map of topic to topic validator
         self.topic_validators = {}
 
-        self.counter = time.time_ns()
+        self.counter = int(time.time())
 
         self._tasks = []
         # Call handle peer to keep waiting for updates to peer queue

@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Tuple, cast
 
 import factory
@@ -32,6 +31,12 @@ from .constants import (
     LISTEN_MADDR,
 )
 from .utils import connect, connect_swarm
+
+try:
+    from contextlib import asynccontextmanager
+except ImportError:
+    # NOTE: mypy complains about a duplicate import without the following ``# type: ignore``
+    from async_generator import asynccontextmanager  # type: ignore
 
 
 def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> PeerStore:

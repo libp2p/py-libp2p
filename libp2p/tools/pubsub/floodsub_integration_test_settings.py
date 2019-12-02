@@ -143,6 +143,14 @@ floodsub_protocol_pytest_params = [
 ]
 
 
+def _collect_node_ids(adj_list):
+    node_ids = set()
+    for node, neighbors in adj_list.items():
+        node_ids.add(node)
+        node_ids.update(set(neighbors))
+    return node_ids
+
+
 async def perform_test_from_obj(obj, router_factory) -> None:
     """
     Perform pubsub tests from a test object, which is composed as follows:
@@ -180,59 +188,43 @@ async def perform_test_from_obj(obj, router_factory) -> None:
     node_map = {}
     pubsub_map = {}
 
-    async def add_node(node_id_str: str) -> None:
+    async def add_node(node_id_str: str):
         pubsub_router = router_factory(protocols=obj["supported_protocols"])
         pubsub = PubsubFactory(router=pubsub_router)
         await pubsub.host.get_network().listen(LISTEN_MADDR)
         node_map[node_id_str] = pubsub.host
         pubsub_map[node_id_str] = pubsub
 
-    tasks_connect = []
-    for start_node_id in adj_list:
-        # Create node if node does not yet exist
-        if start_node_id not in node_map:
-            await add_node(start_node_id)
+    all_node_ids = _collect_node_ids(adj_list)
 
-        # For each neighbor of start_node, create if does not yet exist,
-        # then connect start_node to neighbor
-        for neighbor_id in adj_list[start_node_id]:
-            # Create neighbor if neighbor does not yet exist
-            if neighbor_id not in node_map:
-                await add_node(neighbor_id)
-            tasks_connect.append(
-                connect(node_map[start_node_id], node_map[neighbor_id])
-            )
-    # Connect nodes and wait at least for 2 seconds
-    await asyncio.gather(*tasks_connect, asyncio.sleep(2))
+    for node in all_node_ids:
+        await add_node(node)
+
+    for node, neighbors in adj_list.items():
+        for neighbor_id in neighbors:
+            await connect(node_map[node], node_map[neighbor_id])
+
+    # NOTE: the test using this routine will fail w/o these sleeps...
+    await asyncio.sleep(1)
 
     # Step 2) Subscribe to topics
     queues_map = {}
     topic_map = obj["topic_map"]
 
-    tasks_topic = []
-    tasks_topic_data = []
     for topic, node_ids in topic_map.items():
         for node_id in node_ids:
-            tasks_topic.append(pubsub_map[node_id].subscribe(topic))
-            tasks_topic_data.append((node_id, topic))
-    tasks_topic.append(asyncio.sleep(2))
+            queue = await pubsub_map[node_id].subscribe(topic)
+            if node_id not in queues_map:
+                queues_map[node_id] = {}
+            # Store queue in topic-queue map for node
+            queues_map[node_id][topic] = queue
 
-    # Gather is like Promise.all
-    responses = await asyncio.gather(*tasks_topic)
-    for i in range(len(responses) - 1):
-        node_id, topic = tasks_topic_data[i]
-        if node_id not in queues_map:
-            queues_map[node_id] = {}
-        # Store queue in topic-queue map for node
-        queues_map[node_id][topic] = responses[i]
-
-    # Allow time for subscribing before continuing
-    await asyncio.sleep(0.01)
+    # NOTE: the test using this routine will fail w/o these sleeps...
+    await asyncio.sleep(1)
 
     # Step 3) Publish messages
     topics_in_msgs_ordered = []
     messages = obj["messages"]
-    tasks_publish = []
 
     for msg in messages:
         topics = msg["topics"]
@@ -242,21 +234,17 @@ async def perform_test_from_obj(obj, router_factory) -> None:
         # Publish message
         # TODO: Should be single RPC package with several topics
         for topic in topics:
-            tasks_publish.append(pubsub_map[node_id].publish(topic, data))
-
-        # For each topic in topics, add (topic, node_id, data) tuple to ordered test list
-        for topic in topics:
+            await pubsub_map[node_id].publish(topic, data)
+            # For each topic in topics, add (topic, node_id, data) tuple to ordered test list
             topics_in_msgs_ordered.append((topic, node_id, data))
-
-    # Allow time for publishing before continuing
-    await asyncio.gather(*tasks_publish, asyncio.sleep(2))
 
     # Step 4) Check that all messages were received correctly.
     for topic, origin_node_id, data in topics_in_msgs_ordered:
         # Look at each node in each topic
         for node_id in topic_map[topic]:
             # Get message from subscription queue
-            msg = await queues_map[node_id][topic].get()
+            queue = queues_map[node_id][topic]
+            msg = await queue.get()
             assert data == msg.data
             # Check the message origin
             assert node_map[origin_node_id].get_id().to_bytes() == msg.from_id

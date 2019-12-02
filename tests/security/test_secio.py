@@ -76,8 +76,8 @@ async def test_create_secure_session():
     local_conn = InMemoryConnection(local_peer, is_initiator=True)
     remote_conn = InMemoryConnection(remote_peer)
 
-    local_pipe_task = asyncio.create_task(create_pipe(local_conn, remote_conn))
-    remote_pipe_task = asyncio.create_task(create_pipe(remote_conn, local_conn))
+    local_pipe_task = asyncio.ensure_future(create_pipe(local_conn, remote_conn))
+    remote_pipe_task = asyncio.ensure_future(create_pipe(remote_conn, local_conn))
 
     local_session_builder = create_secure_session(
         local_nonce, local_peer, local_key_pair.private_key, local_conn, remote_peer

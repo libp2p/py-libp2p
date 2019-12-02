@@ -1,5 +1,6 @@
 import asyncio
 from socket import socket
+import sys
 from typing import List
 
 from multiaddr import Multiaddr
@@ -53,7 +54,8 @@ class TCPListener(IListener):
         if self.server is None:
             return
         self.server.close()
-        await self.server.wait_closed()
+        if sys.version_info[0:2] > (3, 6):
+            await self.server.wait_closed()
         self.server = None
 
 
