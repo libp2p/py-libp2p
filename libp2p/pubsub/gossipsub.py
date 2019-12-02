@@ -145,6 +145,21 @@ class GossipSub(IPubsubRouter):
         elif peer_id in self.peers_floodsub:
             self.peers_floodsub.remove(peer_id)
 
+        for topic in self.mesh:
+            if peer_id in self.mesh[topic]:
+                # Delete the entry if no other peers left
+                if len(self.mesh[topic]) == 1:
+                    del self.mesh[topic]
+                else:
+                    self.mesh[topic].remove(peer_id)
+        for topic in self.fanout:
+            if peer_id in self.fanout[topic]:
+                # Delete the entry if no other peers left
+                if len(self.fanout[topic]) == 1:
+                    del self.fanout[topic]
+                else:
+                    self.fanout[topic].remove(peer_id)
+
         self.peers_to_protocol.pop(peer_id, None)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
