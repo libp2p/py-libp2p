@@ -320,10 +320,7 @@ class GossipSub(IPubsubRouter):
                     topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic]
                 )
 
-                fanout_peers_not_in_mesh: List[ID] = [
-                    peer for peer in selected_peers if peer not in self.mesh[topic]
-                ]
-                for peer in fanout_peers_not_in_mesh:
+                for peer in selected_peers:
                     # Add peer to mesh[topic]
                     self.mesh[topic].append(peer)
 
@@ -377,12 +374,7 @@ class GossipSub(IPubsubRouter):
                     )
 
                     for peer in peers_to_emit_ihave_to:
-                        # TODO: this line is a monster, can hopefully be simplified
-                        if (
-                            topic not in self.mesh or (peer not in self.mesh[topic])
-                        ) and (
-                            topic not in self.fanout or (peer not in self.fanout[topic])
-                        ):
+                        if peer not in self.mesh[topic]:
                             msg_id_strs = [str(msg_id) for msg_id in msg_ids]
                             await self.emit_ihave(topic, msg_id_strs, peer)
 
@@ -399,10 +391,7 @@ class GossipSub(IPubsubRouter):
                             topic, self.degree, []
                         )
                         for peer in peers_to_emit_ihave_to:
-                            if (
-                                peer not in self.mesh[topic]
-                                and peer not in self.fanout[topic]
-                            ):
+                            if peer not in self.fanout[topic]:
                                 msg_id_strs = [str(msg) for msg in msg_ids]
                                 await self.emit_ihave(topic, msg_id_strs, peer)
 
