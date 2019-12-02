@@ -327,11 +327,9 @@ class Pubsub:
         logger.debug("removed dead peer %s", peer_id)
 
     async def handle_peer_queue(self) -> None:
-        """
-        Continuously read from peer queue and each time a new peer is found,
-        open a stream to the peer using a supported pubsub protocol
-        pubsub protocols we support
-        """
+        """Continuously read from peer queue and each time a new peer is found,
+        open a stream to the peer using a supported pubsub protocol pubsub
+        protocols we support."""
         while True:
             peer_id: ID = await self.peer_queue.get()
             # Add Peer
