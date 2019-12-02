@@ -142,6 +142,7 @@ class GossipsubFactory(factory.Factory):
     time_to_live = GOSSIPSUB_PARAMS.time_to_live
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
+    heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
 
 

@@ -43,6 +43,7 @@ class GossipSub(IPubsubRouter):
 
     mcache: MessageCache
 
+    heartbeat_initial_delay: float
     heartbeat_interval: int
 
     def __init__(
@@ -54,6 +55,7 @@ class GossipSub(IPubsubRouter):
         time_to_live: int,
         gossip_window: int = 3,
         gossip_history: int = 5,
+        heartbeat_initial_delay: int = 0.1,
         heartbeat_interval: int = 120,
     ) -> None:
         self.protocols = list(protocols)
@@ -84,6 +86,7 @@ class GossipSub(IPubsubRouter):
         self.mcache = MessageCache(gossip_window, gossip_history)
 
         # Create heartbeat timer
+        self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
 
     # Interface functions
@@ -294,7 +297,7 @@ class GossipSub(IPubsubRouter):
         state changes in the preceding heartbeat
         """
         # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # Noqa: E501
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(self.heartbeat_initial_delay)
         while True:
 
             await self.mesh_heartbeat()
