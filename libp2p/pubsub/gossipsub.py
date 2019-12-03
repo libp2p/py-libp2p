@@ -205,6 +205,7 @@ class GossipSub(IPubsubRouter):
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
+            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
             try:
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
@@ -238,6 +239,8 @@ class GossipSub(IPubsubRouter):
             if topic in self.mesh:
                 in_topic_gossipsub_peers = self.mesh[topic]
             else:
+                # It could be the case that we publish to a topic that we have not subscribe
+                # and the topic is not yet added to our `fanout`.
                 if (topic not in self.fanout) or (len(self.fanout[topic]) == 0):
                     # If no peers in fanout, choose some peers from gossipsub peers in topic.
                     self.fanout[topic] = self._get_in_topic_gossipsub_peers_from_minus(
