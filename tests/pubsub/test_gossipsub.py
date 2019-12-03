@@ -149,7 +149,7 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     await connect(hosts[index_alice], hosts[index_bob])
 
     # Wait 3 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(3)
+    await asyncio.sleep(1)
 
     # Check that they are each other's mesh peer
     assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -158,15 +158,17 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     # alice emit prune message to bob, alice should be removed
     # from bob's mesh peer
     await gossipsubs[index_alice].emit_prune(topic, id_bob)
+    # `emit_prune` does not remove bob from alice's mesh peers
+    assert id_bob in gossipsubs[index_alice].mesh[topic]
 
     # FIXME: This test currently works because the heartbeat interval
     # is increased to 3 seconds, so alice won't get add back into
     # bob's mesh peer during heartbeat.
-    await asyncio.sleep(1)
+    # Wait for bob to `handle_prune`
+    await asyncio.sleep(0.1)
 
     # Check that alice is no longer bob's mesh peer
     assert id_alice not in gossipsubs[index_bob].mesh[topic]
-    assert id_bob in gossipsubs[index_alice].mesh[topic]
 
 
 @pytest.mark.parametrize("num_hosts", (10,))
