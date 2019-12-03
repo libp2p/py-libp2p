@@ -460,9 +460,12 @@ class GossipSub(IPubsubRouter):
             else:
                 # Check whether our peers are still in the topic
                 # ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L498-L504  # noqa: E501
-                for peer in self.fanout[topic]:
-                    if peer not in self.pubsub.peer_topics[topic]:
-                        self.fanout[topic].remove(peer)
+                in_topic_fanout_peers = [
+                    peer
+                    for peer in self.fanout[topic]
+                    if peer in self.pubsub.peer_topics[topic]
+                ]
+                self.fanout[topic] = in_topic_fanout_peers
                 num_fanout_peers_in_topic = len(self.fanout[topic])
 
                 # If |fanout[topic]| < D
@@ -644,7 +647,10 @@ class GossipSub(IPubsubRouter):
 
         # Remove peer from mesh for topic, if peer is in topic
         if topic in self.mesh and sender_peer_id in self.mesh[topic]:
-            self.mesh[topic].remove(sender_peer_id)
+            if len(self.mesh[topic]) == 1:
+                del self.mesh[topic]
+            else:
+                self.mesh[topic].remove(sender_peer_id)
 
     # RPC emitters
 
