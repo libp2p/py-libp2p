@@ -5,6 +5,7 @@ from async_service import background_trio_service
 import factory
 import trio
 
+from libp2p.tools.constants import GOSSIPSUB_PARAMS
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
@@ -15,6 +16,7 @@ from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.peerstore import PeerStore
+from libp2p.peer.id import ID
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
@@ -28,13 +30,17 @@ from libp2p.transport.typing import TMuxerOptions
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import TProtocol
 
-from .constants import (
-    FLOODSUB_PROTOCOL_ID,
-    GOSSIPSUB_PARAMS,
-    GOSSIPSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
-)
+from .constants import FLOODSUB_PROTOCOL_ID, GOSSIPSUB_PROTOCOL_ID, LISTEN_MADDR
 from .utils import connect, connect_swarm
+
+
+class IDFactory(factory.Factory):
+    class Meta:
+        model = ID
+
+    peer_id_bytes = factory.LazyFunction(
+        lambda: generate_peer_id_from(generate_new_rsa_identity())
+    )
 
 
 def security_transport_factory(
@@ -181,8 +187,37 @@ class PubsubFactory(factory.Factory):
 
     host = factory.SubFactory(HostFactory)
     router = None
-    my_id = factory.LazyAttribute(lambda obj: obj.host.get_id())
     cache_size = None
+
+    @classmethod
+    @asynccontextmanager
+    async def create_and_start(cls, host, router, cache_size):
+        pubsub = PubsubFactory(host=host, router=router, cache_size=cache_size)
+        async with background_trio_service(pubsub):
+            yield pubsub
+
+    @classmethod
+    @asynccontextmanager
+    async def create_batch_with_floodsub(
+        cls, number: int, is_secure: bool = False, cache_size: int = None
+    ):
+        floodsubs = FloodsubFactory.create_batch(number)
+        async with HostFactory.create_batch_and_listen(is_secure, number) as hosts:
+            # Pubsubs should exit before hosts
+            async with AsyncExitStack() as stack:
+                pubsubs = [
+                    await stack.enter_async_context(
+                        cls.create_and_start(host, router, cache_size)
+                    )
+                    for host, router in zip(hosts, floodsubs)
+                ]
+                yield pubsubs
+
+    # @classmethod
+    # async def create_batch_with_gossipsub(
+    #     cls, number: int, cache_size: int = None, gossipsub_params=GOSSIPSUB_PARAMS
+    # ):
+    #     ...
 
 
 @asynccontextmanager

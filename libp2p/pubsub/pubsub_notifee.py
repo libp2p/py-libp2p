@@ -8,19 +8,19 @@ from libp2p.network.notifee_interface import INotifee
 from libp2p.network.stream.net_stream_interface import INetStream
 
 if TYPE_CHECKING:
-    import asyncio  # noqa: F401
+    import trio  # noqa: F401
     from libp2p.peer.id import ID  # noqa: F401
 
 
 class PubsubNotifee(INotifee):
 
-    initiator_peers_queue: "asyncio.Queue[ID]"
-    dead_peers_queue: "asyncio.Queue[ID]"
+    initiator_peers_queue: "trio.MemorySendChannel[ID]"
+    dead_peers_queue: "trio.MemorySendChannel[ID]"
 
     def __init__(
         self,
-        initiator_peers_queue: "asyncio.Queue[ID]",
-        dead_peers_queue: "asyncio.Queue[ID]",
+        initiator_peers_queue: "trio.MemorySendChannel[ID]",
+        dead_peers_queue: "trio.MemorySendChannel[ID]",
     ) -> None:
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub
@@ -46,7 +46,12 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.initiator_peers_queue.put(conn.muxed_conn.peer_id)
+        try:
+            await self.initiator_peers_queue.send(conn.muxed_conn.peer_id)
+        except trio.BrokenResourceError:
+            # Raised when the receive channel is closed.
+            # TODO: Do something with loggers?
+            ...
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -56,7 +61,7 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.dead_peers_queue.put(conn.muxed_conn.peer_id)
+        await self.dead_peers_queue.send(conn.muxed_conn.peer_id)
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         pass

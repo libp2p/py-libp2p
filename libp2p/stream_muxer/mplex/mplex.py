@@ -281,7 +281,7 @@ class Mplex(IMuxedConn, Service):
         mplex_stream = await self._initialize_stream(stream_id, message.decode())
         try:
             await self.new_stream_send_channel.send(mplex_stream)
-        except (trio.BrokenResourceError, trio.EndOfChannel):
+        except (trio.BrokenResourceError, trio.ClosedResourceError):
             raise MplexUnavailable
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
