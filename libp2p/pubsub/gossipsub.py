@@ -150,17 +150,11 @@ class GossipSub(IPubsubRouter):
         for topic in self.mesh:
             if peer_id in self.mesh[topic]:
                 # Delete the entry if no other peers left
-                if len(self.mesh[topic]) == 1:
-                    del self.mesh[topic]
-                else:
-                    self.mesh[topic].remove(peer_id)
+                self.mesh[topic].remove(peer_id)
         for topic in self.fanout:
             if peer_id in self.fanout[topic]:
                 # Delete the entry if no other peers left
-                if len(self.fanout[topic]) == 1:
-                    del self.fanout[topic]
-                else:
-                    self.fanout[topic].remove(peer_id)
+                self.fanout[topic].remove(peer_id)
 
         self.peers_to_protocol.pop(peer_id, None)
 
@@ -647,10 +641,7 @@ class GossipSub(IPubsubRouter):
 
         # Remove peer from mesh for topic, if peer is in topic
         if topic in self.mesh and sender_peer_id in self.mesh[topic]:
-            if len(self.mesh[topic]) == 1:
-                del self.mesh[topic]
-            else:
-                self.mesh[topic].remove(sender_peer_id)
+            self.mesh[topic].remove(sender_peer_id)
 
     # RPC emitters
 
