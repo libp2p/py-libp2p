@@ -406,3 +406,63 @@ async def test_mesh_heartbeat(
             assert peer not in mesh_peers
     else:
         assert len(peers_to_prune) == 0 and len(peers_to_graft) == 0
+
+
+@pytest.mark.parametrize(
+    "num_hosts, gossipsub_params", ((1, GossipsubParams(heartbeat_initial_delay=100)),)
+)
+@pytest.mark.parametrize("initial_peer_count", (1, 4, 7))
+@pytest.mark.asyncio
+async def test_gossip_heartbeat(
+    num_hosts, initial_peer_count, pubsubs_gsub, hosts, monkeypatch
+):
+    total_peer_count = 28
+    topic_mesh = "TEST_GOSSIP_HEARTBEAT_1"
+    topic_fanout = "TEST_GOSSIP_HEARTBEAT_2"
+
+    fake_peer_ids = [
+        ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
+    ]
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", fake_peer_ids)
+
+    topic_mesh_peer_count = 14
+    peer_topics = {
+        topic_mesh: fake_peer_ids[:topic_mesh_peer_count],
+        topic_fanout: fake_peer_ids[topic_mesh_peer_count:],
+    }
+    monkeypatch.setattr(pubsubs_gsub[0], "peer_topics", peer_topics)
+
+    mesh_peer_indices = random.sample(range(topic_mesh_peer_count), initial_peer_count)
+    mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
+    router_mesh = {topic_mesh: list(mesh_peers)}
+    monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
+    fanout_peer_indices = random.sample(
+        range(topic_mesh_peer_count, total_peer_count), initial_peer_count
+    )
+    fanout_peers = [fake_peer_ids[i] for i in fanout_peer_indices]
+    router_fanout = {topic_fanout: list(fanout_peers)}
+    monkeypatch.setattr(pubsubs_gsub[0].router, "fanout", router_fanout)
+
+    def window(topic):
+        if topic == topic_mesh:
+            return [topic_mesh]
+        elif topic == topic_fanout:
+            return [topic_fanout]
+        else:
+            return []
+
+    monkeypatch.setattr(pubsubs_gsub[0].router.mcache, "window", window)
+
+    peers_to_gossip = pubsubs_gsub[0].router.gossip_heartbeat()
+    if topic_mesh_peer_count - initial_peer_count < GOSSIPSUB_PARAMS.degree:
+        assert len(peers_to_gossip) == 2 * (topic_mesh_peer_count - initial_peer_count)
+    elif topic_mesh_peer_count - initial_peer_count >= GOSSIPSUB_PARAMS.degree:
+        assert len(peers_to_gossip) == 2 * (GOSSIPSUB_PARAMS.degree)
+
+    for peer in peers_to_gossip:
+        if peer in peer_topics[topic_mesh]:
+            assert peer not in mesh_peers
+            assert topic_mesh in peers_to_gossip[peer]
+        elif peer in peer_topics[topic_fanout]:
+            assert peer not in fanout_peers
+            assert topic_fanout in peers_to_gossip[peer]
