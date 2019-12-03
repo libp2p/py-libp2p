@@ -197,7 +197,7 @@ async def test_dense(num_hosts, pubsubs_gsub, hosts):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish("foobar", msg_content)
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()

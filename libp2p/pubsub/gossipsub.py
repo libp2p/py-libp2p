@@ -314,9 +314,11 @@ class GossipSub(IPubsubRouter):
         peers_to_prune: Dict[ID, List[str]],
         peers_to_gossip: Dict[ID, Dict[str, List[str]]],
     ) -> None:
+        graft_msgs: List[rpc_pb2.ControlGraft] = []
+        prune_msgs: List[rpc_pb2.ControlPrune] = []
+        ihave_msgs: List[rpc_pb2.ControlIHave] = []
         # Starting with GRAFT messages
         for peer, topics in peers_to_graft.items():
-            graft_msgs: List[rpc_pb2.ControlGraft] = []
             for topic in topics:
                 graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
                 graft_msg.topicID = topic
@@ -324,7 +326,6 @@ class GossipSub(IPubsubRouter):
 
             # If there are also PRUNE messages to send to this peer
             if peer in peers_to_prune:
-                prune_msgs: List[rpc_pb2.ControlPrune] = []
                 for topic in peers_to_prune[peer]:
                     prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
                     prune_msg.topicID = topic
@@ -333,7 +334,6 @@ class GossipSub(IPubsubRouter):
 
             # If there are also IHAVE messages to send to this peer
             if peer in peers_to_gossip:
-                ihave_msgs: List[rpc_pb2.ControlIHave] = []
                 for topic in peers_to_gossip[peer]:
                     ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
                     ihave_msg.messageIDs.extend(peers_to_gossip[peer][topic])
