@@ -396,13 +396,12 @@ class GossipSub(IPubsubRouter):
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
                     peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, []
+                        topic, self.degree, self.mesh[topic]
                     )
 
+                    msg_id_strs = [str(msg_id) for msg_id in msg_ids]
                     for peer in peers_to_emit_ihave_to:
-                        if peer not in self.mesh[topic]:
-                            msg_id_strs = [str(msg_id) for msg_id in msg_ids]
-                            await self.emit_ihave(topic, msg_id_strs, peer)
+                        await self.emit_ihave(topic, msg_id_strs, peer)
 
         # TODO: Refactor and Dedup. This section is the roughly the same as the above.
         # Do the same for fanout, for all topics not already hit in mesh
@@ -414,12 +413,11 @@ class GossipSub(IPubsubRouter):
                     if topic in self.pubsub.peer_topics:
                         # Select D peers from peers.gossipsub[topic]
                         peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                            topic, self.degree, []
+                            topic, self.degree, self.fanout[topic]
                         )
+                        msg_id_strs = [str(msg) for msg in msg_ids]
                         for peer in peers_to_emit_ihave_to:
-                            if peer not in self.fanout[topic]:
-                                msg_id_strs = [str(msg) for msg in msg_ids]
-                                await self.emit_ihave(topic, msg_id_strs, peer)
+                            await self.emit_ihave(topic, msg_id_strs, peer)
 
         self.mcache.shift()
 
