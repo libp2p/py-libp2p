@@ -1,16 +1,14 @@
-from typing import List, Sequence, Tuple
+from typing import Sequence, Tuple
 
 import multiaddr
 
 from libp2p import new_node
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
-from libp2p.kademlia.network import KademliaServer
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.typing import StreamHandlerFn, TProtocol
 
 from .constants import MAX_READ_LEN
@@ -56,24 +54,6 @@ async def set_up_nodes_by_transport_and_disc_opt(
         await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
         nodes_list.append(node)
     return tuple(nodes_list)
-
-
-async def set_up_routers(
-    router_confs: Tuple[int, int] = (0, 0)
-) -> List[KadmeliaPeerRouter]:
-    """The default ``router_confs`` selects two free ports local to this
-    machine."""
-    bootstrap_node = KademliaServer()  # type: ignore
-    await bootstrap_node.listen(router_confs[0])
-
-    routers = [KadmeliaPeerRouter(bootstrap_node)]
-    for port in router_confs[1:]:
-        node = KademliaServer()  # type: ignore
-        await node.listen(port)
-
-        await node.bootstrap_node(bootstrap_node.address)
-        routers.append(KadmeliaPeerRouter(node))
-    return routers
 
 
 async def echo_stream_handler(stream: INetStream) -> None:

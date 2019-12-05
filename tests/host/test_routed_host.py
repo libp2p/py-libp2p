@@ -1,15 +1,21 @@
 import asyncio
+import json
 
 import pytest
 
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.routing.kademlia.kademlia_peer_router import peer_info_to_str
 from libp2p.tools.utils import (
     set_up_nodes_by_transport_and_disc_opt,
     set_up_nodes_by_transport_opt,
     set_up_routers,
 )
+
+
+def peer_info_to_str(peer_info: PeerInfo) -> str:
+    return json.dumps(
+        [peer_info.peer_id.to_string(), list(map(lambda a: str(a), peer_info.addrs))]
+    )
 
 
 @pytest.mark.asyncio
