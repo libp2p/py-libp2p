@@ -10,7 +10,6 @@ Subpackages
     libp2p.host
     libp2p.identity
     libp2p.io
-    libp2p.kademlia
     libp2p.network
     libp2p.peer
     libp2p.protocol_muxer

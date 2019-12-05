@@ -1,12 +1,6 @@
 libp2p.routing package
 ======================
 
-Subpackages
------------
-
-.. toctree::
-
-    libp2p.routing.kademlia
 
 Submodules
 ----------
