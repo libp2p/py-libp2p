@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import multiaddr
 
@@ -7,7 +7,8 @@ from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
-from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.typing import StreamHandlerFn, TProtocol
 
@@ -75,3 +76,29 @@ async def perform_two_host_set_up(
     # Associate the peer with local ip address (see default parameters of Libp2p())
     node_a.get_peerstore().add_addrs(node_b.get_id(), node_b.get_addrs(), 10)
     return node_a, node_b
+
+
+class DummyRouter(IPeerRouting):
+    _routing_table: Dict[ID, PeerInfo]
+
+    def __init__(self) -> None:
+        self._routing_table = dict()
+
+    async def find_peer(self, peer_id: ID) -> PeerInfo:
+        return self._routing_table.get(peer_id, None)
+
+
+async def set_up_routed_hosts() -> Tuple[BasicHost, BasicHost]:
+    router_a, router_b = DummyRouter(), DummyRouter()
+    host_a, host_b = await set_up_nodes_by_transport_and_disc_opt(
+        ((["/ip4/127.0.0.1/tcp/0"], router_a), (["/ip4/127.0.0.1/tcp/0"], router_b))
+    )
+
+    mock_routing_table = {
+        host_a.get_id(): PeerInfo(host_a.get_id(), host_a.get_addrs()),
+        host_b.get_id(): PeerInfo(host_b.get_id(), host_b.get_addrs()),
+    }
+
+    router_a._routing_table = router_b._routing_table = mock_routing_table
+
+    return host_a, host_b
