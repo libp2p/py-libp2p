@@ -148,7 +148,7 @@ async def test_handle_prune(pubsubs_gsub, hosts):
 
     await connect(hosts[index_alice], hosts[index_bob])
 
-     # Wait for heartbeat to allow mesh to connect
+    # Wait for heartbeat to allow mesh to connect
     await asyncio.sleep(1)
 
     # Check that they are each other's mesh peer
