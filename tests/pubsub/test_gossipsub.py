@@ -161,9 +161,8 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     # `emit_prune` does not remove bob from alice's mesh peers
     assert id_bob in gossipsubs[index_alice].mesh[topic]
 
-    # FIXME: This test currently works because the heartbeat interval
-    # is increased to 3 seconds, so alice won't get add back into
-    # bob's mesh peer during heartbeat.
+    # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
+    # add alice back to his mesh after heartbeat.
     # Wait for bob to `handle_prune`
     await asyncio.sleep(0.1)
 
