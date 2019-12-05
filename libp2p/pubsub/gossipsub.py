@@ -130,7 +130,7 @@ class GossipSub(IPubsubRouter):
             #   In this case, probably we registered gossipsub to a wrong `protocol_id`
             #   in multistream-select, or wrong versions.
             raise Exception(
-                f"This should not happen. Protocol={protocol_id} is not supported."
+                f"Unreachable: Protocol={protocol_id} is not supported."
             )
         self.peers_to_protocol[peer_id] = protocol_id
 
