@@ -139,7 +139,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | Peer Discovery                               | Status        |
 | -------------------------------------------- | :-----------: |
 | **`bootstrap list`**                         | :tomato:      |
-| **`Kademlia DHT`**                           | :lemon:       |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`mDNS`**                                   | :chestnut:    |
 | **`PEX`**                                    | :chestnut:    |
 | **`DNS`**                                    | :chestnut:    |
@@ -147,7 +147,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Content Routing                              | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :lemon:       |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`floodsub`**                               | :green_apple: |
 | **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |
@@ -155,7 +155,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Peer Routing                                 | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :green_apple: |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`floodsub`**                               | :green_apple: |
 | **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |
