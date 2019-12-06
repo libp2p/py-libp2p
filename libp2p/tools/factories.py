@@ -9,6 +9,9 @@ from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
+from libp2p.io.abc import ReadWriteCloser
+from libp2p.network.connection.raw_connection import RawConnection
+from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
@@ -49,6 +52,27 @@ def security_transport_factory(
         return {PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)}
     else:
         return {secio.ID: secio.Transport(key_pair)}
+
+
+@asynccontextmanager
+async def raw_conn_factory(
+    nursery: trio.Nursery
+) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
+    conn_0 = None
+    conn_1 = None
+
+    async def tcp_stream_handler(stream: ReadWriteCloser) -> None:
+        nonlocal conn_1
+        conn_1 = RawConnection(stream, initiator=False)
+        await trio.sleep_forever()
+
+    tcp_transport = TCP()
+    listener = tcp_transport.create_listener(tcp_stream_handler)
+    await listener.listen(LISTEN_MADDR, nursery)
+    listening_maddr = listener.multiaddrs[0]
+    conn_0 = await tcp_transport.dial(listening_maddr)
+    print("raw_conn_factory")
+    yield conn_0, conn_1
 
 
 class SwarmFactory(factory.Factory):
