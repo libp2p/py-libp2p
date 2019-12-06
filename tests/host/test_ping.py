@@ -1,7 +1,7 @@
-import trio
 import secrets
 
 import pytest
+import trio
 
 from libp2p.host.ping import ID, PING_LENGTH
 from libp2p.tools.factories import host_pair_factory

@@ -203,16 +203,17 @@ class Swarm(INetwork, Service):
                 await self.add_conn(muxed_conn)
 
                 logger.debug("successfully opened connection to peer %s", peer_id)
-                # FIXME: This is a intentional barrier to prevent from the handler exiting and
-                #   closing the connection. Probably change to `Service.manager.wait_finished`?
-                await trio.sleep_forever()
+                # NOTE: This is a intentional barrier to prevent from the handler exiting and
+                #   closing the connection.
+                await self.manager.wait_finished()
 
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
                 self.listeners[str(maddr)] = listener
-                # FIXME: Hack
-                await listener.listen(maddr, self.manager._task_nursery)
+                # TODO: `listener.listen` is not bounded with nursery. If we want to be
+                #   I/O agnostic, we should change the API.
+                await listener.listen(maddr, self.manager._task_nursery)  # type: ignore
 
                 # Call notifiers since event occurred
                 await self.notify_listen(maddr)
@@ -278,6 +279,7 @@ class Swarm(INetwork, Service):
         """
         self.notifees.append(notifee)
 
+    # TODO: Use `run_task`.
     async def notify_opened_stream(self, stream: INetStream) -> None:
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:

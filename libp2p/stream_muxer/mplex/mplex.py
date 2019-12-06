@@ -1,7 +1,6 @@
 import logging
 import math
-from typing import Any  # noqa: F401
-from typing import Awaitable, Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from async_service import Service
 import trio
@@ -67,13 +66,15 @@ class Mplex(IMuxedConn, Service):
         self.streams = {}
         self.streams_lock = trio.Lock()
         self.streams_msg_channels = {}
-        send_channel, receive_channel = trio.open_memory_channel(math.inf)
-        self.new_stream_send_channel = send_channel
-        self.new_stream_receive_channel = receive_channel
+        channels: Tuple[
+            "trio.MemorySendChannel[IMuxedStream]",
+            "trio.MemoryReceiveChannel[IMuxedStream]",
+        ] = trio.open_memory_channel(math.inf)
+        self.new_stream_send_channel, self.new_stream_receive_channel = channels
         self.event_shutting_down = trio.Event()
         self.event_closed = trio.Event()
 
-    async def run(self):
+    async def run(self) -> None:
         self.manager.run_task(self.handle_incoming)
         await self.manager.wait_finished()
 
@@ -112,11 +113,13 @@ class Mplex(IMuxedConn, Service):
     async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
         # Use an unbounded buffer, to avoid `handle_incoming` being blocked when doing
         # `send_channel.send`.
-        send_channel, receive_channel = trio.open_memory_channel(math.inf)
-        stream = MplexStream(name, stream_id, self, receive_channel)
+        channels: Tuple[
+            "trio.MemorySendChannel[bytes]", "trio.MemoryReceiveChannel[bytes]"
+        ] = trio.open_memory_channel(math.inf)
+        stream = MplexStream(name, stream_id, self, channels[1])
         async with self.streams_lock:
             self.streams[stream_id] = stream
-            self.streams_msg_channels[stream_id] = send_channel
+            self.streams_msg_channels[stream_id] = channels[0]
         return stream
 
     async def open_stream(self) -> IMuxedStream:
@@ -150,9 +153,6 @@ class Mplex(IMuxedConn, Service):
         :param data: data to send in the message
         :param stream_id: stream the message is in
         """
-        print(
-            f"!@# send_message: {self._id}: flag={flag}, data={data}, stream_id={stream_id}"
-        )
         # << by 3, then or with flag
         header = encode_uvarint((stream_id.channel_id << 3) | flag.value)
 
@@ -179,19 +179,10 @@ class Mplex(IMuxedConn, Service):
 
         while self.manager.is_running:
             try:
-                print(
-                    f"!@# handle_incoming: {self._id}: before _handle_incoming_message"
-                )
                 await self._handle_incoming_message()
-                print(
-                    f"!@# handle_incoming: {self._id}: after _handle_incoming_message"
-                )
             except MplexUnavailable as e:
                 logger.debug("mplex unavailable while waiting for incoming: %s", e)
-                print(f"!@# handle_incoming: {self._id}: MplexUnavailable: {e}")
                 break
-
-        print(f"!@# handle_incoming: {self._id}: leaving")
         # If we enter here, it means this connection is shutting down.
         # We should clean things up.
         await self._cleanup()
@@ -232,44 +223,27 @@ class Mplex(IMuxedConn, Service):
 
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """
-        print(f"!@# _handle_incoming_message: {self._id}: before reading")
         channel_id, flag, message = await self.read_message()
-        print(
-            f"!@# _handle_incoming_message: {self._id}: channel_id={channel_id}, flag={flag}, message={message}"
-        )
         stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
-        print(f"!@# _handle_incoming_message: {self._id}: 2")
 
         if flag == HeaderTags.NewStream.value:
-            print(f"!@# _handle_incoming_message: {self._id}: 3")
             await self._handle_new_stream(stream_id, message)
-            print(f"!@# _handle_incoming_message: {self._id}: 4")
         elif flag in (
             HeaderTags.MessageInitiator.value,
             HeaderTags.MessageReceiver.value,
         ):
-            print(f"!@# _handle_incoming_message: {self._id}: 5")
             await self._handle_message(stream_id, message)
-            print(f"!@# _handle_incoming_message: {self._id}: 6")
         elif flag in (HeaderTags.CloseInitiator.value, HeaderTags.CloseReceiver.value):
-            print(f"!@# _handle_incoming_message: {self._id}: 7")
             await self._handle_close(stream_id)
-            print(f"!@# _handle_incoming_message: {self._id}: 8")
         elif flag in (HeaderTags.ResetInitiator.value, HeaderTags.ResetReceiver.value):
-            print(f"!@# _handle_incoming_message: {self._id}: 9")
             await self._handle_reset(stream_id)
-            print(f"!@# _handle_incoming_message: {self._id}: 10")
         else:
-            print(f"!@# _handle_incoming_message: {self._id}: 11")
             # Receives messages with an unknown flag
             # TODO: logging
             async with self.streams_lock:
-                print(f"!@# _handle_incoming_message: {self._id}: 12")
                 if stream_id in self.streams:
-                    print(f"!@# _handle_incoming_message: {self._id}: 13")
                     stream = self.streams[stream_id]
                     await stream.reset()
-            print(f"!@# _handle_incoming_message: {self._id}: 14")
 
     async def _handle_new_stream(self, stream_id: StreamID, message: bytes) -> None:
         async with self.streams_lock:
@@ -285,59 +259,43 @@ class Mplex(IMuxedConn, Service):
             raise MplexUnavailable
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
-        print(
-            f"!@# _handle_message: {self._id}: stream_id={stream_id}, message={message}"
-        )
         async with self.streams_lock:
-            print(f"!@# _handle_message: {self._id}: 1")
             if stream_id not in self.streams:
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
                 # TODO: Warn and emit logs about this.
-                print(f"!@# _handle_message: {self._id}: 2")
                 return
-            print(f"!@# _handle_message: {self._id}: 3")
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
-            print(f"!@# _handle_message: {self._id}: 4")
             if stream.event_remote_closed.is_set():
-                print(f"!@# _handle_message: {self._id}: 5")
                 # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                 return
-        print(f"!@# _handle_message: {self._id}: 6")
         await send_channel.send(message)
-        print(f"!@# _handle_message: {self._id}: 7")
 
     async def _handle_close(self, stream_id: StreamID) -> None:
-        print(f"!@# _handle_close: {self._id}: step=0")
         async with self.streams_lock:
             if stream_id not in self.streams:
                 # Ignore unmatched messages for now.
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
-        print(f"!@# _handle_close: {self._id}: step=1")
         await send_channel.aclose()
-        print(f"!@# _handle_close: {self._id}: step=2")
         # NOTE: If remote is already closed, then return: Technically a bug
         #   on the other side. We should consider killing the connection.
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
                 return
-        print(f"!@# _handle_close: {self._id}: step=3")
         is_local_closed: bool
         async with stream.close_lock:
             stream.event_remote_closed.set()
             is_local_closed = stream.event_local_closed.is_set()
-        print(f"!@# _handle_close: {self._id}: step=4")
         # If local is also closed, both sides are closed. Then, we should clean up
         #   the entry of this stream, to avoid others from accessing it.
         if is_local_closed:
             async with self.streams_lock:
                 if stream_id in self.streams:
                     del self.streams[stream_id]
-        print(f"!@# _handle_close: {self._id}: step=5")
 
     async def _handle_reset(self, stream_id: StreamID) -> None:
         async with self.streams_lock:

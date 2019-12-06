@@ -1,17 +1,9 @@
-from typing import Callable, List, Sequence, Tuple
+from typing import Awaitable, Callable
 
-import multiaddr
-import trio
-
-from libp2p import new_node
-from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
-from libp2p.kademlia.network import KademliaServer
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.routing.interfaces import IPeerRouting
-from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 
 from .constants import MAX_READ_LEN
 
@@ -36,49 +28,9 @@ async def connect(node1: IHost, node2: IHost) -> None:
     await node1.connect(info)
 
 
-async def set_up_nodes_by_transport_opt(
-    transport_opt_list: Sequence[Sequence[str]], nursery: trio.Nursery
-) -> Tuple[BasicHost, ...]:
-    nodes_list = []
-    for transport_opt in transport_opt_list:
-        node = new_node(transport_opt=transport_opt)
-        await node.get_network().listen(
-            multiaddr.Multiaddr(transport_opt[0]), nursery=nursery
-        )
-        nodes_list.append(node)
-    return tuple(nodes_list)
-
-
-async def set_up_nodes_by_transport_and_disc_opt(
-    transport_disc_opt_list: Sequence[Tuple[Sequence[str], IPeerRouting]]
-) -> Tuple[BasicHost, ...]:
-    nodes_list = []
-    for transport_opt, disc_opt in transport_disc_opt_list:
-        node = await new_node(transport_opt=transport_opt, disc_opt=disc_opt)
-        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
-        nodes_list.append(node)
-    return tuple(nodes_list)
-
-
-async def set_up_routers(
-    router_ports: Tuple[int, ...] = (0, 0)
-) -> List[KadmeliaPeerRouter]:
-    """The default ``router_confs`` selects two free ports local to this
-    machine."""
-    bootstrap_node = KademliaServer()  # type: ignore
-    await bootstrap_node.listen(router_ports[0])
-
-    routers = [KadmeliaPeerRouter(bootstrap_node)]
-    for port in router_ports[1:]:
-        node = KademliaServer()  # type: ignore
-        await node.listen(port)
-
-        await node.bootstrap_node(bootstrap_node.address)
-        routers.append(KadmeliaPeerRouter(node))
-    return routers
-
-
-def create_echo_stream_handler(ack_prefix: str) -> Callable[[INetStream], None]:
+def create_echo_stream_handler(
+    ack_prefix: str
+) -> Callable[[INetStream], Awaitable[None]]:
     async def echo_stream_handler(stream: INetStream) -> None:
         while True:
             read_string = (await stream.read(MAX_READ_LEN)).decode()

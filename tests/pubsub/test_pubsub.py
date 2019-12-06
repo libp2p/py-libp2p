@@ -5,12 +5,11 @@ import pytest
 import trio
 
 from libp2p.exceptions import ValidationError
-from libp2p.peer.id import ID
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.tools.constants import MAX_READ_LEN
+from libp2p.tools.factories import IDFactory, PubsubFactory, net_stream_pair_factory
 from libp2p.tools.pubsub.utils import make_pubsub_msg
 from libp2p.tools.utils import connect
-from libp2p.tools.constants import MAX_READ_LEN
-from libp2p.tools.factories import PubsubFactory, net_stream_pair_factory, IDFactory
 from libp2p.utils import encode_varint_prefixed
 
 TESTING_TOPIC = "TEST_SUBSCRIBE"
@@ -250,14 +249,14 @@ async def test_continuously_read_stream(monkeypatch, nursery, is_host_secure):
 
         async def mock_push_msg(msg_forwarder, msg):
             event_push_msg.set()
-            await trio.sleep(0)
+            await trio.hazmat.checkpoint()
 
         def mock_handle_subscription(origin_id, sub_message):
             event_handle_subscription.set()
 
         async def mock_handle_rpc(rpc, sender_peer_id):
             event_handle_rpc.set()
-            await trio.sleep(0)
+            await trio.hazmat.checkpoint()
 
         with monkeypatch.context() as m:
             m.setattr(pubsubs_fsub[0], "push_msg", mock_push_msg)

@@ -1,14 +1,13 @@
 import logging
-from socket import socket
-from typing import List
+from typing import Awaitable, Callable, List, Sequence, Tuple
 
 from multiaddr import Multiaddr
 import trio
+from trio_typing import TaskStatus
 
-from libp2p.io.trio import TrioReadWriteCloser
+from libp2p.io.trio import TrioTCPStream
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
@@ -18,14 +17,12 @@ logger = logging.getLogger("libp2p.transport.tcp")
 
 class TCPListener(IListener):
     multiaddrs: List[Multiaddr]
-    server = None
 
     def __init__(self, handler_function: THandler) -> None:
         self.multiaddrs = []
-        self.server = None
         self.handler = handler_function
 
-    # TODO: Fix handling?
+    # TODO: Get rid of `nursery`?
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         put listener in listening mode and wait for incoming connections.
@@ -34,13 +31,18 @@ class TCPListener(IListener):
         :return: return True if successful
         """
 
-        async def serve_tcp(handler, port, host, task_status=None):
+        async def serve_tcp(
+            handler: Callable[[trio.SocketStream], Awaitable[None]],
+            port: int,
+            host: str,
+            task_status: TaskStatus[Sequence[trio.SocketListener]] = None,
+        ) -> None:
             logger.debug("serve_tcp %s %s", host, port)
             await trio.serve_tcp(handler, port, host=host, task_status=task_status)
 
-        async def handler(stream):
-            read_write_closer = TrioReadWriteCloser(stream)
-            await self.handler(read_write_closer)
+        async def handler(stream: trio.SocketStream) -> None:
+            tcp_stream = TrioTCPStream(stream)
+            await self.handler(tcp_stream)
 
         listeners = await nursery.start(
             serve_tcp,
@@ -51,22 +53,13 @@ class TCPListener(IListener):
         socket = listeners[0].socket
         self.multiaddrs.append(_multiaddr_from_socket(socket))
 
-    def get_addrs(self) -> List[Multiaddr]:
+    def get_addrs(self) -> Tuple[Multiaddr, ...]:
         """
         retrieve list of addresses the listener is listening on.
 
         :return: return list of addrs
         """
         return tuple(self.multiaddrs)
-
-    async def close(self) -> None:
-        """close the listener such that no more connections can be open on this
-        transport instance."""
-        if self.server is None:
-            return
-        self.server.close()
-        await self.server.wait_closed()
-        self.server = None
 
 
 class TCP(ITransport):
@@ -82,7 +75,7 @@ class TCP(ITransport):
         self.port = int(maddr.value_for_protocol("tcp"))
 
         stream = await trio.open_tcp_stream(self.host, self.port)
-        read_write_closer = TrioReadWriteCloser(stream)
+        read_write_closer = TrioTCPStream(stream)
 
         return RawConnection(read_write_closer, True)
 
@@ -97,5 +90,6 @@ class TCP(ITransport):
         return TCPListener(handler_function)
 
 
-def _multiaddr_from_socket(socket: socket) -> Multiaddr:
-    return Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())
+def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
+    ip, port = socket.getsockname()  # type: ignore
+    return Multiaddr(f"/ip4/{ip}/tcp/{port}")

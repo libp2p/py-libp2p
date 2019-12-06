@@ -1,11 +1,13 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+
+from async_service import ServiceAPI
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 
 
-class IMuxedConn(ABC):
+class IMuxedConn(ServiceAPI):
     """
     reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
     """

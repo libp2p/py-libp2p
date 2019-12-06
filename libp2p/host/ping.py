@@ -1,5 +1,6 @@
-import trio
 import logging
+
+import trio
 
 from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream

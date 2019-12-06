@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Tuple
 
 from multiaddr import Multiaddr
+import trio
 
 
 class IListener(ABC):
     @abstractmethod
-    async def listen(self, maddr: Multiaddr) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
         put listener in listening mode and wait for incoming connections.
 
@@ -15,14 +16,9 @@ class IListener(ABC):
         """
 
     @abstractmethod
-    def get_addrs(self) -> List[Multiaddr]:
+    def get_addrs(self) -> Tuple[Multiaddr, ...]:
         """
         retrieve list of addresses the listener is listening on.
 
         :return: return list of addrs
         """
-
-    @abstractmethod
-    async def close(self) -> None:
-        """close the listener such that no more connections can be open on this
-        transport instance."""

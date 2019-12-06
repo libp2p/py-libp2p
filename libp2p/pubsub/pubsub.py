@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 import logging
 import math
 import time
@@ -57,6 +57,7 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
+# TODO: Add interface for Pubsub
 class BasePubsub(ABC):
     pass
 
@@ -103,20 +104,24 @@ class Pubsub(BasePubsub, Service):
         # Attach this new Pubsub object to the router
         self.router.attach(self)
 
-        peer_send_channel, peer_receive_channel = trio.open_memory_channel(0)
-        dead_peer_send_channel, dead_peer_receive_channel = trio.open_memory_channel(0)
+        peer_channels: Tuple[
+            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
+        ] = trio.open_memory_channel(0)
+        dead_peer_channels: Tuple[
+            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
+        ] = trio.open_memory_channel(0)
         # Only keep the receive channels in `Pubsub`.
         # Therefore, we can only close from the receive side.
-        self.peer_receive_channel = peer_receive_channel
-        self.dead_peer_receive_channel = dead_peer_receive_channel
+        self.peer_receive_channel = peer_channels[1]
+        self.dead_peer_receive_channel = dead_peer_channels[1]
         # Register a notifee
         self.host.get_network().register_notifee(
-            PubsubNotifee(peer_send_channel, dead_peer_send_channel)
+            PubsubNotifee(peer_channels[0], dead_peer_channels[0])
         )
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols
-        for protocol in router.protocols:
+        for protocol in router.get_protocols():
             self.host.set_stream_handler(protocol, self.stream_handler)
 
         # keeps track of seen messages as LRU cache
@@ -328,8 +333,9 @@ class Pubsub(BasePubsub, Service):
                 self.manager.run_task(self._handle_new_peer, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
-        """Continuously read from dead peer channel and close the stream between
-        that peer and remove peer info from pubsub and pubsub router."""
+        """Continuously read from dead peer channel and close the stream
+        between that peer and remove peer info from pubsub and pubsub
+        router."""
         async with self.dead_peer_receive_channel:
             while self.manager.is_running:
                 peer_id: ID = await self.dead_peer_receive_channel.receive()
@@ -391,7 +397,11 @@ class Pubsub(BasePubsub, Service):
             return self.subscribed_topics_receive[topic_id]
 
         # Map topic_id to a blocking channel
-        send_channel, receive_channel = trio.open_memory_channel(math.inf)
+        channels: Tuple[
+            "trio.MemorySendChannel[rpc_pb2.Message]",
+            "trio.MemoryReceiveChannel[rpc_pb2.Message]",
+        ] = trio.open_memory_channel(math.inf)
+        send_channel, receive_channel = channels
         self.subscribed_topics_send[topic_id] = send_channel
         self.subscribed_topics_receive[topic_id] = receive_channel
 
@@ -506,7 +516,7 @@ class Pubsub(BasePubsub, Service):
 
         if len(async_topic_validators) > 0:
             # TODO: Use a better pattern
-            final_result = True
+            final_result: bool = True
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
                 nonlocal final_result
@@ -514,8 +524,8 @@ class Pubsub(BasePubsub, Service):
                 final_result = final_result and result
 
             async with trio.open_nursery() as nursery:
-                for validator in async_topic_validators:
-                    nursery.start_soon(run_async_validator, validator)
+                for async_validator in async_topic_validators:
+                    nursery.start_soon(run_async_validator, async_validator)
 
             if not final_result:
                 raise ValidationError(f"Validation failed for msg={msg}")

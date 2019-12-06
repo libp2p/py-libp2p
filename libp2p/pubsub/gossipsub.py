@@ -1,8 +1,10 @@
 from ast import literal_eval
-import asyncio
 import logging
 import random
 from typing import Any, Dict, Iterable, List, Sequence, Set
+
+from async_service import Service
+import trio
 
 from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.peer.id import ID
@@ -10,6 +12,7 @@ from libp2p.pubsub import floodsub
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
+from .exceptions import NoPubsubAttached
 from .mcache import MessageCache
 from .pb import rpc_pb2
 from .pubsub import Pubsub
@@ -20,8 +23,7 @@ PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 
-class GossipSub(IPubsubRouter):
-
+class GossipSub(IPubsubRouter, Service):
     protocols: List[TProtocol]
     pubsub: Pubsub
 
@@ -86,6 +88,12 @@ class GossipSub(IPubsubRouter):
         # Create heartbeat timer
         self.heartbeat_interval = heartbeat_interval
 
+    async def run(self) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
+        self.manager.run_task(self.heartbeat)
+        await self.manager.wait_finished()
+
     # Interface functions
 
     def get_protocols(self) -> List[TProtocol]:
@@ -104,10 +112,6 @@ class GossipSub(IPubsubRouter):
         self.pubsub = pubsub
 
         logger.debug("attached to pusub")
-
-        # Start heartbeat now that we have a pubsub instance
-        # TODO: Start after delay
-        asyncio.ensure_future(self.heartbeat())
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
@@ -310,7 +314,7 @@ class GossipSub(IPubsubRouter):
             await self.fanout_heartbeat()
             await self.gossip_heartbeat()
 
-            await asyncio.sleep(self.heartbeat_interval)
+            await trio.sleep(self.heartbeat_interval)
 
     async def mesh_heartbeat(self) -> None:
         # Note: the comments here are the exact pseudocode from the spec
@@ -338,7 +342,7 @@ class GossipSub(IPubsubRouter):
 
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = GossipSub.select_from_minus(
+                selected_peers = self.select_from_minus(
                     num_mesh_peers_in_topic - self.degree, self.mesh[topic], []
                 )
                 for peer in selected_peers:
@@ -353,7 +357,10 @@ class GossipSub(IPubsubRouter):
         for topic in self.fanout:
             # If time since last published > ttl
             # TODO: there's no way time_since_last_publish gets set anywhere yet
-            if self.time_since_last_publish[topic] > self.time_to_live:
+            if (
+                topic in self.time_since_last_publish
+                and self.time_since_last_publish[topic] > self.time_to_live
+            ):
                 # Remove topic from fanout
                 del self.fanout[topic]
                 del self.time_since_last_publish[topic]
@@ -407,11 +414,7 @@ class GossipSub(IPubsubRouter):
                             topic, self.degree, []
                         )
                         for peer in peers_to_emit_ihave_to:
-                            if (
-                                peer not in self.mesh[topic]
-                                and peer not in self.fanout[topic]
-                            ):
-
+                            if peer not in self.fanout[topic]:
                                 msg_id_strs = [str(msg) for msg in msg_ids]
                                 await self.emit_ihave(topic, msg_id_strs, peer)
 

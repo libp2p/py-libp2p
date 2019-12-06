@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Awaitable, List, Set, Tuple
+from typing import TYPE_CHECKING, Set, Tuple
 
 from async_service import Service
 import trio
@@ -45,16 +45,11 @@ class SwarmConn(INetConn, Service):
         # before we cancel the stream handler tasks.
         await trio.sleep(0.1)
 
-        # FIXME: Now let `_notify_disconnected` finish first.
-        # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
         await self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
         while self.manager.is_running:
             try:
-                print(
-                    f"!@# SwarmConn._handle_new_streams: {self.muxed_conn._id}: waiting for new streams"
-                )
                 stream = await self.muxed_conn.accept_stream()
             except MuxedConnUnavailable:
                 # If there is anything wrong in the MuxedConn,
@@ -63,9 +58,6 @@ class SwarmConn(INetConn, Service):
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             self.manager.run_task(self._handle_muxed_stream, stream)
 
-        print(
-            f"!@# SwarmConn._handle_new_streams: {self.muxed_conn._id}: out of the loop"
-        )
         await self.close()
 
     async def _call_stream_handler(self, net_stream: NetStream) -> None:
@@ -92,8 +84,7 @@ class SwarmConn(INetConn, Service):
         await self.swarm.notify_disconnected(self)
 
     async def run(self) -> None:
-        self.manager.run_task(self._handle_new_streams)
-        await self.manager.wait_finished()
+        await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()

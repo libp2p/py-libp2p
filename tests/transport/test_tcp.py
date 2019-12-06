@@ -3,7 +3,7 @@ import pytest
 import trio
 
 from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.tools.constants import LISTEN_MADDR, MAX_READ_LEN
+from libp2p.tools.constants import LISTEN_MADDR
 from libp2p.transport.tcp.tcp import TCP
 
 
