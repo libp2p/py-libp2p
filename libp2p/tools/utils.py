@@ -1,10 +1,11 @@
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Sequence, Tuple, cast
 
 import multiaddr
 
 from libp2p import new_node
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
+from libp2p.host.routed_host import RoutedHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
@@ -46,17 +47,6 @@ async def set_up_nodes_by_transport_opt(
     return tuple(nodes_list)
 
 
-async def set_up_nodes_by_transport_and_disc_opt(
-    transport_disc_opt_list: Sequence[Tuple[Sequence[str], IPeerRouting]]
-) -> Tuple[BasicHost, ...]:
-    nodes_list = []
-    for transport_opt, disc_opt in transport_disc_opt_list:
-        node = await new_node(transport_opt=transport_opt, disc_opt=disc_opt)
-        await node.get_network().listen(multiaddr.Multiaddr(transport_opt[0]))
-        nodes_list.append(node)
-    return tuple(nodes_list)
-
-
 async def echo_stream_handler(stream: INetStream) -> None:
     while True:
         read_string = (await stream.read(MAX_READ_LEN)).decode()
@@ -88,11 +78,15 @@ class DummyRouter(IPeerRouting):
         return self._routing_table.get(peer_id, None)
 
 
-async def set_up_routed_hosts() -> Tuple[BasicHost, BasicHost]:
+async def set_up_routed_hosts() -> Tuple[RoutedHost, RoutedHost]:
     router_a, router_b = DummyRouter(), DummyRouter()
-    host_a, host_b = await set_up_nodes_by_transport_and_disc_opt(
-        ((["/ip4/127.0.0.1/tcp/0"], router_a), (["/ip4/127.0.0.1/tcp/0"], router_b))
-    )
+    transport = "/ip4/127.0.0.1/tcp/0"
+    host_a = await new_node(transport_opt=[transport], disc_opt=router_a)
+    host_b = await new_node(transport_opt=[transport], disc_opt=router_b)
+
+    address = multiaddr.Multiaddr(transport)
+    await host_a.get_network().listen(address)
+    await host_b.get_network().listen(address)
 
     mock_routing_table = {
         host_a.get_id(): PeerInfo(host_a.get_id(), host_a.get_addrs()),
@@ -101,4 +95,4 @@ async def set_up_routed_hosts() -> Tuple[BasicHost, BasicHost]:
 
     router_a._routing_table = router_b._routing_table = mock_routing_table
 
-    return host_a, host_b
+    return cast(RoutedHost, host_a), cast(RoutedHost, host_b)
