@@ -3,7 +3,8 @@ import random
 
 import pytest
 
-from libp2p.tools.constants import GossipsubParams
+from libp2p.peer.id import ID
+from libp2p.tools.constants import GOSSIPSUB_PARAMS, GossipsubParams
 from libp2p.tools.pubsub.utils import dense_connect, one_to_all_connect
 from libp2p.tools.utils import connect
 
@@ -147,8 +148,8 @@ async def test_handle_prune(pubsubs_gsub, hosts):
 
     await connect(hosts[index_alice], hosts[index_bob])
 
-    # Wait 3 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(3)
+    # Wait for heartbeat to allow mesh to connect
+    await asyncio.sleep(1)
 
     # Check that they are each other's mesh peer
     assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -157,15 +158,16 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     # alice emit prune message to bob, alice should be removed
     # from bob's mesh peer
     await gossipsubs[index_alice].emit_prune(topic, id_bob)
+    # `emit_prune` does not remove bob from alice's mesh peers
+    assert id_bob in gossipsubs[index_alice].mesh[topic]
 
-    # FIXME: This test currently works because the heartbeat interval
-    # is increased to 3 seconds, so alice won't get add back into
-    # bob's mesh peer during heartbeat.
-    await asyncio.sleep(1)
+    # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
+    # add alice back to his mesh after heartbeat.
+    # Wait for bob to `handle_prune`
+    await asyncio.sleep(0.1)
 
     # Check that alice is no longer bob's mesh peer
     assert id_alice not in gossipsubs[index_bob].mesh[topic]
-    assert id_bob in gossipsubs[index_alice].mesh[topic]
 
 
 @pytest.mark.parametrize("num_hosts", (10,))
@@ -366,3 +368,125 @@ async def test_gossip_propagation(hosts, pubsubs_gsub):
     # should be able to read message
     msg = await queue_1.get()
     assert msg.data == msg_content
+
+
+@pytest.mark.parametrize(
+    "num_hosts, gossipsub_params", ((1, GossipsubParams(heartbeat_initial_delay=100)),)
+)
+@pytest.mark.parametrize("initial_mesh_peer_count", (7, 10, 13))
+@pytest.mark.asyncio
+async def test_mesh_heartbeat(
+    num_hosts, initial_mesh_peer_count, pubsubs_gsub, hosts, monkeypatch
+):
+    # It's difficult to set up the initial peer subscription condition.
+    # Ideally I would like to have initial mesh peer count that's below ``GossipSubDegree``
+    # so I can test if `mesh_heartbeat` return correct peers to GRAFT.
+    # The problem is that I can not set it up so that we have peers subscribe to the topic
+    # but not being part of our mesh peers (as these peers are the peers to GRAFT).
+    # So I monkeypatch the peer subscriptions and our mesh peers.
+    total_peer_count = 14
+    topic = "TEST_MESH_HEARTBEAT"
+
+    fake_peer_ids = [
+        ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
+    ]
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", fake_peer_ids)
+
+    peer_topics = {topic: fake_peer_ids}
+    # Monkeypatch the peer subscriptions
+    monkeypatch.setattr(pubsubs_gsub[0], "peer_topics", peer_topics)
+
+    mesh_peer_indices = random.sample(range(total_peer_count), initial_mesh_peer_count)
+    mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
+    router_mesh = {topic: list(mesh_peers)}
+    # Monkeypatch our mesh peers
+    monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
+
+    peers_to_graft, peers_to_prune = pubsubs_gsub[0].router.mesh_heartbeat()
+    if initial_mesh_peer_count > GOSSIPSUB_PARAMS.degree:
+        # If number of initial mesh peers is more than `GossipSubDegree`, we should PRUNE mesh peers
+        assert len(peers_to_graft) == 0
+        assert len(peers_to_prune) == initial_mesh_peer_count - GOSSIPSUB_PARAMS.degree
+        for peer in peers_to_prune:
+            assert peer in mesh_peers
+    elif initial_mesh_peer_count < GOSSIPSUB_PARAMS.degree:
+        # If number of initial mesh peers is less than `GossipSubDegree`, we should GRAFT more peers
+        assert len(peers_to_prune) == 0
+        assert len(peers_to_graft) == GOSSIPSUB_PARAMS.degree - initial_mesh_peer_count
+        for peer in peers_to_graft:
+            assert peer not in mesh_peers
+    else:
+        assert len(peers_to_prune) == 0 and len(peers_to_graft) == 0
+
+
+@pytest.mark.parametrize(
+    "num_hosts, gossipsub_params", ((1, GossipsubParams(heartbeat_initial_delay=100)),)
+)
+@pytest.mark.parametrize("initial_peer_count", (1, 4, 7))
+@pytest.mark.asyncio
+async def test_gossip_heartbeat(
+    num_hosts, initial_peer_count, pubsubs_gsub, hosts, monkeypatch
+):
+    # The problem is that I can not set it up so that we have peers subscribe to the topic
+    # but not being part of our mesh peers (as these peers are the peers to GRAFT).
+    # So I monkeypatch the peer subscriptions and our mesh peers.
+    total_peer_count = 28
+    topic_mesh = "TEST_GOSSIP_HEARTBEAT_1"
+    topic_fanout = "TEST_GOSSIP_HEARTBEAT_2"
+
+    fake_peer_ids = [
+        ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
+    ]
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", fake_peer_ids)
+
+    topic_mesh_peer_count = 14
+    # Split into mesh peers and fanout peers
+    peer_topics = {
+        topic_mesh: fake_peer_ids[:topic_mesh_peer_count],
+        topic_fanout: fake_peer_ids[topic_mesh_peer_count:],
+    }
+    # Monkeypatch the peer subscriptions
+    monkeypatch.setattr(pubsubs_gsub[0], "peer_topics", peer_topics)
+
+    mesh_peer_indices = random.sample(range(topic_mesh_peer_count), initial_peer_count)
+    mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
+    router_mesh = {topic_mesh: list(mesh_peers)}
+    # Monkeypatch our mesh peers
+    monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
+    fanout_peer_indices = random.sample(
+        range(topic_mesh_peer_count, total_peer_count), initial_peer_count
+    )
+    fanout_peers = [fake_peer_ids[i] for i in fanout_peer_indices]
+    router_fanout = {topic_fanout: list(fanout_peers)}
+    # Monkeypatch our fanout peers
+    monkeypatch.setattr(pubsubs_gsub[0].router, "fanout", router_fanout)
+
+    def window(topic):
+        if topic == topic_mesh:
+            return [topic_mesh]
+        elif topic == topic_fanout:
+            return [topic_fanout]
+        else:
+            return []
+
+    # Monkeypatch the memory cache messages
+    monkeypatch.setattr(pubsubs_gsub[0].router.mcache, "window", window)
+
+    peers_to_gossip = pubsubs_gsub[0].router.gossip_heartbeat()
+    # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up to
+    # `GossipSubDegree` peers (exclude mesh peers).
+    if topic_mesh_peer_count - initial_peer_count < GOSSIPSUB_PARAMS.degree:
+        # The same goes for fanout so it's two times the number of peers to gossip.
+        assert len(peers_to_gossip) == 2 * (topic_mesh_peer_count - initial_peer_count)
+    elif topic_mesh_peer_count - initial_peer_count >= GOSSIPSUB_PARAMS.degree:
+        assert len(peers_to_gossip) == 2 * (GOSSIPSUB_PARAMS.degree)
+
+    for peer in peers_to_gossip:
+        if peer in peer_topics[topic_mesh]:
+            # Check that the peer to gossip to is not in our mesh peers
+            assert peer not in mesh_peers
+            assert topic_mesh in peers_to_gossip[peer]
+        elif peer in peer_topics[topic_fanout]:
+            # Check that the peer to gossip to is not in our fanout peers
+            assert peer not in fanout_peers
+            assert topic_fanout in peers_to_gossip[peer]

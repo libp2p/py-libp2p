@@ -24,6 +24,7 @@ class GossipsubParams(NamedTuple):
     time_to_live: int = 30
     gossip_window: int = 3
     gossip_history: int = 5
+    heartbeat_initial_delay: float = 0.1
     heartbeat_interval: float = 0.5
 
 

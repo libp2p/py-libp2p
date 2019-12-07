@@ -78,7 +78,6 @@ class Pubsub:
 
     topic_validators: Dict[str, TopicValidator]
 
-    # TODO: Be sure it is increased atomically everytime.
     counter: int  # uint64
 
     _tasks: List["asyncio.Future[Any]"]
@@ -300,7 +299,6 @@ class Pubsub:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             del self.peers[peer_id]
             return
-        # TODO: Check EOF of this stream.
         # TODO: Check if the peer in black list.
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
@@ -318,6 +316,7 @@ class Pubsub:
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
+                # Delete the entry if no other peers left
                 self.peer_topics[topic].remove(peer_id)
 
         self.router.remove_peer(peer_id)
@@ -325,12 +324,9 @@ class Pubsub:
         logger.debug("removed dead peer %s", peer_id)
 
     async def handle_peer_queue(self) -> None:
-        """
-        Continuously read from peer queue and each time a new peer is found,
-        open a stream to the peer using a supported pubsub protocol
-        TODO: Handle failure for when the peer does not support any of the
-        pubsub protocols we support
-        """
+        """Continuously read from peer queue and each time a new peer is found,
+        open a stream to the peer using a supported pubsub protocol pubsub
+        protocols we support."""
         while True:
             peer_id: ID = await self.peer_queue.get()
             # Add Peer
@@ -364,6 +360,7 @@ class Pubsub:
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
+                    # Delete the entry if no other peers left
                     self.peer_topics[sub_message.topicid].remove(origin_id)
 
     # FIXME(mhchia): Change the function name?
