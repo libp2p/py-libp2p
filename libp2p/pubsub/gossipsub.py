@@ -235,7 +235,7 @@ class GossipSub(IPubsubRouter):
                 gossipsub_peers = self.mesh[topic]
             else:
                 # When we publish to a topic that we have not subscribe to, we randomly pick
-                # `self.degree` number of peers who have subscribe to the topic and add them
+                # `self.degree` number of peers who have subscribed to the topic and add them
                 # as our `fanout` peers.
                 topic_in_fanout: bool = topic in self.fanout
                 fanout_peers: List[ID] = self.fanout[topic] if topic_in_fanout else []
