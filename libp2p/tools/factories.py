@@ -1,7 +1,8 @@
 import asyncio
-from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Tuple, cast
 
+# NOTE: import ``asynccontextmanager`` from ``contextlib`` when support for python 3.6 is dropped.
+from async_generator import asynccontextmanager
 import factory
 
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
@@ -173,7 +174,7 @@ async def host_pair_factory(is_secure: bool) -> Tuple[BasicHost, BasicHost]:
     return hosts[0], hosts[1]
 
 
-@asynccontextmanager
+@asynccontextmanager  # type: ignore
 async def pair_of_connected_hosts(
     is_secure: bool = True
 ) -> AsyncIterator[Tuple[BasicHost, BasicHost]]:

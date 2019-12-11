@@ -151,6 +151,8 @@ class DaemonStream(ReadWriteCloser):
 
     async def close(self) -> None:
         self.writer.close()
+        if sys.version_info < (3, 7):
+            return
         await self.writer.wait_closed()
 
     async def read(self, n: int = -1) -> bytes:
@@ -196,7 +198,8 @@ async def py_to_daemon_stream_pair(hosts, p2pds, is_to_fail_daemon_stream):
         #   some day.
         listener = p2pds[0].control.control.listener
         listener.close()
-        await listener.wait_closed()
+        if sys.version_info[0:2] > (3, 6):
+            await listener.wait_closed()
     stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
     if not is_to_fail_daemon_stream:
         await event_stream_handled.wait()

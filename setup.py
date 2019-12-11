@@ -58,6 +58,8 @@ install_requires = [
     "protobuf>=3.10.0,<4.0.0",
     "coincurve>=10.0.0,<11.0.0",
     "pynacl==1.3.0",
+    "dataclasses>=0.7, <1;python_version<'3.7'",
+    "async_generator==1.10",
 ]
 
 
@@ -80,7 +82,7 @@ setup(
     url="https://github.com/libp2p/py-libp2p",
     include_package_data=True,
     install_requires=install_requires,
-    python_requires=">=3.7,<4",
+    python_requires=">=3.6,<4",
     extras_require=extras_require,
     py_modules=["libp2p"],
     license="MIT/APACHE2.0",
@@ -94,6 +96,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
     ],
     platforms=["unix", "linux", "osx"],

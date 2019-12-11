@@ -58,11 +58,11 @@ async def test_peers_subscribe(pubsubs_fsub):
     await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
     await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
     # Yield to let 0 notify 1
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
     assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
     await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
     # Yield to let 0 notify 1
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
     assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
 

@@ -1,4 +1,5 @@
 import asyncio
+import sys
 
 from .exceptions import RawConnError
 from .raw_connection_interface import IRawConnection
@@ -52,4 +53,6 @@ class RawConnection(IRawConnection):
 
     async def close(self) -> None:
         self.writer.close()
+        if sys.version_info < (3, 7):
+            return
         await self.writer.wait_closed()
