@@ -54,9 +54,11 @@ class TCPListener(IListener):
         if self.server is None:
             return
         self.server.close()
-        if sys.version_info[0:2] > (3, 6):
-            await self.server.wait_closed()
+        server = self.server
         self.server = None
+        if sys.version_info < (3, 7):
+            return
+        await server.wait_closed()
 
 
 class TCP(ITransport):

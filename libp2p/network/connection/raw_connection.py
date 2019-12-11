@@ -53,5 +53,6 @@ class RawConnection(IRawConnection):
 
     async def close(self) -> None:
         self.writer.close()
-        if sys.version_info[0:2] > (3, 6):
-            await self.writer.wait_closed()
+        if sys.version_info < (3, 7):
+            return
+        await self.writer.wait_closed()

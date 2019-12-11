@@ -59,7 +59,7 @@ install_requires = [
     "coincurve>=10.0.0,<11.0.0",
     "pynacl==1.3.0",
     "dataclasses>=0.7, <1;python_version<'3.7'",
-    "async_generator==1.10;python_version<'3.7'",
+    "async_generator==1.10",
 ]
 
 
@@ -96,6 +96,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
     ],
     platforms=["unix", "linux", "osx"],
