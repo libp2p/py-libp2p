@@ -1,1 +1,0 @@
-Add signing and verification to pubsub

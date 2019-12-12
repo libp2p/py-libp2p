@@ -3,6 +3,22 @@ Release Notes
 
 .. towncrier release notes start
 
+libp2p v0.1.4 (2019-12-12)
+--------------------------
+
+Features
+~~~~~~~~
+
+- Added support for Python 3.6 (`#372 <https://github.com/libp2p/py-libp2p/issues/372>`__)
+- Add signing and verification to pubsub (`#362 <https://github.com/libp2p/py-libp2p/issues/362>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Refactor and cleanup gossipsub (`#373 <https://github.com/libp2p/py-libp2p/issues/373>`__)
+
+
 libp2p v0.1.3 (2019-11-27)
 --------------------------
 
