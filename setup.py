@@ -25,7 +25,7 @@ extras_require = {
         "sphinx_rtd_theme>=0.4.3,<=1",
         "towncrier>=19.2.0, <20",
     ],
-    "dev": [
+    "dev_core": [
         "bumpversion>=0.5.3,<1",
         "pytest-watch>=4.1.0,<5",
         "wheel",
@@ -37,7 +37,7 @@ extras_require = {
 }
 
 extras_require["dev"] = (
-    extras_require["dev"]
+    extras_require["dev_core"]
     + extras_require["test"]
     + extras_require["lint"]
     + extras_require["doc"]
