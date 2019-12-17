@@ -148,11 +148,9 @@ class GossipSub(IPubsubRouter):
 
         for topic in self.mesh:
             if peer_id in self.mesh[topic]:
-                # Delete the entry if no other peers left
                 self.mesh[topic].remove(peer_id)
         for topic in self.fanout:
             if peer_id in self.fanout[topic]:
-                # Delete the entry if no other peers left
                 self.fanout[topic].remove(peer_id)
 
         self.peers_to_protocol.pop(peer_id, None)

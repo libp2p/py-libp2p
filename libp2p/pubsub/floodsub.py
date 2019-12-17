@@ -77,10 +77,12 @@ class FloodSub(IPubsubRouter):
         :param pubsub_msg: pubsub message in protobuf.
         """
 
-        peers_gen = self._get_peers_to_send(
-            pubsub_msg.topicIDs,
-            msg_forwarder=msg_forwarder,
-            origin=ID(pubsub_msg.from_id),
+        peers_gen = set(
+            self._get_peers_to_send(
+                pubsub_msg.topicIDs,
+                msg_forwarder=msg_forwarder,
+                origin=ID(pubsub_msg.from_id),
+            )
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
