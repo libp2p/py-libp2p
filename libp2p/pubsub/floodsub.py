@@ -89,6 +89,8 @@ class FloodSub(IPubsubRouter):
         logger.debug("publishing message %s", pubsub_msg)
 
         for peer_id in peers_gen:
+            if peer_id not in self.pubsub.peers:
+                continue
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
