@@ -88,11 +88,8 @@ class Swarm(INetwork):
         try:
             # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
-        except PeerStoreError:
-            raise SwarmException(f"No known addresses to peer {peer_id}")
-
-        if len(addrs) == 0:
-            raise SwarmException(f"No known addresses to peer {peer_id}")
+        except PeerStoreError as error:
+            raise SwarmException(f"No known addresses to peer {peer_id}") from error
 
         exceptions: List[SwarmException] = []
 
@@ -112,12 +109,16 @@ class Swarm(INetwork):
         # Tried all addresses, raising exception.
         if len(exceptions) > 0:
             raise SwarmException(
-                "unable to connect to %s, all addresses failed to dial (with exceptions)",
+                "unable to connect to %s, no addresses established a successful connection "
+                "(with exceptions)",
                 peer_id,
             ) from MultiError(exceptions)
         else:
             raise SwarmException(
-                "unable to connect to %s, all addresses failed to dial", peer_id
+                "unable to connect to %s, no addresses established a successful connection "
+                "(tried %d addresses)",
+                peer_id,
+                len(addrs),
             )
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
@@ -173,7 +174,6 @@ class Swarm(INetwork):
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
         :param peer_id: peer_id of destination
-        :param protocol_id: protocol id fixme: protocol_id not in parameters
         :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
