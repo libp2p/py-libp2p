@@ -44,7 +44,7 @@ class ID:
     @property
     def xor_id(self) -> int:
         if not self._xor_id:
-            self._xor_id = int(digest(self._bytes).hex(), 16)
+            self._xor_id = int(sha256_digest(self._bytes).hex(), 16)
         return self._xor_id
 
     def to_bytes(self) -> bytes:
@@ -89,7 +89,7 @@ class ID:
         return cls(mh_digest.encode())
 
 
-def digest(data: Union[str, bytes]) -> bytes:
+def sha256_digest(data: Union[str, bytes]) -> bytes:
     if isinstance(data, str):
         data = data.encode("utf8")
-    return hashlib.sha1(data).digest()
+    return hashlib.sha256(data).digest()
