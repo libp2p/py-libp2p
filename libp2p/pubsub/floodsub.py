@@ -98,6 +98,7 @@ class FloodSub(IPubsubRouter):
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
+                self.pubsub._handle_dead_peer(peer_id)
 
     async def join(self, topic: str) -> None:
         """
