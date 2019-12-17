@@ -44,6 +44,7 @@ class Swarm(INetwork, Service):
     common_stream_handler: Optional[StreamHandlerFn]
 
     notifees: List[INotifee]
+    event_closed: trio.Event
 
     def __init__(
         self,
@@ -61,6 +62,8 @@ class Swarm(INetwork, Service):
 
         # Create Notifee array
         self.notifees = []
+
+        self.event_closed = trio.Event()
 
         self.common_stream_handler = None
 
@@ -227,10 +230,19 @@ class Swarm(INetwork, Service):
         return False
 
     async def close(self) -> None:
-        # TODO: Prevent from new listeners and conns being added.
+        if self.event_closed.is_set():
+            return
+        self.event_closed.set()
         #   Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L124-L134  # noqa: E501
+        async with trio.open_nursery() as nursery:
+            for conn in self.connections.values():
+                nursery.start_soon(conn.close)
+        async with trio.open_nursery() as nursery:
+            for listener in self.listeners.values():
+                nursery.start_soon(listener.close)
+
+        # Cancel tasks
         await self.manager.stop()
-        await self.manager.wait_finished()
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:
@@ -269,8 +281,6 @@ class Swarm(INetwork, Service):
         del self.connections[peer_id]
 
     # Notifee
-
-    # TODO: Remeber the spawn notifying tasks and clean them up when closing.
 
     def register_notifee(self, notifee: INotifee) -> None:
         """

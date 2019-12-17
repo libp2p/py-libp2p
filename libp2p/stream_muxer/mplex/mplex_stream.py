@@ -156,26 +156,22 @@ class MplexStream(IMuxedStream):
             if self.event_local_closed.is_set():
                 return
 
-        print(f"!@# stream.close: {self.muxed_conn._id}: step=0")
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
         # TODO: Raise when `muxed_conn.send_message` fails and `Mplex` isn't shutdown.
         await self.muxed_conn.send_message(flag, None, self.stream_id)
 
-        print(f"!@# stream.close: {self.muxed_conn._id}: step=1")
         _is_remote_closed: bool
         async with self.close_lock:
             self.event_local_closed.set()
             _is_remote_closed = self.event_remote_closed.is_set()
 
-        print(f"!@# stream.close: {self.muxed_conn._id}: step=2")
         if _is_remote_closed:
             # Both sides are closed, we can safely remove the buffer from the dict.
             async with self.muxed_conn.streams_lock:
                 if self.stream_id in self.muxed_conn.streams:
                     del self.muxed_conn.streams[self.stream_id]
-        print(f"!@# stream.close: {self.muxed_conn._id}: step=3")
 
     async def reset(self) -> None:
         """closes both ends of the stream tells this remote side to hang up."""

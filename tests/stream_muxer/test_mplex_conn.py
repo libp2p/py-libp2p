@@ -8,10 +8,6 @@ async def test_mplex_conn(mplex_conn_pair):
 
     assert len(conn_0.streams) == 0
     assert len(conn_1.streams) == 0
-    assert not conn_0.event_shutting_down.is_set()
-    assert not conn_1.event_shutting_down.is_set()
-    assert not conn_0.event_closed.is_set()
-    assert not conn_1.event_closed.is_set()
 
     # Test: Open a stream, and both side get 1 more stream.
     stream_0 = await conn_0.open_stream()
@@ -29,10 +25,8 @@ async def test_mplex_conn(mplex_conn_pair):
     # Sleep for a while for both side to handle `close`.
     await trio.sleep(0.01)
     # Test: Both side is closed.
-    assert conn_0.event_shutting_down.is_set()
-    assert conn_0.event_closed.is_set()
-    assert conn_1.event_shutting_down.is_set()
-    assert conn_1.event_closed.is_set()
+    assert conn_0.is_closed
+    assert conn_1.is_closed
     # Test: All streams should have been closed.
     assert stream_0.event_remote_closed.is_set()
     assert stream_0.event_reset.is_set()

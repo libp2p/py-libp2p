@@ -39,3 +39,6 @@ def create_echo_stream_handler(
             await stream.write(resp.encode())
 
     return echo_stream_handler
+
+
+# TODO: Service `external_api`

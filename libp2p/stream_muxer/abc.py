@@ -33,6 +33,7 @@ class IMuxedConn(ServiceAPI):
     async def close(self) -> None:
         """close connection."""
 
+    @property
     @abstractmethod
     def is_closed(self) -> bool:
         """

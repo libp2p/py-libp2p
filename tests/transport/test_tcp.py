@@ -38,8 +38,9 @@ async def test_tcp_dial(nursery):
 
     listener = transport.create_listener(handler)
     await listener.listen(LISTEN_MADDR, nursery)
-    assert len(listener.multiaddrs) == 1
-    listen_addr = listener.multiaddrs[0]
+    addrs = listener.get_addrs()
+    assert len(addrs) == 1
+    listen_addr = addrs[0]
     raw_conn = await transport.dial(listen_addr)
 
     data = b"123"

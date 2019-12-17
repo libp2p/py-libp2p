@@ -69,9 +69,8 @@ async def raw_conn_factory(
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
     await listener.listen(LISTEN_MADDR, nursery)
-    listening_maddr = listener.multiaddrs[0]
+    listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
-    print("raw_conn_factory")
     yield conn_0, conn_1
 
 

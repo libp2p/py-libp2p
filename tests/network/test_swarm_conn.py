@@ -1,20 +1,23 @@
 import pytest
 import trio
+from trio.testing import wait_all_tasks_blocked
 
 
 @pytest.mark.trio
 async def test_swarm_conn_close(swarm_conn_pair):
     conn_0, conn_1 = swarm_conn_pair
 
-    assert not conn_0.event_closed.is_set()
-    assert not conn_1.event_closed.is_set()
+    assert not conn_0.is_closed
+    assert not conn_1.is_closed
 
     await conn_0.close()
 
-    await trio.sleep(0.01)
+    await trio.sleep(0.1)
+    await wait_all_tasks_blocked()
+    await conn_0.manager.wait_finished()
 
-    assert conn_0.event_closed.is_set()
-    assert conn_1.event_closed.is_set()
+    assert conn_0.is_closed
+    assert conn_1.is_closed
     assert conn_0 not in conn_0.swarm.connections.values()
     assert conn_1 not in conn_1.swarm.connections.values()
 

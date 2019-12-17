@@ -22,3 +22,7 @@ class IListener(ABC):
 
         :return: return list of addrs
         """
+
+    @abstractmethod
+    async def close(self) -> None:
+        ...

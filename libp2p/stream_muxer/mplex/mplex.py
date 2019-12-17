@@ -91,7 +91,9 @@ class Mplex(IMuxedConn, Service):
         await self.secured_conn.close()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
+        await self.manager.stop()
 
+    @property
     def is_closed(self) -> bool:
         """
         check connection is fully closed.
@@ -212,10 +214,6 @@ class Mplex(IMuxedConn, Service):
         channel_id = header >> 3
 
         return channel_id, flag, message
-
-    @property
-    def _id(self) -> int:
-        return 0 if self.is_initiator else 1
 
     async def _handle_incoming_message(self) -> None:
         """

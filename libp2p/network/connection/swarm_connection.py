@@ -29,10 +29,19 @@ class SwarmConn(INetConn, Service):
         self.streams = set()
         self.event_closed = trio.Event()
 
+    @property
+    def is_closed(self) -> bool:
+        return self.event_closed.is_set()
+
     async def close(self) -> None:
         if self.event_closed.is_set():
             return
         self.event_closed.set()
+        await self._cleanup()
+        # Cancel service
+        await self.manager.stop()
+
+    async def _cleanup(self) -> None:
         self.swarm.remove_conn(self)
 
         await self.muxed_conn.close()
@@ -51,28 +60,23 @@ class SwarmConn(INetConn, Service):
         while self.manager.is_running:
             try:
                 stream = await self.muxed_conn.accept_stream()
-            except MuxedConnUnavailable:
-                # If there is anything wrong in the MuxedConn,
-                # we should break the loop and close the connection.
-                break
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+            except MuxedConnUnavailable:
+                break
             self.manager.run_task(self._handle_muxed_stream, stream)
 
         await self.close()
 
-    async def _call_stream_handler(self, net_stream: NetStream) -> None:
-        try:
-            await self.swarm.common_stream_handler(net_stream)
-        # TODO: More exact exceptions
-        except Exception:
-            # TODO: Emit logs.
-            # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
-            self.remove_stream(net_stream)
-
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         net_stream = await self._add_stream(muxed_stream)
         if self.swarm.common_stream_handler is not None:
-            await self._call_stream_handler(net_stream)
+            try:
+                await self.swarm.common_stream_handler(net_stream)
+            # TODO: More exact exceptions
+            except Exception:
+                # TODO: Emit logs.
+                # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
+                self.remove_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
@@ -84,7 +88,8 @@ class SwarmConn(INetConn, Service):
         await self.swarm.notify_disconnected(self)
 
     async def run(self) -> None:
-        await self._handle_new_streams()
+        self.manager.run_task(self._handle_new_streams)
+        await self.manager.wait_finished()
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()

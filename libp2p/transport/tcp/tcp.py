@@ -16,10 +16,10 @@ logger = logging.getLogger("libp2p.transport.tcp")
 
 
 class TCPListener(IListener):
-    multiaddrs: List[Multiaddr]
+    listeners: List[trio.SocketListener]
 
     def __init__(self, handler_function: THandler) -> None:
-        self.multiaddrs = []
+        self.listeners = []
         self.handler = handler_function
 
     # TODO: Get rid of `nursery`?
@@ -50,8 +50,7 @@ class TCPListener(IListener):
             int(maddr.value_for_protocol("tcp")),
             maddr.value_for_protocol("ip4"),
         )
-        socket = listeners[0].socket
-        self.multiaddrs.append(_multiaddr_from_socket(socket))
+        self.listeners.extend(listeners)
 
     def get_addrs(self) -> Tuple[Multiaddr, ...]:
         """
@@ -59,7 +58,14 @@ class TCPListener(IListener):
 
         :return: return list of addrs
         """
-        return tuple(self.multiaddrs)
+        return tuple(
+            _multiaddr_from_socket(listener.socket) for listener in self.listeners
+        )
+
+    async def close(self) -> None:
+        async with trio.open_nursery() as nursery:
+            for listener in self.listeners:
+                nursery.start_soon(listener.aclose)
 
 
 class TCP(ITransport):

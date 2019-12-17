@@ -58,11 +58,11 @@ class TopicValidator(NamedTuple):
 
 
 # TODO: Add interface for Pubsub
-class BasePubsub(ABC):
+class IPubsub(ABC):
     pass
 
 
-class Pubsub(BasePubsub, Service):
+class Pubsub(IPubsub, Service):
 
     host: IHost
 
