@@ -250,7 +250,7 @@ async def perform_test_from_obj(obj, pubsub_factory) -> None:
             # Look at each node in each topic
             for node_id in topic_map[topic]:
                 # Get message from subscription queue
-                msg = await queues_map[node_id][topic].receive()
+                msg = await queues_map[node_id][topic].get()
                 assert data == msg.data
                 # Check the message origin
                 assert node_map[origin_node_id].get_id().to_bytes() == msg.from_id

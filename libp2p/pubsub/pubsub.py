@@ -1,4 +1,3 @@
-from abc import ABC
 import logging
 import math
 import time
@@ -30,12 +29,14 @@ from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
+from .abc import IPubsub, ISubscriptionAPI
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
+from .subscription import TrioSubscriptionAPI
 from .validators import signature_validator
 
 if TYPE_CHECKING:
-    from .pubsub_router_interface import IPubsubRouter  # noqa: F401
+    from .abc import IPubsubRouter  # noqa: F401
     from typing import Any  # noqa: F401
 
 
@@ -57,11 +58,6 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
-# TODO: Add interface for Pubsub
-class IPubsub(ABC):
-    pass
-
-
 class Pubsub(IPubsub, Service):
 
     host: IHost
@@ -75,7 +71,7 @@ class Pubsub(IPubsub, Service):
 
     # TODO: Implement `trio.abc.Channel`?
     subscribed_topics_send: Dict[str, "trio.MemorySendChannel[rpc_pb2.Message]"]
-    subscribed_topics_receive: Dict[str, "trio.MemoryReceiveChannel[rpc_pb2.Message]"]
+    subscribed_topics_receive: Dict[str, "TrioSubscriptionAPI"]
 
     peer_topics: Dict[str, List[ID]]
     peers: Dict[ID, INetStream]
@@ -380,10 +376,7 @@ class Pubsub(IPubsub, Service):
                 # for each topic
                 await self.subscribed_topics_send[topic].send(publish_message)
 
-    # TODO: Change to return an `AsyncIterable` to be I/O-agnostic?
-    async def subscribe(
-        self, topic_id: str
-    ) -> "trio.MemoryReceiveChannel[rpc_pb2.Message]":
+    async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
         """
         Subscribe ourself to a topic.
 
@@ -396,14 +389,14 @@ class Pubsub(IPubsub, Service):
         if topic_id in self.topic_ids:
             return self.subscribed_topics_receive[topic_id]
 
-        # Map topic_id to a blocking channel
         channels: Tuple[
             "trio.MemorySendChannel[rpc_pb2.Message]",
             "trio.MemoryReceiveChannel[rpc_pb2.Message]",
         ] = trio.open_memory_channel(math.inf)
         send_channel, receive_channel = channels
+        subscription = TrioSubscriptionAPI(receive_channel)
         self.subscribed_topics_send[topic_id] = send_channel
-        self.subscribed_topics_receive[topic_id] = receive_channel
+        self.subscribed_topics_receive[topic_id] = subscription
 
         # Create subscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
@@ -417,8 +410,8 @@ class Pubsub(IPubsub, Service):
         # Tell router we are joining this topic
         await self.router.join(topic_id)
 
-        # Return the trio channel for messages on this topic
-        return receive_channel
+        # Return the subscription for messages on this topic
+        return subscription
 
     async def unsubscribe(self, topic_id: str) -> None:
         """

@@ -27,7 +27,7 @@ async def test_simple_two_nodes():
 
         await pubsubs_fsub[0].publish(topic, data)
 
-        res_b = await sub_b.receive()
+        res_b = await sub_b.get()
 
         # Check that the msg received by node_b is the same
         # as the message sent by node_a
@@ -75,11 +75,8 @@ async def test_lru_cache_two_nodes(monkeypatch):
         await trio.sleep(0.25)
 
         for index in expected_received_indices:
-            res_b = await sub_b.receive()
+            res_b = await sub_b.get()
             assert res_b.data == _make_testing_data(index)
-
-        with pytest.raises(trio.WouldBlock):
-            sub_b.receive_nowait()
 
 
 @pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)

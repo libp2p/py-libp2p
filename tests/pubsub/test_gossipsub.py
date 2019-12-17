@@ -196,7 +196,7 @@ async def test_dense():
             await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.receive()
+                msg = await queue.get()
                 assert msg.data == msg_content
 
 
@@ -229,7 +229,7 @@ async def test_fanout():
             await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for sub in subs:
-                msg = await sub.receive()
+                msg = await sub.get()
                 assert msg.data == msg_content
 
         # Subscribe message origin
@@ -248,7 +248,7 @@ async def test_fanout():
             await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for sub in subs:
-                msg = await sub.receive()
+                msg = await sub.get()
                 assert msg.data == msg_content
 
 
@@ -287,7 +287,7 @@ async def test_fanout_maintenance():
             await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.receive()
+                msg = await queue.get()
                 assert msg.data == msg_content
 
         for sub in pubsubs_gsub:
@@ -319,7 +319,7 @@ async def test_fanout_maintenance():
             await trio.sleep(0.5)
             # Assert that all blocking queues receive the message
             for queue in queues:
-                msg = await queue.receive()
+                msg = await queue.get()
                 assert msg.data == msg_content
 
 
@@ -346,5 +346,5 @@ async def test_gossip_propagation():
         await trio.sleep(2)
 
         # should be able to read message
-        msg = await queue_1.receive()
+        msg = await queue_1.get()
         assert msg.data == msg_content

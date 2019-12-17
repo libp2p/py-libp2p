@@ -17,10 +17,10 @@ from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
+from libp2p.pubsub.abc import IPubsubRouter
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
-from libp2p.pubsub.pubsub_router_interface import IPubsubRouter
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio

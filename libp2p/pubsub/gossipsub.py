@@ -12,11 +12,11 @@ from libp2p.pubsub import floodsub
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
+from .abc import IPubsubRouter
 from .exceptions import NoPubsubAttached
 from .mcache import MessageCache
 from .pb import rpc_pb2
 from .pubsub import Pubsub
-from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 

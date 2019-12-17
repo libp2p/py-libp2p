@@ -384,7 +384,7 @@ async def test_handle_talk():
             len(pubsubs_fsub[0].topic_ids) == 1
             and sub == pubsubs_fsub[0].subscribed_topics_receive[TESTING_TOPIC]
         )
-        assert (await sub.receive()) == msg_0
+        assert (await sub.get()) == msg_0
 
 
 @pytest.mark.trio
@@ -486,7 +486,7 @@ async def test_push_msg(monkeypatch):
             with trio.fail_after(0.1):
                 await event.wait()
             # Test: Subscribers are notified when `push_msg` new messages.
-            assert (await sub.receive()) == msg_1
+            assert (await sub.get()) == msg_1
 
         with mock_router_publish() as event:
             # Test: add a topic validator and `push_msg` the message that

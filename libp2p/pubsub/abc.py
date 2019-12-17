@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, AsyncContextManager, AsyncIterable, List
 
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
@@ -8,6 +8,11 @@ from .pb import rpc_pb2
 
 if TYPE_CHECKING:
     from .pubsub import Pubsub  # noqa: F401
+
+
+# TODO: Add interface for Pubsub
+class IPubsub(ABC):
+    pass
 
 
 class IPubsubRouter(ABC):
@@ -53,7 +58,6 @@ class IPubsubRouter(ABC):
         :param rpc: rpc message
         """
 
-    # FIXME: Should be changed to type 'peer.ID'
     @abstractmethod
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
@@ -80,3 +84,15 @@ class IPubsubRouter(ABC):
 
         :param topic: topic to leave
         """
+
+
+class ISubscriptionAPI(
+    AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
+):
+    @abstractmethod
+    async def cancel(self) -> None:
+        ...
+
+    @abstractmethod
+    async def get(self) -> rpc_pb2.Message:
+        ...

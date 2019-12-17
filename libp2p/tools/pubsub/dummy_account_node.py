@@ -61,7 +61,7 @@ class DummyAccountNode(Service):
     async def handle_incoming_msgs(self) -> None:
         """Handle all incoming messages on the CRYPTO_TOPIC from peers."""
         while True:
-            incoming = await self.subscription.receive()
+            incoming = await self.subscription.get()
             msg_comps = incoming.data.decode("utf-8").split(",")
 
             if msg_comps[0] == "send":

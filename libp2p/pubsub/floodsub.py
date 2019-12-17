@@ -8,9 +8,9 @@ from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
+from .abc import IPubsubRouter
 from .pb import rpc_pb2
 from .pubsub import Pubsub
-from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
