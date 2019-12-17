@@ -246,7 +246,7 @@ class GossipSub(IPubsubRouter):
                         # Combine fanout peers with selected peers
                         fanout_peers.update(
                             self._get_in_topic_gossipsub_peers_from_minus(
-                                topic, self.degree - fanout_size, fanout_peers
+                                topic, self.degree - fanout_size, list(fanout_peers)
                             )
                         )
                 self.fanout[topic] = fanout_peers
@@ -278,7 +278,7 @@ class GossipSub(IPubsubRouter):
             # Selects the remaining number of peers (D-x) from peers.gossipsub[topic].
             if topic in self.pubsub.peer_topics:
                 selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
-                    topic, self.degree - fanout_size, fanout_peers
+                    topic, self.degree - fanout_size, list(fanout_peers)
                 )
                 # Combine fanout peers with selected peers
                 fanout_peers.update(selected_peers)
@@ -417,7 +417,7 @@ class GossipSub(IPubsubRouter):
             if num_mesh_peers_in_topic < self.degree_low:
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
                 selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
-                    topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic]
+                    topic, self.degree - num_mesh_peers_in_topic, list(self.mesh[topic])
                 )
 
                 for peer in selected_peers:
@@ -430,7 +430,7 @@ class GossipSub(IPubsubRouter):
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 selected_peers = GossipSub.select_from_minus(
-                    num_mesh_peers_in_topic - self.degree, self.mesh[topic], []
+                    num_mesh_peers_in_topic - self.degree, list(self.mesh[topic]), []
                 )
                 for peer in selected_peers:
                     # Remove peer from mesh[topic]
@@ -470,10 +470,10 @@ class GossipSub(IPubsubRouter):
                     selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
                         topic,
                         self.degree - num_fanout_peers_in_topic,
-                        self.fanout[topic],
+                        list(self.fanout[topic]),
                     )
                     # Add the peers to fanout[topic]
-                    self.fanout[topic].Update(selected_peers)
+                    self.fanout[topic].update(selected_peers)
 
     def gossip_heartbeat(self) -> DefaultDict[ID, Dict[str, List[str]]]:
         peers_to_gossip: DefaultDict[ID, Dict[str, List[str]]] = defaultdict(dict)
@@ -484,7 +484,7 @@ class GossipSub(IPubsubRouter):
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
                     peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.mesh[topic]
+                        topic, self.degree, list(self.mesh[topic])
                     )
 
                     msg_id_strs = [str(msg_id) for msg_id in msg_ids]
@@ -500,7 +500,7 @@ class GossipSub(IPubsubRouter):
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
                     peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.fanout[topic]
+                        topic, self.degree, list(self.fanout[topic])
                     )
                     msg_id_strs = [str(msg) for msg in msg_ids]
                     for peer in peers_to_emit_ihave_to:
@@ -528,7 +528,7 @@ class GossipSub(IPubsubRouter):
 
         # If num_to_select > size(selection_pool), then return selection_pool (which has the most
         # possible elements s.t. the number of elements is less than num_to_select)
-        if num_to_select > len(selection_pool):
+        if num_to_select >= len(selection_pool):
             return selection_pool
 
         # Random selection
