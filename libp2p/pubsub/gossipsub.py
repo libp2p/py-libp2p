@@ -611,6 +611,7 @@ class GossipSub(IPubsubRouter):
                 "Fail to responed to iwant request from %s: peer disconnected",
                 sender_peer_id,
             )
+            return
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
@@ -719,6 +720,7 @@ class GossipSub(IPubsubRouter):
         # Get stream for peer from pubsub
         if to_peer not in self.pubsub.peers:
             logger.debug("Fail to emit control message to %s: peer disconnected", to_peer)
+            return
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream

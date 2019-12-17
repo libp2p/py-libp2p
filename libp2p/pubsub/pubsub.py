@@ -351,7 +351,7 @@ class Pubsub:
         """
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = [origin_id]
+                self.peer_topics[sub_message.topicid] = set([origin_id])
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
