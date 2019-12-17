@@ -18,11 +18,11 @@ async def test_simple_two_nodes(pubsubs_fsub):
     data = b"some data"
 
     await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     sub_b = await pubsubs_fsub[1].subscribe(topic)
     # Sleep to let a know of b's subscription
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     await pubsubs_fsub[0].publish(topic, data)
 
@@ -59,10 +59,10 @@ async def test_lru_cache_two_nodes(pubsubs_fsub, monkeypatch):
     monkeypatch.setattr(libp2p.pubsub.pubsub, "get_msg_id", get_msg_id)
 
     await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     sub_b = await pubsubs_fsub[1].subscribe(topic)
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     def _make_testing_data(i: int) -> bytes:
         num_int_bytes = 4
@@ -72,7 +72,7 @@ async def test_lru_cache_two_nodes(pubsubs_fsub, monkeypatch):
 
     for index in message_indices:
         await pubsubs_fsub[0].publish(topic, _make_testing_data(index))
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     for index in expected_received_indices:
         res_b = await sub_b.get()

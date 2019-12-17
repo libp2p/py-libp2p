@@ -49,7 +49,7 @@ async def test_swarm_close_peer(is_host_secure):
 
     # peer 1 closes peer 0
     await swarms[1].close_peer(swarms[0].get_peer_id())
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     # 0  1 <> 2
     assert len(swarms[0].connections) == 0
     assert (
@@ -59,7 +59,7 @@ async def test_swarm_close_peer(is_host_secure):
 
     # peer 1 is closed by peer 2
     await swarms[2].close_peer(swarms[1].get_peer_id())
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     # 0  1  2
     assert len(swarms[1].connections) == 0 and len(swarms[2].connections) == 0
 
@@ -75,7 +75,7 @@ async def test_swarm_close_peer(is_host_secure):
     )
     # peer 0 closes peer 1
     await swarms[0].close_peer(swarms[1].get_peer_id())
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     # 0  1  2
     assert len(swarms[1].connections) == 0 and len(swarms[2].connections) == 0
 

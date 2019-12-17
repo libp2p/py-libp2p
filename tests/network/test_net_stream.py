@@ -34,17 +34,17 @@ async def test_net_stream_read_until_eof(net_stream_pair):
     # Test: `read` doesn't return before `close` is called.
     await stream_0.write(DATA)
     expected_data.extend(DATA)
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(read_bytes) == 0
     # Test: `read` doesn't return before `close` is called.
     await stream_0.write(DATA)
     expected_data.extend(DATA)
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(read_bytes) == 0
 
     # Test: Close the stream, `read` returns, and receive previous sent data.
     await stream_0.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert read_bytes == expected_data
 
     task.cancel()
@@ -55,7 +55,7 @@ async def test_net_stream_read_after_remote_closed(net_stream_pair):
     stream_0, stream_1 = net_stream_pair
     await stream_0.write(DATA)
     await stream_0.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(StreamEOF):
         await stream_1.read(MAX_READ_LEN)
@@ -75,7 +75,7 @@ async def test_net_stream_read_after_remote_reset(net_stream_pair):
     await stream_0.write(DATA)
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     with pytest.raises(StreamReset):
         await stream_1.read(MAX_READ_LEN)
 
@@ -87,7 +87,7 @@ async def test_net_stream_read_after_remote_closed_and_reset(net_stream_pair):
     await stream_0.close()
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
 
@@ -112,6 +112,6 @@ async def test_net_stream_write_after_local_reset(net_stream_pair):
 async def test_net_stream_write_after_remote_reset(net_stream_pair):
     stream_0, stream_1 = net_stream_pair
     await stream_1.reset()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     with pytest.raises(StreamClosed):
         await stream_0.write(DATA)

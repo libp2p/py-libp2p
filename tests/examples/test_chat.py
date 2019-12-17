@@ -47,7 +47,7 @@ async def connect_write(host_a, host_b):
         await stream.write(message.encode())
 
     # Reader needs time due to async reads
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     await stream.close()
     assert received == messages

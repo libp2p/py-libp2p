@@ -46,7 +46,7 @@ async def perform_simple_test(
     # Wait a very short period to allow conns to be stored (since the functions
     # storing the conns are async, they may happen at slightly different times
     # on each node)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.1)  # todo: remove sleep or justify existence
 
     # Get conns
     node1_conn = node1.get_network().connections[peer_id_for_node(node2)]

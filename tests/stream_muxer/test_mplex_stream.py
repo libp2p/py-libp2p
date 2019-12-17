@@ -34,17 +34,17 @@ async def test_mplex_stream_pair_read_until_eof(mplex_stream_pair):
     # Test: `read` doesn't return before `close` is called.
     await stream_0.write(DATA)
     expected_data.extend(DATA)
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(read_bytes) == 0
     # Test: `read` doesn't return before `close` is called.
     await stream_0.write(DATA)
     expected_data.extend(DATA)
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(read_bytes) == 0
 
     # Test: Close the stream, `read` returns, and receive previous sent data.
     await stream_0.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert read_bytes == expected_data
 
     task.cancel()
@@ -56,7 +56,7 @@ async def test_mplex_stream_read_after_remote_closed(mplex_stream_pair):
     assert not stream_1.event_remote_closed.is_set()
     await stream_0.write(DATA)
     await stream_0.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert stream_1.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(MplexStreamEOF):
@@ -77,7 +77,7 @@ async def test_mplex_stream_read_after_remote_reset(mplex_stream_pair):
     await stream_0.write(DATA)
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     with pytest.raises(MplexStreamReset):
         await stream_1.read(MAX_READ_LEN)
 
@@ -89,7 +89,7 @@ async def test_mplex_stream_read_after_remote_closed_and_reset(mplex_stream_pair
     await stream_0.close()
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
 
@@ -114,7 +114,7 @@ async def test_mplex_stream_write_after_local_reset(mplex_stream_pair):
 async def test_mplex_stream_write_after_remote_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_1.reset()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     with pytest.raises(MplexStreamClosed):
         await stream_0.write(DATA)
 
@@ -133,7 +133,7 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close one side.
     await stream_0.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
 
     assert stream_0.event_local_closed.is_set()
     assert not stream_1.event_local_closed.is_set()
@@ -145,7 +145,7 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close the other side.
     await stream_1.close()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()
     assert stream_1.event_local_closed.is_set()
@@ -163,7 +163,7 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 async def test_mplex_stream_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.reset()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
 
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()

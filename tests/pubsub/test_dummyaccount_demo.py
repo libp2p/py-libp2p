@@ -40,7 +40,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
             )
 
     # Allow time for network creation to take place
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     # Start a thread for each node so that each node can listen and respond
     # to messages on its own thread, which will avoid waiting indefinitely
@@ -51,13 +51,13 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
         thread.run()
 
     # Allow time for nodes to subscribe to CRYPTO_TOPIC topic
-    await asyncio.sleep(0.25)
+    await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
 
     # Perform action function
     await action_func(dummy_nodes)
 
     # Allow time for action function to be performed (i.e. messages to propogate)
-    await asyncio.sleep(1)
+    await asyncio.sleep(1)  # todo: remove sleep or justify existence
 
     # Perform assertion function
     for dummy_node in dummy_nodes:
@@ -129,7 +129,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("aspyn", 20)
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -146,7 +146,7 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[6].publish_set_crypto("aspyn", 20)
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
         await dummy_nodes[4].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -177,7 +177,7 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.25)  # todo: remove sleep or justify existence
         await dummy_nodes[3].publish_send_crypto("alex", "rob", 12)
 
     def assertion_func(dummy_node):
@@ -195,13 +195,13 @@ async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # todo: remove sleep or justify existence
         await dummy_nodes[1].publish_send_crypto("alex", "rob", 3)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # todo: remove sleep or justify existence
         await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # todo: remove sleep or justify existence
         await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1)  # todo: remove sleep or justify existence
         await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
 
     def assertion_func(dummy_node):

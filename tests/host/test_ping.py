@@ -33,5 +33,5 @@ async def test_ping_several():
             # NOTE: simulate some time to sleep to mirror a real
             # world usage where a peer sends pings on some periodic interval
             # NOTE: this interval can be `0` for this test.
-            await asyncio.sleep(0)
+            await asyncio.sleep(0)  # todo: remove sleep or justify existence
         await stream.close()

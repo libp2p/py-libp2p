@@ -16,19 +16,19 @@ async def test_mplex_conn(mplex_conn_pair):
 
     # Test: Open a stream, and both side get 1 more stream.
     stream_0 = await conn_0.open_stream()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(conn_0.streams) == 1
     assert len(conn_1.streams) == 1
     # Test: From another side.
     stream_1 = await conn_1.open_stream()
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     assert len(conn_0.streams) == 2
     assert len(conn_1.streams) == 2
 
     # Close from one side.
     await conn_0.close()
     # Sleep for a while for both side to handle `close`.
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)  # todo: remove sleep or justify existence
     # Test: Both side is closed.
     assert conn_0.event_shutting_down.is_set()
     assert conn_0.event_closed.is_set()

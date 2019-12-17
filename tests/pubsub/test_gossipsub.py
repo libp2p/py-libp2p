@@ -34,7 +34,7 @@ async def test_join(num_hosts, hosts, pubsubs_gsub):
     await one_to_all_connect(hosts, central_node_index)
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # Central node publish to the topic so that this topic
     # is added to central node's fanout
@@ -49,7 +49,7 @@ async def test_join(num_hosts, hosts, pubsubs_gsub):
     # Central node subscribes the topic
     await pubsubs_gsub[central_node_index].subscribe(topic)
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # Check that the gossipsub of central node no longer has fanout for the topic
     assert topic not in gossipsubs[central_node_index].fanout
@@ -93,7 +93,7 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
     await connect(hosts[index_alice], hosts[index_bob])
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     topic = "test_handle_graft"
     # Only lice subscribe to the topic
@@ -125,7 +125,7 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
 
     await gossipsubs[index_bob].emit_graft(topic, id_alice)
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(1)  # todo: remove sleep or justify existence
 
     # Check that bob is now alice's mesh peer
     assert id_bob in gossipsubs[index_alice].mesh[topic]
@@ -150,7 +150,7 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     await connect(hosts[index_alice], hosts[index_bob])
 
     # Wait for heartbeat to allow mesh to connect
-    await asyncio.sleep(1)
+    await asyncio.sleep(1)  # todo: remove sleep or justify existence
 
     # Check that they are each other's mesh peer
     assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -165,7 +165,7 @@ async def test_handle_prune(pubsubs_gsub, hosts):
     # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
     # add alice back to his mesh after heartbeat.
     # Wait for bob to `handle_prune`
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.1)  # todo: remove sleep or justify existence
 
     # Check that alice is no longer bob's mesh peer
     assert id_alice not in gossipsubs[index_bob].mesh[topic]
@@ -188,7 +188,7 @@ async def test_dense(num_hosts, pubsubs_gsub, hosts):
     await dense_connect(hosts)
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     for i in range(num_msgs):
         msg_content = b"foo " + i.to_bytes(1, "big")
@@ -199,7 +199,7 @@ async def test_dense(num_hosts, pubsubs_gsub, hosts):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish("foobar", msg_content)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # todo: remove sleep or justify existence
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()
@@ -223,7 +223,7 @@ async def test_fanout(hosts, pubsubs_gsub):
     await dense_connect(hosts)
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     topic = "foobar"
     # Send messages with origin not subscribed
@@ -236,7 +236,7 @@ async def test_fanout(hosts, pubsubs_gsub):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # todo: remove sleep or justify existence
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()
@@ -255,7 +255,7 @@ async def test_fanout(hosts, pubsubs_gsub):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # todo: remove sleep or justify existence
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()
@@ -281,7 +281,7 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
     await dense_connect(hosts)
 
     # Wait 2 seconds for heartbeat to allow mesh to connect
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # Send messages with origin not subscribed
     for i in range(num_msgs):
@@ -293,7 +293,7 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # todo: remove sleep or justify existence
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()
@@ -304,7 +304,7 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
 
     queues = []
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # Resub and repeat
     for i in range(1, len(pubsubs_gsub)):
@@ -313,7 +313,7 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
         # Add each blocking queue to an array of blocking queues
         queues.append(q)
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # Check messages can still be sent
     for i in range(num_msgs):
@@ -325,7 +325,7 @@ async def test_fanout_maintenance(hosts, pubsubs_gsub):
         # publish from the randomly chosen host
         await pubsubs_gsub[origin_idx].publish(topic, msg_content)
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.5)  # todo: remove sleep or justify existence
         # Assert that all blocking queues receive the message
         for queue in queues:
             msg = await queue.get()
@@ -364,7 +364,7 @@ async def test_gossip_propagation(hosts, pubsubs_gsub):
     await connect(hosts[0], hosts[1])
 
     # wait for gossip heartbeat
-    await asyncio.sleep(2)
+    await asyncio.sleep(2)  # todo: remove sleep or justify existence
 
     # should be able to read message
     msg = await queue_1.get()
