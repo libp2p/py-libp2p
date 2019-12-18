@@ -112,7 +112,7 @@ class Swarm(INetwork):
         # Tried all addresses, raising exception.
         raise SwarmException(
             f"unable to connect to {peer_id}, no addresses established a successful connection "
-            "(with exceptions)",
+            "(with exceptions)"
         ) from MultiError(exceptions)
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
