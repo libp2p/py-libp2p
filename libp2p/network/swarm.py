@@ -114,7 +114,7 @@ class Swarm(INetwork):
             error_msg = "fail to upgrade security for peer %s"
             logger.debug(error_msg, peer_id)
             await raw_conn.close()
-            raise SwarmException(error_msg % peer_id) from error
+            raise SwarmException(error_msg % peer_id) from error  # wip
 
         logger.debug("upgraded security for peer %s", peer_id)
 
@@ -124,7 +124,7 @@ class Swarm(INetwork):
             error_msg = "fail to upgrade mux for peer %s"
             logger.debug(error_msg, peer_id)
             await secured_conn.close()
-            raise SwarmException(error_msg % peer_id) from error
+            raise SwarmException(error_msg % peer_id) from error  # wip
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
@@ -190,7 +190,7 @@ class Swarm(INetwork):
                     error_msg = "fail to upgrade security for peer at %s"
                     logger.debug(error_msg, peer_addr)
                     await raw_conn.close()
-                    raise SwarmException(error_msg % peer_addr) from error
+                    raise SwarmException(error_msg % peer_addr) from error  # wip
                 peer_id = secured_conn.get_remote_peer()
 
                 logger.debug("upgraded security for peer at %s", peer_addr)
@@ -204,7 +204,7 @@ class Swarm(INetwork):
                     error_msg = "fail to upgrade mux for peer %s"
                     logger.debug(error_msg, peer_id)
                     await secured_conn.close()
-                    raise SwarmException(error_msg % peer_id) from error
+                    raise SwarmException(error_msg % peer_id) from error  # wip
                 logger.debug("upgraded mux for peer %s", peer_id)
 
                 await self.add_conn(muxed_conn)

@@ -92,4 +92,4 @@ class TCP(ITransport):
 
 
 def _multiaddr_from_socket(socket: socket) -> Multiaddr:
-    return Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())
+    return Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())  # wip
