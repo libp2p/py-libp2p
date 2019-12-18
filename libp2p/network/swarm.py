@@ -91,6 +91,9 @@ class Swarm(INetwork):
         except PeerStoreError as error:
             raise SwarmException(f"No known addresses to peer {peer_id}") from error
 
+        if not addrs:
+            raise SwarmException(f"No known addresses to peer {peer_id}")
+
         exceptions: List[SwarmException] = []
 
         # Try all known addresses
@@ -107,19 +110,10 @@ class Swarm(INetwork):
                 )
 
         # Tried all addresses, raising exception.
-        if len(exceptions) > 0:
-            raise SwarmException(
-                "unable to connect to %s, no addresses established a successful connection "
-                "(with exceptions)",
-                peer_id,
-            ) from MultiError(exceptions)
-        else:
-            raise SwarmException(
-                "unable to connect to %s, no addresses established a successful connection "
-                "(tried %d addresses)",
-                peer_id,
-                len(addrs),
-            )
+        raise SwarmException(
+            f"unable to connect to {peer_id}, no addresses established a successful connection "
+            "(with exceptions)",
+        ) from MultiError(exceptions)
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
@@ -138,7 +132,7 @@ class Swarm(INetwork):
         except OpenConnectionError as error:
             logger.debug("fail to dial peer %s over base transport", peer_id)
             raise SwarmException(
-                "fail to open connection to peer %s", peer_id
+                f"fail to open connection to peer {peer_id}"
             ) from error
 
         logger.debug("dialed peer %s over base transport", peer_id)
