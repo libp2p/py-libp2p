@@ -390,15 +390,15 @@ async def test_mesh_heartbeat(
     fake_peer_ids = [
         ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
     ]
-    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", fake_peer_ids)
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", set(fake_peer_ids))
 
-    peer_topics = {topic: fake_peer_ids}
+    peer_topics = {topic: set(fake_peer_ids)}
     # Monkeypatch the peer subscriptions
     monkeypatch.setattr(pubsubs_gsub[0], "peer_topics", peer_topics)
 
     mesh_peer_indices = random.sample(range(total_peer_count), initial_mesh_peer_count)
     mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
-    router_mesh = {topic: list(mesh_peers)}
+    router_mesh = {topic: set(mesh_peers)}
     # Monkeypatch our mesh peers
     monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
 
@@ -437,27 +437,27 @@ async def test_gossip_heartbeat(
     fake_peer_ids = [
         ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
     ]
-    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", fake_peer_ids)
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", set(fake_peer_ids))
 
     topic_mesh_peer_count = 14
     # Split into mesh peers and fanout peers
     peer_topics = {
-        topic_mesh: fake_peer_ids[:topic_mesh_peer_count],
-        topic_fanout: fake_peer_ids[topic_mesh_peer_count:],
+        topic_mesh: set(fake_peer_ids[:topic_mesh_peer_count]),
+        topic_fanout: set(fake_peer_ids[topic_mesh_peer_count:]),
     }
     # Monkeypatch the peer subscriptions
     monkeypatch.setattr(pubsubs_gsub[0], "peer_topics", peer_topics)
 
     mesh_peer_indices = random.sample(range(topic_mesh_peer_count), initial_peer_count)
     mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
-    router_mesh = {topic_mesh: list(mesh_peers)}
+    router_mesh = {topic_mesh: set(mesh_peers)}
     # Monkeypatch our mesh peers
     monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
     fanout_peer_indices = random.sample(
         range(topic_mesh_peer_count, total_peer_count), initial_peer_count
     )
     fanout_peers = [fake_peer_ids[i] for i in fanout_peer_indices]
-    router_fanout = {topic_fanout: list(fanout_peers)}
+    router_fanout = {topic_fanout: set(fanout_peers)}
     # Monkeypatch our fanout peers
     monkeypatch.setattr(pubsubs_gsub[0].router, "fanout", router_fanout)
 
