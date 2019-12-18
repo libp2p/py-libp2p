@@ -128,7 +128,7 @@ class Swarm(INetwork):
         :param addr: the address we want to connect with
         :param peer_id: the peer we want to connect to
         :raises SwarmException: raised when an error occurs
-        :return: muxed connection
+        :return: network connection
         """
 
         # Dial peer (connection to peer does not yet exist)
