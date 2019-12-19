@@ -121,7 +121,7 @@ class GossipSub(IPubsubRouter):
             #   instance in multistream-select, but it is not the protocol that gossipsub supports.
             #   In this case, probably we registered gossipsub to a wrong `protocol_id`
             #   in multistream-select, or wrong versions.
-             raise ValueError(f"Protocol={protocol_id} is not supported.")
+            raise ValueError(f"Protocol={protocol_id} is not supported.")
         self.peer_protocol[peer_id] = protocol_id
 
     def remove_peer(self, peer_id: ID) -> None:
