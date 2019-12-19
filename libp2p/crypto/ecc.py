@@ -32,7 +32,7 @@ class ECCPublicKey(PublicKey):
         return KeyType.ECC_P256
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        raise NotImplementedError
+        raise NotImplementedError()
 
 
 class ECCPrivateKey(PrivateKey):
@@ -53,7 +53,7 @@ class ECCPrivateKey(PrivateKey):
         return KeyType.ECC_P256
 
     def sign(self, data: bytes) -> bytes:
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def get_public_key(self) -> PublicKey:
         public_key_impl = keys.get_public_key(self.impl, self.curve)

@@ -29,7 +29,7 @@ class RawConnection(IRawConnection):
         try:
             self.writer.write(data)
         except ConnectionResetError as error:
-            raise RawConnError(error)
+            raise RawConnError() from error
         # Reference: https://github.com/ethereum/lahja/blob/93610b2eb46969ff1797e0748c7ac2595e130aef/lahja/asyncio/endpoint.py#L99-L102  # noqa: E501
         # Use a lock to serialize drain() calls. Circumvents this bug:
         # https://bugs.python.org/issue29930
@@ -37,7 +37,7 @@ class RawConnection(IRawConnection):
             try:
                 await self.writer.drain()
             except ConnectionResetError as error:
-                raise RawConnError(error)
+                raise RawConnError() from error
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -49,7 +49,7 @@ class RawConnection(IRawConnection):
         try:
             return await self.reader.read(n)
         except ConnectionResetError as error:
-            raise RawConnError(error)
+            raise RawConnError() from error
 
     async def close(self) -> None:
         self.writer.close()

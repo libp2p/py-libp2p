@@ -1,9 +1,11 @@
 import asyncio
-from socket import socket
+import socket
 import sys
-from typing import List
+from typing import List, Optional
 
 from multiaddr import Multiaddr
+from multiaddr.protocols import P_IP4, P_IP6, P_TCP, P_UDP
+from multiaddr.protocols import protocol_with_code as p_code
 
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
@@ -29,10 +31,14 @@ class TCPListener(IListener):
         :param maddr: maddr of peer
         :return: return True if successful
         """
+        listen_addr = _ip4_or_6_from_multiaddr(maddr)
+        if listen_addr is None:
+            raise NotImplementedError(
+                "Can only start TCP Listener with a IPv4 or IPv6 address"
+            )
+
         self.server = await asyncio.start_server(
-            self.handler,
-            maddr.value_for_protocol("ip4"),
-            maddr.value_for_protocol("tcp"),
+            self.handler, listen_addr, maddr.value_for_protocol("tcp")
         )
         socket = self.server.sockets[0]
         self.multiaddrs.append(_multiaddr_from_socket(socket))
@@ -70,7 +76,10 @@ class TCP(ITransport):
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
-        self.host = maddr.value_for_protocol("ip4")
+        self.host = _ip4_or_6_from_multiaddr(maddr)
+        if self.host is None:
+            raise ValueError("Cannot find ipv4 or ipv6 host in multiaddress")
+
         self.port = int(maddr.value_for_protocol("tcp"))
 
         try:
@@ -91,5 +100,52 @@ class TCP(ITransport):
         return TCPListener(handler_function)
 
 
-def _multiaddr_from_socket(socket: socket) -> Multiaddr:
-    return Multiaddr("/ip4/%s/tcp/%s" % socket.getsockname())  # wip
+def _ip4_or_6_from_multiaddr(maddr: Multiaddr) -> Optional[str]:
+    if P_IP4 in maddr.protocols():
+        return maddr.value_for_protocol(P_IP4)
+    elif P_IP6 in maddr.protocols():
+        return maddr.value_for_protocol(P_IP6)
+    else:
+        return None
+
+
+def _multiaddr_from_socket(sock: socket.socket) -> Multiaddr:
+    # Reference: http://man7.org/linux/man-pages/man2/socket.2.html#DESCRIPTION
+    # todo: move this to more generic libp2p.transport helper function
+
+    # Reference: https://stackoverflow.com/questions/5815675/what-is-sock-dgram-and-sock-stream
+    # Selects first protocol in sequence if bitwise AND matches, else None
+    t_proto = next(
+        (
+            v
+            for k, v in {
+                socket.SOCK_STREAM: p_code(P_TCP).name,
+                socket.SOCK_DGRAM: p_code(P_UDP).name,
+            }.items()
+            if k & sock.type != 0
+        ),
+        None,
+    )
+
+    if t_proto is None:
+        raise NotImplementedError(
+            f"Cannot convert socket to multiaddr, socket type is of {sock.type}"
+        )
+
+    # Reference: https://docs.python.org/3/library/socket.html#socket-families
+    if sock.family == socket.AF_INET:
+        # ipv4: (host, port)
+        addr, port = sock.getsockname()
+        ip = p_code(P_IP4).name
+
+    elif sock.family == socket.AF_INET6:
+        # ipv6: (host, port, flowinfo, scopeid)
+        addr, port = sock.getsockname()[:2]
+        ip = p_code(P_IP6).name
+
+    else:
+        raise NotImplementedError(
+            f"Cannot convert socket to multiaddr, socket family is of {sock.family}"
+        )
+
+    return Multiaddr(f"/{ip}/{addr}/{t_proto}/{port}")

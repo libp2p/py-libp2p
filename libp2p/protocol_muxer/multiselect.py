@@ -49,7 +49,7 @@ class Multiselect(IMultiselectMuxer):
             try:
                 command = await communicator.read()
             except MultiselectCommunicatorError as error:
-                raise MultiselectError(error)
+                raise MultiselectError() from error
 
             if command == "ls":
                 # TODO: handle ls command
@@ -60,13 +60,13 @@ class Multiselect(IMultiselectMuxer):
                     try:
                         await communicator.write(protocol)
                     except MultiselectCommunicatorError as error:
-                        raise MultiselectError(error)
+                        raise MultiselectError() from error
 
                     return protocol, self.handlers[protocol]
                 try:
                     await communicator.write(PROTOCOL_NOT_FOUND_MSG)
                 except MultiselectCommunicatorError as error:
-                    raise MultiselectError(error)
+                    raise MultiselectError() from error
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
@@ -78,12 +78,12 @@ class Multiselect(IMultiselectMuxer):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
-            raise MultiselectError(error)
+            raise MultiselectError() from error
 
         try:
             handshake_contents = await communicator.read()
         except MultiselectCommunicatorError as error:
-            raise MultiselectError(error)
+            raise MultiselectError() from error
 
         if not is_valid_handshake(handshake_contents):
             raise MultiselectError(

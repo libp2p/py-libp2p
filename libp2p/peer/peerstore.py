@@ -71,7 +71,7 @@ class PeerStore(IPeerStore):
             try:
                 val = self.peer_data_map[peer_id].get_metadata(key)
             except PeerDataError as error:
-                raise PeerStoreError(error)
+                raise PeerStoreError() from error
             return val
         raise PeerStoreError("peer ID not found")
 
@@ -153,8 +153,8 @@ class PeerStore(IPeerStore):
             peer_data = self.peer_data_map[peer_id]
             try:
                 pubkey = peer_data.get_pubkey()
-            except PeerDataError:
-                raise PeerStoreError("peer pubkey not found")
+            except PeerDataError as e:
+                raise PeerStoreError("peer pubkey not found") from e
             return pubkey
         raise PeerStoreError("peer ID not found")
 
@@ -179,8 +179,8 @@ class PeerStore(IPeerStore):
             peer_data = self.peer_data_map[peer_id]
             try:
                 privkey = peer_data.get_privkey()
-            except PeerDataError:
-                raise PeerStoreError("peer privkey not found")
+            except PeerDataError as e:
+                raise PeerStoreError("peer privkey not found") from e
             return privkey
         raise PeerStoreError("peer ID not found")
 

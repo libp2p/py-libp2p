@@ -20,8 +20,10 @@ def deserialize_public_key(data: bytes) -> PublicKey:
     f = PublicKey.deserialize_from_protobuf(data)
     try:
         deserializer = key_type_to_public_key_deserializer[f.key_type]
-    except KeyError:
-        raise MissingDeserializerError({"key_type": f.key_type, "key": "public_key"})
+    except KeyError as e:
+        raise MissingDeserializerError(
+            {"key_type": f.key_type, "key": "public_key"}
+        ) from e
     return deserializer(f.data)
 
 
@@ -29,6 +31,8 @@ def deserialize_private_key(data: bytes) -> PrivateKey:
     f = PrivateKey.deserialize_from_protobuf(data)
     try:
         deserializer = key_type_to_private_key_deserializer[f.key_type]
-    except KeyError:
-        raise MissingDeserializerError({"key_type": f.key_type, "key": "private_key"})
+    except KeyError as e:
+        raise MissingDeserializerError(
+            {"key_type": f.key_type, "key": "private_key"}
+        ) from e
     return deserializer(f.data)
