@@ -8,6 +8,7 @@ from typing import (
     Dict,
     List,
     NamedTuple,
+    Set,
     Tuple,
     Union,
     cast,
@@ -73,7 +74,7 @@ class Pubsub:
 
     my_topics: Dict[str, "asyncio.Queue[rpc_pb2.Message]"]
 
-    peer_topics: Dict[str, List[ID]]
+    peer_topics: Dict[str, Set[ID]]
     peers: Dict[ID, INetStream]
 
     topic_validators: Dict[str, TopicValidator]
@@ -289,23 +290,21 @@ class Pubsub:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
 
-        self.peers[peer_id] = stream
-
         # Send hello packet
         hello = self.get_hello_packet()
         try:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
-            del self.peers[peer_id]
             return
         # TODO: Check if the peer in black list.
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
-            del self.peers[peer_id]
             return
+
+        self.peers[peer_id] = stream
 
         logger.debug("added new peer %s", peer_id)
 
@@ -316,8 +315,7 @@ class Pubsub:
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
-                # Delete the entry if no other peers left
-                self.peer_topics[topic].remove(peer_id)
+                self.peer_topics[topic].discard(peer_id)
 
         self.router.remove_peer(peer_id)
 
@@ -353,15 +351,14 @@ class Pubsub:
         """
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = [origin_id]
+                self.peer_topics[sub_message.topicid] = set([origin_id])
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
-                self.peer_topics[sub_message.topicid].append(origin_id)
+                self.peer_topics[sub_message.topicid].add(origin_id)
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
-                    # Delete the entry if no other peers left
-                    self.peer_topics[sub_message.topicid].remove(origin_id)
+                    self.peer_topics[sub_message.topicid].discard(origin_id)
 
     # FIXME(mhchia): Change the function name?
     async def handle_talk(self, publish_message: rpc_pb2.Message) -> None:
