@@ -4,6 +4,7 @@ import random
 import pytest
 
 from libp2p.peer.id import ID
+from libp2p.pubsub.gossipsub import PROTOCOL_ID
 from libp2p.tools.constants import GOSSIPSUB_PARAMS, GossipsubParams
 from libp2p.tools.pubsub.utils import dense_connect, one_to_all_connect
 from libp2p.tools.utils import connect
@@ -108,7 +109,7 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
     monkeypatch.setattr(gossipsubs[index_bob], "emit_prune", emit_prune)
 
     # Check that alice is bob's peer but not his mesh peer
-    assert id_alice in gossipsubs[index_bob].peers_gossipsub
+    assert gossipsubs[index_bob].peer_protocol[id_alice] == PROTOCOL_ID
     assert topic not in gossipsubs[index_bob].mesh
 
     await gossipsubs[index_alice].emit_graft(topic, id_bob)
@@ -120,7 +121,7 @@ async def test_handle_graft(pubsubs_gsub, hosts, event_loop, monkeypatch):
     # Check that bob is alice's peer but not her mesh peer
     assert topic in gossipsubs[index_alice].mesh
     assert id_bob not in gossipsubs[index_alice].mesh[topic]
-    assert id_bob in gossipsubs[index_alice].peers_gossipsub
+    assert gossipsubs[index_alice].peer_protocol[id_bob] == PROTOCOL_ID
 
     await gossipsubs[index_bob].emit_graft(topic, id_alice)
 
@@ -390,7 +391,8 @@ async def test_mesh_heartbeat(
     fake_peer_ids = [
         ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
     ]
-    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", set(fake_peer_ids))
+    peer_protocol = {peer_id: PROTOCOL_ID for peer_id in fake_peer_ids}
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peer_protocol", peer_protocol)
 
     peer_topics = {topic: set(fake_peer_ids)}
     # Monkeypatch the peer subscriptions
@@ -437,7 +439,8 @@ async def test_gossip_heartbeat(
     fake_peer_ids = [
         ID((i).to_bytes(2, byteorder="big")) for i in range(total_peer_count)
     ]
-    monkeypatch.setattr(pubsubs_gsub[0].router, "peers_gossipsub", set(fake_peer_ids))
+    peer_protocol = {peer_id: PROTOCOL_ID for peer_id in fake_peer_ids}
+    monkeypatch.setattr(pubsubs_gsub[0].router, "peer_protocol", peer_protocol)
 
     topic_mesh_peer_count = 14
     # Split into mesh peers and fanout peers
