@@ -588,7 +588,7 @@ class GossipSub(IPubsubRouter):
         # 3) Get the stream to this peer
         if sender_peer_id not in self.pubsub.peers:
             logger.debug(
-                "Fail to responed to iwant request from %s: peer disconnected",
+                "Fail to responed to iwant request from %s: peer record not exist",
                 sender_peer_id,
             )
             return
@@ -700,7 +700,7 @@ class GossipSub(IPubsubRouter):
         # Get stream for peer from pubsub
         if to_peer not in self.pubsub.peers:
             logger.debug(
-                "Fail to emit control message to %s: peer disconnected", to_peer
+                "Fail to emit control message to %s: peer record not exist", to_peer
             )
             return
         peer_stream = self.pubsub.peers[to_peer]
