@@ -48,9 +48,22 @@ async def test_ipv6_multiaddr_from_socket():
     def handler(r, w):
         pass
 
+    # Test if socket.has_ipv6 isn't lying
+    try:
+        server = await asyncio.start_server(handler, "::1", 0)
+    except OSError as e:
+        # OSError [99]: cannot assign requested address
+        if e.errno == 99:
+            # The reason we skip this test instead of passing it is because we are testing if
+            # _multiaddr_from_socket returns a correct value from low-level socket objects,
+            # not if the host supports ipv6. If it doesn't, this test cannot run.
+            pytest.skip("Binding to random ipv6 address failed.")
+    else:
+        server.close()
+
     # Test with IPv6
-    server = await asyncio.start_server(handler, "::1", 8000)
-    assert str(_multiaddr_from_socket(server.sockets[0])) == "/ip6/::1/tcp/8000"
+    server = await asyncio.start_server(handler, "::1", 8081)
+    assert str(_multiaddr_from_socket(server.sockets[0])) == "/ip6/::1/tcp/8081"
     server.close()
 
     # Additional test with raw sockets
