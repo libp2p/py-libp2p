@@ -33,7 +33,6 @@ extras_require = {
         "ipython",
         "setuptools>=36.2.0",
         "tox>=3.13.2,<4.0.0",
-        "eth_utils",
     ],
 }
 
