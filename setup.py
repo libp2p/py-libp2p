@@ -43,6 +43,20 @@ extras_require["dev"] = (
     + extras_require["doc"]
 )
 
+fastecdsa = [
+    # No official fastecdsa==1.7.4,1.7.5 wheels for Windows, using a pypi package that includes
+    # the original library, but also windows-built wheels (32+64-bit) on those versions.
+    # Fixme: Remove section when fastecdsa has released a windows-compatible wheel
+    #  (specifically: both win32 and win_amd64 targets)
+    #  See the following issues for more information;
+    #  https://github.com/libp2p/py-libp2p/issues/363
+    #  https://github.com/AntonKueltz/fastecdsa/issues/11
+    "fastecdsa-any==1.7.5;sys_platform=='win32'",
+    # Wheels are provided for these platforms, or compiling one is minimally frustrating in a
+    # default python installation.
+    "fastecdsa==1.7.5;sys_platform!='win32'",
+]
+
 
 with open("./README.md") as readme:
     long_description = readme.read()
@@ -67,7 +81,7 @@ install_requires = [
 # RTD system so we have to exclude these dependencies when we are in an RTD environment.
 readthedocs_is_building = os.environ.get("READTHEDOCS", False)
 if not readthedocs_is_building:
-    install_requires.append("fastecdsa==1.7.4")
+    install_requires.extend(fastecdsa)
 
 
 setup(
