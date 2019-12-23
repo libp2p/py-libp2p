@@ -99,7 +99,7 @@ async def test_pubsub(pubsubs, p2pds):
     go_0_topic_1_peers = await p2pds[0].control.pubsub_list_peers(TOPIC_1)
     assert len(go_0_topic_1_peers) == 1 and py_peer_id == go_0_topic_1_peers[0]
     # py
-    py_topic_0_peers = py_pubsub.peer_topics[TOPIC_0]
+    py_topic_0_peers = list(py_pubsub.peer_topics[TOPIC_0])
     assert len(py_topic_0_peers) == 1 and p2pds[0].peer_id == py_topic_0_peers[0]
     # go_1
     go_1_topic_1_peers = await p2pds[1].control.pubsub_list_peers(TOPIC_1)

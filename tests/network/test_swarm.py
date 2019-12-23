@@ -1,5 +1,6 @@
 import asyncio
 
+from multiaddr import Multiaddr
 import pytest
 
 from libp2p.network.exceptions import SwarmException
@@ -91,3 +92,59 @@ async def test_swarm_remove_conn(swarm_pair):
     # Test: Remove twice. There should not be errors.
     swarm_0.remove_conn(conn_0)
     assert swarm_1.get_peer_id() not in swarm_0.connections
+
+
+@pytest.mark.asyncio
+async def test_swarm_multiaddr(is_host_secure):
+    swarms = await SwarmFactory.create_batch_and_listen(is_host_secure, 3)
+
+    def clear():
+        swarms[0].peerstore.clear_addrs(swarms[1].get_peer_id())
+
+    clear()
+    # No addresses
+    with pytest.raises(SwarmException):
+        await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+    clear()
+    # Wrong addresses
+    swarms[0].peerstore.add_addrs(
+        swarms[1].get_peer_id(), [Multiaddr("/ip4/0.0.0.0/tcp/9999")], 10000
+    )
+
+    with pytest.raises(SwarmException):
+        await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+    clear()
+    # Multiple wrong addresses
+    swarms[0].peerstore.add_addrs(
+        swarms[1].get_peer_id(),
+        [Multiaddr("/ip4/0.0.0.0/tcp/9999"), Multiaddr("/ip4/0.0.0.0/tcp/9998")],
+        10000,
+    )
+
+    with pytest.raises(SwarmException):
+        await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+    # Test one address
+    addrs = tuple(
+        addr
+        for transport in swarms[1].listeners.values()
+        for addr in transport.get_addrs()
+    )
+
+    swarms[0].peerstore.add_addrs(swarms[1].get_peer_id(), addrs[:1], 10000)
+    await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+    # Test multiple addresses
+    addrs = tuple(
+        addr
+        for transport in swarms[1].listeners.values()
+        for addr in transport.get_addrs()
+    )
+
+    swarms[0].peerstore.add_addrs(swarms[1].get_peer_id(), addrs + addrs, 10000)
+    await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+    for swarm in swarms:
+        await swarm.close()

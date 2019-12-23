@@ -77,16 +77,20 @@ class FloodSub(IPubsubRouter):
         :param pubsub_msg: pubsub message in protobuf.
         """
 
-        peers_gen = self._get_peers_to_send(
-            pubsub_msg.topicIDs,
-            msg_forwarder=msg_forwarder,
-            origin=ID(pubsub_msg.from_id),
+        peers_gen = set(
+            self._get_peers_to_send(
+                pubsub_msg.topicIDs,
+                msg_forwarder=msg_forwarder,
+                origin=ID(pubsub_msg.from_id),
+            )
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
         logger.debug("publishing message %s", pubsub_msg)
 
         for peer_id in peers_gen:
+            if peer_id not in self.pubsub.peers:
+                continue
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
@@ -94,6 +98,7 @@ class FloodSub(IPubsubRouter):
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
+                self.pubsub._handle_dead_peer(peer_id)
 
     async def join(self, topic: str) -> None:
         """

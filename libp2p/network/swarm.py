@@ -19,6 +19,7 @@ from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.typing import StreamHandlerFn
 
+from ..exceptions import MultiError
 from .connection.raw_connection import RawConnection
 from .connection.swarm_connection import SwarmConn
 from .exceptions import SwarmException
@@ -87,17 +88,47 @@ class Swarm(INetwork):
         try:
             # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
-        except PeerStoreError as e:
-            raise SwarmException(f"No known addresses to peer {peer_id}") from e
+        except PeerStoreError as error:
+            raise SwarmException(f"No known addresses to peer {peer_id}") from error
 
         if not addrs:
             raise SwarmException(f"No known addresses to peer {peer_id}")
 
-        multiaddr = addrs[0]
+        exceptions: List[SwarmException] = []
+
+        # Try all known addresses
+        for multiaddr in addrs:
+            try:
+                return await self.dial_addr(multiaddr, peer_id)
+            except SwarmException as e:
+                exceptions.append(e)
+                logger.debug(
+                    "encountered swarm exception when trying to connect to %s, "
+                    "trying next address...",
+                    multiaddr,
+                    exc_info=e,
+                )
+
+        # Tried all addresses, raising exception.
+        raise SwarmException(
+            f"unable to connect to {peer_id}, no addresses established a successful connection "
+            "(with exceptions)"
+        ) from MultiError(exceptions)
+
+    async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+        """
+        dial_addr try to create a connection to peer_id with addr.
+
+        :param addr: the address we want to connect with
+        :param peer_id: the peer we want to connect to
+        :raises SwarmException: raised when an error occurs
+        :return: network connection
+        """
+
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
-            raw_conn = await self.transport.dial(multiaddr)
+            raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
             logger.debug("fail to dial peer %s over base transport", peer_id)
             raise SwarmException(
@@ -137,7 +168,6 @@ class Swarm(INetwork):
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
         :param peer_id: peer_id of destination
-        :param protocol_id: protocol id
         :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
