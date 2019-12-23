@@ -6,6 +6,7 @@ import trio
 
 from libp2p.exceptions import ValidationError
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.tools.factories import IDFactory, PubsubFactory, net_stream_pair_factory
 from libp2p.tools.pubsub.utils import make_pubsub_msg
@@ -60,11 +61,11 @@ async def test_peers_subscribe():
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         # Yield to let 0 notify 1
-        await trio.sleep(0.1)
+        await trio.sleep(1)
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
         await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
         # Yield to let 0 notify 1
-        await trio.sleep(0.1)
+        await trio.sleep(1)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
 
@@ -509,3 +510,76 @@ async def test_push_msg(monkeypatch):
             await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg_2)
             await trio.sleep(0.01)
             assert not event.is_set()
+
+
+@pytest.mark.trio
+async def test_strict_signing():
+    async with PubsubFactory.create_batch_with_floodsub(
+        2, strict_signing=True
+    ) as pubsubs_fsub:
+        await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        await pubsubs_fsub[1].subscribe(TESTING_TOPIC)
+        await trio.sleep(1)
+
+        await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
+        await trio.sleep(1)
+
+        assert len(pubsubs_fsub[0].seen_messages) == 1
+        assert len(pubsubs_fsub[1].seen_messages) == 1
+
+
+@pytest.mark.trio
+async def test_strict_signing_failed_validation(monkeypatch):
+    async with PubsubFactory.create_batch_with_floodsub(
+        2, strict_signing=True
+    ) as pubsubs_fsub:
+        msg = make_pubsub_msg(
+            origin_id=pubsubs_fsub[0].my_id,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00" * 8,
+        )
+        priv_key = pubsubs_fsub[0].sign_key
+        signature = priv_key.sign(
+            PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
+        )
+
+        event = trio.Event()
+
+        def _is_msg_seen(msg):
+            return False
+
+        # Use router publish to check if `push_msg` succeed.
+        async def router_publish(*args, **kwargs):
+            # The event will only be set if `push_msg` succeed.
+            event.set()
+
+        monkeypatch.setattr(pubsubs_fsub[0], "_is_msg_seen", _is_msg_seen)
+        monkeypatch.setattr(pubsubs_fsub[0].router, "publish", router_publish)
+
+        # Test: no signature attached in `msg`
+        await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg)
+        await trio.sleep(0.01)
+        assert not event.is_set()
+
+        # Test: `msg.key` does not match `msg.from_id`
+        msg.key = pubsubs_fsub[1].host.get_public_key().serialize()
+        msg.signature = signature
+        await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg)
+        await trio.sleep(0.01)
+        assert not event.is_set()
+
+        # Test: invalid signature
+        msg.key = pubsubs_fsub[0].host.get_public_key().serialize()
+        msg.signature = b"\x12" * 100
+        await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg)
+        await trio.sleep(0.01)
+        assert not event.is_set()
+
+        # Finally, assert the signature indeed will pass validation
+        msg.key = pubsubs_fsub[0].host.get_public_key().serialize()
+        msg.signature = signature
+        await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg)
+        await trio.sleep(0.01)
+        assert event.is_set()

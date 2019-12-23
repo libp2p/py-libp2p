@@ -7,9 +7,6 @@ from .id import ID
 
 
 class IAddrBook(ABC):
-    def __init__(self) -> None:
-        pass
-
     @abstractmethod
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
         """

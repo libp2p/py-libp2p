@@ -1,11 +1,13 @@
 from typing import Callable, Tuple, cast
 
-from fastecdsa.encoding.util import int_bytelen
+from fastecdsa.encoding import util
 
 from libp2p.crypto.ecc import ECCPrivateKey, ECCPublicKey, create_new_key_pair
 from libp2p.crypto.keys import PublicKey
 
 SharedKeyGenerator = Callable[[bytes], bytes]
+
+int_bytelen = util.int_bytelen
 
 
 def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGenerator]:

@@ -5,15 +5,12 @@ from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
 from libp2p.host.routed_host import RoutedHost
-from libp2p.kademlia.network import KademliaServer
-from libp2p.kademlia.storage import IStorage
 from libp2p.network.network_interface import INetwork
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.peer.peerstore_interface import IPeerStore
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.routing.kademlia.kademlia_peer_router import KadmeliaPeerRouter
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
@@ -30,31 +27,6 @@ def generate_new_rsa_identity() -> KeyPair:
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
     public_key = key_pair.public_key
     return ID.from_pubkey(public_key)
-
-
-def initialize_default_kademlia_router(
-    ksize: int = 20, alpha: int = 3, id_opt: ID = None, storage: IStorage = None
-) -> KadmeliaPeerRouter:
-    """
-    initialize kadmelia router when no kademlia router is passed in.
-
-    :param ksize: The k parameter from the paper
-    :param alpha: The alpha parameter from the paper
-    :param id_opt: optional id for host
-    :param storage: An instance that implements
-        :interface:`~kademlia.storage.IStorage`
-    :return: return a default kademlia instance
-    """
-    if not id_opt:
-        key_pair = generate_new_rsa_identity()
-        id_opt = generate_peer_id_from(key_pair)
-
-    node_id = id_opt.to_bytes()
-    # ignore type for Kademlia module
-    server = KademliaServer(  # type: ignore
-        ksize=ksize, alpha=alpha, node_id=node_id, storage=storage
-    )
-    return KadmeliaPeerRouter(server)
 
 
 def initialize_default_swarm(
@@ -92,6 +64,9 @@ def initialize_default_swarm(
     )
 
     peerstore = peerstore_opt or PeerStore()
+    # Store our key pair in peerstore
+    peerstore.add_key_pair(id_opt, key_pair)
+
     # TODO: Initialize discovery if not presented
     return Swarm(id_opt, peerstore, upgrader, transport)
 
@@ -138,8 +113,8 @@ def new_node(
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
     if disc_opt:
-        host = RoutedHost(key_pair.public_key, swarm_opt, disc_opt)
+        host = RoutedHost(swarm_opt, disc_opt)
     else:
-        host = BasicHost(key_pair.public_key, swarm_opt)
+        host = BasicHost(swarm_opt)
 
     return host

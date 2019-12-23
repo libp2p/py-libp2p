@@ -1,10 +1,9 @@
 import multiaddr
 import pytest
 
-from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.tools.factories import HostFactory
-from libp2p.tools.utils import create_echo_stream_handler
+from libp2p.tools.utils import connect, create_echo_stream_handler
 from libp2p.typing import TProtocol
 
 PROTOCOL_ID_0 = TProtocol("/echo/0")
@@ -261,18 +260,14 @@ async def test_triangle_nodes_connection(is_host_secure):
 @pytest.mark.trio
 async def test_host_connect(is_host_secure):
     async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
-        assert not hosts[0].get_peerstore().peer_ids()
-
-        addr = hosts[1].get_addrs()[0]
-        info = info_from_p2p_addr(addr)
-        await hosts[0].connect(info)
-
         assert len(hosts[0].get_peerstore().peer_ids()) == 1
 
-        await hosts[0].connect(info)
+        await connect(hosts[0], hosts[1])
+        assert len(hosts[0].get_peerstore().peer_ids()) == 2
 
+        await connect(hosts[0], hosts[1])
         # make sure we don't do double connection
-        assert len(hosts[0].get_peerstore().peer_ids()) == 1
+        assert len(hosts[0].get_peerstore().peer_ids()) == 2
 
         assert hosts[1].get_id() in hosts[0].get_peerstore().peer_ids()
         ma_node_b = multiaddr.Multiaddr("/p2p/%s" % hosts[1].get_id().pretty())

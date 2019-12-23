@@ -1,13 +1,25 @@
-# py-libp2p [![Build Status](https://travis-ci.com/libp2p/py-libp2p.svg?branch=master)](https://travis-ci.com/libp2p/py-libp2p)  [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/py-libp2p/Lobby) [![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg)](https://webchat.freenode.net/?channels=%23libp2p) [![Matrix](https://img.shields.io/badge/matrix-%23libp2p%3Apermaweb.io-blue.svg)](https://riot.permaweb.io/#/room/#libp2p:permaweb.io) [![Discord](https://img.shields.io/discord/475789330380488707?color=blueviolet&label=discord)](https://discord.gg/66KBrm2)
+# py-libp2p
 
+[![Join the chat at https://gitter.im/py-libp2p/Lobby](https://badges.gitter.im/py-libp2p/Lobby.png)](https://gitter.im/py-libp2p/Lobby)
+[![Build Status](https://travis-ci.com/libp2p/py-libp2p.svg?branch=master)](https://travis-ci.com/libp2p/py-libp2p)
+[![PyPI version](https://badge.fury.io/py/libp2p.svg)](https://badge.fury.io/py/libp2p)
+[![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
+[![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
+[![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg)](https://webchat.freenode.net/?channels=%23libp2p)
+[![Matrix](https://img.shields.io/badge/matrix-%23libp2p%3Apermaweb.io-blue.svg)](https://riot.permaweb.io/#/room/#libp2p:permaweb.io)
+[![Discord](https://img.shields.io/discord/475789330380488707?color=blueviolet&label=discord)](https://discord.gg/66KBrm2)
 
 
 <h1 align="center">
-  <img width="250" align="center" src="https://github.com/libp2p/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
+<img width="250" align="center" src="https://github.com/libp2p/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
 </h1>
 
 ## WARNING
 py-libp2p is an experimental and work-in-progress repo under heavy development. We do not yet recommend using py-libp2p in production environments.
+
+The Python implementation of the libp2p networking stack
+
+Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the change log](https://py-libp2p.readthedocs.io/en/latest/releases.html).
 
 ## Sponsorship
 This project is graciously sponsored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
@@ -15,27 +27,55 @@ This project is graciously sponsored by the Ethereum Foundation through [Wave 5 
 ## Maintainers
 The py-libp2p team consists of:
 
-[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac)
+[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac) [@carver](https://github.com/carver)
 
 ## Development
 
 py-libp2p requires Python 3.7 and the best way to guarantee a clean Python 3.7 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
 
 ```sh
+git clone git@github.com:libp2p/py-libp2p.git
+cd py-libp2p
 virtualenv -p python3.7 venv
 . venv/bin/activate
-pip3 install -r requirements_dev.txt
-python setup.py develop
+pip install -e .[dev]
 ```
 
-## Testing
+### Testing Setup
 
-After installing our requirements (see above), you can:
+During development, you might like to have tests run on every file save.
+
+Show flake8 errors on file change:
+
 ```sh
-cd tests
-pytest
+# Test flake8
+when-changed -v -s -r -1 libp2p/ tests/ -c "clear; flake8 libp2p tests && echo 'flake8 success' || echo 'error'"
 ```
+
+Run multi-process tests in one command, but without color:
+
+```sh
+# in the project root:
+pytest --numprocesses=4 --looponfail --maxfail=1
+# the same thing, succinctly:
+pytest -n 4 -f --maxfail=1
+```
+
+Run in one thread, with color and desktop notifications:
+
+```sh
+cd venv
+ptw --onfail "notify-send -t 5000 'Test failure ⚠⚠⚠⚠⚠' 'python 3 test on py-libp2p failed'" ../tests ../libp2p
+```
+
 Note that tests/libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of concept.
+
+
+### Release setup
+
+Releases follow the same basic pattern as releases of some tangentially-related projects,
+like Trinity. See [Trinity's release instructions](
+https://trinity-client.readthedocs.io/en/latest/contributing.html#releasing).
 
 ## Requirements
 
@@ -99,7 +139,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | Peer Discovery                               | Status        |
 | -------------------------------------------- | :-----------: |
 | **`bootstrap list`**                         | :tomato:      |
-| **`Kademlia DHT`**                           | :lemon:       |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`mDNS`**                                   | :chestnut:    |
 | **`PEX`**                                    | :chestnut:    |
 | **`DNS`**                                    | :chestnut:    |
@@ -107,7 +147,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Content Routing                              | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :lemon:       |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`floodsub`**                               | :green_apple: |
 | **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |
@@ -115,7 +155,7 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 
 | Peer Routing                                 | Status        |
 | -------------------------------------------- | :-----------: |
-| **`Kademlia DHT`**                           | :green_apple: |
+| **`Kademlia DHT`**                           | :chestnut:    |
 | **`floodsub`**                               | :green_apple: |
 | **`gossipsub`**                              | :green_apple: |
 | **`PHT`**                                    | :chestnut:    |

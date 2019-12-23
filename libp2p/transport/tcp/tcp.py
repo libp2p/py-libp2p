@@ -8,6 +8,7 @@ from trio_typing import TaskStatus
 from libp2p.io.trio import TrioTCPStream
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.listener_interface import IListener
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.typing import THandler
@@ -80,7 +81,10 @@ class TCP(ITransport):
         self.host = maddr.value_for_protocol("ip4")
         self.port = int(maddr.value_for_protocol("tcp"))
 
-        stream = await trio.open_tcp_stream(self.host, self.port)
+        try:
+            stream = await trio.open_tcp_stream(self.host, self.port)
+        except OSError as error:
+            raise OpenConnectionError from error
         read_write_closer = TrioTCPStream(stream)
 
         return RawConnection(read_write_closer, True)

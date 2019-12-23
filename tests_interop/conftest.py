@@ -76,7 +76,24 @@ def is_gossipsub():
 
 
 @pytest.fixture
-async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory):
+def is_pubsub_signing():
+    return True
+
+
+@pytest.fixture
+def is_pubsub_signing_strict():
+    return True
+
+
+@pytest.fixture
+async def p2pds(
+    num_p2pds,
+    is_host_secure,
+    is_gossipsub,
+    unused_tcp_port_factory,
+    is_pubsub_signing,
+    is_pubsub_signing_strict,
+):
     p2pds: Union[Daemon, Exception] = await asyncio.gather(
         *[
             make_p2pd(
@@ -84,6 +101,8 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
                 unused_tcp_port_factory(),
                 is_host_secure,
                 is_gossipsub=is_gossipsub,
+                is_pubsub_signing=is_pubsub_signing,
+                is_pubsub_signing_strict=is_pubsub_signing_strict,
             )
             for _ in range(num_p2pds)
         ],
@@ -102,13 +121,14 @@ async def p2pds(num_p2pds, is_host_secure, is_gossipsub, unused_tcp_port_factory
 
 
 @pytest.fixture
-def pubsubs(num_hosts, hosts, is_gossipsub):
+def pubsubs(num_hosts, hosts, is_gossipsub, is_pubsub_signing_strict):
     if is_gossipsub:
         routers = GossipsubFactory.create_batch(num_hosts, **GOSSIPSUB_PARAMS._asdict())
     else:
         routers = FloodsubFactory.create_batch(num_hosts)
     _pubsubs = tuple(
-        PubsubFactory(host=host, router=router) for host, router in zip(hosts, routers)
+        PubsubFactory(host=host, router=router, strict_signing=is_pubsub_signing_strict)
+        for host, router in zip(hosts, routers)
     )
     yield _pubsubs
     # TODO: Clean up
@@ -131,6 +151,8 @@ class DaemonStream(ReadWriteCloser):
 
     async def close(self) -> None:
         self.writer.close()
+        if sys.version_info < (3, 7):
+            return
         await self.writer.wait_closed()
 
     async def read(self, n: int = -1) -> bytes:
@@ -176,7 +198,8 @@ async def py_to_daemon_stream_pair(hosts, p2pds, is_to_fail_daemon_stream):
         #   some day.
         listener = p2pds[0].control.control.listener
         listener.close()
-        await listener.wait_closed()
+        if sys.version_info[0:2] > (3, 6):
+            await listener.wait_closed()
     stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
     if not is_to_fail_daemon_stream:
         await event_stream_handled.wait()

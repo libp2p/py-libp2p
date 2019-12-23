@@ -7,7 +7,7 @@ from libp2p.host.defaults import get_default_protocols
 def test_default_protocols():
     key_pair = create_new_key_pair()
     swarm = initialize_default_swarm(key_pair)
-    host = BasicHost(key_pair.public_key, swarm)
+    host = BasicHost(swarm)
 
     mux = host.get_mux()
     handlers = mux.handlers

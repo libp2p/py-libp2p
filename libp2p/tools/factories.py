@@ -1,14 +1,18 @@
-from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any, AsyncIterator, Dict, Sequence, Tuple, cast
+from contextlib import AsyncExitStack
+from typing import Any, AsyncIterator, Dict, List, Sequence, Tuple, cast
 
+# NOTE: import ``asynccontextmanager`` from ``contextlib`` when support for python 3.6 is dropped.
+from async_generator import asynccontextmanager
 from async_service import background_trio_service
 import factory
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
 from libp2p.crypto.keys import KeyPair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
+from libp2p.host.routed_host import RoutedHost
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.connection.raw_connection_interface import IRawConnection
@@ -16,11 +20,13 @@ from libp2p.network.connection.swarm_connection import SwarmConn
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStore
 from libp2p.pubsub.abc import IPubsubRouter
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
+from libp2p.routing.interfaces import IPeerRouting
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 import libp2p.security.secio.transport as secio
@@ -45,6 +51,12 @@ class IDFactory(factory.Factory):
     )
 
 
+def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> PeerStore:
+    peer_store = PeerStore()
+    peer_store.add_key_pair(self_id, key_pair)
+    return peer_store
+
+
 def security_transport_factory(
     is_secure: bool, key_pair: KeyPair
 ) -> Dict[TProtocol, BaseSecureTransport]:
@@ -60,10 +72,12 @@ async def raw_conn_factory(
 ) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
     conn_0 = None
     conn_1 = None
+    event = trio.Event()
 
     async def tcp_stream_handler(stream: ReadWriteCloser) -> None:
         nonlocal conn_1
         conn_1 = RawConnection(stream, initiator=False)
+        event.set()
         await trio.sleep_forever()
 
     tcp_transport = TCP()
@@ -71,6 +85,7 @@ async def raw_conn_factory(
     await listener.listen(LISTEN_MADDR, nursery)
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
+    await event.wait()
     yield conn_0, conn_1
 
 
@@ -84,7 +99,9 @@ class SwarmFactory(factory.Factory):
         muxer_opt = {MPLEX_PROTOCOL_ID: Mplex}
 
     peer_id = factory.LazyAttribute(lambda o: generate_peer_id_from(o.key_pair))
-    peerstore = factory.LazyFunction(PeerStore)
+    peerstore = factory.LazyAttribute(
+        lambda o: initialize_peerstore_with_our_keypair(o.peer_id, o.key_pair)
+    )
     upgrader = factory.LazyAttribute(
         lambda o: TransportUpgrader(
             security_transport_factory(o.is_secure, o.key_pair), o.muxer_opt
@@ -133,29 +150,57 @@ class HostFactory(factory.Factory):
         is_secure = False
         key_pair = factory.LazyFunction(generate_new_rsa_identity)
 
-    public_key = factory.LazyAttribute(lambda o: o.key_pair.public_key)
-    network = factory.LazyAttribute(
-        lambda o: SwarmFactory(is_secure=o.is_secure, key_pair=o.key_pair)
-    )
+    network = factory.LazyAttribute(lambda o: SwarmFactory(is_secure=o.is_secure))
 
     @classmethod
     @asynccontextmanager
     async def create_batch_and_listen(
         cls, is_secure: bool, number: int
     ) -> AsyncIterator[Tuple[BasicHost, ...]]:
-        key_pairs = [generate_new_rsa_identity() for _ in range(number)]
-        async with AsyncExitStack() as stack:
-            swarms = [
-                await stack.enter_async_context(
-                    SwarmFactory.create_and_listen(is_secure, key_pair)
-                )
-                for key_pair in key_pairs
-            ]
-            hosts = tuple(
-                BasicHost(key_pair.public_key, swarm)
-                for key_pair, swarm in zip(key_pairs, swarms)
-            )
+        async with SwarmFactory.create_batch_and_listen(is_secure, number) as swarms:
+            hosts = tuple(BasicHost(swarm) for swarm in swarms)
             yield hosts
+
+
+class DummyRouter(IPeerRouting):
+    _routing_table: Dict[ID, PeerInfo]
+
+    def __init__(self) -> None:
+        self._routing_table = dict()
+
+    def _add_peer(self, peer_id: ID, addrs: List[Multiaddr]) -> None:
+        self._routing_table[peer_id] = PeerInfo(peer_id, addrs)
+
+    async def find_peer(self, peer_id: ID) -> PeerInfo:
+        await trio.hazmat.checkpoint()
+        return self._routing_table.get(peer_id, None)
+
+
+class RoutedHostFactory(factory.Factory):
+    class Meta:
+        model = RoutedHost
+
+    class Params:
+        is_secure = False
+
+    network = factory.LazyAttribute(
+        lambda o: HostFactory(is_secure=o.is_secure).get_network()
+    )
+    router = factory.LazyFunction(DummyRouter)
+
+    @classmethod
+    @asynccontextmanager
+    async def create_batch_and_listen(
+        cls, is_secure: bool, number: int
+    ) -> AsyncIterator[Tuple[RoutedHost, ...]]:
+        routing_table = DummyRouter()
+        async with HostFactory.create_batch_and_listen(is_secure, number) as hosts:
+            for host in hosts:
+                routing_table._add_peer(host.get_id(), host.get_addrs())
+            routed_hosts = tuple(
+                RoutedHost(host.get_network(), routing_table) for host in hosts
+            )
+            yield routed_hosts
 
 
 class FloodsubFactory(factory.Factory):
@@ -176,6 +221,7 @@ class GossipsubFactory(factory.Factory):
     time_to_live = GOSSIPSUB_PARAMS.time_to_live
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
+    heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
 
 
@@ -186,13 +232,19 @@ class PubsubFactory(factory.Factory):
     host = factory.SubFactory(HostFactory)
     router = None
     cache_size = None
+    strict_signing = False
 
     @classmethod
     @asynccontextmanager
     async def create_and_start(
-        cls, host: IHost, router: IPubsubRouter, cache_size: int
+        cls, host: IHost, router: IPubsubRouter, cache_size: int, strict_signing: bool
     ) -> AsyncIterator[Pubsub]:
-        pubsub = PubsubFactory(host=host, router=router, cache_size=cache_size)
+        pubsub = PubsubFactory(
+            host=host,
+            router=router,
+            cache_size=cache_size,
+            strict_signing=strict_signing,
+        )
         async with background_trio_service(pubsub):
             yield pubsub
 
@@ -204,13 +256,14 @@ class PubsubFactory(factory.Factory):
         routers: Sequence[IPubsubRouter],
         is_secure: bool = False,
         cache_size: int = None,
+        strict_signing: bool = False,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         async with HostFactory.create_batch_and_listen(is_secure, number) as hosts:
             # Pubsubs should exit before hosts
             async with AsyncExitStack() as stack:
                 pubsubs = [
                     await stack.enter_async_context(
-                        cls.create_and_start(host, router, cache_size)
+                        cls.create_and_start(host, router, cache_size, strict_signing)
                     )
                     for host, router in zip(hosts, routers)
                 ]
@@ -223,6 +276,7 @@ class PubsubFactory(factory.Factory):
         number: int,
         is_secure: bool = False,
         cache_size: int = None,
+        strict_signing: bool = False,
         protocols: Sequence[TProtocol] = None,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         if protocols is not None:
@@ -230,7 +284,7 @@ class PubsubFactory(factory.Factory):
         else:
             floodsubs = FloodsubFactory.create_batch(number)
         async with cls._create_batch_with_router(
-            number, floodsubs, is_secure, cache_size
+            number, floodsubs, is_secure, cache_size, strict_signing
         ) as pubsubs:
             yield pubsubs
 
@@ -242,6 +296,7 @@ class PubsubFactory(factory.Factory):
         *,
         is_secure: bool = False,
         cache_size: int = None,
+        strict_signing: bool = False,
         protocols: Sequence[TProtocol] = None,
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
@@ -250,6 +305,7 @@ class PubsubFactory(factory.Factory):
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
         heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
+        heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
@@ -274,7 +330,7 @@ class PubsubFactory(factory.Factory):
             )
 
         async with cls._create_batch_with_router(
-            number, gossipsubs, is_secure, cache_size
+            number, gossipsubs, is_secure, cache_size, strict_signing
         ) as pubsubs:
             async with AsyncExitStack() as stack:
                 for router in gossipsubs:
