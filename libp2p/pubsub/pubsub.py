@@ -539,6 +539,7 @@ class Pubsub:
         except ValidationError:
             logger.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",
+                msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
                 base58.b58encode(msg.from_id).decode(),
