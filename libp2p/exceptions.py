@@ -8,3 +8,9 @@ class ValidationError(BaseLibp2pError):
 
 class ParseError(BaseLibp2pError):
     pass
+
+
+class MultiError(BaseLibp2pError):
+    """Raised with multiple exceptions."""
+
+    # todo: find some way for this to fancy-print all encapsulated errors
