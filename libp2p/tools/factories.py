@@ -1,7 +1,6 @@
-from contextlib import AsyncExitStack
 from typing import Any, AsyncIterator, Dict, List, Sequence, Tuple, cast
 
-# NOTE: import ``asynccontextmanager`` from ``contextlib`` when support for python 3.6 is dropped.
+from async_exit_stack import AsyncExitStack
 from async_generator import asynccontextmanager
 from async_service import background_trio_service
 import factory

@@ -76,6 +76,7 @@ install_requires = [
     "async_generator==1.10",
     "trio>=0.13.0",
     "async-service>=0.1.0a2,<0.2.0",
+    "async-exit-stack==1.0.1",
 ]
 
 
