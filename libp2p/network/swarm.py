@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, List, Optional
 
-from async_service import Service
 from multiaddr import Multiaddr
 import trio
 
@@ -25,14 +24,14 @@ from ..exceptions import MultiError
 from .connection.raw_connection import RawConnection
 from .connection.swarm_connection import SwarmConn
 from .exceptions import SwarmException
-from .network_interface import INetwork
+from .network_interface import INetworkService
 from .notifee_interface import INotifee
 from .stream.net_stream_interface import INetStream
 
 logger = logging.getLogger("libp2p.network.swarm")
 
 
-class Swarm(INetwork, Service):
+class Swarm(INetworkService):
 
     self_id: ID
     peerstore: IPeerStore

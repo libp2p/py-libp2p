@@ -25,9 +25,6 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
         raise InvalidAddrError("`addr` should not be `None`")
 
-    if not isinstance(addr, multiaddr.Multiaddr):
-        raise InvalidAddrError(f"`addr`={addr} should be of type `Multiaddr`")
-
     parts = addr.split()
     if not parts:
         raise InvalidAddrError(

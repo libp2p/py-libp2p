@@ -1,11 +1,14 @@
-from typing import Sequence
+from typing import AsyncIterator, Sequence
+
+from async_generator import asynccontextmanager
+from async_service import background_trio_service
 
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
 from libp2p.host.routed_host import RoutedHost
-from libp2p.network.network_interface import INetwork
+from libp2p.network.network_interface import INetwork, INetworkService
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
@@ -30,28 +33,27 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
 
 
 def initialize_default_swarm(
-    key_pair: KeyPair,
-    id_opt: ID = None,
-    transport_opt: Sequence[str] = None,
+    key_pair: KeyPair = None,
     muxer_opt: TMuxerOptions = None,
     sec_opt: TSecurityOptions = None,
     peerstore_opt: IPeerStore = None,
-) -> Swarm:
+) -> INetworkService:
     """
     initialize swarm when no swarm is passed in.
 
-    :param id_opt: optional id for host
-    :param transport_opt: optional choice of transport upgrade
+    :param key_pair: optional choice of the ``KeyPair``
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
     :return: return a default swarm instance
     """
 
-    if not id_opt:
-        id_opt = generate_peer_id_from(key_pair)
+    if not key_pair:
+        key_pair = generate_new_rsa_identity()
 
-    # TODO: Parse `transport_opt` to determine transport
+    id_opt = generate_peer_id_from(key_pair)
+
+    # TODO: Parse `listen_addrs` to determine transport
     transport = TCP()
 
     muxer_transports_by_protocol = muxer_opt or {MPLEX_PROTOCOL_ID: Mplex}
@@ -67,48 +69,17 @@ def initialize_default_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
-    # TODO: Initialize discovery if not presented
     return Swarm(id_opt, peerstore, upgrader, transport)
 
 
-def new_node(
-    key_pair: KeyPair = None,
-    swarm_opt: INetwork = None,
-    transport_opt: Sequence[str] = None,
-    muxer_opt: TMuxerOptions = None,
-    sec_opt: TSecurityOptions = None,
-    peerstore_opt: IPeerStore = None,
-    disc_opt: IPeerRouting = None,
-) -> BasicHost:
+def _new_host(swarm_opt: INetwork, disc_opt: IPeerRouting = None) -> IHost:
     """
-    create new libp2p node.
+    create new libp2p host.
 
-    :param key_pair: key pair for deriving an identity
     :param swarm_opt: optional swarm
-    :param id_opt: optional id for host
-    :param transport_opt: optional choice of transport upgrade
-    :param muxer_opt: optional choice of stream muxer
-    :param sec_opt: optional choice of security upgrade
-    :param peerstore_opt: optional peerstore
     :param disc_opt: optional discovery
     :return: return a host instance
     """
-
-    if not key_pair:
-        key_pair = generate_new_rsa_identity()
-
-    id_opt = generate_peer_id_from(key_pair)
-
-    if not swarm_opt:
-        swarm_opt = initialize_default_swarm(
-            key_pair=key_pair,
-            id_opt=id_opt,
-            transport_opt=transport_opt,
-            muxer_opt=muxer_opt,
-            sec_opt=sec_opt,
-            peerstore_opt=peerstore_opt,
-        )
-
     # TODO enable support for other host type
     # TODO routing unimplemented
     host: IHost  # If not explicitly typed, MyPy raises error
@@ -118,3 +89,28 @@ def new_node(
         host = BasicHost(swarm_opt)
 
     return host
+
+
+@asynccontextmanager
+async def new_host_trio(
+    listen_addrs: Sequence[str],
+    key_pair: KeyPair = None,
+    swarm_opt: INetwork = None,
+    muxer_opt: TMuxerOptions = None,
+    sec_opt: TSecurityOptions = None,
+    peerstore_opt: IPeerStore = None,
+    disc_opt: IPeerRouting = None,
+) -> AsyncIterator[IHost]:
+    swarm = initialize_default_swarm(
+        key_pair=key_pair,
+        muxer_opt=muxer_opt,
+        sec_opt=sec_opt,
+        peerstore_opt=peerstore_opt,
+    )
+    async with background_trio_service(swarm):
+        await swarm.listen(*listen_addrs)
+        host = _new_host(swarm_opt=swarm, disc_opt=disc_opt)
+        yield host
+
+
+# TODO: Support asyncio

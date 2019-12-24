@@ -1,8 +1,7 @@
-from async_service import background_trio_service
 import pytest
 import trio
 
-from libp2p import new_node
+from libp2p import new_host_trio
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.tools.constants import LISTEN_MADDR
@@ -30,16 +29,15 @@ async def perform_simple_test(
     # for testing, we do NOT want to communicate over a stream so we can't just create two nodes
     # and use their conn because our mplex will internally relay messages to a stream
 
-    node1 = new_node(key_pair=initiator_key_pair, sec_opt=transports_for_initiator)
-    node2 = new_node(
-        key_pair=noninitiator_key_pair, sec_opt=transports_for_noninitiator
-    )
-    swarm1 = node1.get_network()
-    swarm2 = node2.get_network()
-    async with background_trio_service(swarm1), background_trio_service(swarm2):
-        await swarm1.listen(LISTEN_MADDR)
-        await swarm2.listen(LISTEN_MADDR)
-
+    async with new_host_trio(
+        listen_addrs=[LISTEN_MADDR],
+        key_pair=initiator_key_pair,
+        sec_opt=transports_for_initiator,
+    ) as node1, new_host_trio(
+        listen_addrs=[LISTEN_MADDR],
+        key_pair=noninitiator_key_pair,
+        sec_opt=transports_for_noninitiator,
+    ) as node2:
         await connect(node1, node2)
 
         # Wait a very short period to allow conns to be stored (since the functions
