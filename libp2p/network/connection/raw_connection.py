@@ -55,4 +55,8 @@ class RawConnection(IRawConnection):
         self.writer.close()
         if sys.version_info < (3, 7):
             return
-        await self.writer.wait_closed()
+        try:
+            await self.writer.wait_closed()
+        # In case the connection is already reset.
+        except (ConnectionResetError, RawConnError):
+            return
