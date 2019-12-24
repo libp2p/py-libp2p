@@ -154,6 +154,7 @@ async def test_get_msg_validators():
         async def async_validator(peer_id, msg):
             nonlocal times_async_validator_called
             times_async_validator_called += 1
+            await trio.hazmat.checkpoint()
 
         topic_1 = "TEST_VALIDATOR_1"
         topic_2 = "TEST_VALIDATOR_2"
@@ -199,9 +200,11 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
             return False
 
         async def passed_async_validator(peer_id, msg):
+            await trio.hazmat.checkpoint()
             return True
 
         async def failed_async_validator(peer_id, msg):
+            await trio.hazmat.checkpoint()
             return False
 
         topic_1 = "TEST_SYNC_VALIDATOR"
