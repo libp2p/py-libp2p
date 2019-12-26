@@ -238,7 +238,7 @@ class PubsubFactory(factory.Factory):
     async def create_and_start(
         cls, host: IHost, router: IPubsubRouter, cache_size: int, strict_signing: bool
     ) -> AsyncIterator[Pubsub]:
-        pubsub = PubsubFactory(
+        pubsub = cls(
             host=host,
             router=router,
             cache_size=cache_size,
