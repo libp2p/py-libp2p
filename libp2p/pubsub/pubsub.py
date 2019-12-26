@@ -332,8 +332,7 @@ class Pubsub(IPubsub, Service):
         open a stream to the peer using a supported pubsub protocol pubsub
         protocols we support."""
         async with self.peer_receive_channel:
-            while self.manager.is_running:
-                peer_id: ID = await self.peer_receive_channel.receive()
+            async for peer_id in self.peer_receive_channel:
                 # Add Peer
                 self.manager.run_task(self._handle_new_peer, peer_id)
 
@@ -342,8 +341,7 @@ class Pubsub(IPubsub, Service):
         between that peer and remove peer info from pubsub and pubsub
         router."""
         async with self.dead_peer_receive_channel:
-            while self.manager.is_running:
-                peer_id: ID = await self.dead_peer_receive_channel.receive()
+            async for peer_id in self.dead_peer_receive_channel:
                 # Remove Peer
                 self._handle_dead_peer(peer_id)
 
