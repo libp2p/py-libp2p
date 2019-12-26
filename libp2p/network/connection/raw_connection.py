@@ -26,10 +26,11 @@ class RawConnection(IRawConnection):
 
     async def write(self, data: bytes) -> None:
         """Raise `RawConnError` if the underlying connection breaks."""
-        try:
-            self.writer.write(data)
-        except ConnectionResetError as error:
-            raise RawConnError(error)
+        # Detect if underlying transport is closing before write data to it
+        # ref: https://github.com/ethereum/trinity/pull/614
+        if self.writer.transport.is_closing():
+            raise RawConnError("Transport is closing")
+        self.writer.write(data)
         # Reference: https://github.com/ethereum/lahja/blob/93610b2eb46969ff1797e0748c7ac2595e130aef/lahja/asyncio/endpoint.py#L99-L102  # noqa: E501
         # Use a lock to serialize drain() calls. Circumvents this bug:
         # https://bugs.python.org/issue29930
@@ -52,7 +53,13 @@ class RawConnection(IRawConnection):
             raise RawConnError(error)
 
     async def close(self) -> None:
+        if self.writer.transport.is_closing():
+            return
         self.writer.close()
         if sys.version_info < (3, 7):
             return
-        await self.writer.wait_closed()
+        try:
+            await self.writer.wait_closed()
+        # In case the connection is already reset.
+        except ConnectionResetError:
+            return
