@@ -188,9 +188,7 @@ class MplexStream(IMuxedStream):
                     if self.is_initiator
                     else HeaderTags.ResetReceiver
                 )
-                self.muxed_conn.manager.run_task(
-                    self.muxed_conn.send_message, flag, None, self.stream_id
-                )
+                await self.muxed_conn.send_message(flag, None, self.stream_id)
 
             self.event_local_closed.set()
             self.event_remote_closed.set()

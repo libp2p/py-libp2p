@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Set, Tuple
 
-from async_service import Service
 import trio
 
 from libp2p.network.connection.net_connection_interface import INetConn
@@ -17,10 +16,11 @@ Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee
 """
 
 
-class SwarmConn(INetConn, Service):
+class SwarmConn(INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: Set[NetStream]
+    event_started: trio.Event
     event_closed: trio.Event
 
     def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
@@ -28,6 +28,7 @@ class SwarmConn(INetConn, Service):
         self.swarm = swarm
         self.streams = set()
         self.event_closed = trio.Event()
+        self.event_started = trio.Event()
 
     @property
     def is_closed(self) -> bool:
@@ -38,8 +39,6 @@ class SwarmConn(INetConn, Service):
             return
         self.event_closed.set()
         await self._cleanup()
-        # Cancel service
-        await self.manager.stop()
 
     async def _cleanup(self) -> None:
         self.swarm.remove_conn(self)
@@ -57,13 +56,14 @@ class SwarmConn(INetConn, Service):
         self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
-        while self.manager.is_running:
+        self.event_started.set()
+        while True:
             try:
                 stream = await self.muxed_conn.accept_stream()
             # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             except MuxedConnUnavailable:
                 break
-            self.manager.run_task(self._handle_muxed_stream, stream)
+            self.swarm.manager.run_task(self._handle_muxed_stream, stream)
 
         await self.close()
 
@@ -87,15 +87,14 @@ class SwarmConn(INetConn, Service):
     def _notify_disconnected(self) -> None:
         self.swarm.notify_disconnected(self)
 
-    async def run(self) -> None:
-        self.manager.run_task(self._handle_new_streams)
-        await self.manager.wait_finished()
+    async def start(self) -> None:
+        await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()
         return self._add_stream(muxed_stream)
 
-    async def get_streams(self) -> Tuple[NetStream, ...]:
+    def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)
 
     def remove_stream(self, stream: NetStream) -> None:

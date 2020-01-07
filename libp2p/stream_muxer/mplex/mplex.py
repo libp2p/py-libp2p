@@ -2,7 +2,6 @@ import logging
 import math
 from typing import Dict, Optional, Tuple
 
-from async_service import Service
 import trio
 
 from libp2p.exceptions import ParseError
@@ -29,7 +28,7 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
 
 
-class Mplex(IMuxedConn, Service):
+class Mplex(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
     """
@@ -45,6 +44,7 @@ class Mplex(IMuxedConn, Service):
 
     event_shutting_down: trio.Event
     event_closed: trio.Event
+    event_started: trio.Event
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
@@ -73,10 +73,10 @@ class Mplex(IMuxedConn, Service):
         self.new_stream_send_channel, self.new_stream_receive_channel = channels
         self.event_shutting_down = trio.Event()
         self.event_closed = trio.Event()
+        self.event_started = trio.Event()
 
-    async def run(self) -> None:
-        self.manager.run_task(self.handle_incoming)
-        await self.manager.wait_finished()
+    async def start(self) -> None:
+        await self.handle_incoming()
 
     @property
     def is_initiator(self) -> bool:
@@ -91,7 +91,6 @@ class Mplex(IMuxedConn, Service):
         await self.secured_conn.close()
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
-        await self.manager.stop()
 
     @property
     def is_closed(self) -> bool:
@@ -178,8 +177,8 @@ class Mplex(IMuxedConn, Service):
     async def handle_incoming(self) -> None:
         """Read a message off of the secured connection and add it to the
         corresponding message buffer."""
-
-        while self.manager.is_running:
+        self.event_started.set()
+        while True:
             try:
                 await self._handle_incoming_message()
             except MplexUnavailable as e:

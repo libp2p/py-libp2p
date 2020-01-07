@@ -1,18 +1,19 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
-from async_service import ServiceAPI
+import trio
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
 
 
-class IMuxedConn(ServiceAPI):
+class IMuxedConn(ABC):
     """
     reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
     """
 
     peer_id: ID
+    event_started: trio.Event
 
     @abstractmethod
     def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
@@ -27,7 +28,11 @@ class IMuxedConn(ServiceAPI):
     @property
     @abstractmethod
     def is_initiator(self) -> bool:
-        pass
+        """if this connection is the initiator."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """start the multiplexer."""
 
     @abstractmethod
     async def close(self) -> None:

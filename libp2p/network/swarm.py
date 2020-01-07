@@ -2,7 +2,6 @@ import logging
 from typing import Dict, List, Optional
 
 from multiaddr import Multiaddr
-import trio
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.net_connection_interface import INetConn
@@ -44,7 +43,6 @@ class Swarm(INetworkService):
     common_stream_handler: Optional[StreamHandlerFn]
 
     notifees: List[INotifee]
-    event_closed: trio.Event
 
     def __init__(
         self,
@@ -62,8 +60,6 @@ class Swarm(INetworkService):
 
         # Create Notifee array
         self.notifees = []
-
-        self.event_closed = trio.Event()
 
         self.common_stream_handler = None
 
@@ -158,13 +154,11 @@ class Swarm(INetworkService):
 
         try:
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
-            self.manager.run_child_service(muxed_conn)
         except MuxerUpgradeFailure as error:
             error_msg = "fail to upgrade mux for peer %s"
             logger.debug(error_msg, peer_id)
             await secured_conn.close()
             raise SwarmException(error_msg % peer_id) from error
-
         logger.debug("upgraded mux for peer %s", peer_id)
 
         swarm_conn = await self.add_conn(muxed_conn)
@@ -226,7 +220,6 @@ class Swarm(INetworkService):
                     muxed_conn = await self.upgrader.upgrade_connection(
                         secured_conn, peer_id
                     )
-                    self.manager.run_child_service(muxed_conn)
                 except MuxerUpgradeFailure as error:
                     error_msg = "fail to upgrade mux for peer %s"
                     logger.debug(error_msg, peer_id)
@@ -235,8 +228,8 @@ class Swarm(INetworkService):
                 logger.debug("upgraded mux for peer %s", peer_id)
 
                 await self.add_conn(muxed_conn)
-
                 logger.debug("successfully opened connection to peer %s", peer_id)
+
                 # NOTE: This is a intentional barrier to prevent from the handler exiting and
                 #   closing the connection.
                 await self.manager.wait_finished()
@@ -261,26 +254,12 @@ class Swarm(INetworkService):
         return False
 
     async def close(self) -> None:
-        if self.event_closed.is_set():
-            return
-        self.event_closed.set()
-        #   Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L124-L134  # noqa: E501
-        async with trio.open_nursery() as nursery:
-            for conn in self.connections.values():
-                nursery.start_soon(conn.close)
-        async with trio.open_nursery() as nursery:
-            for listener in self.listeners.values():
-                nursery.start_soon(listener.close)
-
-        # Cancel tasks
         await self.manager.stop()
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:
         if peer_id not in self.connections:
             return
-        # TODO: Should be changed to close multisple connections,
-        #   if we have several connections per peer in the future.
         connection = self.connections[peer_id]
         # NOTE: `connection.close` will delete `peer_id` from `self.connections`
         # and `notify_disconnected` for us.
@@ -293,12 +272,14 @@ class Swarm(INetworkService):
         and start to monitor the connection for its new streams and
         disconnection."""
         swarm_conn = SwarmConn(muxed_conn, self)
-        manager = self.manager.run_child_service(swarm_conn)
+        self.manager.run_task(muxed_conn.start)
+        await muxed_conn.event_started.wait()
+        self.manager.run_task(swarm_conn.start)
+        await swarm_conn.event_started.wait()
         # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
         self.notify_connected(swarm_conn)
-        await manager.wait_started()
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
@@ -307,8 +288,6 @@ class Swarm(INetworkService):
         peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return
-        # TODO: Should be changed to remove the exact connection,
-        #   if we have several connections per peer in the future.
         del self.connections[peer_id]
 
     # Notifee
