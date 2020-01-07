@@ -54,7 +54,7 @@ class SwarmConn(INetConn, Service):
         # before we cancel the stream handler tasks.
         await trio.sleep(0.1)
 
-        await self._notify_disconnected()
+        self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
         while self.manager.is_running:
@@ -68,7 +68,7 @@ class SwarmConn(INetConn, Service):
         await self.close()
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
-        net_stream = await self._add_stream(muxed_stream)
+        net_stream = self._add_stream(muxed_stream)
         if self.swarm.common_stream_handler is not None:
             try:
                 await self.swarm.common_stream_handler(net_stream)
@@ -78,14 +78,14 @@ class SwarmConn(INetConn, Service):
                 # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
                 self.remove_stream(net_stream)
 
-    async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
+    def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
-        await self.swarm.notify_opened_stream(net_stream)
+        self.swarm.notify_opened_stream(net_stream)
         return net_stream
 
-    async def _notify_disconnected(self) -> None:
-        await self.swarm.notify_disconnected(self)
+    def _notify_disconnected(self) -> None:
+        self.swarm.notify_disconnected(self)
 
     async def run(self) -> None:
         self.manager.run_task(self._handle_new_streams)
@@ -93,7 +93,7 @@ class SwarmConn(INetConn, Service):
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()
-        return await self._add_stream(muxed_stream)
+        return self._add_stream(muxed_stream)
 
     async def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)

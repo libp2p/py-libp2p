@@ -250,7 +250,7 @@ class Swarm(INetworkService):
                 await listener.listen(maddr, self.manager._task_nursery)  # type: ignore
 
                 # Call notifiers since event occurred
-                await self.notify_listen(maddr)
+                self.notify_listen(maddr)
 
                 return True
             except IOError:
@@ -297,7 +297,7 @@ class Swarm(INetworkService):
         # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
-        self.manager.run_task(self.notify_connected, swarm_conn)
+        self.notify_connected(swarm_conn)
         await manager.wait_started()
         return swarm_conn
 
@@ -320,27 +320,22 @@ class Swarm(INetworkService):
         """
         self.notifees.append(notifee)
 
-    # TODO: Use `run_task`.
-    async def notify_opened_stream(self, stream: INetStream) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.opened_stream, self, stream)
+    def notify_opened_stream(self, stream: INetStream) -> None:
+        for notifee in self.notifees:
+            self.manager.run_task(notifee.opened_stream, self, stream)
 
     # TODO: `notify_closed_stream`
 
-    async def notify_connected(self, conn: INetConn) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.connected, self, conn)
+    def notify_connected(self, conn: INetConn) -> None:
+        for notifee in self.notifees:
+            self.manager.run_task(notifee.connected, self, conn)
 
-    async def notify_disconnected(self, conn: INetConn) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.disconnected, self, conn)
+    def notify_disconnected(self, conn: INetConn) -> None:
+        for notifee in self.notifees:
+            self.manager.run_task(notifee.disconnected, self, conn)
 
-    async def notify_listen(self, multiaddr: Multiaddr) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.listen, self, multiaddr)
+    def notify_listen(self, multiaddr: Multiaddr) -> None:
+        for notifee in self.notifees:
+            self.manager.run_task(notifee.listen, self, multiaddr)
 
     # TODO: `notify_listen_close`
