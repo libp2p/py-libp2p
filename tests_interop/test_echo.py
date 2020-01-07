@@ -1,7 +1,7 @@
-import random
 import re
 
 from multiaddr import Multiaddr
+from p2pclient.utils import get_unused_tcp_port
 import pytest
 import trio
 
@@ -13,11 +13,6 @@ from libp2p.typing import TProtocol
 
 ECHO_PATH = GO_BIN_PATH / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
-
-
-# FIXME: Change to a reasonable implementation
-def unused_tcp_port_factory():
-    return random.randint(1024, 65535)
 
 
 class EchoProcess(BaseInteractiveProcess):
@@ -68,7 +63,7 @@ class EchoProcess(BaseInteractiveProcess):
 @pytest.mark.trio
 async def test_insecure_conn_py_to_go(is_host_secure):
     async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
-        go_proc = EchoProcess(unused_tcp_port_factory(), is_host_secure)
+        go_proc = EchoProcess(get_unused_tcp_port(), is_host_secure)
         await go_proc.start()
 
         host = hosts[0]
@@ -99,6 +94,6 @@ async def test_insecure_conn_go_to_py(is_host_secure):
 
         host.set_stream_handler(ECHO_PROTOCOL_ID, _handle_echo)
         py_maddr = host.get_addrs()[0]
-        go_proc = EchoProcess(unused_tcp_port_factory(), is_host_secure, py_maddr)
+        go_proc = EchoProcess(get_unused_tcp_port(), is_host_secure, py_maddr)
         await go_proc.start()
         await event_handler_finished.wait()
