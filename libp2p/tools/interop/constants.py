@@ -1,2 +1,1 @@
 LOCALHOST_IP = "127.0.0.1"
-PEXPECT_NEW_LINE = "\r\n"

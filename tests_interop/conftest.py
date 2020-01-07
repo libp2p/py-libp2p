@@ -1,68 +1,19 @@
-import asyncio
-import sys
-from typing import Union
-
+import anyio
+from async_exit_stack import AsyncExitStack
 from p2pclient.datastructures import StreamInfo
-import pexpect
+from p2pclient.utils import get_unused_tcp_port
 import pytest
+import trio
 
 from libp2p.io.abc import ReadWriteCloser
-from libp2p.tools.constants import GOSSIPSUB_PARAMS, LISTEN_MADDR
-from libp2p.tools.factories import (
-    FloodsubFactory,
-    GossipsubFactory,
-    HostFactory,
-    PubsubFactory,
-)
-from libp2p.tools.interop.daemon import Daemon, make_p2pd
+from libp2p.tools.factories import HostFactory, PubsubFactory
+from libp2p.tools.interop.daemon import make_p2pd
 from libp2p.tools.interop.utils import connect
 
 
 @pytest.fixture
 def is_host_secure():
     return False
-
-
-@pytest.fixture
-def num_hosts():
-    return 3
-
-
-@pytest.fixture
-async def hosts(num_hosts, is_host_secure):
-    _hosts = HostFactory.create_batch(num_hosts, is_secure=is_host_secure)
-    await asyncio.gather(
-        *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
-    )
-    try:
-        yield _hosts
-    finally:
-        # TODO: It's possible that `close` raises exceptions currently,
-        #   due to the connection reset things. Though we don't care much about that when
-        #   cleaning up the tasks, it is probably better to handle the exceptions properly.
-        await asyncio.gather(
-            *[_host.close() for _host in _hosts], return_exceptions=True
-        )
-
-
-@pytest.fixture
-def proc_factory():
-    procs = []
-
-    def call_proc(cmd, args, logfile=None, encoding=None):
-        if logfile is None:
-            logfile = sys.stdout
-        if encoding is None:
-            encoding = "utf-8"
-        proc = pexpect.spawn(cmd, args, logfile=logfile, encoding=encoding)
-        procs.append(proc)
-        return proc
-
-    try:
-        yield call_proc
-    finally:
-        for proc in procs:
-            proc.close()
 
 
 @pytest.fixture
@@ -87,79 +38,60 @@ def is_pubsub_signing_strict():
 
 @pytest.fixture
 async def p2pds(
-    num_p2pds,
-    is_host_secure,
-    is_gossipsub,
-    unused_tcp_port_factory,
-    is_pubsub_signing,
-    is_pubsub_signing_strict,
+    num_p2pds, is_host_secure, is_gossipsub, is_pubsub_signing, is_pubsub_signing_strict
 ):
-    p2pds: Union[Daemon, Exception] = await asyncio.gather(
-        *[
-            make_p2pd(
-                unused_tcp_port_factory(),
-                unused_tcp_port_factory(),
-                is_host_secure,
-                is_gossipsub=is_gossipsub,
-                is_pubsub_signing=is_pubsub_signing,
-                is_pubsub_signing_strict=is_pubsub_signing_strict,
+    async with AsyncExitStack() as stack:
+        p2pds = [
+            await stack.enter_async_context(
+                make_p2pd(
+                    get_unused_tcp_port(),
+                    get_unused_tcp_port(),
+                    is_host_secure,
+                    is_gossipsub=is_gossipsub,
+                    is_pubsub_signing=is_pubsub_signing,
+                    is_pubsub_signing_strict=is_pubsub_signing_strict,
+                )
             )
             for _ in range(num_p2pds)
-        ],
-        return_exceptions=True,
-    )
-    p2pds_succeeded = tuple(p2pd for p2pd in p2pds if isinstance(p2pd, Daemon))
-    if len(p2pds_succeeded) != len(p2pds):
-        # Not all succeeded. Close the succeeded ones and print the failed ones(exceptions).
-        await asyncio.gather(*[p2pd.close() for p2pd in p2pds_succeeded])
-        exceptions = tuple(p2pd for p2pd in p2pds if isinstance(p2pd, Exception))
-        raise Exception(f"not all p2pds succeed: first exception={exceptions[0]}")
-    try:
-        yield p2pds
-    finally:
-        await asyncio.gather(*[p2pd.close() for p2pd in p2pds])
+        ]
+        try:
+            yield p2pds
+        finally:
+            for p2pd in p2pds:
+                await p2pd.close()
 
 
 @pytest.fixture
-def pubsubs(num_hosts, hosts, is_gossipsub, is_pubsub_signing_strict):
+async def pubsubs(num_hosts, is_host_secure, is_gossipsub, is_pubsub_signing_strict):
     if is_gossipsub:
-        routers = GossipsubFactory.create_batch(num_hosts, **GOSSIPSUB_PARAMS._asdict())
+        yield PubsubFactory.create_batch_with_gossipsub(
+            num_hosts, is_secure=is_host_secure, strict_signing=is_pubsub_signing_strict
+        )
     else:
-        routers = FloodsubFactory.create_batch(num_hosts)
-    _pubsubs = tuple(
-        PubsubFactory(host=host, router=router, strict_signing=is_pubsub_signing_strict)
-        for host, router in zip(hosts, routers)
-    )
-    yield _pubsubs
-    # TODO: Clean up
+        yield PubsubFactory.create_batch_with_floodsub(
+            num_hosts, is_host_secure, strict_signing=is_pubsub_signing_strict
+        )
 
 
 class DaemonStream(ReadWriteCloser):
     stream_info: StreamInfo
-    reader: asyncio.StreamReader
-    writer: asyncio.StreamWriter
+    stream: anyio.abc.SocketStream
 
-    def __init__(
-        self,
-        stream_info: StreamInfo,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
+    def __init__(self, stream_info: StreamInfo, stream: anyio.abc.SocketStream) -> None:
         self.stream_info = stream_info
-        self.reader = reader
-        self.writer = writer
+        self.stream = stream
 
     async def close(self) -> None:
-        self.writer.close()
-        if sys.version_info < (3, 7):
-            return
-        await self.writer.wait_closed()
+        await self.stream.close()
 
     async def read(self, n: int = -1) -> bytes:
-        return await self.reader.read(n)
+        if n == -1:
+            return await self.stream.receive_some()
+        else:
+            return await self.stream.receive_some(n)
 
-    async def write(self, data: bytes) -> int:
-        return self.writer.write(data)
+    async def write(self, data: bytes) -> None:
+        return await self.stream.send_all(data)
 
 
 @pytest.fixture
@@ -168,40 +100,38 @@ async def is_to_fail_daemon_stream():
 
 
 @pytest.fixture
-async def py_to_daemon_stream_pair(hosts, p2pds, is_to_fail_daemon_stream):
-    assert len(hosts) >= 1
-    assert len(p2pds) >= 1
-    host = hosts[0]
-    p2pd = p2pds[0]
-    protocol_id = "/protocol/id/123"
-    stream_py = None
-    stream_daemon = None
-    event_stream_handled = asyncio.Event()
-    await connect(host, p2pd)
+async def py_to_daemon_stream_pair(p2pds, is_host_secure, is_to_fail_daemon_stream):
+    async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
+        assert len(p2pds) >= 1
+        host = hosts[0]
+        p2pd = p2pds[0]
+        protocol_id = "/protocol/id/123"
+        stream_py = None
+        stream_daemon = None
+        event_stream_handled = trio.Event()
+        await connect(host, p2pd)
 
-    async def daemon_stream_handler(stream_info, reader, writer):
-        nonlocal stream_daemon
-        stream_daemon = DaemonStream(stream_info, reader, writer)
-        event_stream_handled.set()
+        async def daemon_stream_handler(stream_info, stream):
+            nonlocal stream_daemon
+            stream_daemon = DaemonStream(stream_info, stream)
+            event_stream_handled.set()
+            await trio.hazmat.checkpoint()
 
-    await p2pd.control.stream_handler(protocol_id, daemon_stream_handler)
-    # Sleep for a while to wait for the handler being registered.
-    await asyncio.sleep(0.01)
+        await p2pd.control.stream_handler(protocol_id, daemon_stream_handler)
+        # Sleep for a while to wait for the handler being registered.
+        await trio.sleep(0.01)
 
-    if is_to_fail_daemon_stream:
-        # FIXME: This is a workaround to make daemon reset the stream.
-        #   We intentionally close the listener on the python side, it makes the connection from
-        #   daemon to us fail, and therefore the daemon resets the opened stream on their side.
-        #   Reference: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/stream.go#L47-L50  # noqa: E501
-        #   We need it because we want to test against `stream_py` after the remote side(daemon)
-        #   is reset. This should be removed after the API `stream.reset` is exposed in daemon
-        #   some day.
-        listener = p2pds[0].control.control.listener
-        listener.close()
-        if sys.version_info[0:2] > (3, 6):
-            await listener.wait_closed()
-    stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
-    if not is_to_fail_daemon_stream:
-        await event_stream_handled.wait()
-    # NOTE: If `is_to_fail_daemon_stream == True`, then `stream_daemon == None`.
-    yield stream_py, stream_daemon
+        if is_to_fail_daemon_stream:
+            # FIXME: This is a workaround to make daemon reset the stream.
+            #   We intentionally close the listener on the python side, it makes the connection from
+            #   daemon to us fail, and therefore the daemon resets the opened stream on their side.
+            #   Reference: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/stream.go#L47-L50  # noqa: E501
+            #   We need it because we want to test against `stream_py` after the remote side(daemon)
+            #   is reset. This should be removed after the API `stream.reset` is exposed in daemon
+            #   some day.
+            await p2pds[0].control.control.close()
+        stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
+        if not is_to_fail_daemon_stream:
+            await event_stream_handled.wait()
+        # NOTE: If `is_to_fail_daemon_stream == True`, then `stream_daemon == None`.
+        yield stream_py, stream_daemon
