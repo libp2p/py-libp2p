@@ -75,7 +75,7 @@ install_requires = [
     "dataclasses>=0.7, <1;python_version<'3.7'",
     "async_generator==1.10",
     "trio>=0.13.0",
-    "async-service==0.1.0a2",
+    "async-service>=0.1.0a4",
     "async-exit-stack==1.0.1",
 ]
 
