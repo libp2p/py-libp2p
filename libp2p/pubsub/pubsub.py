@@ -86,6 +86,9 @@ class Pubsub(IPubsub, Service):
     strict_signing: bool
     sign_key: PrivateKey
 
+    event_handle_peer_queue_started: trio.Event
+    event_handle_dead_peer_queue_started: trio.Event
+
     def __init__(
         self,
         host: IHost,
@@ -158,6 +161,9 @@ class Pubsub(IPubsub, Service):
         self.topic_validators = {}
 
         self.counter = int(time.time())
+
+        self.event_handle_peer_queue_started = trio.Event()
+        self.event_handle_dead_peer_queue_started = trio.Event()
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
@@ -331,12 +337,14 @@ class Pubsub(IPubsub, Service):
         """Continuously read from peer queue and each time a new peer is found,
         open a stream to the peer using a supported pubsub protocol pubsub
         protocols we support."""
+        self.event_handle_peer_queue_started.set()
         async with self.peer_receive_channel:
             async for peer_id in self.peer_receive_channel:
                 # Add Peer
                 self.manager.run_task(self._handle_new_peer, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
+        self.event_handle_dead_peer_queue_started.set()
         """Continuously read from dead peer channel and close the stream
         between that peer and remove peer info from pubsub and pubsub
         router."""

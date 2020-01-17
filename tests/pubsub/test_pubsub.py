@@ -103,6 +103,7 @@ async def test_set_and_remove_topic_validator():
         async def async_validator(peer_id, msg):
             nonlocal is_async_validator_called
             is_async_validator_called = True
+            await trio.hazmat.checkpoint()
 
         topic = "TEST_VALIDATOR"
 
@@ -237,6 +238,7 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
 @pytest.mark.trio
 async def test_continuously_read_stream(monkeypatch, nursery, is_host_secure):
     async def wait_for_event_occurring(event):
+        await trio.hazmat.checkpoint()
         with trio.fail_after(0.1):
             await event.wait()
 
@@ -418,6 +420,7 @@ async def test_publish(monkeypatch):
     async def push_msg(msg_forwarder, msg):
         msg_forwarders.append(msg_forwarder)
         msgs.append(msg)
+        await trio.hazmat.checkpoint()
 
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
         with monkeypatch.context() as m:
@@ -454,7 +457,7 @@ async def test_push_msg(monkeypatch):
 
             async def router_publish(*args, **kwargs):
                 event.set()
-                await trio.sleep(0)
+                await trio.hazmat.checkpoint()
 
             with monkeypatch.context() as m:
                 m.setattr(pubsubs_fsub[0].router, "publish", router_publish)
@@ -555,6 +558,7 @@ async def test_strict_signing_failed_validation(monkeypatch):
 
         # Use router publish to check if `push_msg` succeed.
         async def router_publish(*args, **kwargs):
+            await trio.hazmat.checkpoint()
             # The event will only be set if `push_msg` succeed.
             event.set()
 

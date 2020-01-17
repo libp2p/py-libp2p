@@ -245,6 +245,8 @@ class PubsubFactory(factory.Factory):
             strict_signing=strict_signing,
         )
         async with background_trio_service(pubsub):
+            await pubsub.event_handle_peer_queue_started.wait()
+            await pubsub.event_handle_dead_peer_queue_started.wait()
             yield pubsub
 
     @classmethod
