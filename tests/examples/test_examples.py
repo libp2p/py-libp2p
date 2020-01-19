@@ -1,10 +1,10 @@
-import asyncio
-
 import pytest
+import trio
 
 from libp2p.host.exceptions import StreamFailure
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.tools.utils import set_up_nodes_by_transport_opt
+from libp2p.tools.factories import HostFactory
+from libp2p.tools.utils import MAX_READ_LEN
 
 PROTOCOL_ID = "/chat/1.0.0"
 
@@ -25,7 +25,7 @@ async def hello_world(host_a, host_b):
     # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
     stream = await host_b.new_stream(host_a.get_id(), [PROTOCOL_ID])
     await stream.write(hello_world_from_host_b)
-    read = await stream.read()
+    read = await stream.read(MAX_READ_LEN)
     assert read == hello_world_from_host_a
     await stream.close()
 
@@ -47,7 +47,7 @@ async def connect_write(host_a, host_b):
         await stream.write(message.encode())
 
     # Reader needs time due to async reads
-    await asyncio.sleep(2)
+    await trio.sleep(2)
 
     await stream.close()
     assert received == messages
@@ -88,16 +88,14 @@ async def no_common_protocol(host_a, host_b):
         await host_b.new_stream(host_a.get_id(), ["/fakeproto/0.0.1"])
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "test", [(hello_world), (connect_write), (connect_read), (no_common_protocol)]
 )
-async def test_chat(test):
-    transport_opt_list = [["/ip4/127.0.0.1/tcp/0"], ["/ip4/127.0.0.1/tcp/0"]]
-    (host_a, host_b) = await set_up_nodes_by_transport_opt(transport_opt_list)
+@pytest.mark.trio
+async def test_chat(test, is_host_secure):
+    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+        addr = hosts[0].get_addrs()[0]
+        info = info_from_p2p_addr(addr)
+        await hosts[1].connect(info)
 
-    addr = host_a.get_addrs()[0]
-    info = info_from_p2p_addr(addr)
-    await host_b.connect(info)
-
-    await test(host_a, host_b)
+        await test(hosts[0], hosts[1])
