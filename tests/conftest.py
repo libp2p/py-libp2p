@@ -1,8 +1,5 @@
-import asyncio
-
 import pytest
 
-from libp2p.tools.constants import LISTEN_MADDR
 from libp2p.tools.factories import HostFactory
 
 
@@ -17,17 +14,6 @@ def num_hosts():
 
 
 @pytest.fixture
-async def hosts(num_hosts, is_host_secure):
-    _hosts = HostFactory.create_batch(num_hosts, is_secure=is_host_secure)
-    await asyncio.gather(
-        *[_host.get_network().listen(LISTEN_MADDR) for _host in _hosts]
-    )
-    try:
+async def hosts(num_hosts, is_host_secure, nursery):
+    async with HostFactory.create_batch_and_listen(is_host_secure, num_hosts) as _hosts:
         yield _hosts
-    finally:
-        # TODO: It's possible that `close` raises exceptions currently,
-        #   due to the connection reset things. Though we don't care much about that when
-        #   cleaning up the tasks, it is probably better to handle the exceptions properly.
-        await asyncio.gather(
-            *[_host.close() for _host in _hosts], return_exceptions=True
-        )
