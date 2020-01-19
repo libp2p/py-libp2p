@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, Sequence
 
+from async_service import Service
 from multiaddr import Multiaddr
 
 from libp2p.network.connection.net_connection_interface import INetConn
@@ -70,3 +71,7 @@ class INetwork(ABC):
     @abstractmethod
     async def close_peer(self, peer_id: ID) -> None:
         pass
+
+
+class INetworkService(INetwork, Service):
+    ...
