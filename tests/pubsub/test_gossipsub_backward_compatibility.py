@@ -3,25 +3,25 @@ import functools
 import pytest
 
 from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
-from libp2p.tools.factories import GossipsubFactory
+from libp2p.tools.factories import PubsubFactory
 from libp2p.tools.pubsub.floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,
 )
 
 
-@pytest.mark.asyncio
-async def test_gossipsub_initialize_with_floodsub_protocol():
-    GossipsubFactory(protocols=[FLOODSUB_PROTOCOL_ID])
-
-
 @pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)
-@pytest.mark.asyncio
+@pytest.mark.trio
 @pytest.mark.slow
 async def test_gossipsub_run_with_floodsub_tests(test_case_obj):
     await perform_test_from_obj(
         test_case_obj,
         functools.partial(
-            GossipsubFactory, degree=3, degree_low=2, degree_high=4, time_to_live=30
+            PubsubFactory.create_batch_with_gossipsub,
+            protocols=[FLOODSUB_PROTOCOL_ID],
+            degree=3,
+            degree_low=2,
+            degree_high=4,
+            time_to_live=30,
         ),
     )

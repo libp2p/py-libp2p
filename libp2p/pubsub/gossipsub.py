@@ -1,9 +1,11 @@
 from ast import literal_eval
-import asyncio
 from collections import defaultdict
 import logging
 import random
 from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Set, Tuple
+
+from async_service import Service
+import trio
 
 from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.peer.id import ID
@@ -11,18 +13,18 @@ from libp2p.pubsub import floodsub
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
+from .abc import IPubsubRouter
+from .exceptions import NoPubsubAttached
 from .mcache import MessageCache
 from .pb import rpc_pb2
 from .pubsub import Pubsub
-from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 
-class GossipSub(IPubsubRouter):
-
+class GossipSub(IPubsubRouter, Service):
     protocols: List[TProtocol]
     pubsub: Pubsub
 
@@ -38,7 +40,8 @@ class GossipSub(IPubsubRouter):
     # The protocol peer supports
     peer_protocol: Dict[ID, TProtocol]
 
-    time_since_last_publish: Dict[str, int]
+    # TODO: Add `time_since_last_publish`
+    #   Create topic --> time since last publish map.
 
     mcache: MessageCache
 
@@ -75,15 +78,18 @@ class GossipSub(IPubsubRouter):
         # Create peer --> protocol mapping
         self.peer_protocol = {}
 
-        # Create topic --> time since last publish map
-        self.time_since_last_publish = {}
-
         # Create message cache
         self.mcache = MessageCache(gossip_window, gossip_history)
 
         # Create heartbeat timer
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
+
+    async def run(self) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
+        self.manager.run_task(self.heartbeat)
+        await self.manager.wait_finished()
 
     # Interface functions
 
@@ -103,9 +109,6 @@ class GossipSub(IPubsubRouter):
         self.pubsub = pubsub
 
         logger.debug("attached to pusub")
-
-        # Start heartbeat now that we have a pubsub instance
-        asyncio.ensure_future(self.heartbeat())
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
@@ -370,7 +373,7 @@ class GossipSub(IPubsubRouter):
         state changes in the preceding heartbeat
         """
         # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # Noqa: E501
-        await asyncio.sleep(self.heartbeat_initial_delay)
+        await trio.sleep(self.heartbeat_initial_delay)
         while True:
             # Maintain mesh and keep track of which peers to send GRAFT or PRUNE to
             peers_to_graft, peers_to_prune = self.mesh_heartbeat()
@@ -385,7 +388,7 @@ class GossipSub(IPubsubRouter):
 
             self.mcache.shift()
 
-            await asyncio.sleep(self.heartbeat_interval)
+            await trio.sleep(self.heartbeat_interval)
 
     def mesh_heartbeat(
         self
@@ -413,7 +416,7 @@ class GossipSub(IPubsubRouter):
 
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = GossipSub.select_from_minus(
+                selected_peers = self.select_from_minus(
                     num_mesh_peers_in_topic - self.degree, self.mesh[topic], set()
                 )
                 for peer in selected_peers:
@@ -428,15 +431,10 @@ class GossipSub(IPubsubRouter):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.fanout:
             # Delete topic entry if it's not in `pubsub.peer_topics`
-            # or if it's time-since-last-published > ttl
-            # TODO: there's no way time_since_last_publish gets set anywhere yet
-            if (
-                topic not in self.pubsub.peer_topics
-                or self.time_since_last_publish[topic] > self.time_to_live
-            ):
+            # or (TODO) if it's time-since-last-published > ttl
+            if topic not in self.pubsub.peer_topics:
                 # Remove topic from fanout
                 del self.fanout[topic]
-                del self.time_since_last_publish[topic]
             else:
                 # Check if fanout peers are still in the topic and remove the ones that are not
                 # ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L498-L504  # noqa: E501

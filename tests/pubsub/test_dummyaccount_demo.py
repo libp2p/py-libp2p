@@ -1,17 +1,8 @@
-import asyncio
-from threading import Thread
-
 import pytest
+import trio
 
 from libp2p.tools.pubsub.dummy_account_node import DummyAccountNode
 from libp2p.tools.utils import connect
-
-
-def create_setup_in_new_thread_func(dummy_node):
-    def setup_in_new_thread():
-        asyncio.ensure_future(dummy_node.setup_crypto_networking())
-
-    return setup_in_new_thread
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
@@ -26,47 +17,35 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     :param assertion_func: assertions for testing the results of the actions are correct
     """
 
-    # Create nodes
-    dummy_nodes = []
-    for _ in range(num_nodes):
-        dummy_nodes.append(await DummyAccountNode.create())
+    async with DummyAccountNode.create(num_nodes) as dummy_nodes:
+        # Create connections between nodes according to `adjacency_map`
+        async with trio.open_nursery() as nursery:
+            for source_num in adjacency_map:
+                target_nums = adjacency_map[source_num]
+                for target_num in target_nums:
+                    nursery.start_soon(
+                        connect,
+                        dummy_nodes[source_num].host,
+                        dummy_nodes[target_num].host,
+                    )
 
-    # Create network
-    for source_num in adjacency_map:
-        target_nums = adjacency_map[source_num]
-        for target_num in target_nums:
-            await connect(
-                dummy_nodes[source_num].libp2p_node, dummy_nodes[target_num].libp2p_node
-            )
+        # Allow time for network creation to take place
+        await trio.sleep(0.25)
 
-    # Allow time for network creation to take place
-    await asyncio.sleep(0.25)
+        # Perform action function
+        await action_func(dummy_nodes)
 
-    # Start a thread for each node so that each node can listen and respond
-    # to messages on its own thread, which will avoid waiting indefinitely
-    # on the main thread. On this thread, call the setup func for the node,
-    # which subscribes the node to the CRYPTO_TOPIC topic
-    for dummy_node in dummy_nodes:
-        thread = Thread(target=create_setup_in_new_thread_func(dummy_node))
-        thread.run()
+        # Allow time for action function to be performed (i.e. messages to propogate)
+        await trio.sleep(1)
 
-    # Allow time for nodes to subscribe to CRYPTO_TOPIC topic
-    await asyncio.sleep(0.25)
-
-    # Perform action function
-    await action_func(dummy_nodes)
-
-    # Allow time for action function to be performed (i.e. messages to propogate)
-    await asyncio.sleep(1)
-
-    # Perform assertion function
-    for dummy_node in dummy_nodes:
-        assertion_func(dummy_node)
+        # Perform assertion function
+        for dummy_node in dummy_nodes:
+            assertion_func(dummy_node)
 
     # Success, terminate pending tasks.
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_simple_two_nodes():
     num_nodes = 2
     adj_map = {0: [1]}
@@ -80,7 +59,7 @@ async def test_simple_two_nodes():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_simple_three_nodes_line_topography():
     num_nodes = 3
     adj_map = {0: [1], 1: [2]}
@@ -94,7 +73,7 @@ async def test_simple_three_nodes_line_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_simple_three_nodes_triangle_topography():
     num_nodes = 3
     adj_map = {0: [1, 2], 1: [2]}
@@ -108,7 +87,7 @@ async def test_simple_three_nodes_triangle_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -122,14 +101,14 @@ async def test_simple_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_set_then_send_from_root_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("aspyn", 20)
-        await asyncio.sleep(0.25)
+        await trio.sleep(0.25)
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -139,14 +118,14 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[6].publish_set_crypto("aspyn", 20)
-        await asyncio.sleep(0.25)
+        await trio.sleep(0.25)
         await dummy_nodes[4].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -156,7 +135,7 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_simple_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
@@ -170,14 +149,14 @@ async def test_simple_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
     adj_map = {0: [1], 1: [2], 2: [3], 3: [4], 4: [0]}
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await asyncio.sleep(0.25)
+        await trio.sleep(0.25)
         await dummy_nodes[3].publish_send_crypto("alex", "rob", 12)
 
     def assertion_func(dummy_node):
@@ -187,7 +166,7 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 @pytest.mark.slow
 async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
     num_nodes = 5
@@ -195,13 +174,13 @@ async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await asyncio.sleep(1)
+        await trio.sleep(1)
         await dummy_nodes[1].publish_send_crypto("alex", "rob", 3)
-        await asyncio.sleep(1)
+        await trio.sleep(1)
         await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
-        await asyncio.sleep(1)
+        await trio.sleep(1)
         await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
-        await asyncio.sleep(1)
+        await trio.sleep(1)
         await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
 
     def assertion_func(dummy_node):

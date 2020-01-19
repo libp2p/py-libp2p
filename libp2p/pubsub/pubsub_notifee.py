@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.network_interface import INetwork
@@ -8,19 +9,19 @@ from libp2p.network.notifee_interface import INotifee
 from libp2p.network.stream.net_stream_interface import INetStream
 
 if TYPE_CHECKING:
-    import asyncio  # noqa: F401
     from libp2p.peer.id import ID  # noqa: F401
 
 
 class PubsubNotifee(INotifee):
 
-    initiator_peers_queue: "asyncio.Queue[ID]"
-    dead_peers_queue: "asyncio.Queue[ID]"
+    initiator_peers_queue: "trio.MemorySendChannel[ID]"
+    dead_peers_queue: "trio.MemorySendChannel[ID]"
+    dead_peers_queue_lock: trio.Lock
 
     def __init__(
         self,
-        initiator_peers_queue: "asyncio.Queue[ID]",
-        dead_peers_queue: "asyncio.Queue[ID]",
+        initiator_peers_queue: "trio.MemorySendChannel[ID]",
+        dead_peers_queue: "trio.MemorySendChannel[ID]",
     ) -> None:
         """
         :param initiator_peers_queue: queue to add new peers to so that pubsub
@@ -29,7 +30,9 @@ class PubsubNotifee(INotifee):
         can process dead peers after we disconnect from each other
         """
         self.initiator_peers_queue = initiator_peers_queue
+        self.initiator_peers_queue_lock = trio.Lock()
         self.dead_peers_queue = dead_peers_queue
+        self.dead_peers_queue_lock = trio.Lock()
 
     async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
         pass
@@ -46,7 +49,17 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.initiator_peers_queue.put(conn.muxed_conn.peer_id)
+        async with self.initiator_peers_queue_lock:
+            try:
+                await self.initiator_peers_queue.send(conn.muxed_conn.peer_id)
+            except (
+                trio.BrokenResourceError,
+                trio.ClosedResourceError,
+                trio.BusyResourceError,
+            ):
+                # Raised when the receive channel is closed.
+                # TODO: Do something with loggers?
+                ...
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -56,7 +69,17 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        await self.dead_peers_queue.put(conn.muxed_conn.peer_id)
+        async with self.dead_peers_queue_lock:
+            try:
+                await self.dead_peers_queue.send(conn.muxed_conn.peer_id)
+            except (
+                trio.BrokenResourceError,
+                trio.ClosedResourceError,
+                trio.BusyResourceError,
+            ):
+                # Raised when the receive channel is closed.
+                # TODO: Do something with loggers?
+                ...
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         pass

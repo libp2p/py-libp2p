@@ -1,11 +1,12 @@
-import asyncio
 import logging
+import math
 import time
 from typing import (
     TYPE_CHECKING,
     Awaitable,
     Callable,
     Dict,
+    KeysView,
     List,
     NamedTuple,
     Set,
@@ -14,8 +15,10 @@ from typing import (
     cast,
 )
 
+from async_service import Service
 import base58
 from lru import LRU
+import trio
 
 from libp2p.crypto.keys import PrivateKey
 from libp2p.exceptions import ParseError, ValidationError
@@ -28,12 +31,14 @@ from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
 
+from .abc import IPubsub, ISubscriptionAPI
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
+from .subscription import TrioSubscriptionAPI
 from .validators import PUBSUB_SIGNING_PREFIX, signature_validator
 
 if TYPE_CHECKING:
-    from .pubsub_router_interface import IPubsubRouter  # noqa: F401
+    from .abc import IPubsubRouter  # noqa: F401
     from typing import Any  # noqa: F401
 
 
@@ -55,24 +60,20 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
-class Pubsub:
+class Pubsub(IPubsub, Service):
 
     host: IHost
-    my_id: ID
 
     router: "IPubsubRouter"
 
-    peer_queue: "asyncio.Queue[ID]"
-    dead_peer_queue: "asyncio.Queue[ID]"
-
-    protocols: List[TProtocol]
-
-    incoming_msgs_from_peers: "asyncio.Queue[rpc_pb2.Message]"
-    outgoing_messages: "asyncio.Queue[rpc_pb2.Message]"
+    peer_receive_channel: "trio.MemoryReceiveChannel[ID]"
+    dead_peer_receive_channel: "trio.MemoryReceiveChannel[ID]"
 
     seen_messages: LRU
 
-    my_topics: Dict[str, "asyncio.Queue[rpc_pb2.Message]"]
+    # TODO: Implement `trio.abc.Channel`?
+    subscribed_topics_send: Dict[str, "trio.MemorySendChannel[rpc_pb2.Message]"]
+    subscribed_topics_receive: Dict[str, "TrioSubscriptionAPI"]
 
     peer_topics: Dict[str, Set[ID]]
     peers: Dict[ID, INetStream]
@@ -81,17 +82,17 @@ class Pubsub:
 
     counter: int  # uint64
 
-    _tasks: List["asyncio.Future[Any]"]
-
     # Indicate if we should enforce signature verification
     strict_signing: bool
     sign_key: PrivateKey
+
+    event_handle_peer_queue_started: trio.Event
+    event_handle_dead_peer_queue_started: trio.Event
 
     def __init__(
         self,
         host: IHost,
         router: "IPubsubRouter",
-        my_id: ID,
         cache_size: int = None,
         strict_signing: bool = True,
     ) -> None:
@@ -107,27 +108,29 @@ class Pubsub:
         """
         self.host = host
         self.router = router
-        self.my_id = my_id
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
 
+        peer_channels: Tuple[
+            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
+        ] = trio.open_memory_channel(0)
+        dead_peer_channels: Tuple[
+            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
+        ] = trio.open_memory_channel(0)
+        # Only keep the receive channels in `Pubsub`.
+        # Therefore, we can only close from the receive side.
+        self.peer_receive_channel = peer_channels[1]
+        self.dead_peer_receive_channel = dead_peer_channels[1]
         # Register a notifee
-        self.peer_queue = asyncio.Queue()
-        self.dead_peer_queue = asyncio.Queue()
         self.host.get_network().register_notifee(
-            PubsubNotifee(self.peer_queue, self.dead_peer_queue)
+            PubsubNotifee(peer_channels[0], dead_peer_channels[0])
         )
 
         # Register stream handlers for each pubsub router protocol to handle
         # the pubsub streams opened on those protocols
-        self.protocols = self.router.get_protocols()
-        for protocol in self.protocols:
+        for protocol in router.get_protocols():
             self.host.set_stream_handler(protocol, self.stream_handler)
-
-        # Use asyncio queues for proper context switching
-        self.incoming_msgs_from_peers = asyncio.Queue()
-        self.outgoing_messages = asyncio.Queue()
 
         # keeps track of seen messages as LRU cache
         if cache_size is None:
@@ -135,11 +138,18 @@ class Pubsub:
         else:
             self.cache_size = cache_size
 
+        self.strict_signing = strict_signing
+        if strict_signing:
+            self.sign_key = self.host.get_private_key()
+        else:
+            self.sign_key = None
+
         self.seen_messages = LRU(self.cache_size)
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
-        self.my_topics = {}
+        self.subscribed_topics_send = {}
+        self.subscribed_topics_receive = {}
 
         # Map of topic to peers to keep track of what peers are subscribed to
         self.peer_topics = {}
@@ -152,22 +162,31 @@ class Pubsub:
 
         self.counter = int(time.time())
 
-        self._tasks = []
-        # Call handle peer to keep waiting for updates to peer queue
-        self._tasks.append(asyncio.ensure_future(self.handle_peer_queue()))
-        self._tasks.append(asyncio.ensure_future(self.handle_dead_peer_queue()))
+        self.event_handle_peer_queue_started = trio.Event()
+        self.event_handle_dead_peer_queue_started = trio.Event()
 
-        self.strict_signing = strict_signing
-        if strict_signing:
-            self.sign_key = self.host.get_private_key()
-        else:
-            self.sign_key = None
+    async def run(self) -> None:
+        self.manager.run_daemon_task(self.handle_peer_queue)
+        self.manager.run_daemon_task(self.handle_dead_peer_queue)
+        await self.manager.wait_finished()
+
+    @property
+    def my_id(self) -> ID:
+        return self.host.get_id()
+
+    @property
+    def protocols(self) -> Tuple[TProtocol, ...]:
+        return tuple(self.router.get_protocols())
+
+    @property
+    def topic_ids(self) -> KeysView[str]:
+        return self.subscribed_topics_receive.keys()
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
         """Generate subscription message with all topics we are subscribed to
         only send hello packet if we have subscribed topics."""
         packet = rpc_pb2.RPC()
-        for topic_id in self.my_topics:
+        for topic_id in self.topic_ids:
             packet.subscriptions.extend(
                 [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
             )
@@ -182,7 +201,7 @@ class Pubsub:
         """
         peer_id = stream.muxed_conn.peer_id
 
-        while True:
+        while self.manager.is_running:
             incoming: bytes = await read_varint_prefixed_bytes(stream)
             rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
             rpc_incoming.ParseFromString(incoming)
@@ -194,11 +213,7 @@ class Pubsub:
                     logger.debug(
                         "received `publish` message %s from peer %s", msg, peer_id
                     )
-                    self._tasks.append(
-                        asyncio.ensure_future(
-                            self.push_msg(msg_forwarder=peer_id, msg=msg)
-                        )
-                    )
+                    self.manager.run_task(self.push_msg, peer_id, msg)
 
             if rpc_incoming.subscriptions:
                 # deal with RPC.subscriptions
@@ -225,9 +240,6 @@ class Pubsub:
                     peer_id,
                 )
                 await self.router.handle_rpc(rpc_incoming, peer_id)
-
-            # Force context switch
-            await asyncio.sleep(0)
 
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
@@ -325,18 +337,21 @@ class Pubsub:
         """Continuously read from peer queue and each time a new peer is found,
         open a stream to the peer using a supported pubsub protocol pubsub
         protocols we support."""
-        while True:
-            peer_id: ID = await self.peer_queue.get()
-            # Add Peer
-            self._tasks.append(asyncio.ensure_future(self._handle_new_peer(peer_id)))
+        self.event_handle_peer_queue_started.set()
+        async with self.peer_receive_channel:
+            async for peer_id in self.peer_receive_channel:
+                # Add Peer
+                self.manager.run_task(self._handle_new_peer, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
-        """Continuously read from dead peer queue and close the stream between
-        that peer and remove peer info from pubsub and pubsub router."""
-        while True:
-            peer_id: ID = await self.dead_peer_queue.get()
-            # Remove Peer
-            self._handle_dead_peer(peer_id)
+        self.event_handle_dead_peer_queue_started.set()
+        """Continuously read from dead peer channel and close the stream
+        between that peer and remove peer info from pubsub and pubsub
+        router."""
+        async with self.dead_peer_receive_channel:
+            async for peer_id in self.dead_peer_receive_channel:
+                # Remove Peer
+                self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -370,13 +385,13 @@ class Pubsub:
 
         # Check if this message has any topics that we are subscribed to
         for topic in publish_message.topicIDs:
-            if topic in self.my_topics:
+            if topic in self.topic_ids:
                 # we are subscribed to a topic this message was sent for,
                 # so add message to the subscription output queue
                 # for each topic
-                await self.my_topics[topic].put(publish_message)
+                await self.subscribed_topics_send[topic].send(publish_message)
 
-    async def subscribe(self, topic_id: str) -> "asyncio.Queue[rpc_pb2.Message]":
+    async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
         """
         Subscribe ourself to a topic.
 
@@ -386,11 +401,17 @@ class Pubsub:
         logger.debug("subscribing to topic %s", topic_id)
 
         # Already subscribed
-        if topic_id in self.my_topics:
-            return self.my_topics[topic_id]
+        if topic_id in self.topic_ids:
+            return self.subscribed_topics_receive[topic_id]
 
-        # Map topic_id to blocking queue
-        self.my_topics[topic_id] = asyncio.Queue()
+        channels: Tuple[
+            "trio.MemorySendChannel[rpc_pb2.Message]",
+            "trio.MemoryReceiveChannel[rpc_pb2.Message]",
+        ] = trio.open_memory_channel(math.inf)
+        send_channel, receive_channel = channels
+        subscription = TrioSubscriptionAPI(receive_channel)
+        self.subscribed_topics_send[topic_id] = send_channel
+        self.subscribed_topics_receive[topic_id] = subscription
 
         # Create subscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
@@ -404,8 +425,8 @@ class Pubsub:
         # Tell router we are joining this topic
         await self.router.join(topic_id)
 
-        # Return the asyncio queue for messages on this topic
-        return self.my_topics[topic_id]
+        # Return the subscription for messages on this topic
+        return subscription
 
     async def unsubscribe(self, topic_id: str) -> None:
         """
@@ -417,10 +438,14 @@ class Pubsub:
         logger.debug("unsubscribing from topic %s", topic_id)
 
         # Return if we already unsubscribed from the topic
-        if topic_id not in self.my_topics:
+        if topic_id not in self.topic_ids:
             return
-        # Remove topic_id from map if present
-        del self.my_topics[topic_id]
+        # Remove topic_id from the maps before yielding
+        send_channel = self.subscribed_topics_send[topic_id]
+        del self.subscribed_topics_send[topic_id]
+        del self.subscribed_topics_receive[topic_id]
+        # Only close the send side
+        await send_channel.aclose()
 
         # Create unsubscribe message
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
@@ -462,7 +487,7 @@ class Pubsub:
             data=data,
             topicIDs=[topic_id],
             # Origin is ourself.
-            from_id=self.host.get_id().to_bytes(),
+            from_id=self.my_id.to_bytes(),
             seqno=self._next_seqno(),
         )
 
@@ -474,7 +499,7 @@ class Pubsub:
             msg.key = self.host.get_public_key().serialize()
             msg.signature = signature
 
-        await self.push_msg(self.host.get_id(), msg)
+        await self.push_msg(self.my_id, msg)
 
         logger.debug("successfully published message %s", msg)
 
@@ -485,12 +510,12 @@ class Pubsub:
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
-        sync_topic_validators = []
-        async_topic_validator_futures: List[Awaitable[bool]] = []
+        sync_topic_validators: List[SyncValidatorFn] = []
+        async_topic_validators: List[AsyncValidatorFn] = []
         for topic_validator in self.get_msg_validators(msg):
             if topic_validator.is_async:
-                async_topic_validator_futures.append(
-                    cast(Awaitable[bool], topic_validator.validator(msg_forwarder, msg))
+                async_topic_validators.append(
+                    cast(AsyncValidatorFn, topic_validator.validator)
                 )
             else:
                 sync_topic_validators.append(
@@ -503,9 +528,20 @@ class Pubsub:
 
         # TODO: Implement throttle on async validators
 
-        if len(async_topic_validator_futures) > 0:
-            results = await asyncio.gather(*async_topic_validator_futures)
-            if not all(results):
+        if len(async_topic_validators) > 0:
+            # TODO: Use a better pattern
+            final_result: bool = True
+
+            async def run_async_validator(func: AsyncValidatorFn) -> None:
+                nonlocal final_result
+                result = await func(msg_forwarder, msg)
+                final_result = final_result and result
+
+            async with trio.open_nursery() as nursery:
+                for async_validator in async_topic_validators:
+                    nursery.start_soon(run_async_validator, async_validator)
+
+            if not final_result:
                 raise ValidationError(f"Validation failed for msg={msg}")
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
@@ -565,14 +601,4 @@ class Pubsub:
         self.seen_messages[msg_id] = 1
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
-        if not self.my_topics:
-            return False
-        return any(topic in self.my_topics for topic in msg.topicIDs)
-
-    async def close(self) -> None:
-        for task in self._tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        return any(topic in self.topic_ids for topic in msg.topicIDs)
