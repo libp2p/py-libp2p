@@ -1,8 +1,7 @@
-import asyncio
-
 import pytest
+import trio
 
-from libp2p import new_node
+from libp2p import new_host_trio
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.tools.constants import LISTEN_MADDR
@@ -24,42 +23,38 @@ noninitiator_key_pair = create_new_key_pair()
 async def perform_simple_test(
     assertion_func, transports_for_initiator, transports_for_noninitiator
 ):
-
     # Create libp2p nodes and connect them, then secure the connection, then check
     # the proper security was chosen
     # TODO: implement -- note we need to introduce the notion of communicating over a raw connection
     # for testing, we do NOT want to communicate over a stream so we can't just create two nodes
     # and use their conn because our mplex will internally relay messages to a stream
 
-    node1 = await new_node(
-        key_pair=initiator_key_pair, sec_opt=transports_for_initiator
-    )
-    node2 = await new_node(
-        key_pair=noninitiator_key_pair, sec_opt=transports_for_noninitiator
-    )
+    async with new_host_trio(
+        listen_addrs=[LISTEN_MADDR],
+        key_pair=initiator_key_pair,
+        sec_opt=transports_for_initiator,
+    ) as node1, new_host_trio(
+        listen_addrs=[LISTEN_MADDR],
+        key_pair=noninitiator_key_pair,
+        sec_opt=transports_for_noninitiator,
+    ) as node2:
+        await connect(node1, node2)
 
-    await node1.get_network().listen(LISTEN_MADDR)
-    await node2.get_network().listen(LISTEN_MADDR)
+        # Wait a very short period to allow conns to be stored (since the functions
+        # storing the conns are async, they may happen at slightly different times
+        # on each node)
+        await trio.sleep(0.1)
 
-    await connect(node1, node2)
+        # Get conns
+        node1_conn = node1.get_network().connections[peer_id_for_node(node2)]
+        node2_conn = node2.get_network().connections[peer_id_for_node(node1)]
 
-    # Wait a very short period to allow conns to be stored (since the functions
-    # storing the conns are async, they may happen at slightly different times
-    # on each node)
-    await asyncio.sleep(0.1)
-
-    # Get conns
-    node1_conn = node1.get_network().connections[peer_id_for_node(node2)]
-    node2_conn = node2.get_network().connections[peer_id_for_node(node1)]
-
-    # Perform assertion
-    assertion_func(node1_conn.muxed_conn.secured_conn)
-    assertion_func(node2_conn.muxed_conn.secured_conn)
-
-    # Success, terminate pending tasks.
+        # Perform assertion
+        assertion_func(node1_conn.muxed_conn.secured_conn)
+        assertion_func(node2_conn.muxed_conn.secured_conn)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_single_insecure_security_transport_succeeds():
     transports_for_initiator = {"foo": InsecureTransport(initiator_key_pair)}
     transports_for_noninitiator = {"foo": InsecureTransport(noninitiator_key_pair)}
@@ -72,7 +67,7 @@ async def test_single_insecure_security_transport_succeeds():
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_default_insecure_security():
     transports_for_initiator = None
     transports_for_noninitiator = None

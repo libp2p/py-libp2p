@@ -1,7 +1,8 @@
-import asyncio
 import logging
-from typing import Any  # noqa: F401
-from typing import Awaitable, Dict, List, Optional, Tuple
+import math
+from typing import Dict, Optional, Tuple
+
+import trio
 
 from libp2p.exceptions import ParseError
 from libp2p.io.exceptions import IncompleteReadError
@@ -36,12 +37,14 @@ class Mplex(IMuxedConn):
     peer_id: ID
     next_channel_id: int
     streams: Dict[StreamID, MplexStream]
-    streams_lock: asyncio.Lock
-    new_stream_queue: "asyncio.Queue[IMuxedStream]"
-    event_shutting_down: asyncio.Event
-    event_closed: asyncio.Event
+    streams_lock: trio.Lock
+    streams_msg_channels: Dict[StreamID, "trio.MemorySendChannel[bytes]"]
+    new_stream_send_channel: "trio.MemorySendChannel[IMuxedStream]"
+    new_stream_receive_channel: "trio.MemoryReceiveChannel[IMuxedStream]"
 
-    _tasks: List["asyncio.Future[Any]"]
+    event_shutting_down: trio.Event
+    event_closed: trio.Event
+    event_started: trio.Event
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
@@ -61,15 +64,19 @@ class Mplex(IMuxedConn):
 
         # Mapping from stream ID -> buffer of messages for that stream
         self.streams = {}
-        self.streams_lock = asyncio.Lock()
-        self.new_stream_queue = asyncio.Queue()
-        self.event_shutting_down = asyncio.Event()
-        self.event_closed = asyncio.Event()
+        self.streams_lock = trio.Lock()
+        self.streams_msg_channels = {}
+        channels: Tuple[
+            "trio.MemorySendChannel[IMuxedStream]",
+            "trio.MemoryReceiveChannel[IMuxedStream]",
+        ] = trio.open_memory_channel(math.inf)
+        self.new_stream_send_channel, self.new_stream_receive_channel = channels
+        self.event_shutting_down = trio.Event()
+        self.event_closed = trio.Event()
+        self.event_started = trio.Event()
 
-        self._tasks = []
-
-        # Kick off reading
-        self._tasks.append(asyncio.ensure_future(self.handle_incoming()))
+    async def start(self) -> None:
+        await self.handle_incoming()
 
     @property
     def is_initiator(self) -> bool:
@@ -85,6 +92,7 @@ class Mplex(IMuxedConn):
         # Blocked until `close` is finally set.
         await self.event_closed.wait()
 
+    @property
     def is_closed(self) -> bool:
         """
         check connection is fully closed.
@@ -104,9 +112,15 @@ class Mplex(IMuxedConn):
         return next_id
 
     async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
-        stream = MplexStream(name, stream_id, self)
+        # Use an unbounded buffer, to avoid `handle_incoming` being blocked when doing
+        # `send_channel.send`.
+        channels: Tuple[
+            "trio.MemorySendChannel[bytes]", "trio.MemoryReceiveChannel[bytes]"
+        ] = trio.open_memory_channel(math.inf)
+        stream = MplexStream(name, stream_id, self, channels[1])
         async with self.streams_lock:
             self.streams[stream_id] = stream
+            self.streams_msg_channels[stream_id] = channels[0]
         return stream
 
     async def open_stream(self) -> IMuxedStream:
@@ -123,27 +137,12 @@ class Mplex(IMuxedConn):
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
         return stream
 
-    async def _wait_until_shutting_down_or_closed(self, coro: Awaitable[Any]) -> Any:
-        task_coro = asyncio.ensure_future(coro)
-        task_wait_closed = asyncio.ensure_future(self.event_closed.wait())
-        task_wait_shutting_down = asyncio.ensure_future(self.event_shutting_down.wait())
-        done, pending = await asyncio.wait(
-            [task_coro, task_wait_closed, task_wait_shutting_down],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for fut in pending:
-            fut.cancel()
-        if task_wait_closed in done:
-            raise MplexUnavailable("Mplex is closed")
-        if task_wait_shutting_down in done:
-            raise MplexUnavailable("Mplex is shutting down")
-        return task_coro.result()
-
     async def accept_stream(self) -> IMuxedStream:
         """accepts a muxed stream opened by the other end."""
-        return await self._wait_until_shutting_down_or_closed(
-            self.new_stream_queue.get()
-        )
+        try:
+            return await self.new_stream_receive_channel.receive()
+        except (trio.ClosedResourceError, trio.EndOfChannel):
+            raise MplexUnavailable
 
     async def send_message(
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
@@ -163,9 +162,7 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        return await self._wait_until_shutting_down_or_closed(
-            self.write_to_stream(_bytes)
-        )
+        return await self.write_to_stream(_bytes)
 
     async def write_to_stream(self, _bytes: bytes) -> int:
         """
@@ -180,15 +177,13 @@ class Mplex(IMuxedConn):
     async def handle_incoming(self) -> None:
         """Read a message off of the secured connection and add it to the
         corresponding message buffer."""
-
+        self.event_started.set()
         while True:
             try:
                 await self._handle_incoming_message()
             except MplexUnavailable as e:
                 logger.debug("mplex unavailable while waiting for incoming: %s", e)
                 break
-            # Force context switch
-            await asyncio.sleep(0)
         # If we enter here, it means this connection is shutting down.
         # We should clean things up.
         await self._cleanup()
@@ -200,20 +195,19 @@ class Mplex(IMuxedConn):
         :return: stream_id, flag, message contents
         """
 
-        # FIXME: No timeout is used in Go implementation.
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-            message = await asyncio.wait_for(
-                read_varint_prefixed_bytes(self.secured_conn), timeout=5
-            )
         except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
-                "failed to read messages correctly from the underlying connection"
-            ) from error
-        except asyncio.TimeoutError as error:
+                f"failed to read the header correctly from the underlying connection: {error}"
+            )
+        try:
+            message = await read_varint_prefixed_bytes(self.secured_conn)
+        except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
-                "failed to read more message body within the timeout"
-            ) from error
+                "failed to read the message body correctly from the underlying connection: "
+                f"{error}"
+            )
 
         flag = header & 0x07
         channel_id = header >> 3
@@ -226,9 +220,7 @@ class Mplex(IMuxedConn):
 
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """
-        channel_id, flag, message = await self._wait_until_shutting_down_or_closed(
-            self.read_message()
-        )
+        channel_id, flag, message = await self.read_message()
         stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
 
         if flag == HeaderTags.NewStream.value:
@@ -258,9 +250,10 @@ class Mplex(IMuxedConn):
                     f"received NewStream message for existing stream: {stream_id}"
                 )
         mplex_stream = await self._initialize_stream(stream_id, message.decode())
-        await self._wait_until_shutting_down_or_closed(
-            self.new_stream_queue.put(mplex_stream)
-        )
+        try:
+            await self.new_stream_send_channel.send(mplex_stream)
+        except (trio.BrokenResourceError, trio.ClosedResourceError):
+            raise MplexUnavailable
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
         async with self.streams_lock:
@@ -270,13 +263,12 @@ class Mplex(IMuxedConn):
                 # TODO: Warn and emit logs about this.
                 return
             stream = self.streams[stream_id]
+            send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
                 # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                 return
-        await self._wait_until_shutting_down_or_closed(
-            stream.incoming_data.put(message)
-        )
+        await send_channel.send(message)
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
@@ -284,6 +276,8 @@ class Mplex(IMuxedConn):
                 # Ignore unmatched messages for now.
                 return
             stream = self.streams[stream_id]
+            send_channel = self.streams_msg_channels[stream_id]
+        await send_channel.aclose()
         # NOTE: If remote is already closed, then return: Technically a bug
         #   on the other side. We should consider killing the connection.
         async with stream.close_lock:
@@ -305,27 +299,32 @@ class Mplex(IMuxedConn):
                 # This is *ok*. We forget the stream on reset.
                 return
             stream = self.streams[stream_id]
-
+            send_channel = self.streams_msg_channels[stream_id]
+        await send_channel.aclose()
         async with stream.close_lock:
             if not stream.event_remote_closed.is_set():
                 stream.event_reset.set()
-
                 stream.event_remote_closed.set()
             # If local is not closed, we should close it.
             if not stream.event_local_closed.is_set():
                 stream.event_local_closed.set()
         async with self.streams_lock:
             self.streams.pop(stream_id, None)
+            self.streams_msg_channels.pop(stream_id, None)
 
     async def _cleanup(self) -> None:
         if not self.event_shutting_down.is_set():
             self.event_shutting_down.set()
         async with self.streams_lock:
-            for stream in self.streams.values():
+            for stream_id, stream in self.streams.items():
                 async with stream.close_lock:
                     if not stream.event_remote_closed.is_set():
                         stream.event_remote_closed.set()
                         stream.event_reset.set()
                         stream.event_local_closed.set()
+                send_channel = self.streams_msg_channels[stream_id]
+                await send_channel.aclose()
             self.streams = None
         self.event_closed.set()
+        await self.new_stream_send_channel.aclose()
+        await self.new_stream_receive_channel.aclose()
