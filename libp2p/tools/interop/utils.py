@@ -1,7 +1,7 @@
-import asyncio
 from typing import Union
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.host.host_interface import IHost
 from libp2p.peer.id import ID
@@ -50,7 +50,7 @@ async def connect(a: TDaemonOrHost, b: TDaemonOrHost) -> None:
     else:  # isinstance(b, IHost)
         await a.connect(b_peer_info)
     # Allow additional sleep for both side to establish the connection.
-    await asyncio.sleep(0.1)
+    await trio.sleep(0.1)
 
     a_peer_info = _get_peer_info(a)
 
