@@ -38,7 +38,7 @@ class RawConnection(IRawConnection):
             try:
                 await self.writer.drain()
             except ConnectionResetError as error:
-                raise RawConnError(error)
+                raise RawConnError() from error
 
     async def read(self, n: int = -1) -> bytes:
         """
@@ -50,7 +50,7 @@ class RawConnection(IRawConnection):
         try:
             return await self.reader.read(n)
         except ConnectionResetError as error:
-            raise RawConnError(error)
+            raise RawConnError() from error
 
     async def close(self) -> None:
         if self.writer.transport.is_closing():

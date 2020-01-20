@@ -51,7 +51,7 @@ async def echo_stream_handler(stream: INetStream) -> None:
     while True:
         read_string = (await stream.read(MAX_READ_LEN)).decode()
 
-        resp = "ack:" + read_string
+        resp = f"ack:{read_string}"
         await stream.write(resp.encode())
 
 

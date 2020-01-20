@@ -56,7 +56,7 @@ class ID:
         return self._b58_str
 
     def __repr__(self) -> str:
-        return f"<libp2p.peer.id.ID ({self.to_string()})>"
+        return f"<libp2p.peer.id.ID ({self!s})>"
 
     __str__ = pretty = to_string = to_base58
 

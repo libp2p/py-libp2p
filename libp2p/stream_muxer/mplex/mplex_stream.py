@@ -75,7 +75,7 @@ class MplexStream(IMuxedStream):
 
         if task_event_reset in done:
             if self.event_reset.is_set():
-                raise MplexStreamReset
+                raise MplexStreamReset()
             else:
                 # However, it is abnormal that `Event.wait` is unblocked without any of the flag
                 #   is set. The task is probably cancelled.
@@ -91,7 +91,7 @@ class MplexStream(IMuxedStream):
 
         if task_event_remote_closed in done:
             if self.event_remote_closed.is_set():
-                raise MplexStreamEOF
+                raise MplexStreamEOF()
             else:
                 # However, it is abnormal that `Event.wait` is unblocked without any of the flag
                 #   is set. The task is probably cancelled.
@@ -126,7 +126,7 @@ class MplexStream(IMuxedStream):
                 f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
             )
         if self.event_reset.is_set():
-            raise MplexStreamReset
+            raise MplexStreamReset()
         if n == -1:
             return await self._read_until_eof()
         if len(self._buf) == 0 and self.incoming_data.empty():

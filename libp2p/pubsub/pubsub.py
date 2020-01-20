@@ -538,10 +538,12 @@ class Pubsub:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
             logger.debug(
-                "Topic validation failed: sender %s sent data %s under topic IDs: %s",
-                f"{base58.b58encode(msg.from_id).decode()}:{msg.seqno.hex()}",
+                "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",
+                msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
+                base58.b58encode(msg.from_id).decode(),
+                msg.seqno.hex(),
             )
             return
 
