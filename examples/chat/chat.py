@@ -4,7 +4,7 @@ import sys
 import multiaddr
 import trio
 
-from libp2p import new_host_trio
+from libp2p import new_host
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.typing import TProtocol
@@ -34,9 +34,8 @@ async def write_data(stream: INetStream) -> None:
 async def run(port: int, destination: str) -> None:
     localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    async with new_host_trio(
-        listen_addrs=[listen_addr]
-    ) as host, trio.open_nursery() as nursery:
+    host = new_host()
+    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         if not destination:  # its the server
 
             async def stream_handler(stream: INetStream) -> None:

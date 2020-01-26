@@ -1,7 +1,7 @@
 import pytest
 import trio
 
-from libp2p import new_host_trio
+from libp2p import new_host
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.security.insecure.transport import InsecureSession, InsecureTransport
 from libp2p.tools.constants import LISTEN_MADDR
@@ -29,15 +29,13 @@ async def perform_simple_test(
     # for testing, we do NOT want to communicate over a stream so we can't just create two nodes
     # and use their conn because our mplex will internally relay messages to a stream
 
-    async with new_host_trio(
-        listen_addrs=[LISTEN_MADDR],
-        key_pair=initiator_key_pair,
-        sec_opt=transports_for_initiator,
-    ) as node1, new_host_trio(
-        listen_addrs=[LISTEN_MADDR],
-        key_pair=noninitiator_key_pair,
-        sec_opt=transports_for_noninitiator,
-    ) as node2:
+    node1 = new_host(key_pair=initiator_key_pair, sec_opt=transports_for_initiator)
+    node2 = new_host(
+        key_pair=noninitiator_key_pair, sec_opt=transports_for_noninitiator
+    )
+    async with node1.run(listen_addrs=[LISTEN_MADDR]), node2.run(
+        listen_addrs=[LISTEN_MADDR]
+    ):
         await connect(node1, node2)
 
         # Wait a very short period to allow conns to be stored (since the functions

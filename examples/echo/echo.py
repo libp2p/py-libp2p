@@ -3,7 +3,7 @@ import argparse
 import multiaddr
 import trio
 
-from libp2p import new_host_trio
+from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -34,9 +34,8 @@ async def run(port: int, destination: str, seed: int = None) -> None:
 
         secret = secrets.token_bytes(32)
 
-    async with new_host_trio(
-        listen_addrs=[listen_addr], key_pair=create_new_key_pair(secret)
-    ) as host:
+    host = new_host(key_pair=create_new_key_pair(secret))
+    async with host.run(listen_addrs=[listen_addr]):
 
         print(f"I am {host.get_id().to_string()}")
 
