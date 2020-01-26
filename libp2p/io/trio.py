@@ -35,12 +35,6 @@ class TrioTCPStream(ReadWriteCloser):
                 return await self.stream.receive_some(n)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
                 raise IOException from error
-            except trio.BusyResourceError as error:
-                # This should never happen, since we already access streams with read/write locks.
-                raise Exception(
-                    "this should never happen "
-                    "since we already access streams with read/write locks."
-                ) from error
 
     async def close(self) -> None:
         await self.stream.aclose()
