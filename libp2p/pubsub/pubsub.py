@@ -71,7 +71,6 @@ class Pubsub(IPubsub, Service):
 
     seen_messages: LRU
 
-    # TODO: Implement `trio.abc.Channel`?
     subscribed_topics_send: Dict[str, "trio.MemorySendChannel[rpc_pb2.Message]"]
     subscribed_topics_receive: Dict[str, "TrioSubscriptionAPI"]
 
@@ -112,12 +111,8 @@ class Pubsub(IPubsub, Service):
         # Attach this new Pubsub object to the router
         self.router.attach(self)
 
-        peer_channels: Tuple[
-            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
-        ] = trio.open_memory_channel(0)
-        dead_peer_channels: Tuple[
-            "trio.MemorySendChannel[ID]", "trio.MemoryReceiveChannel[ID]"
-        ] = trio.open_memory_channel(0)
+        peer_channels = trio.open_memory_channel[ID](0)
+        dead_peer_channels = trio.open_memory_channel[ID](0)
         # Only keep the receive channels in `Pubsub`.
         # Therefore, we can only close from the receive side.
         self.peer_receive_channel = peer_channels[1]
@@ -404,10 +399,7 @@ class Pubsub(IPubsub, Service):
         if topic_id in self.topic_ids:
             return self.subscribed_topics_receive[topic_id]
 
-        channels: Tuple[
-            "trio.MemorySendChannel[rpc_pb2.Message]",
-            "trio.MemoryReceiveChannel[rpc_pb2.Message]",
-        ] = trio.open_memory_channel(math.inf)
+        channels = trio.open_memory_channel[rpc_pb2.Message](math.inf)
         send_channel, receive_channel = channels
         subscription = TrioSubscriptionAPI(receive_channel)
         self.subscribed_topics_send[topic_id] = send_channel
