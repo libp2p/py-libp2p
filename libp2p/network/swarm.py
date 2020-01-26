@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
+from async_service import Service
 from multiaddr import Multiaddr
 
 from libp2p.io.abc import ReadWriteCloser
@@ -30,7 +31,7 @@ from .stream.net_stream_interface import INetStream
 logger = logging.getLogger("libp2p.network.swarm")
 
 
-class Swarm(INetworkService):
+class Swarm(Service, INetworkService):
 
     self_id: ID
     peerstore: IPeerStore

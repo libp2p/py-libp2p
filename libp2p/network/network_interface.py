@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, Sequence
 
-from async_service import Service
+from async_service import ServiceAPI
 from multiaddr import Multiaddr
 
 from libp2p.network.connection.net_connection_interface import INetConn
@@ -73,5 +73,5 @@ class INetwork(ABC):
         pass
 
 
-class INetworkService(INetwork, Service):
+class INetworkService(INetwork, ServiceAPI):
     ...
