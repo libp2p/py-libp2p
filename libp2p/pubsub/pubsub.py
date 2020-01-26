@@ -1,19 +1,7 @@
 import logging
 import math
 import time
-from typing import (
-    TYPE_CHECKING,
-    Awaitable,
-    Callable,
-    Dict,
-    KeysView,
-    List,
-    NamedTuple,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from typing import TYPE_CHECKING, Dict, KeysView, List, NamedTuple, Set, Tuple, cast
 
 from async_service import Service
 import base58
@@ -35,6 +23,7 @@ from .abc import IPubsub, ISubscriptionAPI
 from .pb import rpc_pb2
 from .pubsub_notifee import PubsubNotifee
 from .subscription import TrioSubscriptionAPI
+from .typing import AsyncValidatorFn, SyncValidatorFn, ValidatorFn
 from .validators import PUBSUB_SIGNING_PREFIX, signature_validator
 
 if TYPE_CHECKING:
@@ -50,17 +39,12 @@ def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
     return (msg.seqno, msg.from_id)
 
 
-SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
-AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
-ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
-
-
 class TopicValidator(NamedTuple):
     validator: ValidatorFn
     is_async: bool
 
 
-class Pubsub(IPubsub, Service):
+class Pubsub(Service, IPubsub):
 
     host: IHost
 
@@ -290,6 +274,10 @@ class Pubsub(IPubsub, Service):
             await stream.reset()
             self._handle_dead_peer(peer_id)
 
+    async def wait_until_ready(self) -> None:
+        await self.event_handle_peer_queue_started.wait()
+        await self.event_handle_dead_peer_queue_started.wait()
+
     async def _handle_new_peer(self, peer_id: ID) -> None:
         try:
             stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
@@ -332,18 +320,18 @@ class Pubsub(IPubsub, Service):
         """Continuously read from peer queue and each time a new peer is found,
         open a stream to the peer using a supported pubsub protocol pubsub
         protocols we support."""
-        self.event_handle_peer_queue_started.set()
         async with self.peer_receive_channel:
+            self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
                 # Add Peer
                 self.manager.run_task(self._handle_new_peer, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
-        self.event_handle_dead_peer_queue_started.set()
         """Continuously read from dead peer channel and close the stream
         between that peer and remove peer info from pubsub and pubsub
         router."""
         async with self.dead_peer_receive_channel:
+            self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
                 # Remove Peer
                 self._handle_dead_peer(peer_id)

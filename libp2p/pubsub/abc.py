@@ -1,18 +1,35 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, AsyncContextManager, AsyncIterable, List
+from typing import (
+    TYPE_CHECKING,
+    AsyncContextManager,
+    AsyncIterable,
+    KeysView,
+    List,
+    Tuple,
+)
+
+from async_service import ServiceAPI
 
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 
 from .pb import rpc_pb2
+from .typing import ValidatorFn
 
 if TYPE_CHECKING:
     from .pubsub import Pubsub  # noqa: F401
 
 
-# TODO: Add interface for Pubsub
-class IPubsub(ABC):
-    pass
+class ISubscriptionAPI(
+    AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
+):
+    @abstractmethod
+    async def cancel(self) -> None:
+        ...
+
+    @abstractmethod
+    async def get(self) -> rpc_pb2.Message:
+        ...
 
 
 class IPubsubRouter(ABC):
@@ -86,13 +103,44 @@ class IPubsubRouter(ABC):
         """
 
 
-class ISubscriptionAPI(
-    AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
-):
+class IPubsub(ServiceAPI):
+    @property
     @abstractmethod
-    async def cancel(self) -> None:
+    def my_id(self) -> ID:
+        ...
+
+    @property
+    @abstractmethod
+    def protocols(self) -> Tuple[TProtocol, ...]:
+        ...
+
+    @property
+    @abstractmethod
+    def topic_ids(self) -> KeysView[str]:
         ...
 
     @abstractmethod
-    async def get(self) -> rpc_pb2.Message:
+    def set_topic_validator(
+        self, topic: str, validator: ValidatorFn, is_async_validator: bool
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def remove_topic_validator(self, topic: str) -> None:
+        ...
+
+    @abstractmethod
+    async def wait_until_ready(self) -> None:
+        ...
+
+    @abstractmethod
+    async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
+        ...
+
+    @abstractmethod
+    async def unsubscribe(self, topic_id: str) -> None:
+        ...
+
+    @abstractmethod
+    async def publish(self, topic_id: str, data: bytes) -> None:
         ...
