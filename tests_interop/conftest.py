@@ -84,11 +84,8 @@ class DaemonStream(ReadWriteCloser):
     async def close(self) -> None:
         await self.stream.close()
 
-    async def read(self, n: int = -1) -> bytes:
-        if n == -1:
-            return await self.stream.receive_some()
-        else:
-            return await self.stream.receive_some(n)
+    async def read(self, n: int = None) -> bytes:
+        return await self.stream.receive_some(n)
 
     async def write(self, data: bytes) -> None:
         return await self.stream.send_all(data)

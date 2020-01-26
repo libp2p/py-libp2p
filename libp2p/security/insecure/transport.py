@@ -39,7 +39,7 @@ class InsecureSession(BaseSession):
         await self.conn.write(data)
         return len(data)
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         return await self.conn.read(n)
 
     async def close(self) -> None:

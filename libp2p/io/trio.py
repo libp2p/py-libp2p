@@ -26,22 +26,13 @@ class TrioTCPStream(ReadWriteCloser):
                 await self.stream.send_all(data)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
                 raise IOException from error
-            except trio.BusyResourceError as error:
-                # This should never happen, since we already access streams with read/write locks.
-                raise Exception(
-                    "this should never happen "
-                    "since we already access streams with read/write locks."
-                ) from error
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         async with self.read_lock:
-            if n == 0:
-                # Checkpoint
-                await trio.hazmat.checkpoint()
+            if n is not None and n == 0:
                 return b""
-            max_bytes = n if n != -1 else None
             try:
-                return await self.stream.receive_some(max_bytes)
+                return await self.stream.receive_some(n)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
                 raise IOException from error
             except trio.BusyResourceError as error:

@@ -81,22 +81,23 @@ class MplexStream(IMuxedStream):
                 break
         return buf
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         """
         Read up to n bytes. Read possibly returns fewer than `n` bytes, if
-        there are not enough bytes in the Mplex buffer. If `n == -1`, read
+        there are not enough bytes in the Mplex buffer. If `n is None`, read
         until EOF.
 
         :param n: number of bytes to read
         :return: bytes actually read
         """
-        if n < 0 and n != -1:
+        if n is not None and n < 0:
             raise ValueError(
-                f"the number of bytes to read `n` must be positive or -1 to indicate read until EOF"
+                f"the number of bytes to read `n` must be non-negative or "
+                "`None` to indicate read until EOF"
             )
         if self.event_reset.is_set():
             raise MplexStreamReset
-        if n == -1:
+        if n is None:
             return await self._read_until_eof()
         if len(self._buf) == 0:
             data: bytes

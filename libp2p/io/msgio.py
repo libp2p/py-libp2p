@@ -54,7 +54,7 @@ class MsgIOReader(ReadCloser):
         self.read_closer = read_closer
         self.next_length = None
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         return await self.read_msg()
 
     async def read_msg(self) -> bytes:
