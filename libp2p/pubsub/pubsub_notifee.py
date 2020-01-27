@@ -16,7 +16,6 @@ class PubsubNotifee(INotifee):
 
     initiator_peers_queue: "trio.MemorySendChannel[ID]"
     dead_peers_queue: "trio.MemorySendChannel[ID]"
-    dead_peers_queue_lock: trio.Lock
 
     def __init__(
         self,
@@ -30,15 +29,13 @@ class PubsubNotifee(INotifee):
         can process dead peers after we disconnect from each other
         """
         self.initiator_peers_queue = initiator_peers_queue
-        self.initiator_peers_queue_lock = trio.Lock()
         self.dead_peers_queue = dead_peers_queue
-        self.dead_peers_queue_lock = trio.Lock()
 
     async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
-        pass
+        ...
 
     async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
-        pass
+        ...
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -49,17 +46,11 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        async with self.initiator_peers_queue_lock:
-            try:
-                await self.initiator_peers_queue.send(conn.muxed_conn.peer_id)
-            except (
-                trio.BrokenResourceError,
-                trio.ClosedResourceError,
-                trio.BusyResourceError,
-            ):
-                # Raised when the receive channel is closed.
-                # TODO: Do something with loggers?
-                ...
+        try:
+            await self.initiator_peers_queue.send(conn.muxed_conn.peer_id)
+        except trio.BrokenResourceError:
+            # The receive channel is closed by Pubsub. We should do nothing here.
+            ...
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -69,20 +60,14 @@ class PubsubNotifee(INotifee):
         :param network: network the connection was opened on
         :param conn: connection that was opened
         """
-        async with self.dead_peers_queue_lock:
-            try:
-                await self.dead_peers_queue.send(conn.muxed_conn.peer_id)
-            except (
-                trio.BrokenResourceError,
-                trio.ClosedResourceError,
-                trio.BusyResourceError,
-            ):
-                # Raised when the receive channel is closed.
-                # TODO: Do something with loggers?
-                ...
+        try:
+            await self.dead_peers_queue.send(conn.muxed_conn.peer_id)
+        except trio.BrokenResourceError:
+            # The receive channel is closed by Pubsub. We should do nothing here.
+            ...
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
-        pass
+        ...
 
     async def listen_close(self, network: INetwork, multiaddr: Multiaddr) -> None:
-        pass
+        ...
