@@ -1,3 +1,4 @@
+import functools
 import logging
 import math
 import time
@@ -387,9 +388,14 @@ class Pubsub(Service, IPubsub):
         if topic_id in self.topic_ids:
             return self.subscribed_topics_receive[topic_id]
 
-        channels = trio.open_memory_channel[rpc_pb2.Message](math.inf)
-        send_channel, receive_channel = channels
-        subscription = TrioSubscriptionAPI(receive_channel)
+        send_channel, receive_channel = trio.open_memory_channel[rpc_pb2.Message](
+            math.inf
+        )
+
+        subscription = TrioSubscriptionAPI(
+            receive_channel,
+            unsubscribe_fn=functools.partial(self.unsubscribe, topic_id),
+        )
         self.subscribed_topics_send[topic_id] = send_channel
         self.subscribed_topics_receive[topic_id] = subscription
 

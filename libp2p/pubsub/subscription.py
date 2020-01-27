@@ -5,6 +5,7 @@ import trio
 
 from .abc import ISubscriptionAPI
 from .pb import rpc_pb2
+from .typing import UnsubscribeFn
 
 
 class BaseSubscriptionAPI(ISubscriptionAPI):
@@ -18,19 +19,25 @@ class BaseSubscriptionAPI(ISubscriptionAPI):
         exc_value: "Optional[BaseException]",
         traceback: "Optional[TracebackType]",
     ) -> None:
-        await self.cancel()
+        await self.unsubscribe()
 
 
 class TrioSubscriptionAPI(BaseSubscriptionAPI):
     receive_channel: "trio.MemoryReceiveChannel[rpc_pb2.Message]"
+    unsubscribe_fn: UnsubscribeFn
 
     def __init__(
-        self, receive_channel: "trio.MemoryReceiveChannel[rpc_pb2.Message]"
+        self,
+        receive_channel: "trio.MemoryReceiveChannel[rpc_pb2.Message]",
+        unsubscribe_fn: UnsubscribeFn,
     ) -> None:
         self.receive_channel = receive_channel
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        self.unsubscribe_fn = unsubscribe_fn  # type: ignore
 
-    async def cancel(self) -> None:
-        await self.receive_channel.aclose()
+    async def unsubscribe(self) -> None:
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        await self.unsubscribe_fn()  # type: ignore
 
     def __aiter__(self) -> AsyncIterator[rpc_pb2.Message]:
         return self.receive_channel.__aiter__()

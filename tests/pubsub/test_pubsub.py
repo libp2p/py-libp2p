@@ -413,7 +413,39 @@ async def test_message_all_peers(monkeypatch, is_host_secure):
 
 
 @pytest.mark.trio
-async def test_publish(monkeypatch):
+async def test_subscribe_and_publish():
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        list_data = [b"d0", b"d1"]
+        event_receive_data_started = trio.Event()
+
+        async def publish_data(topic):
+            await event_receive_data_started.wait()
+            for data in list_data:
+                await pubsub.publish(topic, data)
+
+        async def receive_data(topic):
+            i = 0
+            event_receive_data_started.set()
+            assert topic not in pubsub.topic_ids
+            subscription = await pubsub.subscribe(topic)
+            async with subscription:
+                assert topic in pubsub.topic_ids
+                async for msg in subscription:
+                    assert msg.data == list_data[i]
+                    i += 1
+                    if i == len(list_data):
+                        break
+            assert topic not in pubsub.topic_ids
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(receive_data, TESTING_TOPIC)
+            nursery.start_soon(publish_data, TESTING_TOPIC)
+
+
+@pytest.mark.trio
+async def test_publish_push_msg_is_called(monkeypatch):
     msg_forwarders = []
     msgs = []
 

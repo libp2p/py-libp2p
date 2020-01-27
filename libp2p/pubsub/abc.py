@@ -24,7 +24,7 @@ class ISubscriptionAPI(
     AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
 ):
     @abstractmethod
-    async def cancel(self) -> None:
+    async def unsubscribe(self) -> None:
         ...
 
     @abstractmethod

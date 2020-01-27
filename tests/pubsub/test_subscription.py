@@ -11,7 +11,14 @@ GET_TIMEOUT = 0.001
 
 def make_trio_subscription():
     send_channel, receive_channel = trio.open_memory_channel(math.inf)
-    return send_channel, TrioSubscriptionAPI(receive_channel)
+
+    async def unsubscribe_fn():
+        await send_channel.aclose()
+
+    return (
+        send_channel,
+        TrioSubscriptionAPI(receive_channel, unsubscribe_fn=unsubscribe_fn),
+    )
 
 
 def make_pubsub_msg():
@@ -56,14 +63,14 @@ async def test_trio_subscription_iter():
 
 
 @pytest.mark.trio
-async def test_trio_subscription_cancel():
+async def test_trio_subscription_unsubscribe():
     send_channel, sub = make_trio_subscription()
-    await sub.cancel()
-    # Test: If the subscription is cancelled, `send_channel` should be broken.
-    with pytest.raises(trio.BrokenResourceError):
+    await sub.unsubscribe()
+    # Test: If the subscription is unsubscribed, `send_channel` should be closed.
+    with pytest.raises(trio.ClosedResourceError):
         await send_something(send_channel)
     # Test: No side effect when cancelled twice.
-    await sub.cancel()
+    await sub.unsubscribe()
 
 
 @pytest.mark.trio
@@ -73,5 +80,5 @@ async def test_trio_subscription_async_context_manager():
         # Test: `sub` is not cancelled yet, so `send_something` works fine.
         await send_something(send_channel)
     # Test: `sub` is cancelled, `send_something` fails
-    with pytest.raises(trio.BrokenResourceError):
+    with pytest.raises(trio.ClosedResourceError):
         await send_something(send_channel)
