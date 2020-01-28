@@ -60,9 +60,9 @@ class SwarmConn(INetConn):
         while True:
             try:
                 stream = await self.muxed_conn.accept_stream()
-            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             except MuxedConnUnavailable:
                 break
+            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
             self.swarm.manager.run_task(self._handle_muxed_stream, stream)
 
         await self.close()

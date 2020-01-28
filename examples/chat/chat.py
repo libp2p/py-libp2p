@@ -63,7 +63,7 @@ async def run(port: int, destination: str) -> None:
 
             nursery.start_soon(read_data, stream)
             nursery.start_soon(write_data, stream)
-            print("Connected to peer %s" % info.addrs[0])
+            print(f"Connected to peer {info.addrs[0]}")
 
         await trio.sleep_forever()
 
