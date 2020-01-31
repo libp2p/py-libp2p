@@ -96,8 +96,8 @@ class Pubsub(Service, IPubsub):
         # Attach this new Pubsub object to the router
         self.router.attach(self)
 
-        peer_send, peer_receive = trio.open_memory_channel[ID](math.inf)
-        dead_peer_send, dead_peer_receive = trio.open_memory_channel[ID](math.inf)
+        peer_send, peer_receive = trio.open_memory_channel[ID](0)
+        dead_peer_send, dead_peer_receive = trio.open_memory_channel[ID](0)
         # Only keep the receive channels in `Pubsub`.
         # Therefore, we can only close from the receive side.
         self.peer_receive_channel = peer_receive
