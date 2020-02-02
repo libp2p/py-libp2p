@@ -21,7 +21,7 @@ async def p2pd_subscribe(p2pd, topic, nursery):
     stream = TrioTCPStream(await p2pd.control.pubsub_subscribe(topic))
     send_channel, receive_channel = trio.open_memory_channel(math.inf)
 
-    sub = TrioSubscriptionAPI(receive_channel)
+    sub = TrioSubscriptionAPI(receive_channel, unsubscribe_fn=stream.close)
 
     async def _read_pubsub_msg() -> None:
         while True:
