@@ -77,7 +77,7 @@ install_requires = [
     "trio>=0.13.0",
     "async-service>=0.1.0a4",
     "async-exit-stack==1.0.1",
-    "trio-typing>=0.3.0,<1.0.0",
+    "trio-typing>=0.3.0,<0.4.0",
 ]
 
 
