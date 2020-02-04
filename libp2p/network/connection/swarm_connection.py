@@ -20,7 +20,6 @@ class SwarmConn(INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: Set[NetStream]
-    event_started: trio.Event
     event_closed: trio.Event
 
     def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
@@ -72,10 +71,7 @@ class SwarmConn(INetConn):
         if self.swarm.common_stream_handler is not None:
             try:
                 await self.swarm.common_stream_handler(net_stream)
-            # TODO: More exact exceptions
-            except Exception:
-                # TODO: Emit logs.
-                # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
+            finally:
                 self.remove_stream(net_stream)
 
     def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
