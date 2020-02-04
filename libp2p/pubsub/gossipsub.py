@@ -88,7 +88,7 @@ class GossipSub(IPubsubRouter, Service):
     async def run(self) -> None:
         if self.pubsub is None:
             raise NoPubsubAttached
-        self.manager.run_task(self.heartbeat)
+        self.manager.run_daemon_task(self.heartbeat)
         await self.manager.wait_finished()
 
     # Interface functions
