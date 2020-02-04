@@ -166,7 +166,13 @@ class Mplex(IMuxedConn):
         :param _bytes: byte array to write
         :return: length written
         """
-        await self.secured_conn.write(_bytes)
+        try:
+            await self.secured_conn.write(_bytes)
+        except RawConnError as e:
+            raise MplexUnavailable(
+                "failed to write message to the underlying connection"
+            ) from e
+
         return len(_bytes)
 
     async def handle_incoming(self) -> None:

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 import trio
 
 from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
 from .constants import HeaderTags
 from .datastructures import StreamID
@@ -189,7 +190,11 @@ class MplexStream(IMuxedStream):
                     if self.is_initiator
                     else HeaderTags.ResetReceiver
                 )
-                await self.muxed_conn.send_message(flag, None, self.stream_id)
+                # Try to send reset message to the other side. Ignore if there is anything wrong.
+                try:
+                    await self.muxed_conn.send_message(flag, None, self.stream_id)
+                except MuxedConnUnavailable:
+                    pass
 
             self.event_local_closed.set()
             self.event_remote_closed.set()
