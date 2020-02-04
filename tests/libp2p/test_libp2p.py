@@ -1,6 +1,7 @@
 import multiaddr
 import pytest
 
+from libp2p.network.stream.exceptions import StreamError
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.tools.factories import HostFactory
 from libp2p.tools.utils import connect, create_echo_stream_handler
@@ -42,13 +43,22 @@ async def test_double_response(is_host_secure):
 
         async def double_response_stream_handler(stream):
             while True:
-                read_string = (await stream.read(MAX_READ_LEN)).decode()
+                try:
+                    read_string = (await stream.read(MAX_READ_LEN)).decode()
+                except StreamError:
+                    break
 
                 response = ACK_STR_0 + read_string
-                await stream.write(response.encode())
+                try:
+                    await stream.write(response.encode())
+                except StreamError:
+                    break
 
                 response = ACK_STR_1 + read_string
-                await stream.write(response.encode())
+                try:
+                    await stream.write(response.encode())
+                except StreamError:
+                    break
 
         hosts[1].set_stream_handler(PROTOCOL_ID_0, double_response_stream_handler)
 

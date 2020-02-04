@@ -1,6 +1,7 @@
 from typing import Awaitable, Callable
 
 from libp2p.host.host_interface import IHost
+from libp2p.network.stream.exceptions import StreamError
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -33,9 +34,15 @@ def create_echo_stream_handler(
 ) -> Callable[[INetStream], Awaitable[None]]:
     async def echo_stream_handler(stream: INetStream) -> None:
         while True:
-            read_string = (await stream.read(MAX_READ_LEN)).decode()
+            try:
+                read_string = (await stream.read(MAX_READ_LEN)).decode()
+            except StreamError:
+                break
 
             resp = ack_prefix + read_string
-            await stream.write(resp.encode())
+            try:
+                await stream.write(resp.encode())
+            except StreamError:
+                break
 
     return echo_stream_handler
