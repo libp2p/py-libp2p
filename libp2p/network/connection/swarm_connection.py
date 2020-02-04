@@ -61,11 +61,10 @@ class SwarmConn(INetConn):
                 try:
                     stream = await self.muxed_conn.accept_stream()
                 except MuxedConnUnavailable:
+                    await self.close()
                     break
                 # Asynchronously handle the accepted stream, to avoid blocking the next stream.
                 nursery.start_soon(self._handle_muxed_stream, stream)
-
-        await self.close()
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         net_stream = self._add_stream(muxed_stream)
