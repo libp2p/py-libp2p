@@ -52,7 +52,7 @@ class SwarmConn(INetConn):
         # before we cancel the stream handler tasks.
         await trio.sleep(0.1)
 
-        self._notify_disconnected()
+        await self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
         self.event_started.set()
@@ -67,7 +67,7 @@ class SwarmConn(INetConn):
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
-        net_stream = self._add_stream(muxed_stream)
+        net_stream = await self._add_stream(muxed_stream)
         try:
             # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
             await self.swarm.common_stream_handler(net_stream)  # type: ignore
@@ -75,21 +75,21 @@ class SwarmConn(INetConn):
             # As long as `common_stream_handler`, remove the stream.
             self.remove_stream(net_stream)
 
-    def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
+    async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
-        self.swarm.notify_opened_stream(net_stream)
+        await self.swarm.notify_opened_stream(net_stream)
         return net_stream
 
-    def _notify_disconnected(self) -> None:
-        self.swarm.notify_disconnected(self)
+    async def _notify_disconnected(self) -> None:
+        await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
         await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()
-        return self._add_stream(muxed_stream)
+        return await self._add_stream(muxed_stream)
 
     def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)
