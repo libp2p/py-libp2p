@@ -46,7 +46,7 @@ class SwarmConn(INetConn):
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
-        for stream in self.streams:
+        for stream in self.streams.copy():
             await stream.reset()
         # Force context switch for stream handlers to process the stream reset event we just emit
         # before we cancel the stream handler tasks.
