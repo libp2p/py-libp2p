@@ -38,6 +38,7 @@ class TCPListener(IListener):
             host: str,
             task_status: TaskStatus[Sequence[trio.SocketListener]] = None,
         ) -> None:
+            """Just a proxy function to add logging here."""
             logger.debug("serve_tcp %s %s", host, port)
             await trio.serve_tcp(handler, port, host=host, task_status=task_status)
 
