@@ -56,13 +56,14 @@ class SwarmConn(INetConn):
 
     async def _handle_new_streams(self) -> None:
         self.event_started.set()
-        while True:
-            try:
-                stream = await self.muxed_conn.accept_stream()
-            except MuxedConnUnavailable:
-                break
-            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
-            self.swarm.manager.run_task(self._handle_muxed_stream, stream)
+        async with trio.open_nursery() as nursery:
+            while True:
+                try:
+                    stream = await self.muxed_conn.accept_stream()
+                except MuxedConnUnavailable:
+                    break
+                # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+                nursery.start_soon(self._handle_muxed_stream, stream)
 
         await self.close()
 
