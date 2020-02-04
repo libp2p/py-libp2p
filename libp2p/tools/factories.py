@@ -404,13 +404,18 @@ async def net_stream_pair_factory(
 
     stream_1: INetStream
 
-    # Just a proxy, we only care about the stream
-    def handler(stream: INetStream) -> None:
+    # Just a proxy, we only care about the stream.
+    # Add a barrier to avoid stream being removed.
+    event_handler_finished = trio.Event()
+
+    async def handler(stream: INetStream) -> None:
         nonlocal stream_1
         stream_1 = stream
+        await event_handler_finished.wait()
 
     async with host_pair_factory(is_secure) as hosts:
         hosts[1].set_stream_handler(protocol_id, handler)
 
         stream_0 = await hosts[0].new_stream(hosts[1].get_id(), [protocol_id])
         yield stream_0, stream_1
+        event_handler_finished.set()
