@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from async_service import Service
 from multiaddr import Multiaddr
@@ -31,6 +31,13 @@ from .stream.net_stream_interface import INetStream
 logger = logging.getLogger("libp2p.network.swarm")
 
 
+def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
+    async def stream_handler(stream: INetStream) -> None:
+        await network.get_manager().wait_finished()
+
+    return stream_handler
+
+
 class Swarm(Service, INetworkService):
 
     self_id: ID
@@ -41,7 +48,7 @@ class Swarm(Service, INetworkService):
     #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, INetConn]
     listeners: Dict[str, IListener]
-    common_stream_handler: Optional[StreamHandlerFn]
+    common_stream_handler: StreamHandlerFn
 
     notifees: List[INotifee]
 
@@ -62,7 +69,8 @@ class Swarm(Service, INetworkService):
         # Create Notifee array
         self.notifees = []
 
-        self.common_stream_handler = None
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        self.common_stream_handler = create_default_stream_handler(self)  # type: ignore
 
     async def run(self) -> None:
         await self.manager.wait_finished()
@@ -71,7 +79,8 @@ class Swarm(Service, INetworkService):
         return self.self_id
 
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        self.common_stream_handler = stream_handler
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        self.common_stream_handler = stream_handler  # type: ignore
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
