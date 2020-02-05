@@ -23,7 +23,7 @@ from .exceptions import MplexUnavailable
 from .mplex_stream import MplexStream
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
-# Ref: https://github.com/libp2p/go-mplex/blob/master/multiplex.go#L115
+# Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
 MPLEX_MESSAGE_CHANNEL_SIZE = 8
 
 logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
