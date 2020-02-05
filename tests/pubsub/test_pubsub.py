@@ -378,14 +378,14 @@ async def test_handle_talk():
             data=b"1234",
             seqno=b"\x00" * 8,
         )
-        await pubsubs_fsub[0].handle_talk(msg_0)
+        pubsubs_fsub[0].notify_subscriptions(msg_0)
         msg_1 = make_pubsub_msg(
             origin_id=pubsubs_fsub[0].my_id,
             topic_ids=["NOT_SUBSCRIBED"],
             data=b"1234",
             seqno=b"\x11" * 8,
         )
-        await pubsubs_fsub[0].handle_talk(msg_1)
+        pubsubs_fsub[0].notify_subscriptions(msg_1)
         assert (
             len(pubsubs_fsub[0].topic_ids) == 1
             and sub == pubsubs_fsub[0].subscribed_topics_receive[TESTING_TOPIC]

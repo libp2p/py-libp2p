@@ -361,8 +361,7 @@ class Pubsub(Service, IPubsub):
                 if origin_id in self.peer_topics[sub_message.topicid]:
                     self.peer_topics[sub_message.topicid].discard(origin_id)
 
-    # FIXME(mhchia): Change the function name?
-    async def handle_talk(self, publish_message: rpc_pb2.Message) -> None:
+    def notify_subscriptions(self, publish_message: rpc_pb2.Message) -> None:
         """
         Put incoming message from a peer onto my blocking queue.
 
@@ -576,7 +575,7 @@ class Pubsub(Service, IPubsub):
             return
 
         self._mark_msg_seen(msg)
-        await self.handle_talk(msg)
+        self.notify_subscriptions(msg)
         await self.router.publish(msg_forwarder, msg)
 
     def _next_seqno(self) -> bytes:
