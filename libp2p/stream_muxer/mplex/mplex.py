@@ -66,7 +66,7 @@ class Mplex(IMuxedConn):
         self.streams = {}
         self.streams_lock = trio.Lock()
         self.streams_msg_channels = {}
-        channels = trio.open_memory_channel[IMuxedStream](math.inf)
+        channels = trio.open_memory_channel[IMuxedStream](0)
         self.new_stream_send_channel, self.new_stream_receive_channel = channels
         self.event_shutting_down = trio.Event()
         self.event_closed = trio.Event()
