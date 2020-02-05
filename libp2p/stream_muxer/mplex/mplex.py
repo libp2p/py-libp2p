@@ -137,7 +137,7 @@ class Mplex(IMuxedConn):
         """accepts a muxed stream opened by the other end."""
         try:
             return await self.new_stream_receive_channel.receive()
-        except (trio.ClosedResourceError, trio.EndOfChannel):
+        except trio.EndOfChannel:
             raise MplexUnavailable
 
     async def send_message(
@@ -254,7 +254,7 @@ class Mplex(IMuxedConn):
         mplex_stream = await self._initialize_stream(stream_id, message.decode())
         try:
             await self.new_stream_send_channel.send(mplex_stream)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
+        except trio.ClosedResourceError:
             raise MplexUnavailable
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
@@ -336,6 +336,4 @@ class Mplex(IMuxedConn):
                 send_channel = self.streams_msg_channels[stream_id]
                 await send_channel.aclose()
         self.event_closed.set()
-        # FIXME: It's enough to just close one side.
         await self.new_stream_send_channel.aclose()
-        await self.new_stream_receive_channel.aclose()
