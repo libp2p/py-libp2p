@@ -31,12 +31,10 @@ async def test_mplex_conn(mplex_conn_pair):
     assert stream_0.event_remote_closed.is_set()
     assert stream_0.event_reset.is_set()
     assert stream_0.event_local_closed.is_set()
-    assert conn_0.streams is None
     # Test: All streams on the other side are also closed.
     assert stream_1.event_remote_closed.is_set()
     assert stream_1.event_reset.is_set()
     assert stream_1.event_local_closed.is_set()
-    assert conn_1.streams is None
 
     # Test: No effect to close more than once between two side.
     await conn_0.close()

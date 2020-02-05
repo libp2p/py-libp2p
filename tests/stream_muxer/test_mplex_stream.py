@@ -69,9 +69,7 @@ async def test_mplex_stream_read_after_remote_closed(mplex_stream_pair):
     await stream_0.close()
     assert stream_0.event_local_closed.is_set()
     await trio.sleep(0.01)
-    # await trio.sleep(100000)
     await wait_all_tasks_blocked()
-    # await trio.sleep_forever()
     assert stream_1.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(MplexStreamEOF):

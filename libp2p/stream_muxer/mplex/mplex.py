@@ -111,11 +111,11 @@ class Mplex(IMuxedConn):
     async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
         # Use an unbounded buffer, to avoid `handle_incoming` being blocked when doing
         # `send_channel.send`.
-        channels = trio.open_memory_channel[bytes](math.inf)
-        stream = MplexStream(name, stream_id, self, channels[1])
+        send_channel, receive_channel = trio.open_memory_channel[bytes](math.inf)
+        stream = MplexStream(name, stream_id, self, receive_channel)
         async with self.streams_lock:
             self.streams[stream_id] = stream
-            self.streams_msg_channels[stream_id] = channels[0]
+            self.streams_msg_channels[stream_id] = send_channel
         return stream
 
     async def open_stream(self) -> IMuxedStream:
@@ -269,7 +269,10 @@ class Mplex(IMuxedConn):
             if stream.event_remote_closed.is_set():
                 # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                 return
-        await send_channel.send(message)
+        try:
+            await send_channel.send(message)
+        except (trio.BrokenResourceError, trio.ClosedResourceError):
+            raise MplexUnavailable
 
     async def _handle_close(self, stream_id: StreamID) -> None:
         async with self.streams_lock:
@@ -325,7 +328,7 @@ class Mplex(IMuxedConn):
                         stream.event_local_closed.set()
                 send_channel = self.streams_msg_channels[stream_id]
                 await send_channel.aclose()
-            self.streams = None
         self.event_closed.set()
+        # FIXME: It's enough to just close one side.
         await self.new_stream_send_channel.aclose()
         await self.new_stream_receive_channel.aclose()
