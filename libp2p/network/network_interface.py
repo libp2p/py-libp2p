@@ -74,4 +74,4 @@ class INetwork(ABC):
 
 
 class INetworkService(INetwork, ServiceAPI):
-    ...
+    pass

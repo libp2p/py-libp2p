@@ -50,7 +50,7 @@ class PubsubNotifee(INotifee):
             await self.initiator_peers_queue.send(conn.muxed_conn.peer_id)
         except trio.BrokenResourceError:
             # The receive channel is closed by Pubsub. We should do nothing here.
-            ...
+            pass
 
     async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -64,7 +64,7 @@ class PubsubNotifee(INotifee):
             await self.dead_peers_queue.send(conn.muxed_conn.peer_id)
         except trio.BrokenResourceError:
             # The receive channel is closed by Pubsub. We should do nothing here.
-            ...
+            pass
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         await trio.hazmat.checkpoint()

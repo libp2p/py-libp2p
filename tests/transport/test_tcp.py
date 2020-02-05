@@ -13,7 +13,7 @@ async def test_tcp_listener(nursery):
     transport = TCP()
 
     async def handler(tcp_stream):
-        ...
+        pass
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
