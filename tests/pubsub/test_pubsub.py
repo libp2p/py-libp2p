@@ -6,7 +6,7 @@ import trio
 
 from libp2p.exceptions import ValidationError
 from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX
+from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX, SUBSCRIPTION_CHANNEL_SIZE
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.tools.factories import IDFactory, PubsubFactory, net_stream_pair_factory
 from libp2p.tools.pubsub.utils import make_pubsub_msg
@@ -442,6 +442,38 @@ async def test_subscribe_and_publish():
         async with trio.open_nursery() as nursery:
             nursery.start_soon(receive_data, TESTING_TOPIC)
             nursery.start_soon(publish_data, TESTING_TOPIC)
+
+
+@pytest.mark.trio
+async def test_subscribe_and_publish_full_channel():
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        extra_data_0 = b"extra_data_0"
+        extra_data_1 = b"extra_data_1"
+
+        # Test: Subscription channel is of size `SUBSCRIPTION_CHANNEL_SIZE`.
+        #   When the channel is full, new received messages are dropped.
+        #   After the channel has empty slot, the channel can receive new messages.
+
+        # Assume `SUBSCRIPTION_CHANNEL_SIZE` is smaller than `2**(4*8)`.
+        list_data = [i.to_bytes(4, "big") for i in range(SUBSCRIPTION_CHANNEL_SIZE)]
+        # Expect `extra_data_0` is dropped and `extra_data_1` is appended.
+        expected_list_data = list_data + [extra_data_1]
+
+        subscription = await pubsub.subscribe(TESTING_TOPIC)
+        for data in list_data:
+            await pubsub.publish(TESTING_TOPIC, data)
+
+        # Publish `extra_data_0` which should be dropped since the channel is already full.
+        await pubsub.publish(TESTING_TOPIC, extra_data_0)
+        # Consume a message and there is an empty slot in the channel.
+        assert (await subscription.get()).data == expected_list_data.pop(0)
+        # Publish `extra_data_1` which should be appended to the channel.
+        await pubsub.publish(TESTING_TOPIC, extra_data_1)
+
+        for expected_data in expected_list_data:
+            assert (await subscription.get()).data == expected_data
 
 
 @pytest.mark.trio

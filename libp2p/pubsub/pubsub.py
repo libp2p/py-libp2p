@@ -1,6 +1,5 @@
 import functools
 import logging
-import math
 import time
 from typing import TYPE_CHECKING, Dict, KeysView, List, NamedTuple, Set, Tuple, cast
 
@@ -31,6 +30,9 @@ if TYPE_CHECKING:
     from .abc import IPubsubRouter  # noqa: F401
     from typing import Any  # noqa: F401
 
+
+# Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
+SUBSCRIPTION_CHANNEL_SIZE = 32
 
 logger = logging.getLogger("libp2p.pubsub")
 
@@ -373,7 +375,13 @@ class Pubsub(Service, IPubsub):
                 # we are subscribed to a topic this message was sent for,
                 # so add message to the subscription output queue
                 # for each topic
-                await self.subscribed_topics_send[topic].send(publish_message)
+                try:
+                    self.subscribed_topics_send[topic].send_nowait(publish_message)
+                except trio.WouldBlock:
+                    # Channel is full, ignore this message.
+                    logger.warning(
+                        "fail to deliver message to subscription for topic %s", topic
+                    )
 
     async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
         """
@@ -389,7 +397,7 @@ class Pubsub(Service, IPubsub):
             return self.subscribed_topics_receive[topic_id]
 
         send_channel, receive_channel = trio.open_memory_channel[rpc_pb2.Message](
-            math.inf
+            SUBSCRIPTION_CHANNEL_SIZE
         )
 
         subscription = TrioSubscriptionAPI(
