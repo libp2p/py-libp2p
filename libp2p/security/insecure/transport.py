@@ -52,13 +52,13 @@ class InsecureSession(BaseSession):
         encoded_msg_bytes = encode_fixedint_prefixed(msg_bytes)
         try:
             await self.write(encoded_msg_bytes)
-        except RawConnError:
-            raise HandshakeFailure("connection closed")
+        except RawConnError as e:
+            raise HandshakeFailure("connection closed") from e
 
         try:
             remote_msg_bytes = await read_fixedint_prefixed(self.conn)
-        except RawConnError:
-            raise HandshakeFailure("connection closed")
+        except RawConnError as e:
+            raise HandshakeFailure("connection closed") from e
         remote_msg = plaintext_pb2.Exchange()
         remote_msg.ParseFromString(remote_msg_bytes)
         received_peer_id = ID(remote_msg.id)
@@ -77,12 +77,12 @@ class InsecureSession(BaseSession):
             received_pubkey = deserialize_public_key(
                 remote_msg.pubkey.SerializeToString()
             )
-        except ValueError:
+        except ValueError as e:
             raise HandshakeFailure(
                 f"unknown `key_type` of remote_msg.pubkey={remote_msg.pubkey}"
-            )
+            ) from e
         except MissingDeserializerError as error:
-            raise HandshakeFailure(error)
+            raise HandshakeFailure() from error
         peer_id_from_received_pubkey = ID.from_pubkey(received_pubkey)
         if peer_id_from_received_pubkey != received_peer_id:
             raise HandshakeFailure(

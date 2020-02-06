@@ -25,12 +25,12 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError(error)
+            raise MultiselectClientError() from error
 
         try:
             handshake_contents = await communicator.read()
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError(str(error))
+            raise MultiselectClientError() from error
 
         if not is_valid_handshake(handshake_contents):
             raise MultiselectClientError("multiselect protocol ID mismatch")
@@ -73,18 +73,18 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(protocol)
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError(error)
+            raise MultiselectClientError() from error
 
         try:
             response = await communicator.read()
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError(str(error))
+            raise MultiselectClientError() from error
 
         if response == protocol:
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
             raise MultiselectClientError("protocol not supported")
-        raise MultiselectClientError("unrecognized response: " + response)
+        raise MultiselectClientError(f"unrecognized response: {response}")
 
 
 def is_valid_handshake(handshake_contents: str) -> bool:

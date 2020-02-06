@@ -81,7 +81,7 @@ class DummyAccountNode(Service):
         :param dest_user: user to send crypto to
         :param amount: amount of crypto to send
         """
-        msg_contents = "send," + source_user + "," + dest_user + "," + str(amount)
+        msg_contents = f"send,{source_user},{dest_user},{amount!s}"
         await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
     async def publish_set_crypto(self, user: str, amount: int) -> None:
@@ -92,7 +92,7 @@ class DummyAccountNode(Service):
         :param user: user to set crypto for
         :param amount: amount of crypto
         """
-        msg_contents = "set," + user + "," + str(amount)
+        msg_contents = f"set,{user},{amount!s}"
         await self.pubsub.publish(CRYPTO_TOPIC, msg_contents.encode())
 
     def handle_send_crypto(self, source_user: str, dest_user: str, amount: int) -> None:

@@ -47,9 +47,9 @@ class NetStream(INetStream):
         try:
             return await self.muxed_stream.read(n)
         except MuxedStreamEOF as error:
-            raise StreamEOF from error
+            raise StreamEOF() from error
         except MuxedStreamReset as error:
-            raise StreamReset from error
+            raise StreamReset() from error
 
     async def write(self, data: bytes) -> int:
         """
@@ -60,7 +60,7 @@ class NetStream(INetStream):
         try:
             return await self.muxed_stream.write(data)
         except MuxedStreamClosed as error:
-            raise StreamClosed from error
+            raise StreamClosed() from error
 
     async def close(self) -> None:
         """close stream."""

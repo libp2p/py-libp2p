@@ -26,7 +26,7 @@ class P2PDProcess(BaseInteractiveProcess):
         is_pubsub_signing: bool = False,
         is_pubsub_signing_strict: bool = False,
     ) -> None:
-        args = [f"-listen={str(control_maddr)}"]
+        args = [f"-listen={control_maddr!s}"]
         # NOTE: To support `-insecure`, we need to hack `go-libp2p-daemon`.
         if not is_secure:
             args.append("-insecure=true")

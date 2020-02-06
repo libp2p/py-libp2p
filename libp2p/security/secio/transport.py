@@ -131,8 +131,8 @@ class SecureSession(BaseSession):
         msg = await self.conn.read_msg()
         try:
             decrypted_msg = self.remote_encrypter.decrypt_if_valid(msg)
-        except InvalidMACException:
-            raise DecryptionFailedException
+        except InvalidMACException as e:
+            raise DecryptionFailedException() from e
         return decrypted_msg
 
     async def write(self, data: bytes) -> int:
@@ -175,7 +175,7 @@ class Proposal:
         try:
             public_key = deserialize_public_key(public_key_protobuf_bytes)
         except MissingDeserializerError as error:
-            raise SedesException(error)
+            raise SedesException() from error
         exchanges = protobuf.exchanges
         ciphers = protobuf.ciphers
         hashes = protobuf.hashes
@@ -424,8 +424,8 @@ async def create_secure_session(
         await conn.close()
         raise e
     # `IOException` includes errors raised while read from/write to raw connection
-    except IOException:
-        raise SecioException("connection closed")
+    except IOException as e:
+        raise SecioException("connection closed") from e
 
     is_initiator = remote_peer is not None
     session = _mk_session_from(
@@ -435,8 +435,8 @@ async def create_secure_session(
     try:
         received_nonce = await _finish_handshake(session, remote_nonce)
     # `IOException` includes errors raised while read from/write to raw connection
-    except IOException:
-        raise SecioException("connection closed")
+    except IOException as e:
+        raise SecioException("connection closed") from e
     if received_nonce != local_nonce:
         await conn.close()
         raise InconsistentNonce()

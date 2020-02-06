@@ -171,20 +171,21 @@ class Swarm(Service, INetworkService):
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
         except SecurityUpgradeFailure as error:
-            error_msg = "fail to upgrade security for peer %s"
-            logger.debug(error_msg, peer_id)
+            logger.debug("failed to upgrade security for peer %s", peer_id)
             await raw_conn.close()
-            raise SwarmException(error_msg % peer_id) from error
+            raise SwarmException(
+                f"failed to upgrade security for peer {peer_id}"
+            ) from error
 
         logger.debug("upgraded security for peer %s", peer_id)
 
         try:
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
         except MuxerUpgradeFailure as error:
-            error_msg = "fail to upgrade mux for peer %s"
-            logger.debug(error_msg, peer_id)
+            logger.debug("failed to upgrade mux for peer %s", peer_id)
             await secured_conn.close()
-            raise SwarmException(error_msg % peer_id) from error
+            raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+
         logger.debug("upgraded mux for peer %s", peer_id)
 
         swarm_conn = await self.add_conn(muxed_conn)
@@ -241,8 +242,11 @@ class Swarm(Service, INetworkService):
                         raw_conn, ID(b""), False
                     )
                 except SecurityUpgradeFailure as error:
+                    logger.debug("failed to upgrade security for peer at %s", maddr)
                     await raw_conn.close()
-                    raise SwarmException() from error
+                    raise SwarmException(
+                        f"failed to upgrade security for peer at {maddr}"
+                    ) from error
                 peer_id = secured_conn.get_remote_peer()
 
                 try:
@@ -250,10 +254,11 @@ class Swarm(Service, INetworkService):
                         secured_conn, peer_id
                     )
                 except MuxerUpgradeFailure as error:
-                    error_msg = "fail to upgrade mux for peer %s"
-                    logger.debug(error_msg, peer_id)
+                    logger.debug("fail to upgrade mux for peer %s", peer_id)
                     await secured_conn.close()
-                    raise SwarmException(error_msg % peer_id) from error
+                    raise SwarmException(
+                        f"fail to upgrade mux for peer {peer_id}"
+                    ) from error
                 logger.debug("upgraded mux for peer %s", peer_id)
 
                 await self.add_conn(muxed_conn)
@@ -279,7 +284,7 @@ class Swarm(Service, INetworkService):
                 return True
             except IOError:
                 # Failed. Continue looping.
-                logger.debug("fail to listen on: " + str(maddr))
+                logger.debug("fail to listen on: %s", maddr)
 
         # No maddr succeeded
         return False

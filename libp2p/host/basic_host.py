@@ -95,7 +95,7 @@ class BasicHost(IHost):
         :return: all the multiaddr addresses this host is listening to
         """
         # TODO: We don't need "/p2p/{peer_id}" postfix actually.
-        p2p_part = multiaddr.Multiaddr("/p2p/{}".format(self.get_id().pretty()))
+        p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
 
         addrs: List[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
@@ -147,7 +147,7 @@ class BasicHost(IHost):
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
             await net_stream.reset()
-            raise StreamFailure("failt to open a stream to peer %s", peer_id) from error
+            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
 
         net_stream.set_protocol(selected_protocol)
         return net_stream
