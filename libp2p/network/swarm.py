@@ -1,9 +1,11 @@
-import asyncio
 import logging
 from typing import Dict, List, Optional
 
+from async_service import Service
 from multiaddr import Multiaddr
+import trio
 
+from libp2p.io.abc import ReadWriteCloser
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
@@ -23,14 +25,21 @@ from ..exceptions import MultiError
 from .connection.raw_connection import RawConnection
 from .connection.swarm_connection import SwarmConn
 from .exceptions import SwarmException
-from .network_interface import INetwork
+from .network_interface import INetworkService
 from .notifee_interface import INotifee
 from .stream.net_stream_interface import INetStream
 
 logger = logging.getLogger("libp2p.network.swarm")
 
 
-class Swarm(INetwork):
+def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
+    async def stream_handler(stream: INetStream) -> None:
+        await network.get_manager().wait_finished()
+
+    return stream_handler
+
+
+class Swarm(Service, INetworkService):
 
     self_id: ID
     peerstore: IPeerStore
@@ -40,7 +49,9 @@ class Swarm(INetwork):
     #   whereas in Go one `peer_id` may point to multiple connections.
     connections: Dict[ID, INetConn]
     listeners: Dict[str, IListener]
-    common_stream_handler: Optional[StreamHandlerFn]
+    common_stream_handler: StreamHandlerFn
+    listener_nursery: Optional[trio.Nursery]
+    event_listener_nursery_created: trio.Event
 
     notifees: List[INotifee]
 
@@ -61,13 +72,31 @@ class Swarm(INetwork):
         # Create Notifee array
         self.notifees = []
 
-        self.common_stream_handler = None
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        self.common_stream_handler = create_default_stream_handler(self)  # type: ignore
+
+        self.listener_nursery = None
+        self.event_listener_nursery_created = trio.Event()
+
+    async def run(self) -> None:
+        async with trio.open_nursery() as nursery:
+            # Create a nursery for listener tasks.
+            self.listener_nursery = nursery
+            self.event_listener_nursery_created.set()
+            try:
+                await self.manager.wait_finished()
+            finally:
+                # The service ended. Cancel listener tasks.
+                nursery.cancel_scope.cancel()
+                # Indicate that the nursery has been cancelled.
+                self.listener_nursery = None
 
     def get_peer_id(self) -> ID:
         return self.self_id
 
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        self.common_stream_handler = stream_handler
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        self.common_stream_handler = stream_handler  # type: ignore
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
@@ -195,19 +224,15 @@ class Swarm(INetwork):
               - Call listener listen with the multiaddr
               - Map multiaddr to listener
         """
+        # We need to wait until `self.listener_nursery` is created.
+        await self.event_listener_nursery_created.wait()
+
         for maddr in multiaddrs:
             if str(maddr) in self.listeners:
                 return True
 
-            async def conn_handler(
-                reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-            ) -> None:
-                connection_info = writer.get_extra_info("peername")
-                # TODO make a proper multiaddr
-                peer_addr = f"/ip4/{connection_info[0]}/tcp/{connection_info[1]}"
-                logger.debug("inbound connection at %s", peer_addr)
-                # logger.debug("inbound connection request", peer_id)
-                raw_conn = RawConnection(reader, writer, False)
+            async def conn_handler(read_write_closer: ReadWriteCloser) -> None:
+                raw_conn = RawConnection(read_write_closer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
                 # the conn and then mux the conn
@@ -217,15 +242,12 @@ class Swarm(INetwork):
                         raw_conn, ID(b""), False
                     )
                 except SecurityUpgradeFailure as error:
-                    logger.debug("failed to upgrade security for peer at %s", peer_addr)
+                    logger.debug("failed to upgrade security for peer at %s", maddr)
                     await raw_conn.close()
                     raise SwarmException(
-                        f"failed to upgrade security for peer at {peer_addr}"
+                        f"failed to upgrade security for peer at {maddr}"
                     ) from error
                 peer_id = secured_conn.get_remote_peer()
-
-                logger.debug("upgraded security for peer at %s", peer_addr)
-                logger.debug("identified peer at %s as %s", peer_addr, peer_id)
 
                 try:
                     muxed_conn = await self.upgrader.upgrade_connection(
@@ -240,17 +262,24 @@ class Swarm(INetwork):
                 logger.debug("upgraded mux for peer %s", peer_id)
 
                 await self.add_conn(muxed_conn)
-
                 logger.debug("successfully opened connection to peer %s", peer_id)
+
+                # NOTE: This is a intentional barrier to prevent from the handler exiting and
+                #   closing the connection.
+                await self.manager.wait_finished()
 
             try:
                 # Success
                 listener = self.transport.create_listener(conn_handler)
                 self.listeners[str(maddr)] = listener
-                await listener.listen(maddr)
+                # TODO: `listener.listen` is not bounded with nursery. If we want to be
+                #   I/O agnostic, we should change the API.
+                if self.listener_nursery is None:
+                    raise SwarmException("swarm instance hasn't been run")
+                await listener.listen(maddr, self.listener_nursery)
 
                 # Call notifiers since event occurred
-                self.notify_listen(maddr)
+                await self.notify_listen(maddr)
 
                 return True
             except IOError:
@@ -261,26 +290,12 @@ class Swarm(INetwork):
         return False
 
     async def close(self) -> None:
-        # TODO: Prevent from new listeners and conns being added.
-        #   Reference: https://github.com/libp2p/go-libp2p-swarm/blob/8be680aef8dea0a4497283f2f98470c2aeae6b65/swarm.go#L124-L134  # noqa: E501
-
-        # Close listeners
-        await asyncio.gather(
-            *[listener.close() for listener in self.listeners.values()]
-        )
-
-        # Close connections
-        await asyncio.gather(
-            *[connection.close() for connection in self.connections.values()]
-        )
-
+        await self.manager.stop()
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:
         if peer_id not in self.connections:
             return
-        # TODO: Should be changed to close multisple connections,
-        #   if we have several connections per peer in the future.
         connection = self.connections[peer_id]
         # NOTE: `connection.close` will delete `peer_id` from `self.connections`
         # and `notify_disconnected` for us.
@@ -293,11 +308,14 @@ class Swarm(INetwork):
         and start to monitor the connection for its new streams and
         disconnection."""
         swarm_conn = SwarmConn(muxed_conn, self)
+        self.manager.run_task(muxed_conn.start)
+        await muxed_conn.event_started.wait()
+        self.manager.run_task(swarm_conn.start)
+        await swarm_conn.event_started.wait()
         # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
         # Call notifiers since event occurred
-        self.notify_connected(swarm_conn)
-        await swarm_conn.start()
+        await self.notify_connected(swarm_conn)
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
@@ -306,13 +324,9 @@ class Swarm(INetwork):
         peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return
-        # TODO: Should be changed to remove the exact connection,
-        #   if we have several connections per peer in the future.
         del self.connections[peer_id]
 
     # Notifee
-
-    # TODO: Remeber the spawn notifying tasks and clean them up when closing.
 
     def register_notifee(self, notifee: INotifee) -> None:
         """
@@ -321,20 +335,28 @@ class Swarm(INetwork):
         """
         self.notifees.append(notifee)
 
-    def notify_opened_stream(self, stream: INetStream) -> None:
-        asyncio.gather(
-            *[notifee.opened_stream(self, stream) for notifee in self.notifees]
-        )
+    async def notify_opened_stream(self, stream: INetStream) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.opened_stream, self, stream)
 
-    # TODO: `notify_closed_stream`
+    async def notify_connected(self, conn: INetConn) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.connected, self, conn)
 
-    def notify_connected(self, conn: INetConn) -> None:
-        asyncio.gather(*[notifee.connected(self, conn) for notifee in self.notifees])
+    async def notify_disconnected(self, conn: INetConn) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.disconnected, self, conn)
 
-    def notify_disconnected(self, conn: INetConn) -> None:
-        asyncio.gather(*[notifee.disconnected(self, conn) for notifee in self.notifees])
+    async def notify_listen(self, multiaddr: Multiaddr) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.listen, self, multiaddr)
 
-    def notify_listen(self, multiaddr: Multiaddr) -> None:
-        asyncio.gather(*[notifee.listen(self, multiaddr) for notifee in self.notifees])
+    async def notify_closed_stream(self, stream: INetStream) -> None:
+        raise NotImplementedError
 
-    # TODO: `notify_listen_close`
+    async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
+        raise NotImplementedError

@@ -1,13 +1,35 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import (
+    TYPE_CHECKING,
+    AsyncContextManager,
+    AsyncIterable,
+    KeysView,
+    List,
+    Tuple,
+)
+
+from async_service import ServiceAPI
 
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 
 from .pb import rpc_pb2
+from .typing import ValidatorFn
 
 if TYPE_CHECKING:
     from .pubsub import Pubsub  # noqa: F401
+
+
+class ISubscriptionAPI(
+    AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
+):
+    @abstractmethod
+    async def unsubscribe(self) -> None:
+        ...
+
+    @abstractmethod
+    async def get(self) -> rpc_pb2.Message:
+        ...
 
 
 class IPubsubRouter(ABC):
@@ -53,7 +75,6 @@ class IPubsubRouter(ABC):
         :param rpc: rpc message
         """
 
-    # FIXME: Should be changed to type 'peer.ID'
     @abstractmethod
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
@@ -80,3 +101,46 @@ class IPubsubRouter(ABC):
 
         :param topic: topic to leave
         """
+
+
+class IPubsub(ServiceAPI):
+    @property
+    @abstractmethod
+    def my_id(self) -> ID:
+        ...
+
+    @property
+    @abstractmethod
+    def protocols(self) -> Tuple[TProtocol, ...]:
+        ...
+
+    @property
+    @abstractmethod
+    def topic_ids(self) -> KeysView[str]:
+        ...
+
+    @abstractmethod
+    def set_topic_validator(
+        self, topic: str, validator: ValidatorFn, is_async_validator: bool
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def remove_topic_validator(self, topic: str) -> None:
+        ...
+
+    @abstractmethod
+    async def wait_until_ready(self) -> None:
+        ...
+
+    @abstractmethod
+    async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
+        ...
+
+    @abstractmethod
+    async def unsubscribe(self, topic_id: str) -> None:
+        ...
+
+    @abstractmethod
+    async def publish(self, topic_id: str, data: bytes) -> None:
+        ...

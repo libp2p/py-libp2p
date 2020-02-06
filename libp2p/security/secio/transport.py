@@ -94,7 +94,7 @@ class SecureSession(BaseSession):
 
         data = self.buf.getbuffer()[self.low_watermark : self.high_watermark]
 
-        if n < 0:
+        if n is None:
             n = len(data)
         result = data[:n].tobytes()
         self.low_watermark += len(result)
@@ -111,7 +111,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = len(msg)
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         if n == 0:
             return bytes()
 

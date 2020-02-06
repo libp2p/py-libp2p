@@ -7,7 +7,7 @@ from libp2p.pubsub import floodsub, gossipsub
 # Just a arbitrary large number.
 # It is used when calling `MplexStream.read(MAX_READ_LEN)`,
 #   to avoid `MplexStream.read()`, which blocking reads until EOF.
-MAX_READ_LEN = 2 ** 32 - 1
+MAX_READ_LEN = 65535
 
 
 LISTEN_MADDR = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")

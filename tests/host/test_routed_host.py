@@ -1,33 +1,26 @@
-import asyncio
-
 import pytest
 
 from libp2p.host.exceptions import ConnectionFailure
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.tools.utils import set_up_nodes_by_transport_opt, set_up_routed_hosts
+from libp2p.tools.factories import HostFactory, RoutedHostFactory
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_host_routing_success():
-    host_a, host_b = await set_up_routed_hosts()
-    # forces to use routing as no addrs are provided
-    await host_a.connect(PeerInfo(host_b.get_id(), []))
-    await host_b.connect(PeerInfo(host_a.get_id(), []))
-
-    # Clean up
-    await asyncio.gather(*[host_a.close(), host_b.close()])
+    async with RoutedHostFactory.create_batch_and_listen(False, 2) as hosts:
+        # forces to use routing as no addrs are provided
+        await hosts[0].connect(PeerInfo(hosts[1].get_id(), []))
+        await hosts[1].connect(PeerInfo(hosts[0].get_id(), []))
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_host_routing_fail():
-    host_a, host_b = await set_up_routed_hosts()
-    basic_host_c = (await set_up_nodes_by_transport_opt([["/ip4/127.0.0.1/tcp/0"]]))[0]
-
-    # routing fails because host_c does not use routing
-    with pytest.raises(ConnectionFailure):
-        await host_a.connect(PeerInfo(basic_host_c.get_id(), []))
-    with pytest.raises(ConnectionFailure):
-        await host_b.connect(PeerInfo(basic_host_c.get_id(), []))
-
-    # Clean up
-    await asyncio.gather(*[host_a.close(), host_b.close(), basic_host_c.close()])
+    is_secure = False
+    async with RoutedHostFactory.create_batch_and_listen(
+        is_secure, 2
+    ) as routed_hosts, HostFactory.create_batch_and_listen(is_secure, 1) as basic_hosts:
+        # routing fails because host_c does not use routing
+        with pytest.raises(ConnectionFailure):
+            await routed_hosts[0].connect(PeerInfo(basic_hosts[0].get_id(), []))
+        with pytest.raises(ConnectionFailure):
+            await routed_hosts[1].connect(PeerInfo(basic_hosts[0].get_id(), []))

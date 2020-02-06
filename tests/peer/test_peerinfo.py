@@ -25,8 +25,6 @@ def test_init_():
 @pytest.mark.parametrize(
     "addr",
     (
-        pytest.param(None),
-        pytest.param(random.randint(0, 255), id="random integer"),
         pytest.param(multiaddr.Multiaddr("/"), id="empty multiaddr"),
         pytest.param(
             multiaddr.Multiaddr("/ip4/127.0.0.1"),

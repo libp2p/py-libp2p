@@ -1,5 +1,6 @@
-import asyncio
 import logging
+
+import trio
 
 from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
 from libp2p.network.stream.net_stream_interface import INetStream
@@ -17,8 +18,9 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     """Return a boolean indicating if we expect more pings from the peer at
     ``peer_id``."""
     try:
-        payload = await asyncio.wait_for(stream.read(PING_LENGTH), RESP_TIMEOUT)
-    except asyncio.TimeoutError as error:
+        with trio.fail_after(RESP_TIMEOUT):
+            payload = await stream.read(PING_LENGTH)
+    except trio.TooSlowError as error:
         logger.debug("Timed out waiting for ping from %s: %s", peer_id, error)
         raise
     except StreamEOF:

@@ -1,12 +1,14 @@
 import logging
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING, AsyncIterator, List, Sequence
 
+from async_generator import asynccontextmanager
+from async_service import background_trio_service
 import multiaddr
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.host.defaults import get_default_protocols
 from libp2p.host.exceptions import StreamFailure
-from libp2p.network.network_interface import INetwork
+from libp2p.network.network_interface import INetworkService
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
@@ -39,7 +41,7 @@ class BasicHost(IHost):
     right after a stream is initialized.
     """
 
-    _network: INetwork
+    _network: INetworkService
     peerstore: IPeerStore
 
     multiselect: Multiselect
@@ -47,7 +49,7 @@ class BasicHost(IHost):
 
     def __init__(
         self,
-        network: INetwork,
+        network: INetworkService,
         default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
     ) -> None:
         self._network = network
@@ -70,7 +72,7 @@ class BasicHost(IHost):
     def get_private_key(self) -> PrivateKey:
         return self.peerstore.privkey(self.get_id())
 
-    def get_network(self) -> INetwork:
+    def get_network(self) -> INetworkService:
         """
         :return: network instance of host
         """
@@ -100,6 +102,20 @@ class BasicHost(IHost):
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
+
+    @asynccontextmanager
+    async def run(
+        self, listen_addrs: Sequence[multiaddr.Multiaddr]
+    ) -> AsyncIterator[None]:
+        """
+        run the host instance and listen to ``listen_addrs``.
+
+        :param listen_addrs: a sequence of multiaddrs that we want to listen to
+        """
+        network = self.get_network()
+        async with background_trio_service(network):
+            await network.listen(*listen_addrs)
+            yield
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
