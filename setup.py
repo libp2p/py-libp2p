@@ -7,8 +7,8 @@ from setuptools import find_packages, setup
 extras_require = {
     "test": [
         "pytest>=4.6.3,<5.0.0",
-        "pytest-xdist>=1.30.0,<2",
-        "pytest-asyncio>=0.10.0,<1.0.0",
+        "pytest-xdist>=1.30.0",
+        "pytest-trio>=0.5.2",
         "factory-boy>=2.12.0,<3.0.0",
     ],
     "lint": [
@@ -74,6 +74,10 @@ install_requires = [
     "pynacl==1.3.0",
     "dataclasses>=0.7, <1;python_version<'3.7'",
     "async_generator==1.10",
+    "trio>=0.13.0",
+    "async-service>=0.1.0a6",
+    "async-exit-stack==1.0.1",
+    "trio-typing>=0.3.0,<0.4.0",
 ]
 
 

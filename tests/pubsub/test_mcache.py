@@ -1,5 +1,3 @@
-import pytest
-
 from libp2p.pubsub.mcache import MessageCache
 
 
@@ -12,8 +10,7 @@ class Msg:
         self.from_id = from_id
 
 
-@pytest.mark.asyncio
-async def test_mcache():
+def test_mcache():
     # Ported from:
     # https://github.com/libp2p/go-libp2p-pubsub/blob/51b7501433411b5096cac2b4994a36a68515fc03/mcache_test.go
     mcache = MessageCache(3, 5)

@@ -1,5 +1,6 @@
-import asyncio
-from typing import TYPE_CHECKING, Any, Awaitable, List, Set, Tuple
+from typing import TYPE_CHECKING, Set, Tuple
+
+import trio
 
 from libp2p.network.connection.net_connection_interface import INetConn
 from libp2p.network.stream.net_stream import NetStream
@@ -19,90 +20,78 @@ class SwarmConn(INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: Set[NetStream]
-    event_closed: asyncio.Event
-
-    _tasks: List["asyncio.Future[Any]"]
+    event_closed: trio.Event
 
     def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
-        self.event_closed = asyncio.Event()
+        self.event_closed = trio.Event()
+        self.event_started = trio.Event()
 
-        self._tasks = []
+    @property
+    def is_closed(self) -> bool:
+        return self.event_closed.is_set()
 
     async def close(self) -> None:
         if self.event_closed.is_set():
             return
         self.event_closed.set()
+        await self._cleanup()
+
+    async def _cleanup(self) -> None:
         self.swarm.remove_conn(self)
 
         await self.muxed_conn.close()
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
-        for stream in self.streams:
+        for stream in self.streams.copy():
             await stream.reset()
         # Force context switch for stream handlers to process the stream reset event we just emit
         # before we cancel the stream handler tasks.
-        await asyncio.sleep(0.1)
+        await trio.sleep(0.1)
 
-        for task in self._tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        # Schedule `self._notify_disconnected` to make it execute after `close` is finished.
-        self._notify_disconnected()
+        await self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
-        while True:
-            try:
-                stream = await self.muxed_conn.accept_stream()
-            except MuxedConnUnavailable:
-                # If there is anything wrong in the MuxedConn,
-                # we should break the loop and close the connection.
-                break
-            # Asynchronously handle the accepted stream, to avoid blocking the next stream.
-            await self.run_task(self._handle_muxed_stream(stream))
-
-        await self.close()
-
-    async def _call_stream_handler(self, net_stream: NetStream) -> None:
-        try:
-            await self.swarm.common_stream_handler(net_stream)
-        # TODO: More exact exceptions
-        except Exception:
-            # TODO: Emit logs.
-            # TODO: Clean up and remove the stream from SwarmConn if there is anything wrong.
-            self.remove_stream(net_stream)
+        self.event_started.set()
+        async with trio.open_nursery() as nursery:
+            while True:
+                try:
+                    stream = await self.muxed_conn.accept_stream()
+                except MuxedConnUnavailable:
+                    await self.close()
+                    break
+                # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+                nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
-        net_stream = self._add_stream(muxed_stream)
-        if self.swarm.common_stream_handler is not None:
-            await self.run_task(self._call_stream_handler(net_stream))
+        net_stream = await self._add_stream(muxed_stream)
+        try:
+            # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+            await self.swarm.common_stream_handler(net_stream)  # type: ignore
+        finally:
+            # As long as `common_stream_handler`, remove the stream.
+            self.remove_stream(net_stream)
 
-    def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
+    async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         net_stream = NetStream(muxed_stream)
         self.streams.add(net_stream)
-        self.swarm.notify_opened_stream(net_stream)
+        await self.swarm.notify_opened_stream(net_stream)
         return net_stream
 
-    def _notify_disconnected(self) -> None:
-        self.swarm.notify_disconnected(self)
+    async def _notify_disconnected(self) -> None:
+        await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
-        await self.run_task(self._handle_new_streams())
-
-    async def run_task(self, coro: Awaitable[Any]) -> None:
-        self._tasks.append(asyncio.ensure_future(coro))
+        await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:
         muxed_stream = await self.muxed_conn.open_stream()
-        return self._add_stream(muxed_stream)
+        return await self._add_stream(muxed_stream)
 
-    async def get_streams(self) -> Tuple[NetStream, ...]:
+    def get_streams(self) -> Tuple[NetStream, ...]:
         return tuple(self.streams)
 
     def remove_stream(self, stream: NetStream) -> None:

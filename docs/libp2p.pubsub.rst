@@ -11,6 +11,22 @@ Subpackages
 Submodules
 ----------
 
+libp2p.pubsub.abc module
+------------------------
+
+.. automodule:: libp2p.pubsub.abc
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+libp2p.pubsub.exceptions module
+-------------------------------
+
+.. automodule:: libp2p.pubsub.exceptions
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 libp2p.pubsub.floodsub module
 -----------------------------
 
@@ -51,10 +67,10 @@ libp2p.pubsub.pubsub\_notifee module
     :undoc-members:
     :show-inheritance:
 
-libp2p.pubsub.pubsub\_router\_interface module
-----------------------------------------------
+libp2p.pubsub.subscription module
+---------------------------------
 
-.. automodule:: libp2p.pubsub.pubsub_router_interface
+.. automodule:: libp2p.pubsub.subscription
     :members:
     :undoc-members:
     :show-inheritance:

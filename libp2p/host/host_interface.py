@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Sequence
+from typing import Any, AsyncContextManager, List, Sequence
 
 import multiaddr
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.network.network_interface import INetwork
+from libp2p.network.network_interface import INetworkService
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
@@ -31,7 +31,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def get_network(self) -> INetwork:
+    def get_network(self) -> INetworkService:
         """
         :return: network instance of host
         """
@@ -47,6 +47,16 @@ class IHost(ABC):
     def get_addrs(self) -> List[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening to
+        """
+
+    @abstractmethod
+    def run(
+        self, listen_addrs: Sequence[multiaddr.Multiaddr]
+    ) -> AsyncContextManager[None]:
+        """
+        run the host instance and listen to ``listen_addrs``.
+
+        :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
 
     @abstractmethod

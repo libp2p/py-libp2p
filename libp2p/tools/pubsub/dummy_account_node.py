@@ -1,12 +1,12 @@
-import asyncio
-from typing import Dict
-import uuid
+from typing import AsyncIterator, Dict, Tuple
+
+from async_exit_stack import AsyncExitStack
+from async_generator import asynccontextmanager
+from async_service import Service, background_trio_service
 
 from libp2p.host.host_interface import IHost
-from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
-from libp2p.tools.constants import LISTEN_MADDR
-from libp2p.tools.factories import FloodsubFactory, PubsubFactory
+from libp2p.tools.factories import PubsubFactory
 
 CRYPTO_TOPIC = "ethereum"
 
@@ -18,7 +18,7 @@ CRYPTO_TOPIC = "ethereum"
 # Determine message type by looking at first item before first comma
 
 
-class DummyAccountNode:
+class DummyAccountNode(Service):
     """
     Node which has an internal balance mapping, meant to serve as a dummy
     crypto blockchain.
@@ -27,19 +27,24 @@ class DummyAccountNode:
     crypto each user in the mappings holds
     """
 
-    libp2p_node: IHost
     pubsub: Pubsub
-    floodsub: FloodSub
 
-    def __init__(self, libp2p_node: IHost, pubsub: Pubsub, floodsub: FloodSub):
-        self.libp2p_node = libp2p_node
+    def __init__(self, pubsub: Pubsub) -> None:
         self.pubsub = pubsub
-        self.floodsub = floodsub
         self.balances: Dict[str, int] = {}
-        self.node_id = str(uuid.uuid1())
+
+    @property
+    def host(self) -> IHost:
+        return self.pubsub.host
+
+    async def run(self) -> None:
+        self.subscription = await self.pubsub.subscribe(CRYPTO_TOPIC)
+        self.manager.run_daemon_task(self.handle_incoming_msgs)
+        await self.manager.wait_finished()
 
     @classmethod
-    async def create(cls) -> "DummyAccountNode":
+    @asynccontextmanager
+    async def create(cls, number: int) -> AsyncIterator[Tuple["DummyAccountNode", ...]]:
         """
         Create a new DummyAccountNode and attach a libp2p node, a floodsub, and
         a pubsub instance to this new node.
@@ -47,28 +52,23 @@ class DummyAccountNode:
         We use create as this serves as a factory function and allows us
         to use async await, unlike the init function
         """
-
-        pubsub = PubsubFactory(router=FloodsubFactory())
-        await pubsub.host.get_network().listen(LISTEN_MADDR)
-        return cls(libp2p_node=pubsub.host, pubsub=pubsub, floodsub=pubsub.router)
+        async with PubsubFactory.create_batch_with_floodsub(number) as pubsubs:
+            async with AsyncExitStack() as stack:
+                dummy_acount_nodes = tuple(cls(pubsub) for pubsub in pubsubs)
+                for node in dummy_acount_nodes:
+                    await stack.enter_async_context(background_trio_service(node))
+                yield dummy_acount_nodes
 
     async def handle_incoming_msgs(self) -> None:
         """Handle all incoming messages on the CRYPTO_TOPIC from peers."""
         while True:
-            incoming = await self.q.get()
+            incoming = await self.subscription.get()
             msg_comps = incoming.data.decode("utf-8").split(",")
 
             if msg_comps[0] == "send":
                 self.handle_send_crypto(msg_comps[1], msg_comps[2], int(msg_comps[3]))
             elif msg_comps[0] == "set":
                 self.handle_set_crypto(msg_comps[1], int(msg_comps[2]))
-
-    async def setup_crypto_networking(self) -> None:
-        """Subscribe to CRYPTO_TOPIC and perform call to function that handles
-        all incoming messages on said topic."""
-        self.q = await self.pubsub.subscribe(CRYPTO_TOPIC)
-
-        asyncio.ensure_future(self.handle_incoming_msgs())
 
     async def publish_send_crypto(
         self, source_user: str, dest_user: str, amount: int

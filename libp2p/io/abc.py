@@ -8,7 +8,7 @@ class Closer(ABC):
 
 class Reader(ABC):
     @abstractmethod
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int = None) -> bytes:
         ...
 
 

@@ -1,6 +1,6 @@
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.exceptions import ConnectionFailure
-from libp2p.network.network_interface import INetwork
+from libp2p.network.network_interface import INetworkService
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.routing.interfaces import IPeerRouting
 
@@ -10,7 +10,7 @@ from libp2p.routing.interfaces import IPeerRouting
 class RoutedHost(BasicHost):
     _router: IPeerRouting
 
-    def __init__(self, network: INetwork, router: IPeerRouting):
+    def __init__(self, network: INetworkService, router: IPeerRouting):
         super().__init__(network)
         self._router = router
 

@@ -1,10 +1,9 @@
 import argparse
-import asyncio
-import urllib.request
 
 import multiaddr
+import trio
 
-from libp2p import new_node
+from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -20,12 +19,9 @@ async def _echo_stream_handler(stream: INetStream) -> None:
     await stream.close()
 
 
-async def run(port: int, destination: str, localhost: bool, seed: int = None) -> None:
-    if localhost:
-        ip = "127.0.0.1"
-    else:
-        ip = urllib.request.urlopen("https://v4.ident.me/").read().decode("utf8")
-    transport_opt = f"/ip4/{ip}/tcp/{port}"
+async def run(port: int, destination: str, seed: int = None) -> None:
+    localhost_ip = "127.0.0.1"
+    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
     if seed:
         import random
@@ -38,47 +34,43 @@ async def run(port: int, destination: str, localhost: bool, seed: int = None) ->
 
         secret = secrets.token_bytes(32)
 
-    host = await new_node(
-        key_pair=create_new_key_pair(secret), transport_opt=[transport_opt]
-    )
+    host = new_host(key_pair=create_new_key_pair(secret))
+    async with host.run(listen_addrs=[listen_addr]):
 
-    print(f"I am {host.get_id().to_string()}")
+        print(f"I am {host.get_id().to_string()}")
 
-    await host.get_network().listen(multiaddr.Multiaddr(transport_opt))
+        if not destination:  # its the server
 
-    if not destination:  # its the server
+            host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
-        host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
+            print(
+                f"Run 'python ./examples/echo/echo.py "
+                f"-p {int(port) + 1} "
+                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}' "
+                "on another console."
+            )
+            print("Waiting for incoming connections...")
+            await trio.sleep_forever()
 
-        localhost_opt = " --localhost" if localhost else ""
+        else:  # its the client
+            maddr = multiaddr.Multiaddr(destination)
+            info = info_from_p2p_addr(maddr)
+            # Associate the peer with local ip address
+            await host.connect(info)
 
-        print(
-            f"Run 'python ./examples/echo/echo.py"
-            + localhost_opt
-            + f" -p {int(port) + 1} -d /ip4/{ip}/tcp/{port}/p2p/{host.get_id().pretty()}'"
-            + " on another console."
-        )
-        print("Waiting for incoming connections...")
+            # Start a stream with the destination.
+            # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
+            stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
 
-    else:  # its the client
-        maddr = multiaddr.Multiaddr(destination)
-        info = info_from_p2p_addr(maddr)
-        # Associate the peer with local ip address
-        await host.connect(info)
+            msg = b"hi, there!\n"
 
-        # Start a stream with the destination.
-        # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
-        stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
+            await stream.write(msg)
+            # Notify the other side about EOF
+            await stream.close()
+            response = await stream.read()
 
-        msg = b"hi, there!\n"
-
-        await stream.write(msg)
-        # Notify the other side about EOF
-        await stream.close()
-        response = await stream.read()
-
-        print(f"Sent: {msg}")
-        print(f"Got: {response}")
+            print(f"Sent: {msg}")
+            print(f"Got: {response}")
 
 
 def main() -> None:
@@ -95,11 +87,6 @@ def main() -> None:
     )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="generate the same node ID on every execution",
-    )
-    parser.add_argument(
         "-p", "--port", default=8000, type=int, help="source port number"
     )
     parser.add_argument(
@@ -107,13 +94,6 @@ def main() -> None:
         "--destination",
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
-    )
-    parser.add_argument(
-        "-l",
-        "--localhost",
-        dest="localhost",
-        action="store_true",
-        help="flag indicating if localhost should be used or an external IP",
     )
     parser.add_argument(
         "-s",
@@ -126,16 +106,10 @@ def main() -> None:
     if not args.port:
         raise RuntimeError("was not able to determine a local port")
 
-    loop = asyncio.get_event_loop()
     try:
-        asyncio.ensure_future(
-            run(args.port, args.destination, args.localhost, args.seed)
-        )
-        loop.run_forever()
+        trio.run(run, args.port, args.destination, args.seed)
     except KeyboardInterrupt:
         pass
-    finally:
-        loop.close()
 
 
 if __name__ == "__main__":

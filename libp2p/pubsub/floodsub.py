@@ -1,14 +1,16 @@
 import logging
 from typing import Iterable, List, Sequence
 
+import trio
+
 from libp2p.network.stream.exceptions import StreamClosed
 from libp2p.peer.id import ID
 from libp2p.typing import TProtocol
 from libp2p.utils import encode_varint_prefixed
 
+from .abc import IPubsubRouter
 from .pb import rpc_pb2
 from .pubsub import Pubsub
-from .pubsub_router_interface import IPubsubRouter
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
@@ -61,6 +63,8 @@ class FloodSub(IPubsubRouter):
 
         :param rpc: rpc message
         """
+        # Checkpoint
+        await trio.hazmat.checkpoint()
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
@@ -107,6 +111,8 @@ class FloodSub(IPubsubRouter):
 
         :param topic: topic to join
         """
+        # Checkpoint
+        await trio.hazmat.checkpoint()
 
     async def leave(self, topic: str) -> None:
         """
@@ -115,6 +121,8 @@ class FloodSub(IPubsubRouter):
 
         :param topic: topic to leave
         """
+        # Checkpoint
+        await trio.hazmat.checkpoint()
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID

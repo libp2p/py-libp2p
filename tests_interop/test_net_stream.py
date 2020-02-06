@@ -1,6 +1,5 @@
-import asyncio
-
 import pytest
+import trio
 
 from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
 from libp2p.tools.constants import MAX_READ_LEN
@@ -8,7 +7,7 @@ from libp2p.tools.constants import MAX_READ_LEN
 DATA = b"data"
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_read_write(py_to_daemon_stream_pair, p2pds):
     stream_py, stream_daemon = py_to_daemon_stream_pair
     assert (
@@ -19,19 +18,19 @@ async def test_net_stream_read_write(py_to_daemon_stream_pair, p2pds):
     assert (await stream_daemon.read(MAX_READ_LEN)) == DATA
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_read_after_remote_closed(py_to_daemon_stream_pair, p2pds):
     stream_py, stream_daemon = py_to_daemon_stream_pair
     await stream_daemon.write(DATA)
     await stream_daemon.close()
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
     assert (await stream_py.read(MAX_READ_LEN)) == DATA
     # EOF
     with pytest.raises(StreamEOF):
         await stream_py.read(MAX_READ_LEN)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_read_after_local_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
     await stream_py.reset()
@@ -40,15 +39,15 @@ async def test_net_stream_read_after_local_reset(py_to_daemon_stream_pair, p2pds
 
 
 @pytest.mark.parametrize("is_to_fail_daemon_stream", (True,))
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_read_after_remote_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
     with pytest.raises(StreamReset):
         await stream_py.read(MAX_READ_LEN)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_write_after_local_closed(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
     await stream_py.write(DATA)
@@ -57,7 +56,7 @@ async def test_net_stream_write_after_local_closed(py_to_daemon_stream_pair, p2p
         await stream_py.write(DATA)
 
 
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_write_after_local_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, stream_daemon = py_to_daemon_stream_pair
     await stream_py.reset()
@@ -66,9 +65,9 @@ async def test_net_stream_write_after_local_reset(py_to_daemon_stream_pair, p2pd
 
 
 @pytest.mark.parametrize("is_to_fail_daemon_stream", (True,))
-@pytest.mark.asyncio
+@pytest.mark.trio
 async def test_net_stream_write_after_remote_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
-    await asyncio.sleep(0.01)
+    await trio.sleep(0.01)
     with pytest.raises(StreamClosed):
         await stream_py.write(DATA)

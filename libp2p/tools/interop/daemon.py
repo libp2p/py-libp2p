@@ -1,52 +1,22 @@
-import asyncio
-import time
-from typing import Any, Awaitable, Callable, List
+from typing import AsyncIterator
 
+from async_generator import asynccontextmanager
 import multiaddr
 from multiaddr import Multiaddr
 from p2pclient import Client
-import pytest
+import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 
 from .constants import LOCALHOST_IP
 from .envs import GO_BIN_PATH
+from .process import BaseInteractiveProcess
 
 P2PD_PATH = GO_BIN_PATH / "p2pd"
 
 
-TIMEOUT_DURATION = 30
-
-
-async def try_until_success(
-    coro_func: Callable[[], Awaitable[Any]], timeout: int = TIMEOUT_DURATION
-) -> None:
-    """
-    Keep running ``coro_func`` until either it succeed or time is up.
-
-    All arguments of ``coro_func`` should be filled, i.e. it should be
-    called without arguments.
-    """
-    t_start = time.monotonic()
-    while True:
-        result = await coro_func()
-        if result:
-            break
-        if (time.monotonic() - t_start) >= timeout:
-            # timeout
-            pytest.fail(f"{coro_func} is still failing after `{timeout}` seconds")
-        await asyncio.sleep(0.01)
-
-
-class P2PDProcess:
-    proc: asyncio.subprocess.Process
-    cmd: str = str(P2PD_PATH)
-    args: List[Any]
-    is_proc_running: bool
-
-    _tasks: List["asyncio.Future[Any]"]
-
+class P2PDProcess(BaseInteractiveProcess):
     def __init__(
         self,
         control_maddr: Multiaddr,
@@ -75,74 +45,21 @@ class P2PDProcess:
             #   - gossipsubHeartbeatInterval: GossipSubHeartbeatInitialDelay = 100 * time.Millisecond  # noqa: E501
             #   - gossipsubHeartbeatInitialDelay: GossipSubHeartbeatInterval = 1 * time.Second
             #   Referece: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/p2pd/main.go#L348-L353  # noqa: E501
+        self.proc = None
+        self.cmd = str(P2PD_PATH)
         self.args = args
-        self.is_proc_running = False
-
-        self._tasks = []
-
-    async def wait_until_ready(self) -> None:
-        lines_head_pattern = (b"Control socket:", b"Peer ID:", b"Peer Addrs:")
-        lines_head_occurred = {line: False for line in lines_head_pattern}
-
-        async def read_from_daemon_and_check() -> bool:
-            line = await self.proc.stdout.readline()
-            for head_pattern in lines_head_occurred:
-                if line.startswith(head_pattern):
-                    lines_head_occurred[head_pattern] = True
-            return all([value for value in lines_head_occurred.values()])
-
-        await try_until_success(read_from_daemon_and_check)
-        # Sleep a little bit to ensure the listener is up after logs are emitted.
-        await asyncio.sleep(0.01)
-
-    async def start_printing_logs(self) -> None:
-        async def _print_from_stream(
-            src_name: str, reader: asyncio.StreamReader
-        ) -> None:
-            while True:
-                line = await reader.readline()
-                if line != b"":
-                    print(f"{src_name}\t: {line.rstrip().decode()}")
-                await asyncio.sleep(0.01)
-
-        self._tasks.append(
-            asyncio.ensure_future(_print_from_stream("out", self.proc.stdout))
-        )
-        self._tasks.append(
-            asyncio.ensure_future(_print_from_stream("err", self.proc.stderr))
-        )
-        await asyncio.sleep(0)
-
-    async def start(self) -> None:
-        if self.is_proc_running:
-            return
-        self.proc = await asyncio.subprocess.create_subprocess_exec(
-            self.cmd,
-            *self.args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            bufsize=0,
-        )
-        self.is_proc_running = True
-        await self.wait_until_ready()
-        await self.start_printing_logs()
-
-    async def close(self) -> None:
-        if self.is_proc_running:
-            self.proc.terminate()
-            await self.proc.wait()
-            self.is_proc_running = False
-        for task in self._tasks:
-            task.cancel()
+        self.patterns = (b"Control socket:", b"Peer ID:", b"Peer Addrs:")
+        self.bytes_read = bytearray()
+        self.event_ready = trio.Event()
 
 
 class Daemon:
-    p2pd_proc: P2PDProcess
+    p2pd_proc: BaseInteractiveProcess
     control: Client
     peer_info: PeerInfo
 
     def __init__(
-        self, p2pd_proc: P2PDProcess, control: Client, peer_info: PeerInfo
+        self, p2pd_proc: BaseInteractiveProcess, control: Client, peer_info: PeerInfo
     ) -> None:
         self.p2pd_proc = p2pd_proc
         self.control = control
@@ -164,6 +81,7 @@ class Daemon:
         await self.control.close()
 
 
+@asynccontextmanager
 async def make_p2pd(
     daemon_control_port: int,
     client_callback_port: int,
@@ -172,7 +90,7 @@ async def make_p2pd(
     is_gossipsub: bool = True,
     is_pubsub_signing: bool = False,
     is_pubsub_signing_strict: bool = False,
-) -> Daemon:
+) -> AsyncIterator[Daemon]:
     control_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{daemon_control_port}")
     p2pd_proc = P2PDProcess(
         control_maddr,
@@ -185,21 +103,22 @@ async def make_p2pd(
     await p2pd_proc.start()
     client_callback_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{client_callback_port}")
     p2pc = Client(control_maddr, client_callback_maddr)
-    await p2pc.listen()
-    peer_id, maddrs = await p2pc.identify()
-    listen_maddr: Multiaddr = None
-    for maddr in maddrs:
-        try:
-            ip = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
-            # NOTE: Check if this `maddr` uses `tcp`.
-            maddr.value_for_protocol(multiaddr.protocols.P_TCP)
-        except multiaddr.exceptions.ProtocolLookupError:
-            continue
-        if ip == LOCALHOST_IP:
-            listen_maddr = maddr
-            break
-    assert listen_maddr is not None, "no loopback maddr is found"
-    peer_info = info_from_p2p_addr(
-        listen_maddr.encapsulate(Multiaddr(f"/p2p/{peer_id.to_string()}"))
-    )
-    return Daemon(p2pd_proc, p2pc, peer_info)
+
+    async with p2pc.listen():
+        peer_id, maddrs = await p2pc.identify()
+        listen_maddr: Multiaddr = None
+        for maddr in maddrs:
+            try:
+                ip = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
+                # NOTE: Check if this `maddr` uses `tcp`.
+                maddr.value_for_protocol(multiaddr.protocols.P_TCP)
+            except multiaddr.exceptions.ProtocolLookupError:
+                continue
+            if ip == LOCALHOST_IP:
+                listen_maddr = maddr
+                break
+        assert listen_maddr is not None, "no loopback maddr is found"
+        peer_info = info_from_p2p_addr(
+            listen_maddr.encapsulate(Multiaddr(f"/p2p/{peer_id.to_string()}"))
+        )
+        yield Daemon(p2pd_proc, p2pc, peer_info)

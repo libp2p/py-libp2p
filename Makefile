@@ -51,7 +51,7 @@ lint:
 	black --check $(FILES_TO_LINT)
 	isort --recursive --check-only --diff $(FILES_TO_LINT)
 	docformatter --pre-summary-newline --check --recursive $(FILES_TO_LINT)
-	tox -elint  # This is probably redundant, but just in case...
+	tox -e lint  # This is probably redundant, but just in case...
 
 lint-roll:
 	isort --recursive $(FILES_TO_LINT)
