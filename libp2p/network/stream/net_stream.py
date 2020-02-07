@@ -51,14 +51,14 @@ class NetStream(INetStream):
         except MuxedStreamReset as error:
             raise StreamReset() from error
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         """
         write to stream.
 
         :return: number of bytes written
         """
         try:
-            return await self.muxed_stream.write(data)
+            await self.muxed_stream.write(data)
         except MuxedStreamClosed as error:
             raise StreamClosed() from error
 

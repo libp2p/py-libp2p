@@ -134,7 +134,7 @@ class MplexStream(IMuxedStream):
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         """
         write to stream.
 
@@ -147,7 +147,7 @@ class MplexStream(IMuxedStream):
             if self.is_initiator
             else HeaderTags.MessageReceiver
         )
-        return await self.muxed_conn.send_message(flag, data, self.stream_id)
+        await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
         """Closing a stream closes it for writing and closes the remote end for

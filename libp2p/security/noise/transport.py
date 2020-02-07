@@ -27,8 +27,8 @@ class NoiseConnection(BaseSession):
     async def read(self, n: int = None) -> bytes:
         return await self.conn.read(n)
 
-    async def write(self, data: bytes) -> int:
-        return await self.conn.write(data)
+    async def write(self, data: bytes) -> None:
+        await self.conn.write(data)
 
     async def close(self) -> None:
         await self.conn.close()

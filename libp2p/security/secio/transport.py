@@ -135,9 +135,8 @@ class SecureSession(BaseSession):
             raise DecryptionFailedException() from e
         return decrypted_msg
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         await self.write_msg(data)
-        return len(data)
 
     async def write_msg(self, msg: bytes) -> None:
         encrypted_data = self.local_encrypter.encrypt(msg)

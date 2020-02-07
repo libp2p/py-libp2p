@@ -160,7 +160,7 @@ class Mplex(IMuxedConn):
 
         return await self.write_to_stream(_bytes)
 
-    async def write_to_stream(self, _bytes: bytes) -> int:
+    async def write_to_stream(self, _bytes: bytes) -> None:
         """
         writes a byte array to a secured connection.
 
@@ -173,8 +173,6 @@ class Mplex(IMuxedConn):
             raise MplexUnavailable(
                 "failed to write message to the underlying connection"
             ) from e
-
-        return len(_bytes)
 
     async def handle_incoming(self) -> None:
         """Read a message off of the secured connection and add it to the
