@@ -35,9 +35,8 @@ class InsecureSession(BaseSession):
         super().__init__(local_peer, local_private_key, is_initiator, peer_id)
         self.conn = conn
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         await self.conn.write(data)
-        return len(data)
 
     async def read(self, n: int = None) -> bytes:
         return await self.conn.read(n)

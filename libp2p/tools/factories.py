@@ -8,7 +8,9 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p import generate_new_rsa_identity, generate_peer_id_from
-from libp2p.crypto.keys import KeyPair
+from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
+from libp2p.crypto.keys import KeyPair, PrivateKey
+from libp2p.crypto.secp256k1 import create_new_key_pair as create_secp256k1_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.host.host_interface import IHost
 from libp2p.host.routed_host import RoutedHost
@@ -26,9 +28,12 @@ from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.routing.interfaces import IPeerRouting
-from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
+import libp2p.security.noise.transport as noise
+from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
+from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
 from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
 from libp2p.tools.constants import GOSSIPSUB_PARAMS
@@ -58,11 +63,24 @@ def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> Pee
 
 def security_transport_factory(
     is_secure: bool, key_pair: KeyPair
-) -> Dict[TProtocol, BaseSecureTransport]:
+) -> Dict[TProtocol, ISecureTransport]:
     if not is_secure:
         return {PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)}
     else:
         return {secio.ID: secio.Transport(key_pair)}
+
+
+def noise_static_key_factory() -> PrivateKey:
+    return create_ed25519_key_pair().private_key
+
+
+def noise_transport_factory() -> NoiseTransport:
+    return noise.Transport(
+        libp2p_keypair=create_secp256k1_key_pair(),
+        noise_privkey=noise_static_key_factory(),
+        early_data=None,
+        with_noise_pipes=False,
+    )
 
 
 @asynccontextmanager
@@ -86,6 +104,39 @@ async def raw_conn_factory(
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
     yield conn_0, conn_1
+
+
+@asynccontextmanager
+async def noise_conn_factory(
+    nursery: trio.Nursery
+) -> AsyncIterator[Tuple[ISecureConn, ISecureConn]]:
+    local_transport = noise_transport_factory()
+    remote_transport = noise_transport_factory()
+
+    local_secure_conn: ISecureConn = None
+    remote_secure_conn: ISecureConn = None
+
+    async def upgrade_local_conn() -> None:
+        nonlocal local_secure_conn
+        local_secure_conn = await local_transport.secure_outbound(
+            local_conn, local_transport.local_peer
+        )
+
+    async def upgrade_remote_conn() -> None:
+        nonlocal remote_secure_conn
+        remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
+
+    async with raw_conn_factory(nursery) as conns:
+        local_conn, remote_conn = conns
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(upgrade_local_conn)
+            nursery.start_soon(upgrade_remote_conn)
+        if local_secure_conn is None or remote_secure_conn is None:
+            raise Exception(
+                "local or remote secure conn has not been successfully upgraded"
+                f"local_secure_conn={local_secure_conn}, remote_secure_conn={remote_secure_conn}"
+            )
+        yield local_secure_conn, remote_secure_conn
 
 
 class SwarmFactory(factory.Factory):
