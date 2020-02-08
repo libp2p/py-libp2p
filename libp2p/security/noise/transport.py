@@ -25,9 +25,11 @@ class NoiseConnection(BaseSession):
         self.conn = conn
 
     async def read(self, n: int = None) -> bytes:
+        # TODO: Add decryption logic here
         return await self.conn.read(n)
 
     async def write(self, data: bytes) -> None:
+        # TODO: Add encryption logic here
         await self.conn.write(data)
 
     async def close(self) -> None:
