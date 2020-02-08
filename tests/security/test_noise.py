@@ -2,7 +2,6 @@ import pytest
 
 from libp2p.tools.factories import noise_conn_factory
 
-
 DATA = b"testing_123"
 
 

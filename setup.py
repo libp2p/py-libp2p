@@ -78,6 +78,7 @@ install_requires = [
     "async-service>=0.1.0a6",
     "async-exit-stack==1.0.1",
     "trio-typing>=0.3.0,<0.4.0",
+    "noiseprotocol>=0.3.0,<0.4.0",
 ]
 
 

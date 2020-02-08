@@ -29,7 +29,6 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
-import libp2p.security.noise.transport as noise
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -75,7 +74,7 @@ def noise_static_key_factory() -> PrivateKey:
 
 
 def noise_transport_factory() -> NoiseTransport:
-    return noise.Transport(
+    return NoiseTransport(
         libp2p_keypair=create_secp256k1_key_pair(),
         noise_privkey=noise_static_key_factory(),
         early_data=None,
