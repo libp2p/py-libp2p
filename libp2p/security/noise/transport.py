@@ -7,7 +7,7 @@ from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.security.secure_transport_interface import ISecureTransport
 from libp2p.typing import TProtocol
 
-PROTOCOL_ID = TProtocol("/")
+PROTOCOL_ID = TProtocol("/noise")
 
 
 class NoiseConnection(BaseSession):
