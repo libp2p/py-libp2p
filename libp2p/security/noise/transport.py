@@ -38,7 +38,12 @@ class Transport(ISecureTransport):
         if self.with_noise_pipes:
             raise NotImplementedError
         else:
-            return PatternXX(self.local_peer, self.libp2p_privkey, self.noise_privkey)
+            return PatternXX(
+                self.local_peer,
+                self.libp2p_privkey,
+                self.noise_privkey,
+                self.early_data,
+            )
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         # TODO: SecureInbound attempts to complete a noise-libp2p handshake initiated

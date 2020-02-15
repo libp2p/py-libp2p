@@ -29,6 +29,10 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
+from libp2p.security.noise.messages import (
+    NoiseHandshakePayload,
+    make_handshake_payload_sig,
+)
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -71,6 +75,17 @@ def security_transport_factory(
 
 def noise_static_key_factory() -> PrivateKey:
     return create_ed25519_key_pair().private_key
+
+
+def noise_handshake_payload_factory() -> NoiseHandshakePayload:
+    libp2p_keypair = create_secp256k1_key_pair()
+    noise_static_privkey = noise_static_key_factory()
+    return NoiseHandshakePayload(
+        libp2p_keypair.public_key,
+        make_handshake_payload_sig(
+            libp2p_keypair.private_key, noise_static_privkey.get_public_key()
+        ),
+    )
 
 
 def noise_transport_factory() -> NoiseTransport:
@@ -118,7 +133,7 @@ async def noise_conn_factory(
     async def upgrade_local_conn() -> None:
         nonlocal local_secure_conn
         local_secure_conn = await local_transport.secure_outbound(
-            local_conn, local_transport.local_peer
+            local_conn, remote_transport.local_peer
         )
 
     async def upgrade_remote_conn() -> None:
