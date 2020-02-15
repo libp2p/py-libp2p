@@ -70,8 +70,8 @@ class PatternXX(BasePattern):
         noise_state.set_as_responder()
         noise_state.start_handshake()
         msg_0_encrypted = await handshake_conn.read_msg()
-        msg_0 = noise_state.read_message(msg_0_encrypted)
         # TODO: Parse and save the payload from the other side.
+        _ = noise_state.read_message(msg_0_encrypted)
 
         # TODO: Send our payload.
         our_payload = b"server"
@@ -79,8 +79,8 @@ class PatternXX(BasePattern):
         await handshake_conn.write_msg(msg_1_encrypted)
 
         msg_2_encrypted = await handshake_conn.read_msg()
-        msg_2 = noise_state.read_message(msg_2_encrypted)
         # TODO: Parse and save another payload from the other side.
+        _ = noise_state.read_message(msg_2_encrypted)
 
         # TODO: Add a specific exception
         if not noise_state.handshake_finished:
@@ -99,8 +99,8 @@ class PatternXX(BasePattern):
         msg_0 = noise_state.write_message()
         await handshake_conn.write_msg(msg_0)
         msg_1_encrypted = await handshake_conn.read_msg()
-        msg_1 = noise_state.read_message(msg_1_encrypted)
         # TODO: Parse and save the payload from the other side.
+        _ = noise_state.read_message(msg_1_encrypted)
 
         # TODO: Send our payload.
         our_payload = b"client"
