@@ -75,10 +75,10 @@ class PatternXX(BasePattern):
         noise_state = self.create_noise_state()
         noise_state.set_as_responder()
         noise_state.start_handshake()
-        state = noise_state.noise_protocol.handshake_state
+        handshake_state = noise_state.noise_protocol.handshake_state
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
 
-        # Consume msg#1
+        # Consume msg#1.
         await read_writer.read_msg()
 
         # Send msg#2, which should include our handshake payload.
@@ -86,13 +86,18 @@ class PatternXX(BasePattern):
         msg_2 = our_payload.serialize()
         await read_writer.write_msg(msg_2)
 
-        # Receive msg#3
+        # Receive and consume msg#3.
         msg_3 = await read_writer.read_msg()
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_3)
 
-        if state.rs is None:
-            raise NoiseStateError
-        remote_pubkey = Ed25519PublicKey.from_bytes(state.rs.public_bytes)
+        if handshake_state.rs is None:
+            raise NoiseStateError(
+                "something is wrong in the underlying noise `handshake_state`: "
+                "we received and consumed msg#3, which should have included the"
+                " remote static public key, but it is not present in the handshake_state"
+            )
+        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
+        remote_pubkey = Ed25519PublicKey.from_bytes(handshake_state.rs.public_bytes)
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
             raise InvalidSignature
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
@@ -118,16 +123,24 @@ class PatternXX(BasePattern):
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
         noise_state.set_as_initiator()
         noise_state.start_handshake()
-        state = noise_state.noise_protocol.handshake_state
+        handshake_state = noise_state.noise_protocol.handshake_state
 
+        # Send msg#1, which is *not* encrypted.
         msg_1 = b""
         await read_writer.write_msg(msg_1)
 
+        # Read msg#2 from the remote, which contains the public key of the peer.
         msg_2 = await read_writer.read_msg()
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_2)
-        if state.rs is None:
-            raise NoiseStateError
-        remote_pubkey = Ed25519PublicKey.from_bytes(state.rs.public_bytes)
+
+        if handshake_state.rs is None:
+            raise NoiseStateError(
+                "something is wrong in the underlying noise `handshake_state`: "
+                "we received and consumed msg#3, which should have included the"
+                " remote static public key, but it is not present in the handshake_state"
+            )
+        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
+        remote_pubkey = Ed25519PublicKey.from_bytes(handshake_state.rs.public_bytes)
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
             raise InvalidSignature
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
@@ -138,6 +151,7 @@ class PatternXX(BasePattern):
                 f"remote_peer_id_from_pubkey={remote_peer_id_from_pubkey}"
             )
 
+        # Send msg#3, which includes our encrypted payload and our noise static key.
         our_payload = self.make_handshake_payload()
         msg_3 = our_payload.serialize()
         await read_writer.write_msg(msg_3)
