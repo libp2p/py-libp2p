@@ -78,20 +78,3 @@ async def read_delim(reader: Reader) -> bytes:
             f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes!r}'
         )
     return msg_bytes[:-1]
-
-
-SIZE_LEN_BYTES = 4
-
-# Fixed-prefixed read/write, used by "/plaintext/2.0.0".
-# Reference: https://github.com/libp2p/go-msgio/blob/d5bbf59d3c4240266b1d2e5df9dc993454c42011/num.go#L11-L33  # noqa: E501  # noqa: E501
-
-
-def encode_fixedint_prefixed(msg_bytes: bytes) -> bytes:
-    len_prefix = len(msg_bytes).to_bytes(SIZE_LEN_BYTES, "big")
-    return len_prefix + msg_bytes
-
-
-async def read_fixedint_prefixed(reader: Reader) -> bytes:
-    len_bytes = await reader.read(SIZE_LEN_BYTES)
-    len_int = int.from_bytes(len_bytes, "big")
-    return await reader.read(len_int)

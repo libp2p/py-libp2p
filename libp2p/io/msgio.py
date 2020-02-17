@@ -5,7 +5,7 @@ from that repo: "a simple package to r/w length-delimited slices."
 
 NOTE: currently missing the capability to indicate lengths by "varint" method.
 """
-# TODO unify w/ https://github.com/libp2p/py-libp2p/blob/1aed52856f56a4b791696bbcbac31b5f9c2e88c9/libp2p/utils.py#L85-L99  # noqa: E501
+
 from typing import Optional
 
 from libp2p.io.abc import MsgReadWriteCloser, Reader, ReadWriteCloser

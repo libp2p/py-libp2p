@@ -5,6 +5,7 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.abc import ReadWriteCloser
+from libp2p.io.msgio import BaseMsgReadWriter
 from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -14,13 +15,18 @@ from libp2p.security.exceptions import HandshakeFailure
 from libp2p.security.secure_conn_interface import ISecureConn
 from libp2p.typing import TProtocol
 
-from .io import PlaintextHandshakeReadWriter
 from .pb import plaintext_pb2
 
 # Reference: https://github.com/libp2p/go-libp2p-core/blob/master/sec/insecure/insecure.go
 
 
 PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
+
+SIZE_PLAINTEXT_LEN_BYTES = 4
+
+
+class PlaintextHandshakeReadWriter(BaseMsgReadWriter):
+    size_len_bytes = SIZE_PLAINTEXT_LEN_BYTES
 
 
 class InsecureSession(BaseSession):
