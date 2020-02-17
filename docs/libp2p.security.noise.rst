@@ -11,10 +11,26 @@ Subpackages
 Submodules
 ----------
 
-libp2p.security.noise.connection module
+libp2p.security.noise.exceptions module
 ---------------------------------------
 
-.. automodule:: libp2p.security.noise.connection
+.. automodule:: libp2p.security.noise.exceptions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.security.noise.io module
+-------------------------------
+
+.. automodule:: libp2p.security.noise.io
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.security.noise.messages module
+-------------------------------------
+
+.. automodule:: libp2p.security.noise.messages
    :members:
    :undoc-members:
    :show-inheritance:
