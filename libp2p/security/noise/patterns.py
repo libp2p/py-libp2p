@@ -16,7 +16,7 @@ from .exceptions import (
     NoiseStateError,
     PeerIDMismatchesPubkey,
 )
-from .io import NoiseHandshakeReadWriter
+from .io import encode_msg_body, decode_msg_body, NoiseHandshakeReadWriter
 from .messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
@@ -55,6 +55,16 @@ class BasePattern(IPattern):
             self.libp2p_privkey, self.noise_static_key.get_public_key()
         )
         return NoiseHandshakePayload(self.libp2p_privkey.get_public_key(), signature)
+
+    async def write_msg(self, conn: IRawConnection, data: bytes) -> None:
+        noise_msg = encode_msg_body(data)
+        data_encrypted = self.noise_state.write_message(noise_msg)
+        await self.read_writer.write_msg(data_encrypted)
+
+    async def read_msg(self) -> bytes:
+        noise_msg_encrypted = await self.read_writer.read_msg()
+        noise_msg = self.noise_state.read_message(noise_msg_encrypted)
+        return decode_msg_body(noise_msg)
 
 
 class PatternXX(BasePattern):

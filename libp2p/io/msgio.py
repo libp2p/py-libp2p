@@ -11,8 +11,7 @@ from typing import Optional
 from libp2p.io.abc import MsgReadWriter, Reader, ReadWriteCloser
 from libp2p.io.utils import read_exactly
 
-SIZE_NOISE_LEN_BYTES = 2
-SIZE_SECIO_LEN_BYTES = 4
+
 BYTE_ORDER = "big"
 
 
@@ -22,7 +21,13 @@ async def read_length(reader: Reader, size_len_bytes: int) -> int:
 
 
 def encode_msg_with_length(msg_bytes: bytes, size_len_bytes: int) -> bytes:
-    len_prefix = len(msg_bytes).to_bytes(size_len_bytes, byteorder=BYTE_ORDER)
+    try:
+        len_prefix = len(msg_bytes).to_bytes(size_len_bytes, byteorder=BYTE_ORDER)
+    except OverflowError:
+        raise ValueError(
+            "msg_bytes is too large for `size_len_bytes` bytes length: "
+            f"msg_bytes={msg_bytes}, size_len_bytes={size_len_bytes}"
+        )
     return len_prefix + msg_bytes
 
 
@@ -58,7 +63,3 @@ class BaseMsgReadWriter(MsgReadWriter):
     async def write_msg(self, msg: bytes) -> None:
         data = encode_msg_with_length(msg, self.size_len_bytes)
         await self.read_write_closer.write(data)
-
-
-class MsgIOReadWriter(BaseMsgReadWriter):
-    size_len_bytes = SIZE_SECIO_LEN_BYTES

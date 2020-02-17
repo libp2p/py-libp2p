@@ -19,7 +19,7 @@ from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.exceptions import DecryptionFailedException, IOException
-from libp2p.io.msgio import MsgIOReadWriter
+from libp2p.io.msgio import BaseMsgReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_session import BaseSession
@@ -41,12 +41,17 @@ from .pb.spipe_pb2 import Exchange, Propose
 ID = TProtocol("/secio/1.0.0")
 
 NONCE_SIZE = 16  # bytes
+SIZE_SECIO_LEN_BYTES = 4
 
 # NOTE: the following is only a subset of allowable parameters according to the
 # `secio` specification.
 DEFAULT_SUPPORTED_EXCHANGES = "P-256"
 DEFAULT_SUPPORTED_CIPHERS = "AES-128"
 DEFAULT_SUPPORTED_HASHES = "SHA256"
+
+
+class MsgIOReadWriter(BaseMsgReadWriter):
+    size_len_bytes = SIZE_SECIO_LEN_BYTES
 
 
 class SecureSession(BaseSession):

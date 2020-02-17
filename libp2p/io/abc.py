@@ -39,9 +39,9 @@ class MsgReader(ABC):
     async def read_msg(self) -> bytes:
         ...
 
-    @abstractmethod
-    async def next_msg_len(self) -> int:
-        ...
+    # @abstractmethod
+    # async def next_msg_len(self) -> int:
+    #     ...
 
 
 class MsgWriter(ABC):
@@ -51,4 +51,18 @@ class MsgWriter(ABC):
 
 
 class MsgReadWriter(MsgReader, MsgWriter):
+    pass
+
+
+class Encrypter(ABC):
+    @abstractmethod
+    def encrypt(self, data: bytes) -> bytes:
+        ...
+
+    @abstractmethod
+    def decrypt(self, data: bytes) -> bytes:
+        ...
+
+
+class EncryptedMsgReadWriter(MsgReadWriter, Encrypter):
     pass
