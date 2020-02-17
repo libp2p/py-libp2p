@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class Closer(ABC):
+    @abstractmethod
     async def close(self) -> None:
         ...
 
@@ -39,10 +40,6 @@ class MsgReader(ABC):
     async def read_msg(self) -> bytes:
         ...
 
-    # @abstractmethod
-    # async def next_msg_len(self) -> int:
-    #     ...
-
 
 class MsgWriter(ABC):
     @abstractmethod
@@ -50,7 +47,7 @@ class MsgWriter(ABC):
         ...
 
 
-class MsgReadWriter(MsgReader, MsgWriter):
+class MsgReadWriteCloser(MsgReader, MsgWriter, Closer):
     pass
 
 
@@ -64,5 +61,5 @@ class Encrypter(ABC):
         ...
 
 
-class EncryptedMsgReadWriter(MsgReadWriter, Encrypter):
-    pass
+class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):
+    """Read/write message with encryption/decryption."""

@@ -1,42 +1,28 @@
 import io
 
-from noise.connection import NoiseConnection as NoiseState
-
 from libp2p.crypto.keys import PrivateKey
-from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.io.abc import EncryptedMsgReadWriter
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
-from libp2p.security.noise.io import MsgReadWriter, NoiseTransportReadWriter
 
 
-class NoiseConnection(BaseSession):
+class SecureSession(BaseSession):
     buf: io.BytesIO
     low_watermark: int
     high_watermark: int
-
-    read_writer: IRawConnection
-    noise_state: NoiseState
 
     def __init__(
         self,
         local_peer: ID,
         local_private_key: PrivateKey,
         remote_peer: ID,
-        conn: IRawConnection,
+        conn: EncryptedMsgReadWriter,
         is_initiator: bool,
-        noise_state: NoiseState,
-        # remote_permanent_pubkey
     ) -> None:
         super().__init__(local_peer, local_private_key, is_initiator, remote_peer)
         self.conn = conn
-        self.noise_state = noise_state
+
         self._reset_internal_buffer()
-
-    def get_msg_read_writer(self) -> MsgReadWriter:
-        return NoiseTransportReadWriter(self.conn, self.noise_state)
-
-    async def close(self) -> None:
-        await self.conn.close()
 
     def _reset_internal_buffer(self) -> None:
         self.buf = io.BytesIO()
@@ -60,6 +46,11 @@ class NoiseConnection(BaseSession):
             self._reset_internal_buffer()
         return result
 
+    def _fill(self, msg: bytes) -> None:
+        self.buf.write(msg)
+        self.low_watermark = 0
+        self.high_watermark = len(msg)
+
     async def read(self, n: int = None) -> bytes:
         if n == 0:
             return bytes()
@@ -68,21 +59,16 @@ class NoiseConnection(BaseSession):
         if len(data_from_buffer) > 0:
             return data_from_buffer
 
-        msg = await self.read_msg()
+        msg = await self.conn.read_msg()
 
         if n < len(msg):
-            self.buf.write(msg)
-            self.low_watermark = 0
-            self.high_watermark = len(msg)
+            self._fill(msg)
             return self._drain(n)
         else:
             return msg
 
-    async def read_msg(self) -> bytes:
-        return await self.get_msg_read_writer().read_msg()
-
     async def write(self, data: bytes) -> None:
-        await self.write_msg(data)
+        await self.conn.write_msg(data)
 
-    async def write_msg(self, msg: bytes) -> None:
-        await self.get_msg_read_writer().write_msg(msg)
+    async def close(self) -> None:
+        await self.conn.close()

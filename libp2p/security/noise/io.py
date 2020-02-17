@@ -1,13 +1,10 @@
-from abc import ABC, abstractmethod
 from typing import cast
 
 from noise.connection import NoiseConnection as NoiseState
 
-from libp2p.io.abc import ReadWriteCloser, MsgReadWriter, EncryptedMsgReadWriter
+from libp2p.io.abc import EncryptedMsgReadWriter, MsgReadWriteCloser, ReadWriteCloser
 from libp2p.io.msgio import BaseMsgReadWriter, encode_msg_with_length
-from libp2p.io.utils import read_exactly
 from libp2p.network.connection.raw_connection_interface import IRawConnection
-
 
 SIZE_NOISE_MESSAGE_LEN = 2
 MAX_NOISE_MESSAGE_LEN = 2 ** (8 * SIZE_NOISE_MESSAGE_LEN) - 1
@@ -50,7 +47,14 @@ def decode_msg_body(noise_msg: bytes) -> bytes:
 
 
 class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
-    read_writer: MsgReadWriter
+    """
+    The base implementation of noise message reader/writer.
+
+    `encrypt` and `decrypt` are not implemented here, which should be
+    implemented by the subclasses.
+    """
+
+    read_writer: MsgReadWriteCloser
     noise_state: NoiseState
 
     def __init__(self, conn: IRawConnection, noise_state: NoiseState) -> None:
@@ -66,6 +70,9 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
         noise_msg_encrypted = await self.read_writer.read_msg()
         noise_msg = self.decrypt(noise_msg_encrypted)
         return decode_msg_body(noise_msg)
+
+    async def close(self) -> None:
+        await self.read_writer.close()
 
 
 class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):

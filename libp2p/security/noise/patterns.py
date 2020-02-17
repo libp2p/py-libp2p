@@ -8,15 +8,15 @@ from libp2p.crypto.keys import PrivateKey
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_session import SecureSession
 
-from .connection import NoiseConnection
 from .exceptions import (
     HandshakeHasNotFinished,
     InvalidSignature,
     NoiseStateError,
     PeerIDMismatchesPubkey,
 )
-from .io import encode_msg_body, decode_msg_body, NoiseHandshakeReadWriter
+from .io import NoiseHandshakeReadWriter, NoiseTransportReadWriter
 from .messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
@@ -55,16 +55,6 @@ class BasePattern(IPattern):
             self.libp2p_privkey, self.noise_static_key.get_public_key()
         )
         return NoiseHandshakePayload(self.libp2p_privkey.get_public_key(), signature)
-
-    async def write_msg(self, conn: IRawConnection, data: bytes) -> None:
-        noise_msg = encode_msg_body(data)
-        data_encrypted = self.noise_state.write_message(noise_msg)
-        await self.read_writer.write_msg(data_encrypted)
-
-    async def read_msg(self) -> bytes:
-        noise_msg_encrypted = await self.read_writer.read_msg()
-        noise_msg = self.noise_state.read_message(noise_msg_encrypted)
-        return decode_msg_body(noise_msg)
 
 
 class PatternXX(BasePattern):
@@ -116,14 +106,13 @@ class PatternXX(BasePattern):
             raise HandshakeHasNotFinished(
                 "handshake is done but it is not marked as finished in `noise_state`"
             )
-
-        return NoiseConnection(
+        transport_read_writer = NoiseTransportReadWriter(conn, noise_state)
+        return SecureSession(
             self.local_peer,
             self.libp2p_privkey,
             remote_peer_id_from_pubkey,
-            conn,
+            transport_read_writer,
             False,
-            noise_state,
         )
 
     async def handshake_outbound(
@@ -171,7 +160,12 @@ class PatternXX(BasePattern):
             raise HandshakeHasNotFinished(
                 "handshake is done but it is not marked as finished in `noise_state`"
             )
+        transport_read_writer = NoiseTransportReadWriter(conn, noise_state)
 
-        return NoiseConnection(
-            self.local_peer, self.libp2p_privkey, remote_peer, conn, False, noise_state
+        return SecureSession(
+            self.local_peer,
+            self.libp2p_privkey,
+            remote_peer,
+            transport_read_writer,
+            False,
         )

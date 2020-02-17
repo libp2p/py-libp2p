@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import io
 import itertools
 from typing import Optional, Tuple
 
@@ -18,13 +17,14 @@ from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.key_exchange import create_ephemeral_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.io.abc import EncryptedMsgReadWriter
 from libp2p.io.exceptions import DecryptionFailedException, IOException
 from libp2p.io.msgio import BaseMsgReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
-from libp2p.security.base_session import BaseSession
 from libp2p.security.base_transport import BaseSecureTransport
 from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.security.secure_session import SecureSession
 from libp2p.typing import TProtocol
 
 from .exceptions import (
@@ -54,30 +54,20 @@ class MsgIOReadWriter(BaseMsgReadWriter):
     size_len_bytes = SIZE_SECIO_LEN_BYTES
 
 
-class SecureSession(BaseSession):
-    buf: io.BytesIO
-    low_watermark: int
-    high_watermark: int
+class SecioMsgReadWriter(EncryptedMsgReadWriter):
+    read_writer: MsgIOReadWriter
 
     def __init__(
         self,
-        local_peer: PeerID,
-        local_private_key: PrivateKey,
         local_encryption_parameters: AuthenticatedEncryptionParameters,
-        remote_peer: PeerID,
         remote_encryption_parameters: AuthenticatedEncryptionParameters,
-        conn: MsgIOReadWriter,
-        is_initiator: bool,
+        read_writer: MsgIOReadWriter,
     ) -> None:
-        super().__init__(local_peer, local_private_key, is_initiator, remote_peer)
-        self.conn = conn
-
         self.local_encryption_parameters = local_encryption_parameters
         self.remote_encryption_parameters = remote_encryption_parameters
         self._initialize_authenticated_encryption_for_local_peer()
         self._initialize_authenticated_encryption_for_remote_peer()
-
-        self._reset_internal_buffer()
+        self.read_writer = read_writer
 
     def _initialize_authenticated_encryption_for_local_peer(self) -> None:
         self.local_encrypter = Encrypter(self.local_encryption_parameters)
@@ -85,68 +75,28 @@ class SecureSession(BaseSession):
     def _initialize_authenticated_encryption_for_remote_peer(self) -> None:
         self.remote_encrypter = Encrypter(self.remote_encryption_parameters)
 
-    async def next_msg_len(self) -> int:
-        return await self.conn.next_msg_len()
+    def encrypt(self, data: bytes) -> bytes:
+        encrypted_data = self.local_encrypter.encrypt(data)
+        tag = self.local_encrypter.authenticate(encrypted_data)
+        return encrypted_data + tag
 
-    def _reset_internal_buffer(self) -> None:
-        self.buf = io.BytesIO()
-        self.low_watermark = 0
-        self.high_watermark = 0
-
-    def _drain(self, n: int) -> bytes:
-        if self.low_watermark == self.high_watermark:
-            return bytes()
-
-        data = self.buf.getbuffer()[self.low_watermark : self.high_watermark]
-
-        if n is None:
-            n = len(data)
-        result = data[:n].tobytes()
-        self.low_watermark += len(result)
-
-        if self.low_watermark == self.high_watermark:
-            del data  # free the memoryview so we can free the underlying BytesIO
-            self.buf.close()
-            self._reset_internal_buffer()
-        return result
-
-    async def _fill(self) -> None:
-        msg = await self.read_msg()
-        self.buf.write(msg)
-        self.low_watermark = 0
-        self.high_watermark = len(msg)
-
-    async def read(self, n: int = None) -> bytes:
-        if n == 0:
-            return bytes()
-
-        data_from_buffer = self._drain(n)
-        if len(data_from_buffer) > 0:
-            return data_from_buffer
-
-        next_length = await self.next_msg_len()
-
-        if n < next_length:
-            await self._fill()
-            return self._drain(n)
-        else:
-            return await self.read_msg()
-
-    async def read_msg(self) -> bytes:
-        msg = await self.conn.read_msg()
+    def decrypt(self, data: bytes) -> bytes:
         try:
-            decrypted_msg = self.remote_encrypter.decrypt_if_valid(msg)
+            decrypted_data = self.remote_encrypter.decrypt_if_valid(data)
         except InvalidMACException as e:
             raise DecryptionFailedException() from e
-        return decrypted_msg
-
-    async def write(self, data: bytes) -> None:
-        await self.write_msg(data)
+        return decrypted_data
 
     async def write_msg(self, msg: bytes) -> None:
-        encrypted_data = self.local_encrypter.encrypt(msg)
-        tag = self.local_encrypter.authenticate(encrypted_data)
-        await self.conn.write_msg(encrypted_data + tag)
+        data_encrypted = self.encrypt(msg)
+        await self.read_writer.write_msg(data_encrypted)
+
+    async def read_msg(self) -> bytes:
+        msg_encrypted = await self.read_writer.read_msg()
+        return self.decrypt(msg_encrypted)
+
+    async def close(self) -> None:
+        await self.read_writer.close()
 
 
 @dataclass(frozen=True)
@@ -387,22 +337,20 @@ def _mk_session_from(
 
     if session_parameters.order < 0:
         key_set1, key_set2 = key_set2, key_set1
-
+    secio_read_writer = SecioMsgReadWriter(key_set1, key_set2, conn)
     session = SecureSession(
         session_parameters.local_peer,
         local_private_key,
-        key_set1,
         session_parameters.remote_peer,
-        key_set2,
-        conn,
+        secio_read_writer,
         is_initiator,
     )
     return session
 
 
 async def _finish_handshake(session: SecureSession, remote_nonce: bytes) -> bytes:
-    await session.write_msg(remote_nonce)
-    return await session.read_msg()
+    await session.conn.write_msg(remote_nonce)
+    return await session.conn.read_msg()
 
 
 async def create_secure_session(

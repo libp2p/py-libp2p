@@ -8,9 +8,8 @@ NOTE: currently missing the capability to indicate lengths by "varint" method.
 # TODO unify w/ https://github.com/libp2p/py-libp2p/blob/1aed52856f56a4b791696bbcbac31b5f9c2e88c9/libp2p/utils.py#L85-L99  # noqa: E501
 from typing import Optional
 
-from libp2p.io.abc import MsgReadWriter, Reader, ReadWriteCloser
+from libp2p.io.abc import MsgReadWriteCloser, Reader, ReadWriteCloser
 from libp2p.io.utils import read_exactly
-
 
 BYTE_ORDER = "big"
 
@@ -26,12 +25,12 @@ def encode_msg_with_length(msg_bytes: bytes, size_len_bytes: int) -> bytes:
     except OverflowError:
         raise ValueError(
             "msg_bytes is too large for `size_len_bytes` bytes length: "
-            f"msg_bytes={msg_bytes}, size_len_bytes={size_len_bytes}"
+            f"msg_bytes={msg_bytes!r}, size_len_bytes={size_len_bytes}"
         )
     return len_prefix + msg_bytes
 
 
-class BaseMsgReadWriter(MsgReadWriter):
+class BaseMsgReadWriter(MsgReadWriteCloser):
     next_length: Optional[int]
     read_write_closer: ReadWriteCloser
     size_len_bytes: int
