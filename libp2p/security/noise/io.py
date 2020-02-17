@@ -88,7 +88,6 @@ def decode_msg_body(noise_msg: bytes) -> bytes:
     ]
 
 
-# TODO: Add comments
 class NoiseHandshakeReadWriter(MsgReadWriter):
     read_writer: MsgReadWriter
     noise_state: NoiseState
@@ -105,4 +104,23 @@ class NoiseHandshakeReadWriter(MsgReadWriter):
     async def read_msg(self) -> bytes:
         noise_msg_encrypted = await self.read_writer.read_msg()
         noise_msg = self.noise_state.read_message(noise_msg_encrypted)
+        return decode_msg_body(noise_msg)
+
+
+class NoiseTransportReadWriter(MsgReadWriter):
+    read_writer: MsgReadWriter
+    noise_state: NoiseState
+
+    def __init__(self, conn: IRawConnection, noise_state: NoiseState) -> None:
+        self.read_writer = NoisePacketReadWriter(cast(ReadWriter, conn))
+        self.noise_state = noise_state
+
+    async def write_msg(self, data: bytes) -> None:
+        noise_msg = encode_msg_body(data)
+        data_encrypted = self.noise_state.encrypt(noise_msg)
+        await self.read_writer.write_msg(data_encrypted)
+
+    async def read_msg(self) -> bytes:
+        noise_msg_encrypted = await self.read_writer.read_msg()
+        noise_msg = self.noise_state.decrypt(noise_msg_encrypted)
         return decode_msg_body(noise_msg)

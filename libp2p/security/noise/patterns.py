@@ -113,6 +113,7 @@ class PatternXX(BasePattern):
             remote_peer_id_from_pubkey,
             conn,
             False,
+            noise_state,
         )
 
     async def handshake_outbound(
@@ -162,5 +163,5 @@ class PatternXX(BasePattern):
             )
 
         return NoiseConnection(
-            self.local_peer, self.libp2p_privkey, remote_peer, conn, False
+            self.local_peer, self.libp2p_privkey, remote_peer, conn, False, noise_state
         )
