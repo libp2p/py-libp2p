@@ -16,6 +16,10 @@ class Transport(ISecureTransport):
     local_peer: ID
     early_data: bytes
     with_noise_pipes: bool
+
+    # NOTE: Implementations that support Noise Pipes must decide whether to use
+    #   an XX or IK handshake based on whether they possess a cached static
+    #   Noise key for the remote peer.
     # TODO: A storage of seen noise static keys for pattern IK?
 
     def __init__(
@@ -46,15 +50,9 @@ class Transport(ISecureTransport):
             )
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
-        # TODO: SecureInbound attempts to complete a noise-libp2p handshake initiated
-        #   by a remote peer over the given InsecureConnection.
         pattern = self.get_pattern()
         return await pattern.handshake_inbound(conn)
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
-        # TODO: Validate libp2p pubkey with `peer_id`. Abort if not correct.
-        # NOTE: Implementations that support Noise Pipes must decide whether to use
-        #   an XX or IK handshake based on whether they possess a cached static
-        #   Noise key for the remote peer.
         pattern = self.get_pattern()
         return await pattern.handshake_outbound(conn, peer_id)
