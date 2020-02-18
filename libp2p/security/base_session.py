@@ -11,20 +11,22 @@ class BaseSession(ISecureConn):
 
     local_peer: ID
     local_private_key: PrivateKey
-    remote_peer_id: ID
+    remote_peer: ID
     remote_permanent_pubkey: PublicKey
 
     def __init__(
         self,
+        *,
         local_peer: ID,
         local_private_key: PrivateKey,
+        remote_peer: ID,
+        remote_permanent_pubkey: PublicKey,
         is_initiator: bool,
-        peer_id: Optional[ID] = None,
     ) -> None:
         self.local_peer = local_peer
         self.local_private_key = local_private_key
-        self.remote_peer_id = peer_id
-        self.remote_permanent_pubkey = None
+        self.remote_peer = remote_peer
+        self.remote_permanent_pubkey = remote_permanent_pubkey
         self.is_initiator = is_initiator
 
     def get_local_peer(self) -> ID:
@@ -34,7 +36,7 @@ class BaseSession(ISecureConn):
         return self.local_private_key
 
     def get_remote_peer(self) -> ID:
-        return self.remote_peer_id
+        return self.remote_peer
 
     def get_remote_public_key(self) -> Optional[PublicKey]:
         return self.remote_permanent_pubkey

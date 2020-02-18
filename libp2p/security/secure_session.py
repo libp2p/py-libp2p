@@ -1,6 +1,6 @@
 import io
 
-from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.io.abc import EncryptedMsgReadWriter
 from libp2p.peer.id import ID
 from libp2p.security.base_session import BaseSession
@@ -13,13 +13,21 @@ class SecureSession(BaseSession):
 
     def __init__(
         self,
+        *,
         local_peer: ID,
         local_private_key: PrivateKey,
         remote_peer: ID,
-        conn: EncryptedMsgReadWriter,
+        remote_permanent_pubkey: PublicKey,
         is_initiator: bool,
+        conn: EncryptedMsgReadWriter,
     ) -> None:
-        super().__init__(local_peer, local_private_key, is_initiator, remote_peer)
+        super().__init__(
+            local_peer=local_peer,
+            local_private_key=local_private_key,
+            remote_peer=remote_peer,
+            remote_permanent_pubkey=remote_permanent_pubkey,
+            is_initiator=is_initiator,
+        )
         self.conn = conn
 
         self._reset_internal_buffer()

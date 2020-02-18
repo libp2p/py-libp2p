@@ -108,11 +108,12 @@ class PatternXX(BasePattern):
             )
         transport_read_writer = NoiseTransportReadWriter(conn, noise_state)
         return SecureSession(
-            self.local_peer,
-            self.libp2p_privkey,
-            remote_peer_id_from_pubkey,
-            transport_read_writer,
-            False,
+            local_peer=self.local_peer,
+            local_private_key=self.libp2p_privkey,
+            remote_peer=remote_peer_id_from_pubkey,
+            remote_permanent_pubkey=remote_pubkey,
+            is_initiator=False,
+            conn=transport_read_writer,
         )
 
     async def handshake_outbound(
@@ -161,11 +162,11 @@ class PatternXX(BasePattern):
                 "handshake is done but it is not marked as finished in `noise_state`"
             )
         transport_read_writer = NoiseTransportReadWriter(conn, noise_state)
-
         return SecureSession(
-            self.local_peer,
-            self.libp2p_privkey,
-            remote_peer,
-            transport_read_writer,
-            False,
+            local_peer=self.local_peer,
+            local_private_key=self.libp2p_privkey,
+            remote_peer=remote_peer_id_from_pubkey,
+            remote_permanent_pubkey=remote_pubkey,
+            is_initiator=True,
+            conn=transport_read_writer,
         )

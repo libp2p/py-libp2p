@@ -338,12 +338,16 @@ def _mk_session_from(
     if session_parameters.order < 0:
         key_set1, key_set2 = key_set2, key_set1
     secio_read_writer = SecioMsgReadWriter(key_set1, key_set2, conn)
+    remote_permanent_pubkey = (
+        session_parameters.remote_encryption_parameters.permanent_public_key
+    )
     session = SecureSession(
-        session_parameters.local_peer,
-        local_private_key,
-        session_parameters.remote_peer,
-        secio_read_writer,
-        is_initiator,
+        local_peer=session_parameters.local_peer,
+        local_private_key=local_private_key,
+        remote_peer=session_parameters.remote_peer,
+        remote_permanent_pubkey=remote_permanent_pubkey,
+        is_initiator=is_initiator,
+        conn=secio_read_writer,
     )
     return session
 

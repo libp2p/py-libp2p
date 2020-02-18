@@ -1,5 +1,3 @@
-from typing import Optional
-
 from libp2p.crypto.exceptions import MissingDeserializerError
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
@@ -32,13 +30,21 @@ class PlaintextHandshakeReadWriter(BaseMsgReadWriter):
 class InsecureSession(BaseSession):
     def __init__(
         self,
+        *,
         local_peer: ID,
         local_private_key: PrivateKey,
-        conn: ReadWriteCloser,
+        remote_peer: ID,
+        remote_permanent_pubkey: PublicKey,
         is_initiator: bool,
-        peer_id: Optional[ID] = None,
+        conn: ReadWriteCloser,
     ) -> None:
-        super().__init__(local_peer, local_private_key, is_initiator, peer_id)
+        super().__init__(
+            local_peer=local_peer,
+            local_private_key=local_private_key,
+            remote_peer=remote_peer,
+            remote_permanent_pubkey=remote_permanent_pubkey,
+            is_initiator=is_initiator,
+        )
         self.conn = conn
 
     async def write(self, data: bytes) -> None:
@@ -102,11 +108,14 @@ async def run_handshake(
         )
 
     secure_conn = InsecureSession(
-        local_peer, local_private_key, conn, is_initiator, received_peer_id
+        local_peer=local_peer,
+        local_private_key=local_private_key,
+        remote_peer=received_peer_id,
+        remote_permanent_pubkey=received_pubkey,
+        is_initiator=is_initiator,
+        conn=conn,
     )
 
-    # Nothing is wrong. Store the `pubkey` and `peer_id` in the session.
-    secure_conn.remote_permanent_pubkey = received_pubkey
     # TODO: Store `pubkey` and `peer_id` to `PeerStore`
 
     return secure_conn
