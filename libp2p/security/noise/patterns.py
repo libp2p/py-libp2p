@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
 
-from noise.connection import Keypair as NoiseKeypair
+from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
+from noise.connection import Keypair as NoiseKeypairEnum
 from noise.connection import NoiseConnection as NoiseState
 
 from libp2p.crypto.ed25519 import Ed25519PublicKey
-from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
 from libp2p.security.secure_conn_interface import ISecureConn
@@ -46,7 +47,7 @@ class BasePattern(IPattern):
     def create_noise_state(self) -> NoiseState:
         noise_state = NoiseState.from_name(self.protocol_name)
         noise_state.set_keypair_from_private_bytes(
-            NoiseKeypair.STATIC, self.noise_static_key.to_bytes()
+            NoiseKeypairEnum.STATIC, self.noise_static_key.to_bytes()
         )
         return noise_state
 
@@ -96,8 +97,8 @@ class PatternXX(BasePattern):
                 "we received and consumed msg#3, which should have included the"
                 " remote static public key, but it is not present in the handshake_state"
             )
-        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
-        remote_pubkey = Ed25519PublicKey.from_bytes(handshake_state.rs.public_bytes)
+        remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
+
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
             raise InvalidSignature
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
@@ -140,8 +141,8 @@ class PatternXX(BasePattern):
                 "we received and consumed msg#3, which should have included the"
                 " remote static public key, but it is not present in the handshake_state"
             )
-        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
-        remote_pubkey = Ed25519PublicKey.from_bytes(handshake_state.rs.public_bytes)
+        remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
+
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
             raise InvalidSignature
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
@@ -170,3 +171,13 @@ class PatternXX(BasePattern):
             is_initiator=True,
             conn=transport_read_writer,
         )
+
+    @staticmethod
+    def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
+        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
+        # NOTE: Ignore the warning for now, since it is also not fixed in `noiseprotocol`.
+        #   "CryptographyDeprecationWarning: public_bytes now requires
+        #   encoding and format arguments. Support for calling without arguments will be
+        #   removed in cryptography 2.7"
+        raw_bytes = key_pair.public.public_bytes()
+        return Ed25519PublicKey.from_bytes(raw_bytes)
