@@ -55,8 +55,8 @@ class MyNotifee(INotifee):
 
 
 @pytest.mark.trio
-async def test_notify(is_host_secure):
-    swarms = [SwarmFactory(is_secure=is_host_secure) for _ in range(2)]
+async def test_notify(security_protocol):
+    swarms = [SwarmFactory(security_protocol=security_protocol) for _ in range(2)]
 
     events_0_0 = []
     events_1_0 = []

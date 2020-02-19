@@ -92,8 +92,11 @@ async def no_common_protocol(host_a, host_b):
     "test", [(hello_world), (connect_write), (connect_read), (no_common_protocol)]
 )
 @pytest.mark.trio
-async def test_chat(test, is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_chat(test, security_protocol):
+    print("!@# ", security_protocol)
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         addr = hosts[0].get_addrs()[0]
         info = info_from_p2p_addr(addr)
         await hosts[1].connect(info)

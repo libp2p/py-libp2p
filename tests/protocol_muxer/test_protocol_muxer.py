@@ -16,9 +16,11 @@ async def perform_simple_test(
     expected_selected_protocol,
     protocols_for_client,
     protocols_with_handlers,
-    is_host_secure,
+    security_protocol,
 ):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         for protocol in protocols_with_handlers:
             hosts[1].set_stream_handler(
                 protocol, create_echo_stream_handler(ACK_PREFIX)
@@ -38,28 +40,28 @@ async def perform_simple_test(
 
 
 @pytest.mark.trio
-async def test_single_protocol_succeeds(is_host_secure):
+async def test_single_protocol_succeeds(security_protocol):
     expected_selected_protocol = PROTOCOL_ECHO
     await perform_simple_test(
         expected_selected_protocol,
         [expected_selected_protocol],
         [expected_selected_protocol],
-        is_host_secure,
+        security_protocol,
     )
 
 
 @pytest.mark.trio
-async def test_single_protocol_fails(is_host_secure):
+async def test_single_protocol_fails(security_protocol):
     with pytest.raises(StreamFailure):
         await perform_simple_test(
-            "", [PROTOCOL_ECHO], [PROTOCOL_POTATO], is_host_secure
+            "", [PROTOCOL_ECHO], [PROTOCOL_POTATO], security_protocol
         )
 
     # Cleanup not reached on error
 
 
 @pytest.mark.trio
-async def test_multiple_protocol_first_is_valid_succeeds(is_host_secure):
+async def test_multiple_protocol_first_is_valid_succeeds(security_protocol):
     expected_selected_protocol = PROTOCOL_ECHO
     protocols_for_client = [PROTOCOL_ECHO, PROTOCOL_POTATO]
     protocols_for_listener = [PROTOCOL_FOO, PROTOCOL_ECHO]
@@ -67,12 +69,12 @@ async def test_multiple_protocol_first_is_valid_succeeds(is_host_secure):
         expected_selected_protocol,
         protocols_for_client,
         protocols_for_listener,
-        is_host_secure,
+        security_protocol,
     )
 
 
 @pytest.mark.trio
-async def test_multiple_protocol_second_is_valid_succeeds(is_host_secure):
+async def test_multiple_protocol_second_is_valid_succeeds(security_protocol):
     expected_selected_protocol = PROTOCOL_FOO
     protocols_for_client = [PROTOCOL_ROCK, PROTOCOL_FOO]
     protocols_for_listener = [PROTOCOL_FOO, PROTOCOL_ECHO]
@@ -80,15 +82,15 @@ async def test_multiple_protocol_second_is_valid_succeeds(is_host_secure):
         expected_selected_protocol,
         protocols_for_client,
         protocols_for_listener,
-        is_host_secure,
+        security_protocol,
     )
 
 
 @pytest.mark.trio
-async def test_multiple_protocol_fails(is_host_secure):
+async def test_multiple_protocol_fails(security_protocol):
     protocols_for_client = [PROTOCOL_ROCK, PROTOCOL_FOO, "/bar/1.0.0"]
     protocols_for_listener = ["/aspyn/1.0.0", "/rob/1.0.0", "/zx/1.0.0", "/alex/1.0.0"]
     with pytest.raises(StreamFailure):
         await perform_simple_test(
-            "", protocols_for_client, protocols_for_listener, is_host_secure
+            "", protocols_for_client, protocols_for_listener, security_protocol
         )

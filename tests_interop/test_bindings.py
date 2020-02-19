@@ -6,8 +6,10 @@ from libp2p.tools.interop.utils import connect
 
 
 @pytest.mark.trio
-async def test_connect(is_host_secure, p2pds):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
+async def test_connect(security_protocol, p2pds):
+    async with HostFactory.create_batch_and_listen(
+        1, security_protocol=security_protocol
+    ) as hosts:
         p2pd = p2pds[0]
         host = hosts[0]
         assert len(await p2pd.control.list_peers()) == 0

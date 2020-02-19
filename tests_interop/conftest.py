@@ -6,14 +6,15 @@ import pytest
 import trio
 
 from libp2p.io.abc import ReadWriteCloser
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID
 from libp2p.tools.factories import HostFactory, PubsubFactory
 from libp2p.tools.interop.daemon import make_p2pd
 from libp2p.tools.interop.utils import connect
 
 
 @pytest.fixture
-def is_host_secure():
-    return False
+def security_protocol():
+    return PLAINTEXT_PROTOCOL_ID
 
 
 @pytest.fixture
@@ -38,7 +39,11 @@ def is_pubsub_signing_strict():
 
 @pytest.fixture
 async def p2pds(
-    num_p2pds, is_host_secure, is_gossipsub, is_pubsub_signing, is_pubsub_signing_strict
+    num_p2pds,
+    security_protocol,
+    is_gossipsub,
+    is_pubsub_signing,
+    is_pubsub_signing_strict,
 ):
     async with AsyncExitStack() as stack:
         p2pds = [
@@ -46,7 +51,7 @@ async def p2pds(
                 make_p2pd(
                     get_unused_tcp_port(),
                     get_unused_tcp_port(),
-                    is_host_secure,
+                    security_protocol,
                     is_gossipsub=is_gossipsub,
                     is_pubsub_signing=is_pubsub_signing,
                     is_pubsub_signing_strict=is_pubsub_signing_strict,
@@ -62,14 +67,16 @@ async def p2pds(
 
 
 @pytest.fixture
-async def pubsubs(num_hosts, is_host_secure, is_gossipsub, is_pubsub_signing_strict):
+async def pubsubs(num_hosts, security_protocol, is_gossipsub, is_pubsub_signing_strict):
     if is_gossipsub:
         yield PubsubFactory.create_batch_with_gossipsub(
-            num_hosts, is_secure=is_host_secure, strict_signing=is_pubsub_signing_strict
+            num_hosts,
+            security_protocol=security_protocol,
+            strict_signing=is_pubsub_signing_strict,
         )
     else:
         yield PubsubFactory.create_batch_with_floodsub(
-            num_hosts, is_host_secure, strict_signing=is_pubsub_signing_strict
+            num_hosts, security_protocol, strict_signing=is_pubsub_signing_strict
         )
 
 
@@ -97,8 +104,10 @@ async def is_to_fail_daemon_stream():
 
 
 @pytest.fixture
-async def py_to_daemon_stream_pair(p2pds, is_host_secure, is_to_fail_daemon_stream):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
+async def py_to_daemon_stream_pair(p2pds, security_protocol, is_to_fail_daemon_stream):
+    async with HostFactory.create_batch_and_listen(
+        1, security_protocol=security_protocol
+    ) as hosts:
         assert len(p2pds) >= 1
         host = hosts[0]
         p2pd = p2pds[0]

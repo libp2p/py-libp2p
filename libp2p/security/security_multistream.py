@@ -27,7 +27,6 @@ class SecurityMultistream(ABC):
     Go implementation: github.com/libp2p/go-conn-security-multistream/ssms.go
     """
 
-    # NOTE: Can be changed to `typing.OrderedDict` since Python 3.7.2.
     transports: "OrderedDict[TProtocol, ISecureTransport]"
     multiselect: Multiselect
     multiselect_client: MultiselectClient

@@ -82,10 +82,11 @@ async def test_lru_cache_two_nodes(monkeypatch):
 @pytest.mark.parametrize("test_case_obj", floodsub_protocol_pytest_params)
 @pytest.mark.trio
 @pytest.mark.slow
-async def test_gossipsub_run_with_floodsub_tests(test_case_obj, is_host_secure):
+async def test_gossipsub_run_with_floodsub_tests(test_case_obj, security_protocol):
     await perform_test_from_obj(
         test_case_obj,
         functools.partial(
-            PubsubFactory.create_batch_with_floodsub, is_secure=is_host_secure
+            PubsubFactory.create_batch_with_floodsub,
+            security_protocol=security_protocol,
         ),
     )

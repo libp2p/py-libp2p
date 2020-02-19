@@ -8,6 +8,8 @@ import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID
+from libp2p.typing import TProtocol
 
 from .constants import LOCALHOST_IP
 from .envs import GO_BIN_PATH
@@ -20,7 +22,7 @@ class P2PDProcess(BaseInteractiveProcess):
     def __init__(
         self,
         control_maddr: Multiaddr,
-        is_secure: bool,
+        security_protocol: TProtocol,
         is_pubsub_enabled: bool = True,
         is_gossipsub: bool = True,
         is_pubsub_signing: bool = False,
@@ -28,7 +30,7 @@ class P2PDProcess(BaseInteractiveProcess):
     ) -> None:
         args = [f"-listen={control_maddr!s}"]
         # NOTE: To support `-insecure`, we need to hack `go-libp2p-daemon`.
-        if not is_secure:
+        if security_protocol == PLAINTEXT_PROTOCOL_ID:
             args.append("-insecure=true")
         if is_pubsub_enabled:
             args.append("-pubsub")
@@ -85,7 +87,7 @@ class Daemon:
 async def make_p2pd(
     daemon_control_port: int,
     client_callback_port: int,
-    is_secure: bool,
+    security_protocol: TProtocol,
     is_pubsub_enabled: bool = True,
     is_gossipsub: bool = True,
     is_pubsub_signing: bool = False,
@@ -94,7 +96,7 @@ async def make_p2pd(
     control_maddr = Multiaddr(f"/ip4/{LOCALHOST_IP}/tcp/{daemon_control_port}")
     p2pd_proc = P2PDProcess(
         control_maddr,
-        is_secure,
+        security_protocol,
         is_pubsub_enabled,
         is_gossipsub,
         is_pubsub_signing,
