@@ -3,7 +3,7 @@ from typing import cast
 from noise.connection import NoiseConnection as NoiseState
 
 from libp2p.io.abc import EncryptedMsgReadWriter, MsgReadWriteCloser, ReadWriteCloser
-from libp2p.io.msgio import BaseMsgReadWriter, encode_msg_with_length
+from libp2p.io.msgio import FixedSizeLenMsgReadWriter, encode_msg_with_length
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 
 SIZE_NOISE_MESSAGE_LEN = 2
@@ -19,7 +19,7 @@ BYTE_ORDER = "big"
 #                   <-2 bytes-><-       max=65533 bytes        ->
 
 
-class NoisePacketReadWriter(BaseMsgReadWriter):
+class NoisePacketReadWriter(FixedSizeLenMsgReadWriter):
     size_len_bytes = SIZE_NOISE_MESSAGE_LEN
 
 

@@ -19,7 +19,7 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.abc import EncryptedMsgReadWriter
 from libp2p.io.exceptions import DecryptionFailedException, IOException
-from libp2p.io.msgio import BaseMsgReadWriter
+from libp2p.io.msgio import FixedSizeLenMsgReadWriter
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_transport import BaseSecureTransport
@@ -50,18 +50,18 @@ DEFAULT_SUPPORTED_CIPHERS = "AES-128"
 DEFAULT_SUPPORTED_HASHES = "SHA256"
 
 
-class MsgIOReadWriter(BaseMsgReadWriter):
+class SecioPacketReadWriter(FixedSizeLenMsgReadWriter):
     size_len_bytes = SIZE_SECIO_LEN_BYTES
 
 
 class SecioMsgReadWriter(EncryptedMsgReadWriter):
-    read_writer: MsgIOReadWriter
+    read_writer: SecioPacketReadWriter
 
     def __init__(
         self,
         local_encryption_parameters: AuthenticatedEncryptionParameters,
         remote_encryption_parameters: AuthenticatedEncryptionParameters,
-        read_writer: MsgIOReadWriter,
+        read_writer: SecioPacketReadWriter,
     ) -> None:
         self.local_encryption_parameters = local_encryption_parameters
         self.remote_encryption_parameters = remote_encryption_parameters
@@ -170,7 +170,7 @@ class SessionParameters:
         pass
 
 
-async def _response_to_msg(read_writer: MsgIOReadWriter, msg: bytes) -> bytes:
+async def _response_to_msg(read_writer: SecioPacketReadWriter, msg: bytes) -> bytes:
     await read_writer.write_msg(msg)
     return await read_writer.read_msg()
 
@@ -234,7 +234,7 @@ async def _establish_session_parameters(
     local_peer: PeerID,
     local_private_key: PrivateKey,
     remote_peer: Optional[PeerID],
-    conn: MsgIOReadWriter,
+    conn: SecioPacketReadWriter,
     nonce: bytes,
 ) -> Tuple[SessionParameters, bytes]:
     # establish shared encryption parameters
@@ -326,7 +326,7 @@ async def _establish_session_parameters(
 def _mk_session_from(
     local_private_key: PrivateKey,
     session_parameters: SessionParameters,
-    conn: MsgIOReadWriter,
+    conn: SecioPacketReadWriter,
     is_initiator: bool,
 ) -> SecureSession:
     key_set1, key_set2 = initialize_pair_for_encryption(
@@ -371,7 +371,7 @@ async def create_secure_session(
     to the ``remote_peer``. Raise `SecioException` when `conn` closed.
     Raise `InconsistentNonce` when handshake failed
     """
-    msg_io = MsgIOReadWriter(conn)
+    msg_io = SecioPacketReadWriter(conn)
     try:
         session_parameters, remote_nonce = await _establish_session_parameters(
             local_peer, local_private_key, remote_peer, msg_io, local_nonce
