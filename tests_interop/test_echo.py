@@ -6,7 +6,6 @@ import pytest
 import trio
 
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
-from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID
 from libp2p.tools.factories import HostFactory
 from libp2p.tools.interop.envs import GO_BIN_PATH
 from libp2p.tools.interop.process import BaseInteractiveProcess

@@ -3,7 +3,7 @@ from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.io.abc import ReadWriteCloser
-from libp2p.io.msgio import FixedSizeLenMsgReadWriter
+from libp2p.io.msgio import VarIntLengthMsgReadWriter
 from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection_interface import IRawConnection
 from libp2p.peer.id import ID
@@ -20,11 +20,9 @@ from .pb import plaintext_pb2
 
 PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
 
-SIZE_PLAINTEXT_LEN_BYTES = 4
 
-
-class PlaintextHandshakeReadWriter(FixedSizeLenMsgReadWriter):
-    size_len_bytes = SIZE_PLAINTEXT_LEN_BYTES
+class PlaintextHandshakeReadWriter(VarIntLengthMsgReadWriter):
+    max_msg_size = 1 << 16
 
 
 class InsecureSession(BaseSession):

@@ -8,7 +8,6 @@ import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
-from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID
 from libp2p.typing import TProtocol
 
 from .constants import LOCALHOST_IP
@@ -28,10 +27,8 @@ class P2PDProcess(BaseInteractiveProcess):
         is_pubsub_signing: bool = False,
         is_pubsub_signing_strict: bool = False,
     ) -> None:
-        args = [f"-listen={control_maddr!s}"]
-        # NOTE: To support `-insecure`, we need to hack `go-libp2p-daemon`.
-        if security_protocol == PLAINTEXT_PROTOCOL_ID:
-            args.append("-insecure=true")
+        # NOTE: To support `-security`, we need to hack `go-libp2p-daemon`.
+        args = [f"-listen={control_maddr!s}", f"-security={security_protocol}"]
         if is_pubsub_enabled:
             args.append("-pubsub")
             if is_gossipsub:
