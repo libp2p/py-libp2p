@@ -11,13 +11,16 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
+	plaintext "github.com/libp2p/go-libp2p-core/sec/insecure"
+	noise "github.com/libp2p/go-libp2p-noise"
+	secio "github.com/libp2p/go-libp2p-secio"
 
 	ma "github.com/multiformats/go-multiaddr"
 )
 
 // MakeBasicHost creates a LibP2P host with a random peer ID listening on the
 // given multiaddress. It won't encrypt the connection if insecure is true.
-func MakeBasicHost(listenPort int, insecure bool, randseed int64) (host.Host, error) {
+func MakeBasicHost(listenPort int, protocolID string, randseed int64) (host.Host, error) {
 
 	// If the seed is zero, use real cryptographic randomness. Otherwise, use a
 	// deterministic randomness source to make generated keys stay the same
@@ -42,8 +45,22 @@ func MakeBasicHost(listenPort int, insecure bool, randseed int64) (host.Host, er
 		libp2p.DisableRelay(),
 	}
 
-	if insecure {
+	if protocolID == plaintext.ID {
 		opts = append(opts, libp2p.NoSecurity)
+	} else if protocolID == noise.ID {
+		tpt, err := noise.New(priv, noise.NoiseKeyPair(nil))
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, libp2p.Security(protocolID, tpt))
+	} else if protocolID == secio.ID {
+		tpt, err := secio.New(priv)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, libp2p.Security(protocolID, tpt))
+	} else {
+		return nil, fmt.Errorf("security protocolID '%s' is not supported", protocolID)
 	}
 
 	basicHost, err := libp2p.New(context.Background(), opts...)
@@ -59,11 +76,7 @@ func MakeBasicHost(listenPort int, insecure bool, randseed int64) (host.Host, er
 	addr := basicHost.Addrs()[0]
 	fullAddr := addr.Encapsulate(hostAddr)
 	log.Printf("I am %s\n", fullAddr)
-	if insecure {
-		log.Printf("Now run \"./echo -l %d -d %s -insecure\" on a different terminal\n", listenPort+1, fullAddr)
-	} else {
-		log.Printf("Now run \"./echo -l %d -d %s\" on a different terminal\n", listenPort+1, fullAddr)
-	}
+	log.Printf("Now run \"./echo -l %d -d %s -security %s\" on a different terminal\n", listenPort+1, fullAddr, protocolID)
 
 	return basicHost, nil
 }

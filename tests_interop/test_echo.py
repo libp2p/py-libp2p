@@ -23,9 +23,7 @@ class EchoProcess(BaseInteractiveProcess):
     def __init__(
         self, port: int, security_protocol: TProtocol, destination: Multiaddr = None
     ) -> None:
-        args = [f"-l={port}"]
-        if security_protocol == PLAINTEXT_PROTOCOL_ID:
-            args.append("-insecure")
+        args = [f"-l={port}", f"-security={security_protocol}"]
         if destination is not None:
             args.append(f"-d={str(destination)}")
 
