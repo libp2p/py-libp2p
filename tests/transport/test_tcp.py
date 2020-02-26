@@ -17,9 +17,9 @@ async def test_tcp_listener(nursery):
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
+    await nursery.start(listener.listen, LISTEN_MADDR)
     assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    await nursery.start(listener.listen, LISTEN_MADDR)
     assert len(listener.get_addrs()) == 2
 
 
@@ -41,7 +41,7 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await nursery.start(listener.listen, LISTEN_MADDR)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     listen_addr = addrs[0]

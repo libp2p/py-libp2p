@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Any, Tuple
 
 from multiaddr import Multiaddr
 import trio
@@ -7,7 +7,9 @@ import trio
 
 class IListener(ABC):
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(
+        self, maddr: Multiaddr, task_status: Any = trio.TASK_STATUS_IGNORED
+    ) -> bool:
         """
         put listener in listening mode and wait for incoming connections.
 

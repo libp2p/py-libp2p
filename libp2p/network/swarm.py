@@ -40,7 +40,6 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
 
 
 class Swarm(Service, INetworkService):
-
     self_id: ID
     peerstore: IPeerStore
     upgrader: TransportUpgrader
@@ -276,7 +275,9 @@ class Swarm(Service, INetworkService):
                 #   I/O agnostic, we should change the API.
                 if self.listener_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
-                await listener.listen(maddr, self.listener_nursery)
+                await self.listener_nursery.start(
+                    listener.listen, maddr  # type: ignore
+                )
 
                 # Call notifiers since event occurred
                 await self.notify_listen(maddr)

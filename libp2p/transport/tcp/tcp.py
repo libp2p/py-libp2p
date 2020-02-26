@@ -1,5 +1,5 @@
 import logging
-from typing import Awaitable, Callable, List, Sequence, Tuple
+from typing import Any, Awaitable, Callable, List, Sequence, Tuple
 
 from multiaddr import Multiaddr
 import trio
@@ -23,8 +23,9 @@ class TCPListener(IListener):
         self.listeners = []
         self.handler = handler_function
 
-    # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(
+        self, maddr: Multiaddr, task_status: TaskStatus[Any] = trio.TASK_STATUS_IGNORED
+    ) -> None:
         """
         put listener in listening mode and wait for incoming connections.
 
@@ -46,13 +47,15 @@ class TCPListener(IListener):
             tcp_stream = TrioTCPStream(stream)
             await self.handler(tcp_stream)
 
-        listeners = await nursery.start(
-            serve_tcp,
-            handler,
-            int(maddr.value_for_protocol("tcp")),
-            maddr.value_for_protocol("ip4"),
-        )
-        self.listeners.extend(listeners)
+        async with trio.open_nursery() as nursery:
+            listeners = await nursery.start(
+                serve_tcp,
+                handler,
+                int(maddr.value_for_protocol("tcp")),
+                maddr.value_for_protocol("ip4"),
+            )
+            task_status.started()
+            self.listeners.extend(listeners)
 
     def get_addrs(self) -> Tuple[Multiaddr, ...]:
         """
