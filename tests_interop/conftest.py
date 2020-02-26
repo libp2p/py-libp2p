@@ -7,14 +7,15 @@ import trio
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID
+from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.tools.factories import HostFactory, PubsubFactory
 from libp2p.tools.interop.daemon import make_p2pd
 from libp2p.tools.interop.utils import connect
 
 
-@pytest.fixture
-def security_protocol():
-    return PLAINTEXT_PROTOCOL_ID
+@pytest.fixture(params=[PLAINTEXT_PROTOCOL_ID, NOISE_PROTOCOL_ID])
+def security_protocol(request):
+    return request.param
 
 
 @pytest.fixture

@@ -88,7 +88,7 @@ class PatternXX(BasePattern):
         await read_writer.write_msg(msg_2)
 
         # Receive and consume msg#3.
-        msg_3 = await read_writer.read_msg()
+        msg_3 = await read_writer.read_msg(prefix_encoded=True)
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_3)
 
         if handshake_state.rs is None:
@@ -156,7 +156,7 @@ class PatternXX(BasePattern):
         # Send msg#3, which includes our encrypted payload and our noise static key.
         our_payload = self.make_handshake_payload()
         msg_3 = our_payload.serialize()
-        await read_writer.write_msg(msg_3)
+        await read_writer.write_msg(msg_3, prefix_encoded=True)
 
         if not noise_state.handshake_finished:
             raise HandshakeHasNotFinished(

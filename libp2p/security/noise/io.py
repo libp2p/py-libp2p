@@ -32,23 +32,26 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     read_writer: MsgReadWriteCloser
     noise_state: NoiseState
 
+    # FIXME: This prefix is added in msg#3 in Go. Check whether it's a desired behavior.
+    prefix: bytes = b"\x00" * 32
+
     def __init__(self, conn: IRawConnection, noise_state: NoiseState) -> None:
         self.read_writer = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
         self.noise_state = noise_state
 
-    async def write_msg(self, data: bytes) -> None:
+    async def write_msg(self, data: bytes, prefix_encoded: bool = False) -> None:
         data_encrypted = self.encrypt(data)
-        # FIXME: Decide whether this prefix should be added or not.
-        # if not first:
-        #     data_encrypted = b"\x00" * 32 + data_encrypted
-        await self.read_writer.write_msg(data_encrypted)
+        if prefix_encoded:
+            await self.read_writer.write_msg(self.prefix + data_encrypted)
+        else:
+            await self.read_writer.write_msg(data_encrypted)
 
-    async def read_msg(self) -> bytes:
+    async def read_msg(self, prefix_encoded: bool = False) -> bytes:
         noise_msg_encrypted = await self.read_writer.read_msg()
-        # FIXME: Decide whether this prefix should be added or not.
-        # if not first:
-        #     noise_msg_encrypted = noise_msg_encrypted[32:]
-        return self.decrypt(noise_msg_encrypted)
+        if prefix_encoded:
+            return self.decrypt(noise_msg_encrypted[len(self.prefix) :])
+        else:
+            return self.decrypt(noise_msg_encrypted)
 
     async def close(self) -> None:
         await self.read_writer.close()
