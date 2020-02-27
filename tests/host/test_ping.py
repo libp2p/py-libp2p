@@ -3,7 +3,7 @@ import secrets
 import pytest
 import trio
 
-from libp2p.host.ping import ID, PING_LENGTH
+from libp2p.host.ping import ID, PING_LENGTH, PingService
 from libp2p.tools.factories import host_pair_factory
 
 
@@ -36,3 +36,32 @@ async def test_ping_several(is_host_secure):
             # NOTE: this interval can be `0` for this test.
             await trio.sleep(0)
         await stream.close()
+
+
+@pytest.mark.trio
+async def test_ping_service_once(is_host_secure):
+    async with host_pair_factory(is_host_secure) as (host_a, host_b):
+        ping_service = PingService(host_b)
+        rtt = await ping_service.ping(host_a.get_id())
+        assert rtt < 10 ** 6  # rtt is in miliseconds
+
+
+@pytest.mark.trio
+async def test_ping_service_loop(is_host_secure):
+    async with host_pair_factory(is_host_secure) as (host_a, host_b):
+        ping_service = PingService(host_b)
+        ping_loop = await ping_service.ping_loop(
+            host_a.get_id(), ping_amount=SOME_PING_COUNT
+        )
+        async for rtt in ping_loop:
+            assert rtt < 10 ** 6
+
+
+@pytest.mark.trio
+async def test_ping_service_loop_infinite(is_host_secure):
+    async with host_pair_factory(is_host_secure) as (host_a, host_b):
+        ping_service = PingService(host_b)
+        ping_loop = await ping_service.ping_loop(host_a.get_id())
+        with trio.move_on_after(1):  # breaking loop after one second
+            async for rtt in ping_loop:
+                assert rtt < 10 ** 6

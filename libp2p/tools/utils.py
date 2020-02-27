@@ -30,7 +30,7 @@ async def connect(node1: IHost, node2: IHost) -> None:
 
 
 def create_echo_stream_handler(
-    ack_prefix: str
+    ack_prefix: str,
 ) -> Callable[[INetStream], Awaitable[None]]:
     async def echo_stream_handler(stream: INetStream) -> None:
         while True:
