@@ -27,7 +27,8 @@ class TCPListener(IListener):
         self, maddr: Multiaddr, task_status: TaskStatus[Any] = trio.TASK_STATUS_IGNORED
     ) -> None:
         """
-        put listener in listening mode and wait for incoming connections.
+        put listener in listening mode and wait for incoming connections. It
+        blocks until it stops to listen.
 
         :param maddr: maddr of peer
         :return: return True if successful

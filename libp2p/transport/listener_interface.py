@@ -11,7 +11,8 @@ class IListener(ABC):
         self, maddr: Multiaddr, task_status: Any = trio.TASK_STATUS_IGNORED
     ) -> bool:
         """
-        put listener in listening mode and wait for incoming connections.
+        put listener in listening mode and wait for incoming connections. It
+        blocks until it stops to listen.
 
         :param maddr: multiaddr of peer
         :return: return True if successful
