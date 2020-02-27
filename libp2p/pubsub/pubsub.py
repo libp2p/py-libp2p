@@ -1,4 +1,6 @@
+import base64
 import functools
+import hashlib
 import logging
 import time
 from typing import (
@@ -50,6 +52,10 @@ logger = logging.getLogger("libp2p.pubsub")
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     # NOTE: `string(from, seqno)` in Go
     return msg.seqno + msg.from_id
+
+
+def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
+    return base64.b64encode(hashlib.sha256(msg.data).digest())
 
 
 class TopicValidator(NamedTuple):
