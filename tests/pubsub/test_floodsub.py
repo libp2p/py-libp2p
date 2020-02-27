@@ -37,10 +37,16 @@ async def test_simple_two_nodes():
 
 
 @pytest.mark.trio
-async def test_lru_cache_two_nodes(monkeypatch):
+async def test_lru_cache_two_nodes():
     # two nodes with cache_size of 4
+
+    # Mock `get_msg_id` to make us easier to manipulate `msg_id` by `data`.
+    def get_msg_id(msg):
+        # Originally it is `(msg.seqno, msg.from_id)`
+        return (msg.data, msg.from_id)
+
     async with PubsubFactory.create_batch_with_floodsub(
-        2, cache_size=4
+        2, cache_size=4, msg_id_constructor=get_msg_id
     ) as pubsubs_fsub:
         # `node_a` send the following messages to node_b
         message_indices = [1, 1, 2, 1, 3, 1, 4, 1, 5, 1]
@@ -48,15 +54,6 @@ async def test_lru_cache_two_nodes(monkeypatch):
         expected_received_indices = [1, 2, 3, 4, 5, 1]
 
         topic = "my_topic"
-
-        # Mock `get_msg_id` to make us easier to manipulate `msg_id` by `data`.
-        def get_msg_id(msg):
-            # Originally it is `(msg.seqno, msg.from_id)`
-            return (msg.data, msg.from_id)
-
-        import libp2p.pubsub.pubsub
-
-        monkeypatch.setattr(libp2p.pubsub.pubsub, "get_msg_id", get_msg_id)
 
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await trio.sleep(0.25)
