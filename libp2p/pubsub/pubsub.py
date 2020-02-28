@@ -1,7 +1,19 @@
+import base64
 import functools
+import hashlib
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, KeysView, List, NamedTuple, Set, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    KeysView,
+    List,
+    NamedTuple,
+    Set,
+    Tuple,
+    cast,
+)
 
 from async_service import Service
 import base58
@@ -37,9 +49,13 @@ SUBSCRIPTION_CHANNEL_SIZE = 32
 logger = logging.getLogger("libp2p.pubsub")
 
 
-def get_msg_id(msg: rpc_pb2.Message) -> Tuple[bytes, bytes]:
+def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     # NOTE: `string(from, seqno)` in Go
-    return (msg.seqno, msg.from_id)
+    return msg.seqno + msg.from_id
+
+
+def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
+    return base64.b64encode(hashlib.sha256(msg.data).digest())
 
 
 class TopicValidator(NamedTuple):
@@ -81,6 +97,9 @@ class Pubsub(Service, IPubsub):
         router: "IPubsubRouter",
         cache_size: int = None,
         strict_signing: bool = True,
+        msg_id_constructor: Callable[
+            [rpc_pb2.Message], bytes
+        ] = get_peer_and_seqno_msg_id,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -94,6 +113,8 @@ class Pubsub(Service, IPubsub):
         """
         self.host = host
         self.router = router
+
+        self._msg_id_constructor = msg_id_constructor
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
@@ -586,11 +607,11 @@ class Pubsub(Service, IPubsub):
         return self.counter.to_bytes(8, "big")
 
     def _is_msg_seen(self, msg: rpc_pb2.Message) -> bool:
-        msg_id = get_msg_id(msg)
+        msg_id = self._msg_id_constructor(msg)
         return msg_id in self.seen_messages
 
     def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
-        msg_id = get_msg_id(msg)
+        msg_id = self._msg_id_constructor(msg)
         # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there is a
         #   more appropriate way.
         self.seen_messages[msg_id] = 1

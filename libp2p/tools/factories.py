@@ -26,7 +26,8 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.pubsub.abc import IPubsubRouter
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.pubsub import Pubsub
+import libp2p.pubsub.pb.rpc_pb2 as rpc_pb2
+from libp2p.pubsub.pubsub import Pubsub, get_peer_and_seqno_msg_id
 from libp2p.routing.interfaces import IPeerRouting
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.security.noise.messages import (
@@ -370,13 +371,19 @@ class PubsubFactory(factory.Factory):
     @classmethod
     @asynccontextmanager
     async def create_and_start(
-        cls, host: IHost, router: IPubsubRouter, cache_size: int, strict_signing: bool
+        cls,
+        host: IHost,
+        router: IPubsubRouter,
+        cache_size: int,
+        strict_signing: bool,
+        msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Pubsub]:
         pubsub = cls(
             host=host,
             router=router,
             cache_size=cache_size,
             strict_signing=strict_signing,
+            msg_id_constructor=msg_id_constructor,
         )
         async with background_trio_service(pubsub):
             await pubsub.wait_until_ready()
@@ -392,6 +399,7 @@ class PubsubFactory(factory.Factory):
         strict_signing: bool = False,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
+        msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         async with HostFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
@@ -400,7 +408,9 @@ class PubsubFactory(factory.Factory):
             async with AsyncExitStack() as stack:
                 pubsubs = [
                     await stack.enter_async_context(
-                        cls.create_and_start(host, router, cache_size, strict_signing)
+                        cls.create_and_start(
+                            host, router, cache_size, strict_signing, msg_id_constructor
+                        )
                     )
                     for host, router in zip(hosts, routers)
                 ]
@@ -416,6 +426,9 @@ class PubsubFactory(factory.Factory):
         protocols: Sequence[TProtocol] = None,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
+        msg_id_constructor: Callable[
+            [rpc_pb2.Message], bytes
+        ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         if protocols is not None:
             floodsubs = FloodsubFactory.create_batch(number, protocols=list(protocols))
@@ -428,6 +441,7 @@ class PubsubFactory(factory.Factory):
             strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
+            msg_id_constructor=msg_id_constructor,
         ) as pubsubs:
             yield pubsubs
 
@@ -450,6 +464,9 @@ class PubsubFactory(factory.Factory):
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
+        msg_id_constructor: Callable[
+            [rpc_pb2.Message], bytes
+        ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[Tuple[Pubsub, ...]]:
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
@@ -480,6 +497,7 @@ class PubsubFactory(factory.Factory):
             strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
+            msg_id_constructor=msg_id_constructor,
         ) as pubsubs:
             async with AsyncExitStack() as stack:
                 for router in gossipsubs:
