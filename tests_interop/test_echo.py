@@ -20,11 +20,9 @@ class EchoProcess(BaseInteractiveProcess):
     _peer_info: PeerInfo
 
     def __init__(
-        self, port: int, is_secure: bool, destination: Multiaddr = None
+        self, port: int, security_protocol: TProtocol, destination: Multiaddr = None
     ) -> None:
-        args = [f"-l={port}"]
-        if not is_secure:
-            args.append("-insecure")
+        args = [f"-l={port}", f"-security={security_protocol}"]
         if destination is not None:
             args.append(f"-d={str(destination)}")
 
@@ -61,9 +59,11 @@ class EchoProcess(BaseInteractiveProcess):
 
 
 @pytest.mark.trio
-async def test_insecure_conn_py_to_go(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
-        go_proc = EchoProcess(get_unused_tcp_port(), is_host_secure)
+async def test_insecure_conn_py_to_go(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        1, security_protocol=security_protocol
+    ) as hosts:
+        go_proc = EchoProcess(get_unused_tcp_port(), security_protocol)
         await go_proc.start()
 
         host = hosts[0]
@@ -78,8 +78,10 @@ async def test_insecure_conn_py_to_go(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_insecure_conn_go_to_py(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 1) as hosts:
+async def test_insecure_conn_go_to_py(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        1, security_protocol=security_protocol
+    ) as hosts:
         host = hosts[0]
         expected_data = "Hello, world!\n"
         reply_data = "Replyooo!\n"
@@ -94,6 +96,6 @@ async def test_insecure_conn_go_to_py(is_host_secure):
 
         host.set_stream_handler(ECHO_PROTOCOL_ID, _handle_echo)
         py_maddr = host.get_addrs()[0]
-        go_proc = EchoProcess(get_unused_tcp_port(), is_host_secure, py_maddr)
+        go_proc = EchoProcess(get_unused_tcp_port(), security_protocol, py_maddr)
         await go_proc.start()
         await event_handler_finished.wait()

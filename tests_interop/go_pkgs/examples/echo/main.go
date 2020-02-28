@@ -28,7 +28,7 @@ func main() {
 	// Parse options from the command line
 	listenF := flag.Int("l", 0, "wait for incoming connections")
 	target := flag.String("d", "", "target peer to dial")
-	insecure := flag.Bool("insecure", false, "use an unencrypted connection")
+	protocolID := flag.String("security", "", "security protocol used for secure channel")
 	seed := flag.Int64("seed", 0, "set random seed for id generation")
 	flag.Parse()
 
@@ -37,7 +37,7 @@ func main() {
 	}
 
 	// Make a host that listens on the given multiaddress
-	ha, err := utils.MakeBasicHost(*listenF, *insecure, *seed)
+	ha, err := utils.MakeBasicHost(*listenF, *protocolID, *seed)
 	if err != nil {
 		log.Fatal(err)
 	}

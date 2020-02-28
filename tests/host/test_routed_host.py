@@ -7,7 +7,7 @@ from libp2p.tools.factories import HostFactory, RoutedHostFactory
 
 @pytest.mark.trio
 async def test_host_routing_success():
-    async with RoutedHostFactory.create_batch_and_listen(False, 2) as hosts:
+    async with RoutedHostFactory.create_batch_and_listen(2) as hosts:
         # forces to use routing as no addrs are provided
         await hosts[0].connect(PeerInfo(hosts[1].get_id(), []))
         await hosts[1].connect(PeerInfo(hosts[0].get_id(), []))
@@ -15,10 +15,9 @@ async def test_host_routing_success():
 
 @pytest.mark.trio
 async def test_host_routing_fail():
-    is_secure = False
     async with RoutedHostFactory.create_batch_and_listen(
-        is_secure, 2
-    ) as routed_hosts, HostFactory.create_batch_and_listen(is_secure, 1) as basic_hosts:
+        2
+    ) as routed_hosts, HostFactory.create_batch_and_listen(1) as basic_hosts:
         # routing fails because host_c does not use routing
         with pytest.raises(ConnectionFailure):
             await routed_hosts[0].connect(PeerInfo(basic_hosts[0].get_id(), []))

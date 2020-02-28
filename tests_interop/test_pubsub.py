@@ -54,7 +54,7 @@ def validate_pubsub_msg(msg: rpc_pb2.Message, data: bytes, from_peer_id: ID) -> 
 @pytest.mark.parametrize("num_p2pds", (2,))
 @pytest.mark.trio
 async def test_pubsub(
-    p2pds, is_gossipsub, is_host_secure, is_pubsub_signing_strict, nursery
+    p2pds, is_gossipsub, security_protocol, is_pubsub_signing_strict, nursery
 ):
     pubsub_factory = None
     if is_gossipsub:
@@ -63,7 +63,7 @@ async def test_pubsub(
         pubsub_factory = PubsubFactory.create_batch_with_floodsub
 
     async with pubsub_factory(
-        1, is_secure=is_host_secure, strict_signing=is_pubsub_signing_strict
+        1, security_protocol=security_protocol, strict_signing=is_pubsub_signing_strict
     ) as pubsubs:
         #
         # Test: Recognize pubsub peers on connection.

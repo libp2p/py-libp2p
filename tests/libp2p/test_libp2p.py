@@ -19,8 +19,10 @@ ACK_STR_3 = "ack_3:"
 
 
 @pytest.mark.trio
-async def test_simple_messages(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_simple_messages(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         hosts[1].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
         )
@@ -38,8 +40,10 @@ async def test_simple_messages(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_double_response(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_double_response(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
 
         async def double_response_stream_handler(stream):
             while True:
@@ -78,11 +82,13 @@ async def test_double_response(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_multiple_streams(is_host_secure):
+async def test_multiple_streams(security_protocol):
     # hosts[0] should be able to open a stream with hosts[1] and then vice versa.
     # Stream IDs should be generated uniquely so that the stream state is not overwritten
 
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         hosts[0].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
         )
@@ -115,8 +121,10 @@ async def test_multiple_streams(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_multiple_streams_same_initiator_different_protocols(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_multiple_streams_same_initiator_different_protocols(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
 
         hosts[1].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
@@ -161,8 +169,10 @@ async def test_multiple_streams_same_initiator_different_protocols(is_host_secur
 
 
 @pytest.mark.trio
-async def test_multiple_streams_two_initiators(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_multiple_streams_two_initiators(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         hosts[0].set_stream_handler(
             PROTOCOL_ID_2, create_echo_stream_handler(ACK_STR_2)
         )
@@ -217,8 +227,10 @@ async def test_multiple_streams_two_initiators(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_triangle_nodes_connection(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 3) as hosts:
+async def test_triangle_nodes_connection(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        3, security_protocol=security_protocol
+    ) as hosts:
 
         hosts[0].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
@@ -268,8 +280,10 @@ async def test_triangle_nodes_connection(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_host_connect(is_host_secure):
-    async with HostFactory.create_batch_and_listen(is_host_secure, 2) as hosts:
+async def test_host_connect(security_protocol):
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
         assert len(hosts[0].get_peerstore().peer_ids()) == 1
 
         await connect(hosts[0], hosts[1])

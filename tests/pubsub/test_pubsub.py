@@ -236,7 +236,7 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
 
 
 @pytest.mark.trio
-async def test_continuously_read_stream(monkeypatch, nursery, is_host_secure):
+async def test_continuously_read_stream(monkeypatch, nursery, security_protocol):
     async def wait_for_event_occurring(event):
         await trio.hazmat.checkpoint()
         with trio.fail_after(0.1):
@@ -271,8 +271,10 @@ async def test_continuously_read_stream(monkeypatch, nursery, is_host_secure):
             yield Events(event_push_msg, event_handle_subscription, event_handle_rpc)
 
     async with PubsubFactory.create_batch_with_floodsub(
-        1, is_secure=is_host_secure
-    ) as pubsubs_fsub, net_stream_pair_factory(is_secure=is_host_secure) as stream_pair:
+        1, security_protocol=security_protocol
+    ) as pubsubs_fsub, net_stream_pair_factory(
+        security_protocol=security_protocol
+    ) as stream_pair:
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         # Kick off the task `continuously_read_stream`
         nursery.start_soon(pubsubs_fsub[0].continuously_read_stream, stream_pair[0])
@@ -394,10 +396,12 @@ async def test_handle_talk():
 
 
 @pytest.mark.trio
-async def test_message_all_peers(monkeypatch, is_host_secure):
+async def test_message_all_peers(monkeypatch, security_protocol):
     async with PubsubFactory.create_batch_with_floodsub(
-        1, is_secure=is_host_secure
-    ) as pubsubs_fsub, net_stream_pair_factory(is_secure=is_host_secure) as stream_pair:
+        1, security_protocol=security_protocol
+    ) as pubsubs_fsub, net_stream_pair_factory(
+        security_protocol=security_protocol
+    ) as stream_pair:
         peer_id = IDFactory()
         mock_peers = {peer_id: stream_pair[0]}
         with monkeypatch.context() as m:

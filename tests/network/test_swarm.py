@@ -9,8 +9,10 @@ from libp2p.tools.utils import connect_swarm
 
 
 @pytest.mark.trio
-async def test_swarm_dial_peer(is_host_secure):
-    async with SwarmFactory.create_batch_and_listen(is_host_secure, 3) as swarms:
+async def test_swarm_dial_peer(security_protocol):
+    async with SwarmFactory.create_batch_and_listen(
+        3, security_protocol=security_protocol
+    ) as swarms:
         # Test: No addr found.
         with pytest.raises(SwarmException):
             await swarms[0].dial_peer(swarms[1].get_peer_id())
@@ -38,8 +40,10 @@ async def test_swarm_dial_peer(is_host_secure):
 
 
 @pytest.mark.trio
-async def test_swarm_close_peer(is_host_secure):
-    async with SwarmFactory.create_batch_and_listen(is_host_secure, 3) as swarms:
+async def test_swarm_close_peer(security_protocol):
+    async with SwarmFactory.create_batch_and_listen(
+        3, security_protocol=security_protocol
+    ) as swarms:
         # 0 <> 1 <> 2
         await connect_swarm(swarms[0], swarms[1])
         await connect_swarm(swarms[1], swarms[2])
@@ -90,8 +94,10 @@ async def test_swarm_remove_conn(swarm_pair):
 
 
 @pytest.mark.trio
-async def test_swarm_multiaddr(is_host_secure):
-    async with SwarmFactory.create_batch_and_listen(is_host_secure, 3) as swarms:
+async def test_swarm_multiaddr(security_protocol):
+    async with SwarmFactory.create_batch_and_listen(
+        3, security_protocol=security_protocol
+    ) as swarms:
 
         def clear():
             swarms[0].peerstore.clear_addrs(swarms[1].get_peer_id())

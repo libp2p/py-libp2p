@@ -16,11 +16,11 @@ matrix:
       env: TOXENV=docs
     - python: 3.7
       dist: xenial
-      env: TOXENV=py37-interop
+      env: TOXENV=py37-interop GOBINPKG=go1.13.8.linux-amd64.tar.gz
       sudo: true
       before_install:
-        - wget https://dl.google.com/go/go1.12.6.linux-amd64.tar.gz
-        - sudo tar -C /usr/local -xzf go1.12.6.linux-amd64.tar.gz
+        - wget https://dl.google.com/go/$GOBINPKG
+        - sudo tar -C /usr/local -xzf $GOBINPKG
         - export GOPATH=$HOME/go
         - export GOROOT=/usr/local/go
         - export PATH=$GOROOT/bin:$GOPATH/bin:$PATH

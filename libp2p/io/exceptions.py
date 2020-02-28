@@ -23,3 +23,7 @@ class MissingMessageException(MsgioException):
 
 class DecryptionFailedException(MsgioException):
     pass
+
+
+class MessageTooLarge(MsgioException):
+    pass
