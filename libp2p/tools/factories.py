@@ -84,7 +84,7 @@ def noise_transport_factory() -> NoiseTransport:
 
 @asynccontextmanager
 async def raw_conn_factory(
-    nursery: trio.Nursery
+    nursery: trio.Nursery,
 ) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
     conn_0 = None
     conn_1 = None
@@ -98,7 +98,7 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await nursery.start(listener.listen, LISTEN_MADDR)
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
@@ -401,7 +401,7 @@ async def swarm_pair_factory(
 
 @asynccontextmanager
 async def host_pair_factory(
-    is_secure: bool
+    is_secure: bool,
 ) -> AsyncIterator[Tuple[BasicHost, BasicHost]]:
     async with HostFactory.create_batch_and_listen(is_secure, 2) as hosts:
         await connect(hosts[0], hosts[1])
@@ -420,7 +420,7 @@ async def swarm_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_conn_pair_factory(
-    is_secure: bool
+    is_secure: bool,
 ) -> AsyncIterator[Tuple[Mplex, Mplex]]:
     muxer_opt = {MPLEX_PROTOCOL_ID: Mplex}
     async with swarm_conn_pair_factory(is_secure, muxer_opt=muxer_opt) as swarm_pair:
@@ -432,7 +432,7 @@ async def mplex_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_stream_pair_factory(
-    is_secure: bool
+    is_secure: bool,
 ) -> AsyncIterator[Tuple[MplexStream, MplexStream]]:
     async with mplex_conn_pair_factory(is_secure) as mplex_conn_pair_info:
         mplex_conn_0, mplex_conn_1 = mplex_conn_pair_info
@@ -448,7 +448,7 @@ async def mplex_stream_pair_factory(
 
 @asynccontextmanager
 async def net_stream_pair_factory(
-    is_secure: bool
+    is_secure: bool,
 ) -> AsyncIterator[Tuple[INetStream, INetStream]]:
     protocol_id = TProtocol("/example/id/1")
 

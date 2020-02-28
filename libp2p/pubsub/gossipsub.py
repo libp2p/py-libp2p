@@ -391,7 +391,7 @@ class GossipSub(IPubsubRouter, Service):
             await trio.sleep(self.heartbeat_interval)
 
     def mesh_heartbeat(
-        self
+        self,
     ) -> Tuple[DefaultDict[ID, List[str]], DefaultDict[ID, List[str]]]:
         peers_to_graft: DefaultDict[ID, List[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, List[str]] = defaultdict(list)
