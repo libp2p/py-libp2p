@@ -14,7 +14,7 @@ class Reader(ABC):
 
 class Writer(ABC):
     @abstractmethod
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         ...
 
 

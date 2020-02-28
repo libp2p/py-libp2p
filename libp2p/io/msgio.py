@@ -31,9 +31,8 @@ class MsgIOWriter(WriteCloser):
     def __init__(self, write_closer: WriteCloser) -> None:
         self.write_closer = write_closer
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes) -> None:
         await self.write_msg(data)
-        return len(data)
 
     async def write_msg(self, msg: bytes) -> None:
         data = encode_msg_with_length(msg)
