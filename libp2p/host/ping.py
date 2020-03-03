@@ -2,7 +2,7 @@ import logging
 import math
 import secrets
 import time
-from typing import Union
+from typing import List, Optional
 
 import trio
 
@@ -72,28 +72,38 @@ class PingService:
     def __init__(self, host: IHost):
         self._host = host
 
-    async def ping(self, peer_id: PeerID) -> int:
+    async def ping(self, peer_id: PeerID, ping_amount: int = 1) -> List[int]:
+        """method for PINGing 'n' times and returning the RTTs."""
+
         stream = await self._host.new_stream(peer_id, (ID,))
         try:
-            rtt = await _ping(stream)
-            await _close_stream(stream)
-            return rtt
+            rtts = [
+                await _ping(stream) for _ in range(ping_amount)
+            ]  # todo: maybe it is better to run them concurrently?
+            await stream.close()
+            return rtts
         except Exception:
-            await _close_stream(stream)
+            await stream.close()
             raise
 
     async def ping_loop(
-        self, peer_id: PeerID, ping_amount: Union[int, float] = math.inf
+        self, peer_id: PeerID, ping_limit: Optional[int] = None
     ) -> "PingIterator":
+        """
+        method for generating a PING iterator, so that some logic can be
+        implemented inbetween each PING.
+
+        Every iteration returns the RTT
+        """
         stream = await self._host.new_stream(peer_id, (ID,))
-        ping_iterator = PingIterator(stream, ping_amount)
+        ping_iterator = PingIterator(stream, ping_limit)
         return ping_iterator
 
 
 class PingIterator:
-    def __init__(self, stream: INetStream, ping_amount: Union[int, float]):
+    def __init__(self, stream: INetStream, ping_limit: Optional[int]):
         self._stream = stream
-        self._ping_limit = ping_amount
+        self._ping_limit = ping_limit or math.inf
         self._ping_counter = 0
 
     def __aiter__(self) -> "PingIterator":
@@ -101,14 +111,14 @@ class PingIterator:
 
     async def __anext__(self) -> int:
         if self._ping_counter > self._ping_limit:
-            await _close_stream(self._stream)
+            await self._stream.close()
             raise StopAsyncIteration
 
         self._ping_counter += 1
         try:
             return await _ping(self._stream)
         except trio.EndOfChannel:
-            await _close_stream(self._stream)
+            await self._stream.close()
             raise StopAsyncIteration
 
 
@@ -121,10 +131,3 @@ async def _ping(stream: INetStream) -> int:
     if ping_bytes != pong_bytes:
         raise ValidationError("Invalid PING response")
     return rtt
-
-
-async def _close_stream(stream: INetStream) -> None:
-    try:
-        await stream.close()
-    except Exception:
-        pass

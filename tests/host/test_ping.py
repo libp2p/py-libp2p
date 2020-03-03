@@ -42,8 +42,19 @@ async def test_ping_several(is_host_secure):
 async def test_ping_service_once(is_host_secure):
     async with host_pair_factory(is_host_secure) as (host_a, host_b):
         ping_service = PingService(host_b)
-        rtt = await ping_service.ping(host_a.get_id())
-        assert rtt < 10 ** 6  # rtt is in miliseconds
+        rtts = await ping_service.ping(host_a.get_id())
+        assert len(rtts) == 1
+        assert rtts[0] < 10 ** 6  # rtt is in miliseconds
+
+
+@pytest.mark.trio
+async def test_ping_service_several(is_host_secure):
+    async with host_pair_factory(is_host_secure) as (host_a, host_b):
+        ping_service = PingService(host_b)
+        rtts = await ping_service.ping(host_a.get_id(), ping_amount=SOME_PING_COUNT)
+        assert len(rtts) == SOME_PING_COUNT
+        for rtt in rtts:
+            assert rtt < 10 ** 6  # rtt is in miliseconds
 
 
 @pytest.mark.trio
@@ -51,7 +62,7 @@ async def test_ping_service_loop(is_host_secure):
     async with host_pair_factory(is_host_secure) as (host_a, host_b):
         ping_service = PingService(host_b)
         ping_loop = await ping_service.ping_loop(
-            host_a.get_id(), ping_amount=SOME_PING_COUNT
+            host_a.get_id(), ping_limit=SOME_PING_COUNT
         )
         async for rtt in ping_loop:
             assert rtt < 10 ** 6
