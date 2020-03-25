@@ -3,7 +3,7 @@ Release Notes
 
 .. towncrier release notes start
 
-libp2p v0.1.15 (2020-03-23)
+libp2p v0.1.5 (2020-03-25)
 ---------------------------
 
 Features
