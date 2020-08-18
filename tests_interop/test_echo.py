@@ -90,9 +90,9 @@ async def test_insecure_conn_go_to_py(security_protocol):
         async def _handle_echo(stream):
             read_data = await stream.read(len(expected_data))
             assert read_data == expected_data.encode()
-            event_handler_finished.set()
             await stream.write(reply_data.encode())
             await stream.close()
+            event_handler_finished.set()
 
         host.set_stream_handler(ECHO_PROTOCOL_ID, _handle_echo)
         py_maddr = host.get_addrs()[0]

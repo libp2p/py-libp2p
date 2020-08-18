@@ -40,6 +40,7 @@ async def test_net_stream_read_after_local_reset(py_to_daemon_stream_pair, p2pds
 
 @pytest.mark.parametrize("is_to_fail_daemon_stream", (True,))
 @pytest.mark.trio
+@pytest.mark.skip
 async def test_net_stream_read_after_remote_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
     await trio.sleep(0.01)
@@ -66,6 +67,7 @@ async def test_net_stream_write_after_local_reset(py_to_daemon_stream_pair, p2pd
 
 @pytest.mark.parametrize("is_to_fail_daemon_stream", (True,))
 @pytest.mark.trio
+@pytest.mark.skip
 async def test_net_stream_write_after_remote_reset(py_to_daemon_stream_pair, p2pds):
     stream_py, _ = py_to_daemon_stream_pair
     await trio.sleep(0.01)

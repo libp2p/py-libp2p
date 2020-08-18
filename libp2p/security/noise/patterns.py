@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from cryptography.hazmat.primitives import serialization
 from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
 from noise.connection import Keypair as NoiseKeypairEnum
 from noise.connection import NoiseConnection as NoiseState
@@ -88,7 +89,7 @@ class PatternXX(BasePattern):
         await read_writer.write_msg(msg_2)
 
         # Receive and consume msg#3.
-        msg_3 = await read_writer.read_msg(prefix_encoded=True)
+        msg_3 = await read_writer.read_msg()
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_3)
 
         if handshake_state.rs is None:
@@ -156,7 +157,7 @@ class PatternXX(BasePattern):
         # Send msg#3, which includes our encrypted payload and our noise static key.
         our_payload = self.make_handshake_payload()
         msg_3 = our_payload.serialize()
-        await read_writer.write_msg(msg_3, prefix_encoded=True)
+        await read_writer.write_msg(msg_3)
 
         if not noise_state.handshake_finished:
             raise HandshakeHasNotFinished(
@@ -175,9 +176,9 @@ class PatternXX(BasePattern):
     @staticmethod
     def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
         # Use `Ed25519PublicKey` since 25519 is used in our pattern.
-        # NOTE: Ignore the warning for now, since it is also not fixed in `noiseprotocol`.
-        #   "CryptographyDeprecationWarning: public_bytes now requires
-        #   encoding and format arguments. Support for calling without arguments will be
-        #   removed in cryptography 2.7"
-        raw_bytes = key_pair.public.public_bytes()
+        raw_bytes = key_pair.public.public_bytes(
+            # ignore "'Type[...]' has no attribute 'Raw'"
+            serialization.Encoding.Raw,  # type: ignore
+            serialization.PublicFormat.Raw,  # type: ignore
+        )
         return Ed25519PublicKey.from_bytes(raw_bytes)

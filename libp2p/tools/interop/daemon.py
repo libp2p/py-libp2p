@@ -8,6 +8,8 @@ import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
+from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
+from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
 from libp2p.typing import TProtocol
 
 from .constants import LOCALHOST_IP
@@ -27,8 +29,11 @@ class P2PDProcess(BaseInteractiveProcess):
         is_pubsub_signing: bool = False,
         is_pubsub_signing_strict: bool = False,
     ) -> None:
-        # NOTE: To support `-security`, we need to hack `go-libp2p-daemon`.
-        args = [f"-listen={control_maddr!s}", f"-security={security_protocol}"]
+        args = [f"-listen={control_maddr!s}"]
+        if security_protocol == SECIO_PROTOCOL_ID:
+            args.append("-secio")
+        if security_protocol == NOISE_PROTOCOL_ID:
+            args.append("-noise")
         if is_pubsub_enabled:
             args.append("-pubsub")
             if is_gossipsub:
