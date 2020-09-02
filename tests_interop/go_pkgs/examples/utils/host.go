@@ -48,7 +48,7 @@ func MakeBasicHost(listenPort int, protocolID string, randseed int64) (host.Host
 	if protocolID == plaintext.ID {
 		opts = append(opts, libp2p.NoSecurity)
 	} else if protocolID == noise.ID {
-		tpt, err := noise.New(priv, noise.NoiseKeyPair(nil))
+		tpt, err := noise.New(priv)
 		if err != nil {
 			return nil, err
 		}
