@@ -59,7 +59,7 @@ setuptools.setup(
     python_requires=">=3.7,<4",
     install_requires=[
         "pycryptodome>=3.9.2,<4.0.0",
-        "base58>=1.0.3,<2.0.0",
+        "base58==2.0.1",
         "pymultihash>=0.8.2",
         "multiaddr>=0.0.8,<0.1.0",
         "rpcudp>=3.0.0,<4.0.0",
