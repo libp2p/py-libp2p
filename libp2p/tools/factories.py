@@ -297,7 +297,7 @@ class DummyRouter(IPeerRouting):
         self._routing_table[peer_id] = PeerInfo(peer_id, addrs)
 
     async def find_peer(self, peer_id: ID) -> PeerInfo:
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
         return self._routing_table.get(peer_id, None)
 
 

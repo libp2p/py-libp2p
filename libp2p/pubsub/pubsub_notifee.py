@@ -32,10 +32,10 @@ class PubsubNotifee(INotifee):
         self.dead_peers_queue = dead_peers_queue
 
     async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         """
@@ -67,7 +67,7 @@ class PubsubNotifee(INotifee):
             pass
 
     async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async def listen_close(self, network: INetwork, multiaddr: Multiaddr) -> None:
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()

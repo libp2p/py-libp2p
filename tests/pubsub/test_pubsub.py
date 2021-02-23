@@ -103,7 +103,7 @@ async def test_set_and_remove_topic_validator():
         async def async_validator(peer_id, msg):
             nonlocal is_async_validator_called
             is_async_validator_called = True
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         topic = "TEST_VALIDATOR"
 
@@ -155,7 +155,7 @@ async def test_get_msg_validators():
         async def async_validator(peer_id, msg):
             nonlocal times_async_validator_called
             times_async_validator_called += 1
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         topic_1 = "TEST_VALIDATOR_1"
         topic_2 = "TEST_VALIDATOR_2"
@@ -201,11 +201,11 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
             return False
 
         async def passed_async_validator(peer_id, msg):
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
             return True
 
         async def failed_async_validator(peer_id, msg):
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
             return False
 
         topic_1 = "TEST_SYNC_VALIDATOR"
@@ -238,7 +238,7 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
 @pytest.mark.trio
 async def test_continuously_read_stream(monkeypatch, nursery, security_protocol):
     async def wait_for_event_occurring(event):
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
         with trio.fail_after(0.1):
             await event.wait()
 
@@ -255,14 +255,14 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
 
         async def mock_push_msg(msg_forwarder, msg):
             event_push_msg.set()
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         def mock_handle_subscription(origin_id, sub_message):
             event_handle_subscription.set()
 
         async def mock_handle_rpc(rpc, sender_peer_id):
             event_handle_rpc.set()
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         with monkeypatch.context() as m:
             m.setattr(pubsubs_fsub[0], "push_msg", mock_push_msg)
@@ -488,7 +488,7 @@ async def test_publish_push_msg_is_called(monkeypatch):
     async def push_msg(msg_forwarder, msg):
         msg_forwarders.append(msg_forwarder)
         msgs.append(msg)
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
         with monkeypatch.context() as m:
@@ -525,7 +525,7 @@ async def test_push_msg(monkeypatch):
 
             async def router_publish(*args, **kwargs):
                 event.set()
-                await trio.hazmat.checkpoint()
+                await trio.lowlevel.checkpoint()
 
             with monkeypatch.context() as m:
                 m.setattr(pubsubs_fsub[0].router, "publish", router_publish)
@@ -626,7 +626,7 @@ async def test_strict_signing_failed_validation(monkeypatch):
 
         # Use router publish to check if `push_msg` succeed.
         async def router_publish(*args, **kwargs):
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
             # The event will only be set if `push_msg` succeed.
             event.set()
 

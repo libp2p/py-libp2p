@@ -122,7 +122,7 @@ async def py_to_daemon_stream_pair(p2pds, security_protocol, is_to_fail_daemon_s
             nonlocal stream_daemon
             stream_daemon = DaemonStream(stream_info, stream)
             event_stream_handled.set()
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         await p2pd.control.stream_handler(protocol_id, daemon_stream_handler)
         # Sleep for a while to wait for the handler being registered.

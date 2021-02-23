@@ -64,7 +64,7 @@ class FloodSub(IPubsubRouter):
         :param rpc: rpc message
         """
         # Checkpoint
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
@@ -112,7 +112,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to join
         """
         # Checkpoint
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     async def leave(self, topic: str) -> None:
         """
@@ -122,7 +122,7 @@ class FloodSub(IPubsubRouter):
         :param topic: topic to leave
         """
         # Checkpoint
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
