@@ -177,8 +177,6 @@ class PatternXX(BasePattern):
     def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
         # Use `Ed25519PublicKey` since 25519 is used in our pattern.
         raw_bytes = key_pair.public.public_bytes(
-            # ignore "'Type[...]' has no attribute 'Raw'"
-            serialization.Encoding.Raw,  # type: ignore
-            serialization.PublicFormat.Raw,  # type: ignore
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
         )
         return Ed25519PublicKey.from_bytes(raw_bytes)

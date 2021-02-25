@@ -102,5 +102,5 @@ class TCP(ITransport):
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
-    ip, port = socket.getsockname()  # type: ignore
+    ip, port = socket.getsockname()
     return Multiaddr(f"/ip4/{ip}/tcp/{port}")

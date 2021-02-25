@@ -10,7 +10,7 @@ from .typing import UnsubscribeFn
 
 class BaseSubscriptionAPI(ISubscriptionAPI):
     async def __aenter__(self) -> "BaseSubscriptionAPI":
-        await trio.hazmat.checkpoint()
+        await trio.lowlevel.checkpoint()
         return self
 
     async def __aexit__(

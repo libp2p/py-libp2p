@@ -217,7 +217,7 @@ async def perform_test_from_obj(obj, pubsub_factory) -> None:
             # Avoid repeated works
             if topic in queues_map[node_id]:
                 # Checkpoint
-                await trio.hazmat.checkpoint()
+                await trio.lowlevel.checkpoint()
                 return
             sub = await pubsub_map[node_id].subscribe(topic)
             queues_map[node_id][topic] = sub

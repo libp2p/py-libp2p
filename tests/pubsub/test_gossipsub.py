@@ -106,7 +106,7 @@ async def test_handle_graft(monkeypatch):
 
         async def emit_prune(topic, sender_peer_id):
             event_emit_prune.set()
-            await trio.hazmat.checkpoint()
+            await trio.lowlevel.checkpoint()
 
         monkeypatch.setattr(gossipsubs[index_bob], "emit_prune", emit_prune)
 
