@@ -19,7 +19,7 @@ py-libp2p is an experimental and work-in-progress repo under heavy development. 
 
 The Python implementation of the libp2p networking stack
 
-Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the change log](https://py-libp2p.readthedocs.io/en/latest/releases.html).
+Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
 ## Sponsorship
 This project is graciously sponsored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
