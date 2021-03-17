@@ -24,9 +24,8 @@ class Ed25519PublicKey(PublicKey):
 
     def verify(self, data: bytes, signature: bytes) -> bool:
         verify_key = VerifyKey(self.to_bytes())
-        h = SHA256.new(data)
         try:
-            verify_key.verify(h, signature)
+            verify_key.verify(data, signature)
         except BadSignatureError:
             return False
         return True
