@@ -41,6 +41,15 @@ virtualenv -p python3.7 venv
 pip install -e .[dev]
 ```
 
+### Apple Silicon
+This method avoids some common issues with [ctypes](https://dev.to/ajkerrigan/homebrew-pyenv-ctypes-oh-my-3d9) and the [GMP Library](https://github.com/libp2p/py-libp2p/issues/432#issuecomment-962437483) on Apple Silicon.
+```sh
+pyenv install --verbose 3.10.3
+virtualenv -p python3.10 venv
+. venv/bin/activate
+CFLAGS=-I/opt/homebrew/opt/gmp/include LDFLAGS=-L/opt/homebrew/opt/gmp/lib pip install -e .[dev]
+```
+
 ### Testing Setup
 
 During development, you might like to have tests run on every file save.
