@@ -38,7 +38,7 @@ class EchoProcess(BaseInteractiveProcess):
 
         self.port = port
         self._peer_info = None
-        self.regex_pat = re.compile(br"I am ([\w\./]+)")
+        self.regex_pat = re.compile(rb"I am ([\w\./]+)")
 
     @property
     def peer_info(self) -> None:
@@ -48,7 +48,7 @@ class EchoProcess(BaseInteractiveProcess):
             raise Exception("process is not ready yet. failed to parse the peer info")
         # Example:
         # b"I am /ip4/127.0.0.1/tcp/56171/ipfs/QmU41TRPs34WWqa1brJEojBLYZKrrBcJq9nyNfVvSrbZUJ\n"
-        m = re.search(br"I am ([\w\./]+)", self.bytes_read)
+        m = re.search(rb"I am ([\w\./]+)", self.bytes_read)
         if m is None:
             raise Exception("failed to find the pattern for the listening multiaddr")
         maddr_bytes_str_ipfs = m.group(1)

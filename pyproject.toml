@@ -43,7 +43,7 @@ name = "Miscellaneous changes"
 showcontent = false
 
 [tool.black]
-target_version = ['py37']
+target_version = ['py38']
 include = '\.pyi?$'
 exclude = '''
 

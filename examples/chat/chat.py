@@ -10,7 +10,7 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.typing import TProtocol
 
 PROTOCOL_ID = TProtocol("/chat/1.0.0")
-MAX_READ_LEN = 2 ** 32 - 1
+MAX_READ_LEN = 2**32 - 1
 
 
 async def read_data(stream: INetStream) -> None:

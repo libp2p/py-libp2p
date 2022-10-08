@@ -105,7 +105,7 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 
 
 def security_options_factory_factory(
-    protocol_id: TProtocol = None
+    protocol_id: TProtocol = None,
 ) -> Callable[[KeyPair], TSecurityOptions]:
     if protocol_id is None:
         protocol_id = DEFAULT_SECURITY_PROTOCOL_ID
@@ -135,7 +135,7 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 
 @asynccontextmanager
 async def raw_conn_factory(
-    nursery: trio.Nursery
+    nursery: trio.Nursery,
 ) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
     conn_0 = None
     conn_1 = None
@@ -158,7 +158,7 @@ async def raw_conn_factory(
 
 @asynccontextmanager
 async def noise_conn_factory(
-    nursery: trio.Nursery
+    nursery: trio.Nursery,
 ) -> AsyncIterator[Tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
@@ -541,7 +541,7 @@ async def swarm_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_conn_pair_factory(
-    security_protocol: TProtocol = None
+    security_protocol: TProtocol = None,
 ) -> AsyncIterator[Tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
         security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
@@ -554,7 +554,7 @@ async def mplex_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_stream_pair_factory(
-    security_protocol: TProtocol = None
+    security_protocol: TProtocol = None,
 ) -> AsyncIterator[Tuple[MplexStream, MplexStream]]:
     async with mplex_conn_pair_factory(
         security_protocol=security_protocol

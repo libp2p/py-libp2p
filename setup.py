@@ -10,21 +10,22 @@ extras_require = {
         "pytest-xdist>=1.30.0",
         "pytest-trio>=0.5.2",
         "factory-boy>=2.12.0,<3.0.0",
+        "p2pclient>=0.2.0",
     ],
     "lint": [
         "flake8==3.7.9",  # flake8 is not semver: it has added new warnings at minor releases
         "isort==4.3.21",
         "mypy==0.780",  # mypy is not semver: it has added new warnings at minor releases
         "mypy-protobuf==1.15",
-        "black==19.3b0",
+        "black==22.3.0",
         "flake8-bugbear>=19.8.0,<20",
         "docformatter>=1.3.1,<2",
         "trio-typing~=0.5.0",
     ],
     "doc": [
-        "Sphinx>=2.2.1,<3",
-        "sphinx_rtd_theme>=0.4.3,<=1",
-        "towncrier>=19.2.0, <20",
+        "Sphinx>=5.2.3",
+        "sphinx_rtd_theme>=1.0.0",
+        "towncrier>=22.8.0",
     ],
     "dev": [
         "bumpversion>=0.5.3,<1",
@@ -92,7 +93,7 @@ if not readthedocs_is_building:
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. Use `make bump`, as described in readme
-    version="0.1.5",
+    version="0.1.6",
     description="libp2p implementation written in python",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -101,7 +102,7 @@ setup(
     url="https://github.com/libp2p/py-libp2p",
     include_package_data=True,
     install_requires=install_requires,
-    python_requires=">=3.6,<4",
+    python_requires=">=3.8,<4",
     extras_require=extras_require,
     py_modules=["libp2p"],
     license="MIT/APACHE2.0",
@@ -115,8 +116,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
     ],
     platforms=["unix", "linux", "osx"],
 )

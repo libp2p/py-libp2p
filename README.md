@@ -31,12 +31,12 @@ The py-libp2p team consists of:
 
 ## Development
 
-py-libp2p requires Python 3.7 and the best way to guarantee a clean Python 3.7 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
+py-libp2p requires Python 3.8 and the best way to guarantee a clean Python 3.8 environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
 
 ```sh
 git clone git@github.com:libp2p/py-libp2p.git
 cd py-libp2p
-virtualenv -p python3.7 venv
+virtualenv -p python3.8 venv
 . venv/bin/activate
 pip install -e .[dev]
 ```

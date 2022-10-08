@@ -9,8 +9,8 @@ from .io.utils import read_exactly
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
 
-LOW_MASK = 2 ** 7 - 1
-HIGH_MASK = 2 ** 7
+LOW_MASK = 2**7 - 1
+HIGH_MASK = 2**7
 
 
 # The maximum shift width for a 64 bit integer.  We shouldn't have to decode

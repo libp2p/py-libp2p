@@ -391,7 +391,7 @@ class GossipSub(IPubsubRouter, Service):
             await trio.sleep(self.heartbeat_interval)
 
     def mesh_heartbeat(
-        self
+        self,
     ) -> Tuple[DefaultDict[ID, List[str]], DefaultDict[ID, List[str]]]:
         peers_to_graft: DefaultDict[ID, List[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, List[str]] = defaultdict(list)
@@ -465,8 +465,10 @@ class GossipSub(IPubsubRouter, Service):
                 # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.mesh[topic]
+                    peers_to_emit_ihave_to = (
+                        self._get_in_topic_gossipsub_peers_from_minus(
+                            topic, self.degree, self.mesh[topic]
+                        )
                     )
 
                     msg_id_strs = [str(msg_id) for msg_id in msg_ids]
@@ -481,8 +483,10 @@ class GossipSub(IPubsubRouter, Service):
                 # Get all pubsub peers in topic and only add if they are gossipsub peers also
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.fanout[topic]
+                    peers_to_emit_ihave_to = (
+                        self._get_in_topic_gossipsub_peers_from_minus(
+                            topic, self.degree, self.fanout[topic]
+                        )
                     )
                     msg_id_strs = [str(msg) for msg in msg_ids]
                     for peer in peers_to_emit_ihave_to:
