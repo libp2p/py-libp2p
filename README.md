@@ -14,6 +14,8 @@
 <img width="250" align="center" src="https://github.com/libp2p/py-libp2p/blob/master/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" />
 </h1>
 
+Welcome! Welcome!
+
 ## WARNING
 py-libp2p is an experimental and work-in-progress repo under heavy development. We do not yet recommend using py-libp2p in production environments.
 
