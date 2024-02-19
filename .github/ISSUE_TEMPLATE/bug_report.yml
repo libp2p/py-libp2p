@@ -15,13 +15,13 @@ body:
   - type: textarea
     attributes:
       label: Expected behavior
-      description: Describe what you expect to happen.    
+      description: Describe what you expect to happen.
     validations:
       required: true
   - type: textarea
     attributes:
       label: Actual behavior
-      description: Describe what actually happens.    
+      description: Describe what actually happens.
     validations:
       required: true
   - type: textarea
@@ -34,13 +34,13 @@ body:
   - type: textarea
     attributes:
       label:  Possible Solution
-      description: Suggest a fix/reason for the bug, or ideas how to implement the addition or change. 
+      description: Suggest a fix/reason for the bug, or ideas how to implement the addition or change.
     validations:
       required: false
   - type: textarea
     attributes:
       label: Environment
-      description: Run this: `$ python -m eth_utils` and put the results here.
+      description: Run `$ python -m eth_utils` and put the results here.
       render: shell
     validations:
       required: false

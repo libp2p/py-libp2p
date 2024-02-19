@@ -3,11 +3,21 @@ import argparse
 import multiaddr
 import trio
 
-from libp2p import new_host
-from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.typing import TProtocol
+from libp2p import (
+    new_host,
+)
+from libp2p.crypto.secp256k1 import (
+    create_new_key_pair,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
@@ -36,11 +46,9 @@ async def run(port: int, destination: str, seed: int = None) -> None:
 
     host = new_host(key_pair=create_new_key_pair(secret))
     async with host.run(listen_addrs=[listen_addr]):
-
         print(f"I am {host.get_id().to_string()}")
 
         if not destination:  # its the server
-
             host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
             print(
@@ -59,7 +67,8 @@ async def run(port: int, destination: str, seed: int = None) -> None:
             await host.connect(info)
 
             # Start a stream with the destination.
-            # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
+            # Multiaddress of the destination peer is fetched from the peerstore
+            # using 'peerId'.
             stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
 
             msg = b"hi, there!\n"
@@ -99,7 +108,7 @@ def main() -> None:
         "-s",
         "--seed",
         type=int,
-        help="provide a seed to the random number generator (e.g. to fix peer IDs across runs)",
+        help="provide a seed to the random number generator (e.g. to fix peer IDs across runs)",  # noqa: E501
     )
     args = parser.parse_args()
 

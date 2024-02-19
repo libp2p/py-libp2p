@@ -1,6 +1,8 @@
 import pytest
 
-from libp2p.tools.factories import HostFactory
+from libp2p.tools.factories import (
+    HostFactory,
+)
 
 
 @pytest.fixture

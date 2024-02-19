@@ -1,8 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 import hmac
-from typing import Tuple
+from typing import (
+    Tuple,
+)
 
-from Crypto.Cipher import AES
+from Crypto.Cipher import (
+    AES,
+)
 import Crypto.Util.Counter as Counter
 
 
@@ -61,9 +67,11 @@ class MacAndCipher:
 def initialize_pair(
     cipher_type: str, hash_type: str, secret: bytes
 ) -> Tuple[EncryptionParameters, EncryptionParameters]:
-    """Return a pair of ``Keys`` for use in securing a communications channel
+    """
+    Return a pair of ``Keys`` for use in securing a communications channel
     with authenticated encryption derived from the ``secret`` and using the
-    requested ``cipher_type`` and ``hash_type``."""
+    requested ``cipher_type`` and ``hash_type``.
+    """
     if cipher_type != "AES-128":
         raise NotImplementedError()
     if hash_type != "SHA256":
@@ -72,7 +80,7 @@ def initialize_pair(
     iv_size = 16
     cipher_key_size = 16
     hmac_key_size = 20
-    seed = "key expansion".encode()
+    seed = b"key expansion"
 
     params_size = iv_size + cipher_key_size + hmac_key_size
     result = bytearray(2 * params_size)

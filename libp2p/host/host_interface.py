@@ -1,14 +1,36 @@
-from abc import ABC, abstractmethod
-from typing import Any, AsyncContextManager, List, Sequence
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Any,
+    AsyncContextManager,
+    List,
+    Sequence,
+)
 
 import multiaddr
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.network.network_interface import INetworkService
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.network.network_interface import (
+    INetworkService,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.typing import (
+    StreamHandlerFn,
+    TProtocol,
+)
 
 
 class IHost(ABC):
@@ -54,7 +76,7 @@ class IHost(ABC):
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
     ) -> AsyncContextManager[None]:
         """
-        run the host instance and listen to ``listen_addrs``.
+        Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
@@ -64,7 +86,7 @@ class IHost(ABC):
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
     ) -> None:
         """
-        set stream handler for host.
+        Set stream handler for host.
 
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
@@ -85,7 +107,7 @@ class IHost(ABC):
     @abstractmethod
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer
+        Ensure there is a connection between this host and the peer
         with given peer_info.peer_id. connect will absorb the addresses in
         peer_info into its internal peerstore. If there is not an active
         connection, connect will issue a dial, and block until a connection is

@@ -1,9 +1,19 @@
-from abc import ABC, abstractmethod
-from typing import List, Sequence
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    List,
+    Sequence,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from .id import ID
+from .id import (
+    ID,
+)
 
 
 class IAddrBook(ABC):
@@ -15,7 +25,7 @@ class IAddrBook(ABC):
         :param peer_id: the peer to add address for
         :param addr: multiaddress of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid)
-        """
+        """  # noqa: E501
 
     @abstractmethod
     def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
@@ -28,7 +38,7 @@ class IAddrBook(ABC):
         :param peer_id: the peer to add address for
         :param addr: multiaddresses of the peer
         :param ttl: time-to-live for the address (after this time, address is no longer valid
-        """
+        """  # noqa: E501
 
     @abstractmethod
     def addrs(self, peer_id: ID) -> List[Multiaddr]:

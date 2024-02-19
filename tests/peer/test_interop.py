@@ -3,8 +3,12 @@ import base64
 import Crypto.PublicKey.RSA as RSA
 
 from libp2p.crypto.pb import crypto_pb2 as pb
-from libp2p.crypto.rsa import RSAPrivateKey
-from libp2p.peer.id import ID
+from libp2p.crypto.rsa import (
+    RSAPrivateKey,
+)
+from libp2p.peer.id import (
+    ID,
+)
 
 # ``PRIVATE_KEY_PROTOBUF_SERIALIZATION`` is a protobuf holding an RSA private key.
 PRIVATE_KEY_PROTOBUF_SERIALIZATION = """

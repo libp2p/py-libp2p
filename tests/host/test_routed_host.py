@@ -1,8 +1,15 @@
 import pytest
 
-from libp2p.host.exceptions import ConnectionFailure
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.tools.factories import HostFactory, RoutedHostFactory
+from libp2p.host.exceptions import (
+    ConnectionFailure,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.tools.factories import (
+    HostFactory,
+    RoutedHostFactory,
+)
 
 
 @pytest.mark.trio

@@ -1,15 +1,36 @@
-from collections import OrderedDict
+from collections import (
+    OrderedDict,
+)
 
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
-from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.transport.typing import TMuxerClass, TMuxerOptions
-from libp2p.typing import TProtocol
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.protocol_muxer.multiselect import (
+    Multiselect,
+)
+from libp2p.protocol_muxer.multiselect_client import (
+    MultiselectClient,
+)
+from libp2p.protocol_muxer.multiselect_communicator import (
+    MultiselectCommunicator,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.transport.typing import (
+    TMuxerClass,
+    TMuxerOptions,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .abc import IMuxedConn
+from .abc import (
+    IMuxedConn,
+)
 
 # FIXME: add negotiate timeout to `MuxerMultistream`
 DEFAULT_NEGOTIATE_TIMEOUT = 60

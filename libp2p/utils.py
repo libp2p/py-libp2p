@@ -1,16 +1,22 @@
 import itertools
 import math
 
-from libp2p.exceptions import ParseError
-from libp2p.io.abc import Reader
+from libp2p.exceptions import (
+    ParseError,
+)
+from libp2p.io.abc import (
+    Reader,
+)
 
-from .io.utils import read_exactly
+from .io.utils import (
+    read_exactly,
+)
 
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
 
-LOW_MASK = 2 ** 7 - 1
-HIGH_MASK = 2 ** 7
+LOW_MASK = 2**7 - 1
+HIGH_MASK = 2**7
 
 
 # The maximum shift width for a 64 bit integer.  We shouldn't have to decode
@@ -72,7 +78,7 @@ def encode_delim(msg: bytes) -> bytes:
 async def read_delim(reader: Reader) -> bytes:
     msg_bytes = await read_varint_prefixed_bytes(reader)
     if len(msg_bytes) == 0:
-        raise ParseError(f"`len(msg_bytes)` should not be 0")
+        raise ParseError("`len(msg_bytes)` should not be 0")
     if msg_bytes[-1:] != b"\n":
         raise ParseError(
             f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes!r}'

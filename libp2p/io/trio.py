@@ -2,8 +2,12 @@ import logging
 
 import trio
 
-from libp2p.io.abc import ReadWriteCloser
-from libp2p.io.exceptions import IOException
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
+from libp2p.io.exceptions import (
+    IOException,
+)
 
 logger = logging.getLogger("libp2p.io.trio")
 

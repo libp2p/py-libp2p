@@ -1,4 +1,6 @@
-from libp2p.security.exceptions import HandshakeFailure
+from libp2p.security.exceptions import (
+    HandshakeFailure,
+)
 
 
 class NoiseFailure(HandshakeFailure):
@@ -14,8 +16,10 @@ class InvalidSignature(NoiseFailure):
 
 
 class NoiseStateError(NoiseFailure):
-    """Raised when anything goes wrong in the noise state in `noiseprotocol`
-    package."""
+    """
+    Raised when anything goes wrong in the noise state in `noiseprotocol`
+    package.
+    """
 
 
 class PeerIDMismatchesPubkey(NoiseFailure):

@@ -1,8 +1,18 @@
-from libp2p.host.basic_host import BasicHost
-from libp2p.host.exceptions import ConnectionFailure
-from libp2p.network.network_interface import INetworkService
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.routing.interfaces import IPeerRouting
+from libp2p.host.basic_host import (
+    BasicHost,
+)
+from libp2p.host.exceptions import (
+    ConnectionFailure,
+)
+from libp2p.network.network_interface import (
+    INetworkService,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.routing.interfaces import (
+    IPeerRouting,
+)
 
 
 # RoutedHost is a p2p Host that includes a routing system.
@@ -16,7 +26,7 @@ class RoutedHost(BasicHost):
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer
+        Ensure there is a connection between this host and the peer
         with given `peer_info.peer_id`. See (basic_host).connect for more
         information.
 
@@ -26,7 +36,8 @@ class RoutedHost(BasicHost):
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
-        # check if we were given some addresses, otherwise, find some with the routing system.
+        # check if we were given some addresses, otherwise, find some with the
+        # routing system.
         if not peer_info.addrs:
             found_peer_info = await self._router.find_peer(peer_info.peer_id)
             if not found_peer_info:

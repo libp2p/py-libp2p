@@ -1,4 +1,6 @@
-from libp2p.security.exceptions import HandshakeFailure
+from libp2p.security.exceptions import (
+    HandshakeFailure,
+)
 
 
 class SecioException(HandshakeFailure):
@@ -6,10 +8,10 @@ class SecioException(HandshakeFailure):
 
 
 class SelfEncryption(SecioException):
-    """Raised to indicate that a host is attempting to encrypt communications
-    with itself."""
-
-    pass
+    """
+    Raised to indicate that a host is attempting to encrypt communications
+    with itself.
+    """
 
 
 class PeerMismatchException(SecioException):

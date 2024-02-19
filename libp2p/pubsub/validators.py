@@ -1,9 +1,15 @@
 import logging
 
-from libp2p.crypto.serialization import deserialize_public_key
-from libp2p.peer.id import ID
+from libp2p.crypto.serialization import (
+    deserialize_public_key,
+)
+from libp2p.peer.id import (
+    ID,
+)
 
-from .pb import rpc_pb2
+from .pb import (
+    rpc_pb2,
+)
 
 logger = logging.getLogger("libp2p.pubsub")
 

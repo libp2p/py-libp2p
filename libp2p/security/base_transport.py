@@ -1,9 +1,17 @@
 import secrets
-from typing import Callable
+from typing import (
+    Callable,
+)
 
-from libp2p.crypto.keys import KeyPair
-from libp2p.peer.id import ID
-from libp2p.security.secure_transport_interface import ISecureTransport
+from libp2p.crypto.keys import (
+    KeyPair,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.secure_transport_interface import (
+    ISecureTransport,
+)
 
 
 def default_secure_bytes_provider(n: int) -> bytes:

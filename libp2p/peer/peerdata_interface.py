@@ -1,11 +1,25 @@
-from abc import ABC, abstractmethod
-from typing import Any, List, Sequence
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Any,
+    List,
+    Sequence,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
 
-from .peermetadata_interface import IPeerMetadata
+from .peermetadata_interface import (
+    IPeerMetadata,
+)
 
 
 class IPeerData(ABC):

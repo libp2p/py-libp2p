@@ -1,8 +1,12 @@
 import pytest
 import trio
 
-from libp2p.tools.factories import HostFactory
-from libp2p.tools.interop.utils import connect
+from libp2p.tools.factories import (
+    HostFactory,
+)
+from libp2p.tools.interop.utils import (
+    connect,
+)
 
 
 @pytest.mark.trio

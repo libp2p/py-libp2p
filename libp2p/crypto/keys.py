@@ -1,6 +1,14 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum, unique
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from dataclasses import (
+    dataclass,
+)
+from enum import (
+    Enum,
+    unique,
+)
 
 from .pb import crypto_pb2 as protobuf
 
@@ -38,8 +46,10 @@ class PublicKey(Key):
 
     @abstractmethod
     def verify(self, data: bytes, signature: bytes) -> bool:
-        """Verify that ``signature`` is the cryptographic signature of the hash
-        of ``data``."""
+        """
+        Verify that ``signature`` is the cryptographic signature of the hash
+        of ``data``.
+        """
         ...
 
     def _serialize_to_protobuf(self) -> protobuf.PublicKey:

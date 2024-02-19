@@ -1,9 +1,20 @@
-from Crypto.Hash import SHA256
+from Crypto.Hash import (
+    SHA256,
+)
 import Crypto.PublicKey.RSA as RSA
-from Crypto.PublicKey.RSA import RsaKey
-from Crypto.Signature import pkcs1_15
+from Crypto.PublicKey.RSA import (
+    RsaKey,
+)
+from Crypto.Signature import (
+    pkcs1_15,
+)
 
-from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    KeyType,
+    PrivateKey,
+    PublicKey,
+)
 
 
 class RSAPublicKey(PublicKey):

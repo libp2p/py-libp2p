@@ -1,8 +1,13 @@
-from typing import NamedTuple
+from typing import (
+    NamedTuple,
+)
 
 import multiaddr
 
-from libp2p.pubsub import floodsub, gossipsub
+from libp2p.pubsub import (
+    floodsub,
+    gossipsub,
+)
 
 # Just a arbitrary large number.
 # It is used when calling `MplexStream.read(MAX_READ_LEN)`,

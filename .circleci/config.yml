@@ -84,7 +84,7 @@ windows-wheel-steps:
       paths:
         - .tox
       key: cache-v1-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "setup.py" }}-{{ checksum "tox.ini" }}
-        
+
 docs: &docs
   docker:
     - image: common

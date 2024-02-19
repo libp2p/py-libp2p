@@ -1,23 +1,58 @@
-from ast import literal_eval
-from collections import defaultdict
+from ast import (
+    literal_eval,
+)
+from collections import (
+    defaultdict,
+)
 import logging
 import random
-from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Set, Tuple
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    Iterable,
+    List,
+    Sequence,
+    Set,
+    Tuple,
+)
 
-from async_service import Service
+from async_service import (
+    Service,
+)
 import trio
 
-from libp2p.network.stream.exceptions import StreamClosed
-from libp2p.peer.id import ID
-from libp2p.pubsub import floodsub
-from libp2p.typing import TProtocol
-from libp2p.utils import encode_varint_prefixed
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.pubsub import (
+    floodsub,
+)
+from libp2p.typing import (
+    TProtocol,
+)
+from libp2p.utils import (
+    encode_varint_prefixed,
+)
 
-from .abc import IPubsubRouter
-from .exceptions import NoPubsubAttached
-from .mcache import MessageCache
-from .pb import rpc_pb2
-from .pubsub import Pubsub
+from .abc import (
+    IPubsubRouter,
+)
+from .exceptions import (
+    NoPubsubAttached,
+)
+from .mcache import (
+    MessageCache,
+)
+from .pb import (
+    rpc_pb2,
+)
+from .pubsub import (
+    Pubsub,
+)
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
@@ -120,10 +155,10 @@ class GossipSub(IPubsubRouter, Service):
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
 
         if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
-            # We should never enter here. Becuase the `protocol_id` is registered by your pubsub
-            #   instance in multistream-select, but it is not the protocol that gossipsub supports.
-            #   In this case, probably we registered gossipsub to a wrong `protocol_id`
-            #   in multistream-select, or wrong versions.
+            # We should never enter here. Becuase the `protocol_id` is registered by
+            #   your pubsub instance in multistream-select, but it is not the protocol
+            #   that gossipsub supports. In this case, probably we registered gossipsub
+            #   to a wrong `protocol_id` in multistream-select, or wrong versions.
             raise ValueError(f"Protocol={protocol_id} is not supported.")
         self.peer_protocol[peer_id] = protocol_id
 
@@ -208,11 +243,11 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             # floodsub peers
-            floodsub_peers: Set[ID] = set(
+            floodsub_peers: Set[ID] = {
                 peer_id
                 for peer_id in self.pubsub.peer_topics[topic]
                 if self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
-            )
+            }
             send_to.update(floodsub_peers)
 
             # gossipsub peers
@@ -220,9 +255,9 @@ class GossipSub(IPubsubRouter, Service):
             if topic in self.mesh:
                 gossipsub_peers = self.mesh[topic]
             else:
-                # When we publish to a topic that we have not subscribe to, we randomly pick
-                # `self.degree` number of peers who have subscribed to the topic and add them
-                # as our `fanout` peers.
+                # When we publish to a topic that we have not subscribe to, we randomly
+                # pick `self.degree` number of peers who have subscribed to the topic
+                # and add them as our `fanout` peers.
                 topic_in_fanout: bool = topic in self.fanout
                 fanout_peers: Set[ID] = self.fanout[topic] if topic_in_fanout else set()
                 fanout_size = len(fanout_peers)
@@ -270,7 +305,7 @@ class GossipSub(IPubsubRouter, Service):
                 # Combine fanout peers with selected peers
                 fanout_peers.update(selected_peers)
 
-        # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message.
+        # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message
         for peer in fanout_peers:
             self.mesh[topic].add(peer)
             await self.emit_graft(topic, peer)
@@ -369,10 +404,10 @@ class GossipSub(IPubsubRouter, Service):
         """
         Call individual heartbeats.
 
-        Note: the heartbeats are called with awaits because each heartbeat depends on the
-        state changes in the preceding heartbeat
+        Note: the heartbeats are called with awaits because each heartbeat depends on
+        the state changes in the preceding heartbeat
         """
-        # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # Noqa: E501
+        # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # noqa: E501
         await trio.sleep(self.heartbeat_initial_delay)
         while True:
             # Maintain mesh and keep track of which peers to send GRAFT or PRUNE to
@@ -381,7 +416,8 @@ class GossipSub(IPubsubRouter, Service):
             self.fanout_heartbeat()
             # Get the peers to send IHAVE to
             peers_to_gossip = self.gossip_heartbeat()
-            # Pack GRAFT, PRUNE and IHAVE for the same peer into one control message and send it
+            # Pack GRAFT, PRUNE and IHAVE for the same peer into one control message and
+            # send it
             await self._emit_control_msgs(
                 peers_to_graft, peers_to_prune, peers_to_gossip
             )
@@ -391,7 +427,7 @@ class GossipSub(IPubsubRouter, Service):
             await trio.sleep(self.heartbeat_interval)
 
     def mesh_heartbeat(
-        self
+        self,
     ) -> Tuple[DefaultDict[ID, List[str]], DefaultDict[ID, List[str]]]:
         peers_to_graft: DefaultDict[ID, List[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, List[str]] = defaultdict(list)
@@ -402,7 +438,7 @@ class GossipSub(IPubsubRouter, Service):
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
             if num_mesh_peers_in_topic < self.degree_low:
-                # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]
+                # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]  # noqa: E501
                 selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic]
                 )
@@ -436,7 +472,7 @@ class GossipSub(IPubsubRouter, Service):
                 # Remove topic from fanout
                 del self.fanout[topic]
             else:
-                # Check if fanout peers are still in the topic and remove the ones that are not
+                # Check if fanout peers are still in the topic and remove the ones that are not  # noqa: E501
                 # ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L498-L504  # noqa: E501
                 in_topic_fanout_peers = [
                     peer
@@ -448,7 +484,7 @@ class GossipSub(IPubsubRouter, Service):
 
                 # If |fanout[topic]| < D
                 if num_fanout_peers_in_topic < self.degree:
-                    # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]
+                    # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]  # noqa: E501
                     selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
                         topic,
                         self.degree - num_fanout_peers_in_topic,
@@ -462,11 +498,14 @@ class GossipSub(IPubsubRouter, Service):
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
-                # Get all pubsub peers in a topic and only add them if they are gossipsub peers too
+                # Get all pubsub peers in a topic and only add them if they are
+                # gossipsub peers too
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.mesh[topic]
+                    peers_to_emit_ihave_to = (
+                        self._get_in_topic_gossipsub_peers_from_minus(
+                            topic, self.degree, self.mesh[topic]
+                        )
                     )
 
                     msg_id_strs = [str(msg_id) for msg_id in msg_ids]
@@ -478,11 +517,14 @@ class GossipSub(IPubsubRouter, Service):
         for topic in self.fanout:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
-                # Get all pubsub peers in topic and only add if they are gossipsub peers also
+                # Get all pubsub peers in topic and only add if they are
+                # gossipsub peers also
                 if topic in self.pubsub.peer_topics:
                     # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic, self.degree, self.fanout[topic]
+                    peers_to_emit_ihave_to = (
+                        self._get_in_topic_gossipsub_peers_from_minus(
+                            topic, self.degree, self.fanout[topic]
+                        )
                     )
                     msg_id_strs = [str(msg) for msg in msg_ids]
                     for peer in peers_to_emit_ihave_to:
@@ -494,7 +536,8 @@ class GossipSub(IPubsubRouter, Service):
         num_to_select: int, pool: Iterable[Any], minus: Iterable[Any]
     ) -> List[Any]:
         """
-        Select at most num_to_select subset of elements from the set (pool - minus) randomly.
+        Select at most num_to_select subset of elements from the set
+        (pool - minus) randomly.
         :param num_to_select: number of elements to randomly select
         :param pool: list of items to select from (excluding elements in minus)
         :param minus: elements to be excluded from selection pool
@@ -508,8 +551,9 @@ class GossipSub(IPubsubRouter, Service):
             # Don't create a new selection_pool if we are not subbing anything
             selection_pool = list(pool)
 
-        # If num_to_select > size(selection_pool), then return selection_pool (which has the most
-        # possible elements s.t. the number of elements is less than num_to_select)
+        # If num_to_select > size(selection_pool), then return selection_pool (which has
+        # the most possible elements s.t. the number of elements is less than
+        # num_to_select)
         if num_to_select >= len(selection_pool):
             return selection_pool
 
@@ -521,11 +565,11 @@ class GossipSub(IPubsubRouter, Service):
     def _get_in_topic_gossipsub_peers_from_minus(
         self, topic: str, num_to_select: int, minus: Iterable[ID]
     ) -> List[ID]:
-        gossipsub_peers_in_topic = set(
+        gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
             if self.peer_protocol[peer_id] == PROTOCOL_ID
-        )
+        }
         return self.select_from_minus(num_to_select, gossipsub_peers_in_topic, minus)
 
     # RPC handlers
@@ -533,15 +577,15 @@ class GossipSub(IPubsubRouter, Service):
     async def handle_ihave(
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
-        """Checks the seen set and requests unknown messages with an IWANT
-        message."""
-        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in seen_messages cache
+        """Checks the seen set and requests unknown messages with an IWANT message."""
+        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
+        # seen_messages cache
         seen_seqnos_and_peers = [
             seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()
         ]
 
-        # Add all unknown message ids (ids that appear in ihave_msg but not in seen_seqnos) to list
-        # of messages we want to request
+        # Add all unknown message ids (ids that appear in ihave_msg but not in
+        # seen_seqnos) to list of messages we want to request
         # FIXME: Update type of message ID
         msg_ids_wanted: List[Any] = [
             msg_id
@@ -556,8 +600,10 @@ class GossipSub(IPubsubRouter, Service):
     async def handle_iwant(
         self, iwant_msg: rpc_pb2.ControlIWant, sender_peer_id: ID
     ) -> None:
-        """Forwards all request messages that are present in mcache to the
-        requesting peer."""
+        """
+        Forwards all request messages that are present in mcache to the
+        requesting peer.
+        """
         # FIXME: Update type of message ID
         # FIXME: Find a better way to parse the msg ids
         msg_ids: List[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
@@ -572,8 +618,8 @@ class GossipSub(IPubsubRouter, Service):
                 msgs_to_forward.append(msg)
 
         # Forward messages to requesting peer
-        # Should this just be publishing? No
-        # because then the message will forwarded to peers in the topics contained in the messages.
+        # Should this just be publishing? No, because then the message will forwarded to
+        # peers in the topics contained in the messages.
         # We should
         # 1) Package these messages into a single packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
@@ -643,7 +689,6 @@ class GossipSub(IPubsubRouter, Service):
 
     async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
         """Emit ihave message, sent to to_peer, for topic and msg_ids."""
-
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
         ihave_msg.messageIDs.extend(msg_ids)
         ihave_msg.topicID = topic
@@ -655,7 +700,6 @@ class GossipSub(IPubsubRouter, Service):
 
     async def emit_iwant(self, msg_ids: Any, to_peer: ID) -> None:
         """Emit iwant message, sent to to_peer, for msg_ids."""
-
         iwant_msg: rpc_pb2.ControlIWant = rpc_pb2.ControlIWant()
         iwant_msg.messageIDs.extend(msg_ids)
 
@@ -666,7 +710,6 @@ class GossipSub(IPubsubRouter, Service):
 
     async def emit_graft(self, topic: str, to_peer: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
-
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
 
@@ -677,7 +720,6 @@ class GossipSub(IPubsubRouter, Service):
 
     async def emit_prune(self, topic: str, to_peer: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
-
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
 

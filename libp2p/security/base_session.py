@@ -1,13 +1,24 @@
-from typing import Optional
+from typing import (
+    Optional,
+)
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.peer.id import ID
-from libp2p.security.secure_conn_interface import ISecureConn
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
 
 
 class BaseSession(ISecureConn):
-    """``BaseSession`` is not fully instantiated from its abstract classes as
-    it is only meant to be used in clases that derive from it."""
+    """
+    ``BaseSession`` is not fully instantiated from its abstract classes as
+    it is only meant to be used in clases that derive from it.
+    """
 
     local_peer: ID
     local_private_key: PrivateKey

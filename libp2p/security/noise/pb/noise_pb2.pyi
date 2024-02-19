@@ -16,24 +16,39 @@ from typing_extensions import (
     Literal as typing_extensions___Literal,
 )
 
-
 class NoiseHandshakePayload(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    identity_key = ... # type: bytes
-    identity_sig = ... # type: bytes
-    data = ... # type: bytes
+    identity_key = ...  # type: bytes
+    identity_sig = ...  # type: bytes
+    data = ...  # type: bytes
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        identity_key : typing___Optional[bytes] = None,
-        identity_sig : typing___Optional[bytes] = None,
-        data : typing___Optional[bytes] = None,
-        ) -> None: ...
+        identity_key: typing___Optional[bytes] = None,
+        identity_sig: typing___Optional[bytes] = None,
+        data: typing___Optional[bytes] = None,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> NoiseHandshakePayload: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",u"identity_key",u"identity_sig"]) -> None: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data", "identity_key", "identity_sig"
+            ],
+        ) -> None: ...
     else:
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",b"data",u"identity_key",b"identity_key",u"identity_sig",b"identity_sig"]) -> None: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data",
+                b"data",
+                "identity_key",
+                b"identity_key",
+                "identity_sig",
+                b"identity_sig",
+            ],
+        ) -> None: ...

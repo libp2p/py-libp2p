@@ -19,7 +19,6 @@ from typing_extensions import (
     Literal as typing_extensions___Literal,
 )
 
-
 class KeyType(int):
     DESCRIPTOR: google___protobuf___descriptor___EnumDescriptor = ...
     @classmethod
@@ -36,6 +35,7 @@ class KeyType(int):
     Ed25519 = typing___cast(KeyType, 1)
     Secp256k1 = typing___cast(KeyType, 2)
     ECDSA = typing___cast(KeyType, 3)
+
 RSA = typing___cast(KeyType, 0)
 Ed25519 = typing___cast(KeyType, 1)
 Secp256k1 = typing___cast(KeyType, 2)
@@ -43,42 +43,72 @@ ECDSA = typing___cast(KeyType, 3)
 
 class PublicKey(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    key_type = ... # type: KeyType
-    data = ... # type: bytes
+    key_type = ...  # type: KeyType
+    data = ...  # type: bytes
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        key_type : KeyType,
-        data : bytes,
-        ) -> None: ...
+        key_type: KeyType,
+        data: bytes,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> PublicKey: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def HasField(self, field_name: typing_extensions___Literal[u"data",u"key_type"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",u"key_type"]) -> None: ...
+        def HasField(
+            self, field_name: typing_extensions___Literal["data", "key_type"]
+        ) -> bool: ...
+        def ClearField(
+            self, field_name: typing_extensions___Literal["data", "key_type"]
+        ) -> None: ...
     else:
-        def HasField(self, field_name: typing_extensions___Literal[u"data",b"data",u"key_type",b"key_type"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",b"data",u"key_type",b"key_type"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data", b"data", "key_type", b"key_type"
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data", b"data", "key_type", b"key_type"
+            ],
+        ) -> None: ...
 
 class PrivateKey(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    key_type = ... # type: KeyType
-    data = ... # type: bytes
+    key_type = ...  # type: KeyType
+    data = ...  # type: bytes
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        key_type : KeyType,
-        data : bytes,
-        ) -> None: ...
+        key_type: KeyType,
+        data: bytes,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> PrivateKey: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def HasField(self, field_name: typing_extensions___Literal[u"data",u"key_type"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",u"key_type"]) -> None: ...
+        def HasField(
+            self, field_name: typing_extensions___Literal["data", "key_type"]
+        ) -> bool: ...
+        def ClearField(
+            self, field_name: typing_extensions___Literal["data", "key_type"]
+        ) -> None: ...
     else:
-        def HasField(self, field_name: typing_extensions___Literal[u"data",b"data",u"key_type",b"key_type"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"data",b"data",u"key_type",b"key_type"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data", b"data", "key_type", b"key_type"
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "data", b"data", "key_type", b"key_type"
+            ],
+        ) -> None: ...

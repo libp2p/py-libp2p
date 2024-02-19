@@ -1,18 +1,31 @@
-from typing import Sequence
+from typing import (
+    Sequence,
+)
 
-from libp2p.typing import TProtocol
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .exceptions import MultiselectClientError, MultiselectCommunicatorError
-from .multiselect_client_interface import IMultiselectClient
-from .multiselect_communicator_interface import IMultiselectCommunicator
+from .exceptions import (
+    MultiselectClientError,
+    MultiselectCommunicatorError,
+)
+from .multiselect_client_interface import (
+    IMultiselectClient,
+)
+from .multiselect_communicator_interface import (
+    IMultiselectCommunicator,
+)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 
 
 class MultiselectClient(IMultiselectClient):
-    """Client for communicating with receiver's multiselect module in order to
-    select a protocol id to communicate over."""
+    """
+    Client for communicating with receiver's multiselect module in order to
+    select a protocol id to communicate over.
+    """
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """

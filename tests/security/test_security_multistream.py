@@ -1,11 +1,20 @@
 import pytest
 
-from libp2p.crypto.rsa import create_new_key_pair
-from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureSession
+from libp2p.crypto.rsa import (
+    create_new_key_pair,
+)
+from libp2p.security.insecure.transport import (
+    PLAINTEXT_PROTOCOL_ID,
+    InsecureSession,
+)
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.security.secure_session import SecureSession
-from libp2p.tools.factories import host_pair_factory
+from libp2p.security.secure_session import (
+    SecureSession,
+)
+from libp2p.tools.factories import (
+    host_pair_factory,
+)
 
 initiator_key_pair = create_new_key_pair()
 

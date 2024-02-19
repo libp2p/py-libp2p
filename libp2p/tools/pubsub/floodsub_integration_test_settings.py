@@ -1,11 +1,16 @@
 # type: ignore
-# To add typing to this module, it's better to do it after refactoring test cases into classes
+# To add typing to this module, it's better to do it after refactoring test cases
+# into classes
 
 import pytest
 import trio
 
-from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
-from libp2p.tools.utils import connect
+from libp2p.tools.constants import (
+    FLOODSUB_PROTOCOL_ID,
+)
+from libp2p.tools.utils import (
+    connect,
+)
 
 SUPPORTED_PROTOCOLS = [FLOODSUB_PROTOCOL_ID]
 
@@ -181,8 +186,7 @@ async def perform_test_from_obj(obj, pubsub_factory) -> None:
         In adj_list, for any neighbors A and B, only list B as a neighbor of A
         or B as a neighbor of A once. Do NOT list both A: ["B"] and B:["A"] as the behavior
         is undefined (even if it may work)
-    """
-
+    """  # noqa: E501
     # Step 1) Create graph
     adj_list = obj["adj_list"]
     node_list = obj["nodes"]
@@ -242,7 +246,8 @@ async def perform_test_from_obj(obj, pubsub_factory) -> None:
             for topic in topics:
                 await pubsub_map[node_id].publish(topic, data)
 
-            # For each topic in topics, add (topic, node_id, data) tuple to ordered test list
+            # For each topic in topics, add (topic, node_id, data) tuple to
+            # ordered test list
             for topic in topics:
                 topics_in_msgs_ordered.append((topic, node_id, data))
         # Allow time for publishing before continuing

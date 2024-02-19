@@ -3,9 +3,13 @@ import random
 import base58
 import multihash
 
-from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.crypto.rsa import (
+    create_new_key_pair,
+)
 import libp2p.peer.id as PeerID
-from libp2p.peer.id import ID
+from libp2p.peer.id import (
+    ID,
+)
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 

@@ -1,6 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 import itertools
-from typing import Optional, Tuple
+from typing import (
+    Optional,
+    Tuple,
+)
 
 import multihash
 
@@ -8,24 +13,54 @@ from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
 )
 from libp2p.crypto.authenticated_encryption import (
+    InvalidMACException,
+)
+from libp2p.crypto.authenticated_encryption import (
     initialize_pair as initialize_pair_for_encryption,
 )
-from libp2p.crypto.authenticated_encryption import InvalidMACException
 from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
-from libp2p.crypto.ecc import ECCPublicKey
-from libp2p.crypto.exceptions import MissingDeserializerError
-from libp2p.crypto.key_exchange import create_ephemeral_key_pair
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.crypto.serialization import deserialize_public_key
-from libp2p.io.abc import EncryptedMsgReadWriter
-from libp2p.io.exceptions import DecryptionFailedException, IOException
-from libp2p.io.msgio import FixedSizeLenMsgReadWriter
-from libp2p.network.connection.raw_connection_interface import IRawConnection
+from libp2p.crypto.ecc import (
+    ECCPublicKey,
+)
+from libp2p.crypto.exceptions import (
+    MissingDeserializerError,
+)
+from libp2p.crypto.key_exchange import (
+    create_ephemeral_key_pair,
+)
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.crypto.serialization import (
+    deserialize_public_key,
+)
+from libp2p.io.abc import (
+    EncryptedMsgReadWriter,
+)
+from libp2p.io.exceptions import (
+    DecryptionFailedException,
+    IOException,
+)
+from libp2p.io.msgio import (
+    FixedSizeLenMsgReadWriter,
+)
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
 from libp2p.peer.id import ID as PeerID
-from libp2p.security.base_transport import BaseSecureTransport
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.secure_session import SecureSession
-from libp2p.typing import TProtocol
+from libp2p.security.base_transport import (
+    BaseSecureTransport,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.security.secure_session import (
+    SecureSession,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
 from .exceptions import (
     IncompatibleChoices,
@@ -36,7 +71,10 @@ from .exceptions import (
     SedesException,
     SelfEncryption,
 )
-from .pb.spipe_pb2 import Exchange, Propose
+from .pb.spipe_pb2 import (
+    Exchange,
+    Propose,
+)
 
 ID = TProtocol("/secio/1.0.0")
 
@@ -101,8 +139,10 @@ class SecioMsgReadWriter(EncryptedMsgReadWriter):
 
 @dataclass(frozen=True)
 class Proposal:
-    """A ``Proposal`` represents the set of session parameters one peer in a
-    pair of peers attempting to negotiate a `secio` channel prefers."""
+    """
+    Represents the set of session parameters one peer in a
+    pair of peers attempting to negotiate a `secio` channel prefers.
+    """
 
     nonce: bytes
     public_key: PublicKey
@@ -401,8 +441,10 @@ async def create_secure_session(
 
 
 class Transport(BaseSecureTransport):
-    """``Transport`` provides a security upgrader for a ``IRawConnection``,
-    following the `secio` protocol defined in the libp2p specs."""
+    """
+    Provide a security upgrader for a ``IRawConnection``,
+    following the `secio` protocol defined in the libp2p specs.
+    """
 
     def get_nonce(self) -> bytes:
         return self.secure_bytes_provider(NONCE_SIZE)

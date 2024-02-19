@@ -1,6 +1,9 @@
 import pytest
 
-from libp2p.peer.peerstore import PeerStore, PeerStoreError
+from libp2p.peer.peerstore import (
+    PeerStore,
+    PeerStoreError,
+)
 
 # Testing methods from IAddrBook base class.
 
@@ -51,8 +54,8 @@ def test_peers_with_addrs():
     store.add_addrs("peer2", ["/foo"], 10)
     store.add_addrs("peer3", ["/bar"], 10)
 
-    assert set(store.peers_with_addrs()) == set(["peer2", "peer3"])
+    assert set(store.peers_with_addrs()) == {"peer2", "peer3"}
 
     store.clear_addrs("peer2")
 
-    assert set(store.peers_with_addrs()) == set(["peer3"])
+    assert set(store.peers_with_addrs()) == {"peer3"}

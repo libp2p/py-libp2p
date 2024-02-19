@@ -1,8 +1,14 @@
-from typing import Any, List, Sequence
+from typing import (
+    Any,
+    List,
+    Sequence,
+)
 
 import multiaddr
 
-from .id import ID
+from .id import (
+    ID,
+)
 
 
 class PeerInfo:

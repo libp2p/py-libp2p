@@ -1,4 +1,7 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
@@ -8,13 +11,23 @@ from typing import (
     Tuple,
 )
 
-from async_service import ServiceAPI
+from async_service import (
+    ServiceAPI,
+)
 
-from libp2p.peer.id import ID
-from libp2p.typing import TProtocol
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .pb import rpc_pb2
-from .typing import ValidatorFn
+from .pb import (
+    rpc_pb2,
+)
+from .typing import (
+    ValidatorFn,
+)
 
 if TYPE_CHECKING:
     from .pubsub import Pubsub  # noqa: F401
@@ -69,9 +82,9 @@ class IPubsubRouter(ABC):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
-        TODO: Check if this interface is ok. It's not the exact same as the go code, but the go
-        code is really confusing with the msg origin, they specify `rpc.from` even when the rpc
-        shouldn't have a from
+        TODO: Check if this interface is ok. It's not the exact same as the go code, but
+        the go code is really confusing with the msg origin, they specify `rpc.from`
+        even when the rpc shouldn't have a from
         :param rpc: rpc message
         """
 

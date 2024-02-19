@@ -1,11 +1,22 @@
 import pytest
 import trio
 
-from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.peer.id import ID
-from libp2p.security.secio.transport import NONCE_SIZE, create_secure_session
-from libp2p.tools.constants import MAX_READ_LEN
-from libp2p.tools.factories import raw_conn_factory
+from libp2p.crypto.secp256k1 import (
+    create_new_key_pair,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.secio.transport import (
+    NONCE_SIZE,
+    create_secure_session,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
+from libp2p.tools.factories import (
+    raw_conn_factory,
+)
 
 
 @pytest.mark.trio

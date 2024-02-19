@@ -1,18 +1,39 @@
-from collections import defaultdict
-from typing import Any, Dict, List, Sequence
+from collections import (
+    defaultdict,
+)
+from typing import (
+    Any,
+    Dict,
+    List,
+    Sequence,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    PrivateKey,
+    PublicKey,
+)
 
-from .id import ID
-from .peerdata import PeerData, PeerDataError
-from .peerinfo import PeerInfo
-from .peerstore_interface import IPeerStore
+from .id import (
+    ID,
+)
+from .peerdata import (
+    PeerData,
+    PeerDataError,
+)
+from .peerinfo import (
+    PeerInfo,
+)
+from .peerstore_interface import (
+    IPeerStore,
+)
 
 
 class PeerStore(IPeerStore):
-
     peer_data_map: Dict[ID, PeerData]
 
     def __init__(self) -> None:

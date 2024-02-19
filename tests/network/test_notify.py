@@ -10,14 +10,24 @@ features are implemented in swarm
 """
 import enum
 
-from async_service import background_trio_service
+from async_service import (
+    background_trio_service,
+)
 import pytest
 import trio
 
-from libp2p.network.notifee_interface import INotifee
-from libp2p.tools.constants import LISTEN_MADDR
-from libp2p.tools.factories import SwarmFactory
-from libp2p.tools.utils import connect_swarm
+from libp2p.network.notifee_interface import (
+    INotifee,
+)
+from libp2p.tools.constants import (
+    LISTEN_MADDR,
+)
+from libp2p.tools.factories import (
+    SwarmFactory,
+)
+from libp2p.tools.utils import (
+    connect_swarm,
+)
 
 
 class Event(enum.Enum):
@@ -63,8 +73,8 @@ async def test_notify(security_protocol):
     events_0_without_listen = []
     # Run swarms.
     async with background_trio_service(swarms[0]), background_trio_service(swarms[1]):
-        # Register events before listening, to allow `MyNotifee` is notified with the event
-        # `listen`.
+        # Register events before listening, to allow `MyNotifee` is notified with the
+        # event `listen`.
         swarms[0].register_notifee(MyNotifee(events_0_0))
         swarms[1].register_notifee(MyNotifee(events_1_0))
 

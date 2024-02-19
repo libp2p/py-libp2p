@@ -1,6 +1,9 @@
 import pytest
 
-from libp2p.peer.peerstore import PeerStore, PeerStoreError
+from libp2p.peer.peerstore import (
+    PeerStore,
+    PeerStoreError,
+)
 
 # Testing methods from IPeerStore base class.
 
@@ -25,8 +28,8 @@ def test_add_get_protocols_basic():
     store.add_protocols("peer1", ["p1", "p2"])
     store.add_protocols("peer2", ["p3"])
 
-    assert set(store.get_protocols("peer1")) == set(["p1", "p2"])
-    assert set(store.get_protocols("peer2")) == set(["p3"])
+    assert set(store.get_protocols("peer1")) == {"p1", "p2"}
+    assert set(store.get_protocols("peer2")) == {"p3"}
 
 
 def test_add_get_protocols_extend():
@@ -34,7 +37,7 @@ def test_add_get_protocols_extend():
     store.add_protocols("peer1", ["p1", "p2"])
     store.add_protocols("peer1", ["p3"])
 
-    assert set(store.get_protocols("peer1")) == set(["p1", "p2", "p3"])
+    assert set(store.get_protocols("peer1")) == {"p1", "p2", "p3"}
 
 
 def test_set_protocols():
@@ -45,8 +48,8 @@ def test_set_protocols():
     store.set_protocols("peer1", ["p4"])
     store.set_protocols("peer2", [])
 
-    assert set(store.get_protocols("peer1")) == set(["p4"])
-    assert set(store.get_protocols("peer2")) == set([])
+    assert set(store.get_protocols("peer1")) == {"p4"}
+    assert set(store.get_protocols("peer2")) == set()
 
 
 # Test with methods from other Peer interfaces.
@@ -56,4 +59,4 @@ def test_peers():
     store.put("peer2", "key", "val")
     store.add_addr("peer3", "/foo", 10)
 
-    assert set(store.peer_ids()) == set(["peer1", "peer2", "peer3"])
+    assert set(store.peer_ids()) == {"peer1", "peer2", "peer3"}

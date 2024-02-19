@@ -1,8 +1,12 @@
 import pytest
 import trio
 
-from libp2p.tools.pubsub.dummy_account_node import DummyAccountNode
-from libp2p.tools.utils import connect
+from libp2p.tools.pubsub.dummy_account_node import (
+    DummyAccountNode,
+)
+from libp2p.tools.utils import (
+    connect,
+)
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):

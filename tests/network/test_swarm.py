@@ -1,11 +1,21 @@
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import pytest
 import trio
-from trio.testing import wait_all_tasks_blocked
+from trio.testing import (
+    wait_all_tasks_blocked,
+)
 
-from libp2p.network.exceptions import SwarmException
-from libp2p.tools.factories import SwarmFactory
-from libp2p.tools.utils import connect_swarm
+from libp2p.network.exceptions import (
+    SwarmException,
+)
+from libp2p.tools.factories import (
+    SwarmFactory,
+)
+from libp2p.tools.utils import (
+    connect_swarm,
+)
 
 
 @pytest.mark.trio

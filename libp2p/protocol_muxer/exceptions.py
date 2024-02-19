@@ -1,4 +1,6 @@
-from libp2p.exceptions import BaseLibp2pError
+from libp2p.exceptions import (
+    BaseLibp2pError,
+)
 
 
 class MultiselectCommunicatorError(BaseLibp2pError):

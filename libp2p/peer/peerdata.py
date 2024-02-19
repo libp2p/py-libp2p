@@ -1,14 +1,25 @@
-from typing import Any, Dict, List, Sequence
+from typing import (
+    Any,
+    Dict,
+    List,
+    Sequence,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
 
-from .peerdata_interface import IPeerData
+from .peerdata_interface import (
+    IPeerData,
+)
 
 
 class PeerData(IPeerData):
-
     pubkey: PublicKey
     privkey: PrivateKey
     metadata: Dict[Any, Any]

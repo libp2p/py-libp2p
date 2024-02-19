@@ -1,14 +1,20 @@
 import pytest
 import trio
-from trio.testing import wait_all_tasks_blocked
+from trio.testing import (
+    wait_all_tasks_blocked,
+)
 
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
 )
-from libp2p.stream_muxer.mplex.mplex import MPLEX_MESSAGE_CHANNEL_SIZE
-from libp2p.tools.constants import MAX_READ_LEN
+from libp2p.stream_muxer.mplex.mplex import (
+    MPLEX_MESSAGE_CHANNEL_SIZE,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
 
 DATA = b"data_123"
 

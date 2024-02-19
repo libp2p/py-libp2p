@@ -1,16 +1,34 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
 
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import (
+    serialization,
+)
 from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
 from noise.connection import Keypair as NoiseKeypairEnum
 from noise.connection import NoiseConnection as NoiseState
 
-from libp2p.crypto.ed25519 import Ed25519PublicKey
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.secure_session import SecureSession
+from libp2p.crypto.ed25519 import (
+    Ed25519PublicKey,
+)
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.security.secure_session import (
+    SecureSession,
+)
 
 from .exceptions import (
     HandshakeHasNotFinished,
@@ -18,7 +36,10 @@ from .exceptions import (
     NoiseStateError,
     PeerIDMismatchesPubkey,
 )
-from .io import NoiseHandshakeReadWriter, NoiseTransportReadWriter
+from .io import (
+    NoiseHandshakeReadWriter,
+    NoiseTransportReadWriter,
+)
 from .messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
@@ -95,8 +116,8 @@ class PatternXX(BasePattern):
         if handshake_state.rs is None:
             raise NoiseStateError(
                 "something is wrong in the underlying noise `handshake_state`: "
-                "we received and consumed msg#3, which should have included the"
-                " remote static public key, but it is not present in the handshake_state"
+                "we received and consumed msg#3, which should have included the "
+                "remote static public key, but it is not present in the handshake_state"
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
 
@@ -139,8 +160,8 @@ class PatternXX(BasePattern):
         if handshake_state.rs is None:
             raise NoiseStateError(
                 "something is wrong in the underlying noise `handshake_state`: "
-                "we received and consumed msg#3, which should have included the"
-                " remote static public key, but it is not present in the handshake_state"
+                "we received and consumed msg#3, which should have included the "
+                "remote static public key, but it is not present in the handshake_state"
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
 

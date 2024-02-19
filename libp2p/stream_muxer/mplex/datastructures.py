@@ -1,4 +1,6 @@
-from typing import NamedTuple
+from typing import (
+    NamedTuple,
+)
 
 
 class StreamID(NamedTuple):

@@ -1,15 +1,28 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Tuple
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Dict,
+    Tuple,
+)
 
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import (
+    StreamHandlerFn,
+    TProtocol,
+)
 
-from .multiselect_communicator_interface import IMultiselectCommunicator
+from .multiselect_communicator_interface import (
+    IMultiselectCommunicator,
+)
 
 
 class IMultiselectMuxer(ABC):
-    """Multiselect module that is responsible for responding to a multiselect
+    """
+    Multiselect module that is responsible for responding to a multiselect
     client and deciding on a specific protocol and handler pair to use for
-    communication."""
+    communication.
+    """
 
     handlers: Dict[TProtocol, StreamHandlerFn]
 

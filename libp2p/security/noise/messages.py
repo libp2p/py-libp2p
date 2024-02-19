@@ -1,7 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.crypto.serialization import (
+    deserialize_public_key,
+)
 
 from .pb import noise_pb2 as noise_pb
 

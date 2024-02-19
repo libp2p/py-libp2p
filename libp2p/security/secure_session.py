@@ -1,9 +1,18 @@
 import io
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.io.abc import EncryptedMsgReadWriter
-from libp2p.peer.id import ID
-from libp2p.security.base_session import BaseSession
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.io.abc import (
+    EncryptedMsgReadWriter,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.base_session import (
+    BaseSession,
+)
 
 
 class SecureSession(BaseSession):
@@ -39,7 +48,7 @@ class SecureSession(BaseSession):
 
     def _drain(self, n: int) -> bytes:
         if self.low_watermark == self.high_watermark:
-            return bytes()
+            return b""
 
         data = self.buf.getbuffer()[self.low_watermark : self.high_watermark]
 
@@ -61,7 +70,7 @@ class SecureSession(BaseSession):
 
     async def read(self, n: int = None) -> bytes:
         if n == 0:
-            return bytes()
+            return b""
 
         data_from_buffer = self._drain(n)
         if len(data_from_buffer) > 0:

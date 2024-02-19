@@ -3,8 +3,14 @@ import random
 import multiaddr
 import pytest
 
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import InvalidAddrError, PeerInfo, info_from_p2p_addr
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    InvalidAddrError,
+    PeerInfo,
+    info_from_p2p_addr,
+)
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 VALID_MULTI_ADDR_STR = "/ip4/127.0.0.1/tcp/8000/p2p/3YgLAeMKSAPcGqZkAt8mREqhQXmJT8SN8VCMN4T6ih4GNX9wvK8mWJnWZ1qA2mLdCQ"  # noqa: E501

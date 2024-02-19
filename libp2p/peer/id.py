@@ -1,10 +1,14 @@
 import hashlib
-from typing import Union
+from typing import (
+    Union,
+)
 
 import base58
 import multihash
 
-from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.keys import (
+    PublicKey,
+)
 
 # NOTE: On inlining...
 # See: https://github.com/libp2p/specs/issues/138

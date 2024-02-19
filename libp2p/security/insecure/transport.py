@@ -1,21 +1,52 @@
-from libp2p.crypto.exceptions import MissingDeserializerError
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.crypto.pb import crypto_pb2
-from libp2p.crypto.serialization import deserialize_public_key
-from libp2p.io.abc import ReadWriteCloser
-from libp2p.io.msgio import VarIntLengthMsgReadWriter
-from libp2p.network.connection.exceptions import RawConnError
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
-from libp2p.security.base_session import BaseSession
-from libp2p.security.base_transport import BaseSecureTransport
-from libp2p.security.exceptions import HandshakeFailure
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.typing import TProtocol
+from libp2p.crypto.exceptions import (
+    MissingDeserializerError,
+)
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.crypto.pb import (
+    crypto_pb2,
+)
+from libp2p.crypto.serialization import (
+    deserialize_public_key,
+)
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
+from libp2p.io.msgio import (
+    VarIntLengthMsgReadWriter,
+)
+from libp2p.network.connection.exceptions import (
+    RawConnError,
+)
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.base_session import (
+    BaseSession,
+)
+from libp2p.security.base_transport import (
+    BaseSecureTransport,
+)
+from libp2p.security.exceptions import (
+    HandshakeFailure,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .pb import plaintext_pb2
+from .pb import (
+    plaintext_pb2,
+)
 
-# Reference: https://github.com/libp2p/go-libp2p-core/blob/master/sec/insecure/insecure.go
+# Reference: https://github.com/libp2p/go-libp2p-core/blob/master/sec/insecure/insecure.go  # noqa: E501
 
 
 PLAINTEXT_PROTOCOL_ID = TProtocol("/plaintext/2.0.0")
@@ -120,9 +151,10 @@ async def run_handshake(
 
 
 class InsecureTransport(BaseSecureTransport):
-    """``InsecureTransport`` provides the "identity" upgrader for a
-    ``IRawConnection``, i.e. the upgraded transport does not add any additional
-    security."""
+    """
+    Provides the "identity" upgrader for a ``IRawConnection``, i.e. the upgraded
+    transport does not add any additional security.
+    """
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """

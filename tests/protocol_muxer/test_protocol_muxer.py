@@ -1,8 +1,14 @@
 import pytest
 
-from libp2p.host.exceptions import StreamFailure
-from libp2p.tools.factories import HostFactory
-from libp2p.tools.utils import create_echo_stream_handler
+from libp2p.host.exceptions import (
+    StreamFailure,
+)
+from libp2p.tools.factories import (
+    HostFactory,
+)
+from libp2p.tools.utils import (
+    create_echo_stream_handler,
+)
 
 PROTOCOL_ECHO = "/echo/1.0.0"
 PROTOCOL_POTATO = "/potato/1.0.0"

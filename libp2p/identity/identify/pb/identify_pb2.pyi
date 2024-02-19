@@ -22,32 +22,79 @@ from typing_extensions import (
     Literal as typing_extensions___Literal,
 )
 
-
 class Identify(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    protocol_version = ... # type: typing___Text
-    agent_version = ... # type: typing___Text
-    public_key = ... # type: bytes
-    listen_addrs = ... # type: google___protobuf___internal___containers___RepeatedScalarFieldContainer[bytes]
-    observed_addr = ... # type: bytes
-    protocols = ... # type: google___protobuf___internal___containers___RepeatedScalarFieldContainer[typing___Text]
+    protocol_version = ...  # type: typing___Text
+    agent_version = ...  # type: typing___Text
+    public_key = ...  # type: bytes
+    listen_addrs = (
+        ...
+    )  # type: google___protobuf___internal___containers___RepeatedScalarFieldContainer[bytes]
+    observed_addr = ...  # type: bytes
+    protocols = (
+        ...
+    )  # type: google___protobuf___internal___containers___RepeatedScalarFieldContainer[typing___Text]
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        protocol_version : typing___Optional[typing___Text] = None,
-        agent_version : typing___Optional[typing___Text] = None,
-        public_key : typing___Optional[bytes] = None,
-        listen_addrs : typing___Optional[typing___Iterable[bytes]] = None,
-        observed_addr : typing___Optional[bytes] = None,
-        protocols : typing___Optional[typing___Iterable[typing___Text]] = None,
-        ) -> None: ...
+        protocol_version: typing___Optional[typing___Text] = None,
+        agent_version: typing___Optional[typing___Text] = None,
+        public_key: typing___Optional[bytes] = None,
+        listen_addrs: typing___Optional[typing___Iterable[bytes]] = None,
+        observed_addr: typing___Optional[bytes] = None,
+        protocols: typing___Optional[typing___Iterable[typing___Text]] = None,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> Identify: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def HasField(self, field_name: typing_extensions___Literal[u"agent_version",u"observed_addr",u"protocol_version",u"public_key"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"agent_version",u"listen_addrs",u"observed_addr",u"protocol_version",u"protocols",u"public_key"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "agent_version", "observed_addr", "protocol_version", "public_key"
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "agent_version",
+                "listen_addrs",
+                "observed_addr",
+                "protocol_version",
+                "protocols",
+                "public_key",
+            ],
+        ) -> None: ...
     else:
-        def HasField(self, field_name: typing_extensions___Literal[u"agent_version",b"agent_version",u"observed_addr",b"observed_addr",u"protocol_version",b"protocol_version",u"public_key",b"public_key"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"agent_version",b"agent_version",u"listen_addrs",b"listen_addrs",u"observed_addr",b"observed_addr",u"protocol_version",b"protocol_version",u"protocols",b"protocols",u"public_key",b"public_key"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "agent_version",
+                b"agent_version",
+                "observed_addr",
+                b"observed_addr",
+                "protocol_version",
+                b"protocol_version",
+                "public_key",
+                b"public_key",
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "agent_version",
+                b"agent_version",
+                "listen_addrs",
+                b"listen_addrs",
+                "observed_addr",
+                b"observed_addr",
+                "protocol_version",
+                b"protocol_version",
+                "protocols",
+                b"protocols",
+                "public_key",
+                b"public_key",
+            ],
+        ) -> None: ...

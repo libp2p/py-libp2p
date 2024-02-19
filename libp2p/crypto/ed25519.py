@@ -1,11 +1,23 @@
-from Crypto.Hash import SHA256
-from nacl.exceptions import BadSignatureError
+from Crypto.Hash import (
+    SHA256,
+)
+from nacl.exceptions import (
+    BadSignatureError,
+)
 from nacl.public import PrivateKey as PrivateKeyImpl
 from nacl.public import PublicKey as PublicKeyImpl
-from nacl.signing import SigningKey, VerifyKey
+from nacl.signing import (
+    SigningKey,
+    VerifyKey,
+)
 import nacl.utils as utils
 
-from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    KeyType,
+    PrivateKey,
+    PublicKey,
+)
 
 
 class Ed25519PublicKey(PublicKey):

@@ -17,51 +17,116 @@ from typing_extensions import (
     Literal as typing_extensions___Literal,
 )
 
-
 class Propose(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    rand = ... # type: bytes
-    public_key = ... # type: bytes
-    exchanges = ... # type: typing___Text
-    ciphers = ... # type: typing___Text
-    hashes = ... # type: typing___Text
+    rand = ...  # type: bytes
+    public_key = ...  # type: bytes
+    exchanges = ...  # type: typing___Text
+    ciphers = ...  # type: typing___Text
+    hashes = ...  # type: typing___Text
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        rand : typing___Optional[bytes] = None,
-        public_key : typing___Optional[bytes] = None,
-        exchanges : typing___Optional[typing___Text] = None,
-        ciphers : typing___Optional[typing___Text] = None,
-        hashes : typing___Optional[typing___Text] = None,
-        ) -> None: ...
+        rand: typing___Optional[bytes] = None,
+        public_key: typing___Optional[bytes] = None,
+        exchanges: typing___Optional[typing___Text] = None,
+        ciphers: typing___Optional[typing___Text] = None,
+        hashes: typing___Optional[typing___Text] = None,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> Propose: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def HasField(self, field_name: typing_extensions___Literal[u"ciphers",u"exchanges",u"hashes",u"public_key",u"rand"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"ciphers",u"exchanges",u"hashes",u"public_key",u"rand"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ciphers", "exchanges", "hashes", "public_key", "rand"
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ciphers", "exchanges", "hashes", "public_key", "rand"
+            ],
+        ) -> None: ...
     else:
-        def HasField(self, field_name: typing_extensions___Literal[u"ciphers",b"ciphers",u"exchanges",b"exchanges",u"hashes",b"hashes",u"public_key",b"public_key",u"rand",b"rand"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"ciphers",b"ciphers",u"exchanges",b"exchanges",u"hashes",b"hashes",u"public_key",b"public_key",u"rand",b"rand"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ciphers",
+                b"ciphers",
+                "exchanges",
+                b"exchanges",
+                "hashes",
+                b"hashes",
+                "public_key",
+                b"public_key",
+                "rand",
+                b"rand",
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ciphers",
+                b"ciphers",
+                "exchanges",
+                b"exchanges",
+                "hashes",
+                b"hashes",
+                "public_key",
+                b"public_key",
+                "rand",
+                b"rand",
+            ],
+        ) -> None: ...
 
 class Exchange(google___protobuf___message___Message):
     DESCRIPTOR: google___protobuf___descriptor___Descriptor = ...
-    ephemeral_public_key = ... # type: bytes
-    signature = ... # type: bytes
+    ephemeral_public_key = ...  # type: bytes
+    signature = ...  # type: bytes
 
-    def __init__(self,
+    def __init__(
+        self,
         *,
-        ephemeral_public_key : typing___Optional[bytes] = None,
-        signature : typing___Optional[bytes] = None,
-        ) -> None: ...
+        ephemeral_public_key: typing___Optional[bytes] = None,
+        signature: typing___Optional[bytes] = None,
+    ) -> None: ...
     @classmethod
     def FromString(cls, s: bytes) -> Exchange: ...
     def MergeFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     def CopyFrom(self, other_msg: google___protobuf___message___Message) -> None: ...
     if sys.version_info >= (3,):
-        def HasField(self, field_name: typing_extensions___Literal[u"ephemeral_public_key",u"signature"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"ephemeral_public_key",u"signature"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ephemeral_public_key", "signature"
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ephemeral_public_key", "signature"
+            ],
+        ) -> None: ...
     else:
-        def HasField(self, field_name: typing_extensions___Literal[u"ephemeral_public_key",b"ephemeral_public_key",u"signature",b"signature"]) -> bool: ...
-        def ClearField(self, field_name: typing_extensions___Literal[u"ephemeral_public_key",b"ephemeral_public_key",u"signature",b"signature"]) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ephemeral_public_key",
+                b"ephemeral_public_key",
+                "signature",
+                b"signature",
+            ],
+        ) -> bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions___Literal[
+                "ephemeral_public_key",
+                b"ephemeral_public_key",
+                "signature",
+                b"signature",
+            ],
+        ) -> None: ...

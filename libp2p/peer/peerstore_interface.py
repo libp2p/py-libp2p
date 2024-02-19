@@ -1,14 +1,34 @@
-from abc import abstractmethod
-from typing import Any, List, Sequence
+from abc import (
+    abstractmethod,
+)
+from typing import (
+    Any,
+    List,
+    Sequence,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    PrivateKey,
+    PublicKey,
+)
 
-from .addrbook_interface import IAddrBook
-from .id import ID
-from .peerinfo import PeerInfo
-from .peermetadata_interface import IPeerMetadata
+from .addrbook_interface import (
+    IAddrBook,
+)
+from .id import (
+    ID,
+)
+from .peerinfo import (
+    PeerInfo,
+)
+from .peermetadata_interface import (
+    IPeerMetadata,
+)
 
 
 class IPeerStore(IAddrBook, IPeerMetadata):

@@ -1,11 +1,21 @@
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import pytest
 import trio
 
-from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.tools.constants import LISTEN_MADDR
-from libp2p.transport.exceptions import OpenConnectionError
-from libp2p.transport.tcp.tcp import TCP
+from libp2p.network.connection.raw_connection import (
+    RawConnection,
+)
+from libp2p.tools.constants import (
+    LISTEN_MADDR,
+)
+from libp2p.transport.exceptions import (
+    OpenConnectionError,
+)
+from libp2p.transport.tcp.tcp import (
+    TCP,
+)
 
 
 @pytest.mark.trio

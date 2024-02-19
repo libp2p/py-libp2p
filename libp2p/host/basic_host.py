@@ -1,28 +1,70 @@
 import logging
-from typing import TYPE_CHECKING, AsyncIterator, List, Sequence
+from typing import (
+    TYPE_CHECKING,
+    AsyncIterator,
+    List,
+    Sequence,
+)
 
-from async_generator import asynccontextmanager
-from async_service import background_trio_service
+from async_generator import (
+    asynccontextmanager,
+)
+from async_service import (
+    background_trio_service,
+)
 import multiaddr
 
-from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.host.defaults import get_default_protocols
-from libp2p.host.exceptions import StreamFailure
-from libp2p.network.network_interface import INetworkService
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
-from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import MultiselectClient
-from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.crypto.keys import (
+    PrivateKey,
+    PublicKey,
+)
+from libp2p.host.defaults import (
+    get_default_protocols,
+)
+from libp2p.host.exceptions import (
+    StreamFailure,
+)
+from libp2p.network.network_interface import (
+    INetworkService,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore_interface import (
+    IPeerStore,
+)
+from libp2p.protocol_muxer.exceptions import (
+    MultiselectClientError,
+    MultiselectError,
+)
+from libp2p.protocol_muxer.multiselect import (
+    Multiselect,
+)
+from libp2p.protocol_muxer.multiselect_client import (
+    MultiselectClient,
+)
+from libp2p.protocol_muxer.multiselect_communicator import (
+    MultiselectCommunicator,
+)
+from libp2p.typing import (
+    StreamHandlerFn,
+    TProtocol,
+)
 
-from .host_interface import IHost
+from .host_interface import (
+    IHost,
+)
 
 if TYPE_CHECKING:
-    from collections import OrderedDict
+    from collections import (
+        OrderedDict,
+    )
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
@@ -108,7 +150,7 @@ class BasicHost(IHost):
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
     ) -> AsyncIterator[None]:
         """
-        run the host instance and listen to ``listen_addrs``.
+        Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
@@ -121,7 +163,7 @@ class BasicHost(IHost):
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
     ) -> None:
         """
-        set stream handler for given `protocol_id`
+        Set stream handler for given `protocol_id`
 
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
@@ -136,7 +178,6 @@ class BasicHost(IHost):
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
-
         net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
@@ -154,7 +195,7 @@ class BasicHost(IHost):
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        connect ensures there is a connection between this host and the peer
+        Ensure there is a connection between this host and the peer
         with given `peer_info.peer_id`. connect will absorb the addresses in
         peer_info into its internal peerstore. If there is not an active
         connection, connect will issue a dial, and block until a connection is

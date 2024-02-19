@@ -1,15 +1,34 @@
 import logging
-from typing import Dict, Optional, Tuple
+from typing import (
+    Dict,
+    Optional,
+    Tuple,
+)
 
 import trio
 
-from libp2p.exceptions import ParseError
-from libp2p.io.exceptions import IncompleteReadError
-from libp2p.network.connection.exceptions import RawConnError
-from libp2p.peer.id import ID
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
-from libp2p.typing import TProtocol
+from libp2p.exceptions import (
+    ParseError,
+)
+from libp2p.io.exceptions import (
+    IncompleteReadError,
+)
+from libp2p.network.connection.exceptions import (
+    RawConnError,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.stream_muxer.abc import (
+    IMuxedConn,
+    IMuxedStream,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
@@ -17,10 +36,18 @@ from libp2p.utils import (
     read_varint_prefixed_bytes,
 )
 
-from .constants import HeaderTags
-from .datastructures import StreamID
-from .exceptions import MplexUnavailable
-from .mplex_stream import MplexStream
+from .constants import (
+    HeaderTags,
+)
+from .datastructures import (
+    StreamID,
+)
+from .exceptions import (
+    MplexUnavailable,
+)
+from .mplex_stream import (
+    MplexStream,
+)
 
 MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 # Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
@@ -49,7 +76,7 @@ class Mplex(IMuxedConn):
 
     def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
         """
-        create a new muxed connection.
+        Create a new muxed connection.
 
         :param secured_conn: an instance of ``ISecureConn``
         :param generic_protocol_handler: generic protocol handler
@@ -81,7 +108,9 @@ class Mplex(IMuxedConn):
         return self.secured_conn.is_initiator
 
     async def close(self) -> None:
-        """close the stream muxer and underlying secured connection."""
+        """
+        Close the stream muxer and underlying secured connection.
+        """
         if self.event_shutting_down.is_set():
             return
         # Set the `event_shutting_down`, to allow graceful shutdown.
@@ -93,7 +122,7 @@ class Mplex(IMuxedConn):
     @property
     def is_closed(self) -> bool:
         """
-        check connection is fully closed.
+        Check connection is fully closed.
 
         :return: true if successful
         """
@@ -121,7 +150,7 @@ class Mplex(IMuxedConn):
 
     async def open_stream(self) -> IMuxedStream:
         """
-        creates a new muxed_stream.
+        Create a new muxed_stream.
 
         :return: a new ``MplexStream``
         """
@@ -134,7 +163,9 @@ class Mplex(IMuxedConn):
         return stream
 
     async def accept_stream(self) -> IMuxedStream:
-        """accepts a muxed stream opened by the other end."""
+        """
+        Accept a muxed stream opened by the other end.
+        """
         try:
             return await self.new_stream_receive_channel.receive()
         except trio.EndOfChannel:
@@ -144,7 +175,7 @@ class Mplex(IMuxedConn):
         self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
     ) -> int:
         """
-        sends a message over the connection.
+        Send a message over the connection.
 
         :param flag: header to use
         :param data: data to send in the message
@@ -162,7 +193,7 @@ class Mplex(IMuxedConn):
 
     async def write_to_stream(self, _bytes: bytes) -> None:
         """
-        writes a byte array to a secured connection.
+        Write a byte array to a secured connection.
 
         :param _bytes: byte array to write
         :return: length written
@@ -175,8 +206,10 @@ class Mplex(IMuxedConn):
             ) from e
 
     async def handle_incoming(self) -> None:
-        """Read a message off of the secured connection and add it to the
-        corresponding message buffer."""
+        """
+        Read a message off of the secured connection and add it to the
+        corresponding message buffer.
+        """
         self.event_started.set()
         while True:
             try:
@@ -194,19 +227,19 @@ class Mplex(IMuxedConn):
 
         :return: stream_id, flag, message contents
         """
-
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
         except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
-                f"failed to read the header correctly from the underlying connection: {error}"
+                "failed to read the header correctly from the underlying connection: "
+                f"{error}"
             )
         try:
             message = await read_varint_prefixed_bytes(self.secured_conn)
         except (ParseError, RawConnError, IncompleteReadError) as error:
             raise MplexUnavailable(
-                "failed to read the message body correctly from the underlying connection: "
-                f"{error}"
+                "failed to read the message body correctly from the underlying "
+                f"connection: {error}"
             )
 
         flag = header & 0x07

@@ -1,33 +1,75 @@
 import logging
-from typing import Dict, List, Optional
+from typing import (
+    Dict,
+    List,
+    Optional,
+)
 
-from async_service import Service
-from multiaddr import Multiaddr
+from async_service import (
+    Service,
+)
+from multiaddr import (
+    Multiaddr,
+)
 import trio
 
-from libp2p.io.abc import ReadWriteCloser
-from libp2p.network.connection.net_connection_interface import INetConn
-from libp2p.peer.id import ID
-from libp2p.peer.peerstore import PeerStoreError
-from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.stream_muxer.abc import IMuxedConn
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
+from libp2p.network.connection.net_connection_interface import (
+    INetConn,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerstore import (
+    PeerStoreError,
+)
+from libp2p.peer.peerstore_interface import (
+    IPeerStore,
+)
+from libp2p.stream_muxer.abc import (
+    IMuxedConn,
+)
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     OpenConnectionError,
     SecurityUpgradeFailure,
 )
-from libp2p.transport.listener_interface import IListener
-from libp2p.transport.transport_interface import ITransport
-from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.typing import StreamHandlerFn
+from libp2p.transport.listener_interface import (
+    IListener,
+)
+from libp2p.transport.transport_interface import (
+    ITransport,
+)
+from libp2p.transport.upgrader import (
+    TransportUpgrader,
+)
+from libp2p.typing import (
+    StreamHandlerFn,
+)
 
-from ..exceptions import MultiError
-from .connection.raw_connection import RawConnection
-from .connection.swarm_connection import SwarmConn
-from .exceptions import SwarmException
-from .network_interface import INetworkService
-from .notifee_interface import INotifee
-from .stream.net_stream_interface import INetStream
+from ..exceptions import (
+    MultiError,
+)
+from .connection.raw_connection import (
+    RawConnection,
+)
+from .connection.swarm_connection import (
+    SwarmConn,
+)
+from .exceptions import (
+    SwarmException,
+)
+from .network_interface import (
+    INetworkService,
+)
+from .notifee_interface import (
+    INotifee,
+)
+from .stream.net_stream_interface import (
+    INetStream,
+)
 
 logger = logging.getLogger("libp2p.network.swarm")
 
@@ -40,7 +82,6 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
 
 
 class Swarm(Service, INetworkService):
-
     self_id: ID
     peerstore: IPeerStore
     upgrader: TransportUpgrader
@@ -72,7 +113,8 @@ class Swarm(Service, INetworkService):
         # Create Notifee array
         self.notifees = []
 
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        # Ignore type here since mypy complains:
+        # https://github.com/python/mypy/issues/2427
         self.common_stream_handler = create_default_stream_handler(self)  # type: ignore
 
         self.listener_nursery = None
@@ -95,18 +137,18 @@ class Swarm(Service, INetworkService):
         return self.self_id
 
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        # Ignore type here since mypy complains:
+        # https://github.com/python/mypy/issues/2427
         self.common_stream_handler = stream_handler  # type: ignore
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
-        dial_peer try to create a connection to peer_id.
+        Try to create a connection to peer_id.
 
         :param peer_id: peer if we want to dial
         :raises SwarmException: raised when an error occurs
         :return: muxed connection
         """
-
         if peer_id in self.connections:
             # If muxed connection already exists for peer_id,
             # set muxed connection equal to existing muxed connection
@@ -140,20 +182,19 @@ class Swarm(Service, INetworkService):
 
         # Tried all addresses, raising exception.
         raise SwarmException(
-            f"unable to connect to {peer_id}, no addresses established a successful connection "
-            "(with exceptions)"
+            f"unable to connect to {peer_id}, no addresses established a successful "
+            "connection (with exceptions)"
         ) from MultiError(exceptions)
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
-        dial_addr try to create a connection to peer_id with addr.
+        Try to create a connection to peer_id with addr.
 
         :param addr: the address we want to connect with
         :param peer_id: the peer we want to connect to
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
-
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
@@ -231,11 +272,13 @@ class Swarm(Service, INetworkService):
             if str(maddr) in self.listeners:
                 return True
 
-            async def conn_handler(read_write_closer: ReadWriteCloser) -> None:
+            async def conn_handler(
+                read_write_closer: ReadWriteCloser, maddr=maddr
+            ) -> None:
                 raw_conn = RawConnection(read_write_closer, False)
 
-                # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
-                # the conn and then mux the conn
+                # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
+                # secure the conn and then mux the conn
                 try:
                     # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                     secured_conn = await self.upgrader.upgrade_security(
@@ -264,8 +307,8 @@ class Swarm(Service, INetworkService):
                 await self.add_conn(muxed_conn)
                 logger.debug("successfully opened connection to peer %s", peer_id)
 
-                # NOTE: This is a intentional barrier to prevent from the handler exiting and
-                #   closing the connection.
+                # NOTE: This is a intentional barrier to prevent from the handler
+                # exiting and closing the connection.
                 await self.manager.wait_finished()
 
             try:
@@ -282,7 +325,7 @@ class Swarm(Service, INetworkService):
                 await self.notify_listen(maddr)
 
                 return True
-            except IOError:
+            except OSError:
                 # Failed. Continue looping.
                 logger.debug("fail to listen on: %s", maddr)
 
@@ -304,9 +347,11 @@ class Swarm(Service, INetworkService):
         logger.debug("successfully close the connection to peer %s", peer_id)
 
     async def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
-        """Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
+        """
+        Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
         and start to monitor the connection for its new streams and
-        disconnection."""
+        disconnection.
+        """
         swarm_conn = SwarmConn(muxed_conn, self)
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
@@ -319,8 +364,10 @@ class Swarm(Service, INetworkService):
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
-        """Simply remove the connection from Swarm's records, without closing
-        the connection."""
+        """
+        Simply remove the connection from Swarm's records, without closing
+        the connection.
+        """
         peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return

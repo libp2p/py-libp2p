@@ -1,8 +1,14 @@
 import pytest
 import trio
 
-from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
-from libp2p.tools.constants import MAX_READ_LEN
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+    StreamEOF,
+    StreamReset,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
 
 DATA = b"data_123"
 
