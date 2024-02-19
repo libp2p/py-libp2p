@@ -1,15 +1,86 @@
+[tool.autoflake]
+remove_all_unused_imports = true
+exclude = "__init__.py"
+
+[tool.isort]
+combine_as_imports = false
+extra_standard_library = "pytest"
+force_grid_wrap = 1
+force_sort_within_sections = true
+known_third_party = "anyio,factory,lru,p2pclient,pytest,noise"
+known_first_party = "libp2p"
+multi_line_output = 3
+profile = "black"
+skip_glob= "*_pb2*.py, *.pyi"
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_subclassing_any = false
+ignore_missing_imports = true
+incremental = false
+strict_optional = false
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = false
+warn_unused_configs = true
+warn_unused_ignores = true
+
+
+[tool.pydocstyle]
+# All error codes found here:
+# http://www.pydocstyle.org/en/3.0.0/error_codes.html
+#
+# Ignored:
+# D1 - Missing docstring error codes
+#
+# Selected:
+# D2 - Whitespace error codes
+# D3 - Quote error codes
+# D4 - Content related error codes
+select = "D2,D3,D4"
+
+# Extra ignores:
+# D200 - One-line docstring should fit on one line with quotes
+# D203 - 1 blank line required before class docstring
+# D204 - 1 blank line required after class docstring
+# D205 - 1 blank line required between summary line and description
+# D212 - Multi-line docstring summary should start at the first line
+# D302 - Use u""" for Unicode docstrings
+# D400 - First line should end with a period
+# D401 - First line should be in imperative mood
+# D412 - No blank lines allowed between a section header and its content
+# D415 - First line should end with a period, question mark, or exclamation point
+add-ignore = "D200,D203,D204,D205,D212,D302,D400,D401,D412,D415"
+
+# Explanation:
+# D400 - Enabling this error code seems to make it a requirement that the first
+# sentence in a docstring is not split across two lines.  It also makes it a
+# requirement that no docstring can have a multi-sentence description without a
+# summary line.  Neither one of those requirements seem appropriate.
+
+[tool.pytest.ini_options]
+addopts = "-v --showlocals --durations 50 --maxfail 10"
+xfail_strict = true
+log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
+log_date_format = "%m-%d %H:%M:%S"
+
 [tool.towncrier]
-# Read https://github.com/libp2p/py-libp2p/newsfragments/README.md for instructions
+# Read https://github.com/ethereum/py-libp2p/blob/main/newsfragments/README.md for instructions
 package = "libp2p"
 filename = "docs/release_notes.rst"
 directory = "newsfragments"
 underlines = ["-", "~", "^"]
-title_format = "libp2p v{version} ({project_date})"
-issue_format = "`#{issue} <https://github.com/libp2p/py-libp2p/issues/{issue}>`__"
+title_format = "py-libp2p v{version} ({project_date})"
+issue_format = "`#{issue} <https://github.com/ethereum/py-libp2p/issues/{issue}>`__"
 
 [[tool.towncrier.type]]
-directory = "feature"
-name = "Features"
+directory = "breaking"
+name = "Breaking Changes"
 showcontent = true
 
 [[tool.towncrier.type]]
@@ -18,18 +89,18 @@ name = "Bugfixes"
 showcontent = true
 
 [[tool.towncrier.type]]
-directory = "performance"
-name = "Performance improvements"
+directory = "deprecation"
+name = "Deprecations"
 showcontent = true
 
 [[tool.towncrier.type]]
-directory = "doc"
+directory = "docs"
 name = "Improved Documentation"
 showcontent = true
 
 [[tool.towncrier.type]]
-directory = "removal"
-name = "Deprecations and Removals"
+directory = "feature"
+name = "Features"
 showcontent = true
 
 [[tool.towncrier.type]]
@@ -39,27 +110,15 @@ showcontent = true
 
 [[tool.towncrier.type]]
 directory = "misc"
-name = "Miscellaneous changes"
+name = "Miscellaneous Changes"
 showcontent = false
 
-[tool.black]
-target_version = ['py37']
-include = '\.pyi?$'
-exclude = '''
+[[tool.towncrier.type]]
+directory = "performance"
+name = "Performance Improvements"
+showcontent = true
 
-(
-  /(
-      \.eggs         # exclude a few common directories in the
-    | \.git          # root of the project
-    | \.hg
-    | \.mypy_cache
-    | \.tox
-    | \.venv
-    | _build
-    | buck-out
-    | build
-    | dist
-  )/
-  | \w*_pb2\w*\.py  # pb2 files
-)
-'''
+[[tool.towncrier.type]]
+directory = "removal"
+name = "Removals"
+showcontent = true
