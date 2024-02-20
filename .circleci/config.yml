@@ -242,5 +242,5 @@ workflows:
       - py310-wheel
       - py311-wheel
       - py312-wheel
-      - py311-windows-wheel
-      - py312-windows-wheel
+      # - py311-windows-wheel
+      # - py312-windows-wheel

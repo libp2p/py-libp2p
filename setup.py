@@ -61,7 +61,6 @@ install_requires = [
     "protobuf>=3.10.0,<4.0.0",
     "coincurve>=10.0.0,<11.0.0",
     "pynacl==1.3.0",
-    "dataclasses>=0.7, <1;python_version<'3.7'",
     "async_generator==1.10",
     "trio>=0.15.0",
     "async-service>=0.1.0a6",
