@@ -66,6 +66,10 @@ install_requires = [
     "async-service>=0.1.0a6",
     "async-exit-stack==1.0.1",
     "noiseprotocol>=0.3.0",
+    # added during debugging
+    "anyio",
+    "p2pclient",
+    "mypy-protobuf",
 ]
 
 
