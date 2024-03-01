@@ -52,20 +52,20 @@ with open("./README.md") as readme:
 
 
 install_requires = [
-    "pycryptodome>=3.9.2,<4.0.0",
-    "base58>=1.0.3,<2.0.0",
+    "pycryptodome>=3.9.2",
+    "base58>=1.0.3",
     "pymultihash>=0.8.2",
-    "multiaddr>=0.0.9,<0.1.0",
-    "rpcudp>=3.0.0,<4.0.0",
+    "multiaddr>=0.0.9",
+    "rpcudp>=3.0.0",
     "lru-dict>=1.1.6",
-    "protobuf>=3.10.0,<4.0.0",
-    "coincurve>=10.0.0,<11.0.0",
+    "protobuf>=3.10.0",
+    "coincurve>=10.0.0",
     "pynacl==1.3.0",
     "async_generator==1.10",
     "trio>=0.15.0",
     "async-service>=0.1.0a6",
     "async-exit-stack==1.0.1",
-    "noiseprotocol>=0.3.0,<0.4.0",
+    "noiseprotocol>=0.3.0",
 ]
 
 
