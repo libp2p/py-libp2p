@@ -1,7 +1,7 @@
 # py-libp2p
 
 [![Join the chat at https://gitter.im/py-libp2p/Lobby](https://badges.gitter.im/py-libp2p/Lobby.png)](https://gitter.im/py-libp2p/Lobby)
-[![Build Status](https://circleci.com/gh/ethereum/py-libp2p.svg?style=shield)](https://circleci.com/gh/ethereum/py-libp2p)
+[![Build Status](https://circleci.com/gh/libp2p/py-libp2p.svg?style=shield)](https://circleci.com/gh/libp2p/py-libp2p)
 [![PyPI version](https://badge.fury.io/py/libp2p.svg)](https://badge.fury.io/py/libp2p)
 [![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
