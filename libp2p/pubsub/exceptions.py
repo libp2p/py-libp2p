@@ -1,4 +1,6 @@
-from libp2p.exceptions import BaseLibp2pError
+from libp2p.exceptions import (
+    BaseLibp2pError,
+)
 
 
 class PubsubRouterError(BaseLibp2pError):

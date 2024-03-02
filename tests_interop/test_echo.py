@@ -1,15 +1,30 @@
 import re
 
-from multiaddr import Multiaddr
-from p2pclient.utils import get_unused_tcp_port
+from multiaddr import (
+    Multiaddr,
+)
+from p2pclient.utils import (
+    get_unused_tcp_port,
+)
 import pytest
 import trio
 
-from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
-from libp2p.tools.factories import HostFactory
-from libp2p.tools.interop.envs import GO_BIN_PATH
-from libp2p.tools.interop.process import BaseInteractiveProcess
-from libp2p.typing import TProtocol
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+    info_from_p2p_addr,
+)
+from libp2p.tools.factories import (
+    HostFactory,
+)
+from libp2p.tools.interop.envs import (
+    GO_BIN_PATH,
+)
+from libp2p.tools.interop.process import (
+    BaseInteractiveProcess,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
 ECHO_PATH = GO_BIN_PATH / "echo"
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
@@ -38,7 +53,7 @@ class EchoProcess(BaseInteractiveProcess):
 
         self.port = port
         self._peer_info = None
-        self.regex_pat = re.compile(br"I am ([\w\./]+)")
+        self.regex_pat = re.compile(rb"I am ([\w\./]+)")
 
     @property
     def peer_info(self) -> None:
@@ -47,8 +62,8 @@ class EchoProcess(BaseInteractiveProcess):
         if not self.event_ready.is_set():
             raise Exception("process is not ready yet. failed to parse the peer info")
         # Example:
-        # b"I am /ip4/127.0.0.1/tcp/56171/ipfs/QmU41TRPs34WWqa1brJEojBLYZKrrBcJq9nyNfVvSrbZUJ\n"
-        m = re.search(br"I am ([\w\./]+)", self.bytes_read)
+        # b"I am /ip4/127.0.0.1/tcp/56171/ipfs/QmU41TRPs34WWqa1brJEojBLYZKrrBcJq9nyNfVvSrbZUJ\n"  # noqa: E501
+        m = re.search(rb"I am ([\w\./]+)", self.bytes_read)
         if m is None:
             raise Exception("failed to find the pattern for the listening multiaddr")
         maddr_bytes_str_ipfs = m.group(1)

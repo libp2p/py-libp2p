@@ -1,11 +1,22 @@
 import multiaddr
 import pytest
 
-from libp2p.network.stream.exceptions import StreamError
-from libp2p.tools.constants import MAX_READ_LEN
-from libp2p.tools.factories import HostFactory
-from libp2p.tools.utils import connect, create_echo_stream_handler
-from libp2p.typing import TProtocol
+from libp2p.network.stream.exceptions import (
+    StreamError,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
+from libp2p.tools.factories import (
+    HostFactory,
+)
+from libp2p.tools.utils import (
+    connect,
+    create_echo_stream_handler,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
 PROTOCOL_ID_0 = TProtocol("/echo/0")
 PROTOCOL_ID_1 = TProtocol("/echo/1")
@@ -84,7 +95,8 @@ async def test_double_response(security_protocol):
 @pytest.mark.trio
 async def test_multiple_streams(security_protocol):
     # hosts[0] should be able to open a stream with hosts[1] and then vice versa.
-    # Stream IDs should be generated uniquely so that the stream state is not overwritten
+    # Stream IDs should be generated uniquely so that the stream state is not
+    # overwritten
 
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol
@@ -125,7 +137,6 @@ async def test_multiple_streams_same_initiator_different_protocols(security_prot
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol
     ) as hosts:
-
         hosts[1].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
         )
@@ -231,7 +242,6 @@ async def test_triangle_nodes_connection(security_protocol):
     async with HostFactory.create_batch_and_listen(
         3, security_protocol=security_protocol
     ) as hosts:
-
         hosts[0].set_stream_handler(
             PROTOCOL_ID_0, create_echo_stream_handler(ACK_STR_0)
         )

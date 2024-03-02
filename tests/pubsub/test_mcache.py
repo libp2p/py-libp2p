@@ -1,4 +1,6 @@
-from libp2p.pubsub.mcache import MessageCache
+from libp2p.pubsub.mcache import (
+    MessageCache,
+)
 
 
 class Msg:

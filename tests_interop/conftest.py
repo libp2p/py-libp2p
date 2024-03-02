@@ -1,16 +1,31 @@
 import anyio
-from async_exit_stack import AsyncExitStack
-from p2pclient.datastructures import StreamInfo
-from p2pclient.utils import get_unused_tcp_port
+from async_exit_stack import (
+    AsyncExitStack,
+)
+from p2pclient.datastructures import (
+    StreamInfo,
+)
+from p2pclient.utils import (
+    get_unused_tcp_port,
+)
 import pytest
 import trio
 
-from libp2p.io.abc import ReadWriteCloser
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.tools.factories import HostFactory, PubsubFactory
-from libp2p.tools.interop.daemon import make_p2pd
-from libp2p.tools.interop.utils import connect
+from libp2p.tools.factories import (
+    HostFactory,
+    PubsubFactory,
+)
+from libp2p.tools.interop.daemon import (
+    make_p2pd,
+)
+from libp2p.tools.interop.utils import (
+    connect,
+)
 
 
 @pytest.fixture(params=[NOISE_PROTOCOL_ID, SECIO_PROTOCOL_ID])
@@ -130,12 +145,13 @@ async def py_to_daemon_stream_pair(p2pds, security_protocol, is_to_fail_daemon_s
 
         if is_to_fail_daemon_stream:
             # FIXME: This is a workaround to make daemon reset the stream.
-            #   We intentionally close the listener on the python side, it makes the connection from
-            #   daemon to us fail, and therefore the daemon resets the opened stream on their side.
+            #   We intentionally close the listener on the python side, it makes the
+            #   connection from daemon to us fail, and therefore the daemon resets the
+            #   opened stream on their side.
             #   Reference: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/stream.go#L47-L50  # noqa: E501
-            #   We need it because we want to test against `stream_py` after the remote side(daemon)
-            #   is reset. This should be removed after the API `stream.reset` is exposed in daemon
-            #   some day.
+            #   We need it because we want to test against `stream_py` after the remote
+            #   side(daemon) is reset. This should be removed after the API
+            #   `stream.reset` is exposed in daemon some day.
             await p2pds[0].control.control.close()
         stream_py = await host.new_stream(p2pd.peer_id, [protocol_id])
         if not is_to_fail_daemon_stream:

@@ -1,19 +1,30 @@
-from typing import TYPE_CHECKING
+from typing import (
+    TYPE_CHECKING,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import trio
 
-from libp2p.network.connection.net_connection_interface import INetConn
-from libp2p.network.network_interface import INetwork
-from libp2p.network.notifee_interface import INotifee
-from libp2p.network.stream.net_stream_interface import INetStream
+from libp2p.network.connection.net_connection_interface import (
+    INetConn,
+)
+from libp2p.network.network_interface import (
+    INetwork,
+)
+from libp2p.network.notifee_interface import (
+    INotifee,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
 
 if TYPE_CHECKING:
     from libp2p.peer.id import ID  # noqa: F401
 
 
 class PubsubNotifee(INotifee):
-
     initiator_peers_queue: "trio.MemorySendChannel[ID]"
     dead_peers_queue: "trio.MemorySendChannel[ID]"
 

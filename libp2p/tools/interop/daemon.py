@@ -1,20 +1,41 @@
-from typing import AsyncIterator
+from typing import (
+    AsyncIterator,
+)
 
-from async_generator import asynccontextmanager
+from async_generator import (
+    asynccontextmanager,
+)
 import multiaddr
-from multiaddr import Multiaddr
-from p2pclient import Client
+from multiaddr import (
+    Multiaddr,
+)
+from p2pclient import (
+    Client,
+)
 import trio
 
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+    info_from_p2p_addr,
+)
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.typing import TProtocol
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .constants import LOCALHOST_IP
-from .envs import GO_BIN_PATH
-from .process import BaseInteractiveProcess
+from .constants import (
+    LOCALHOST_IP,
+)
+from .envs import (
+    GO_BIN_PATH,
+)
+from .process import (
+    BaseInteractiveProcess,
+)
 
 P2PD_PATH = GO_BIN_PATH / "p2pd"
 
@@ -47,7 +68,7 @@ class P2PDProcess(BaseInteractiveProcess):
             # NOTE:
             #   Two other params are possibly what we want to configure:
             #   - gossipsubHeartbeatInterval: GossipSubHeartbeatInitialDelay = 100 * time.Millisecond  # noqa: E501
-            #   - gossipsubHeartbeatInitialDelay: GossipSubHeartbeatInterval = 1 * time.Second
+            #   - gossipsubHeartbeatInitialDelay: GossipSubHeartbeatInterval = 1 * time.Second  # noqa: E501
             #   Referece: https://github.com/libp2p/go-libp2p-daemon/blob/b95e77dbfcd186ccf817f51e95f73f9fd5982600/p2pd/main.go#L348-L353  # noqa: E501
         self.proc = None
         self.cmd = str(P2PD_PATH)

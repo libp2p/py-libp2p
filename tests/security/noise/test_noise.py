@@ -1,7 +1,12 @@
 import pytest
 
-from libp2p.security.noise.messages import NoiseHandshakePayload
-from libp2p.tools.factories import noise_conn_factory, noise_handshake_payload_factory
+from libp2p.security.noise.messages import (
+    NoiseHandshakePayload,
+)
+from libp2p.tools.factories import (
+    noise_conn_factory,
+    noise_handshake_payload_factory,
+)
 
 DATA_0 = b"data_0"
 DATA_1 = b"1" * 1000

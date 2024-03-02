@@ -1,10 +1,18 @@
 import pytest
 import trio
 
-from libp2p.host.exceptions import StreamFailure
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.tools.factories import HostFactory
-from libp2p.tools.utils import MAX_READ_LEN
+from libp2p.host.exceptions import (
+    StreamFailure,
+)
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
+from libp2p.tools.factories import (
+    HostFactory,
+)
+from libp2p.tools.utils import (
+    MAX_READ_LEN,
+)
 
 PROTOCOL_ID = "/chat/1.0.0"
 

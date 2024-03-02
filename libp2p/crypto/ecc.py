@@ -1,13 +1,25 @@
+from fastecdsa import (
+    keys,
+    point,
+)
 from fastecdsa import curve as curve_types
-from fastecdsa import keys, point
-from fastecdsa.encoding.sec1 import SEC1Encoder
+from fastecdsa.encoding.sec1 import (
+    SEC1Encoder,
+)
 
-from libp2p.crypto.keys import KeyPair, KeyType, PrivateKey, PublicKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    KeyType,
+    PrivateKey,
+    PublicKey,
+)
 
 
 def infer_local_type(curve: str) -> curve_types.Curve:
-    """converts a ``str`` representation of some elliptic curve to a
-    representation understood by the backend of this module."""
+    """
+    Convert a ``str`` representation of some elliptic curve to a
+    representation understood by the backend of this module.
+    """
     if curve == "P-256":
         return curve_types.P256
     else:
@@ -61,8 +73,10 @@ class ECCPrivateKey(PrivateKey):
 
 
 def create_new_key_pair(curve: str) -> KeyPair:
-    """Return a new ECC keypair with the requested ``curve`` type, e.g.
-    "P-256"."""
+    """
+    Return a new ECC keypair with the requested ``curve`` type, e.g.
+    "P-256".
+    """
     private_key = ECCPrivateKey.new(curve)
     public_key = private_key.get_public_key()
     return KeyPair(private_key, public_key)

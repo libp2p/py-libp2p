@@ -1,5 +1,10 @@
-from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.crypto.serialization import deserialize_private_key, deserialize_public_key
+from libp2p.crypto.secp256k1 import (
+    create_new_key_pair,
+)
+from libp2p.crypto.serialization import (
+    deserialize_private_key,
+    deserialize_public_key,
+)
 
 
 def test_public_key_serialize_deserialize_round_trip():

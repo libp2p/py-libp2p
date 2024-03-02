@@ -1,35 +1,96 @@
-from typing import Any, AsyncIterator, Callable, Dict, List, Sequence, Tuple, cast
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    List,
+    Sequence,
+    Tuple,
+    cast,
+)
 
-from async_exit_stack import AsyncExitStack
-from async_generator import asynccontextmanager
-from async_service import background_trio_service
+from async_exit_stack import (
+    AsyncExitStack,
+)
+from async_generator import (
+    asynccontextmanager,
+)
+from async_service import (
+    background_trio_service,
+)
 import factory
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import trio
 
-from libp2p import generate_new_rsa_identity, generate_peer_id_from
+from libp2p import (
+    generate_new_rsa_identity,
+    generate_peer_id_from,
+)
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
-from libp2p.crypto.keys import KeyPair, PrivateKey
+from libp2p.crypto.keys import (
+    KeyPair,
+    PrivateKey,
+)
 from libp2p.crypto.secp256k1 import create_new_key_pair as create_secp256k1_key_pair
-from libp2p.host.basic_host import BasicHost
-from libp2p.host.host_interface import IHost
-from libp2p.host.routed_host import RoutedHost
-from libp2p.io.abc import ReadWriteCloser
-from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.network.connection.swarm_connection import SwarmConn
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.network.swarm import Swarm
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerStore
-from libp2p.pubsub.abc import IPubsubRouter
-from libp2p.pubsub.floodsub import FloodSub
-from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.host.basic_host import (
+    BasicHost,
+)
+from libp2p.host.host_interface import (
+    IHost,
+)
+from libp2p.host.routed_host import (
+    RoutedHost,
+)
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
+from libp2p.network.connection.raw_connection import (
+    RawConnection,
+)
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.network.connection.swarm_connection import (
+    SwarmConn,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.network.swarm import (
+    Swarm,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore import (
+    PeerStore,
+)
+from libp2p.pubsub.abc import (
+    IPubsubRouter,
+)
+from libp2p.pubsub.floodsub import (
+    FloodSub,
+)
+from libp2p.pubsub.gossipsub import (
+    GossipSub,
+)
 import libp2p.pubsub.pb.rpc_pb2 as rpc_pb2
-from libp2p.pubsub.pubsub import Pubsub, get_peer_and_seqno_msg_id
-from libp2p.routing.interfaces import IPeerRouting
-from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
+from libp2p.pubsub.pubsub import (
+    Pubsub,
+    get_peer_and_seqno_msg_id,
+)
+from libp2p.routing.interfaces import (
+    IPeerRouting,
+)
+from libp2p.security.insecure.transport import (
+    PLAINTEXT_PROTOCOL_ID,
+    InsecureTransport,
+)
 from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
@@ -37,18 +98,45 @@ from libp2p.security.noise.messages import (
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.secure_transport_interface import ISecureTransport
-from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
-from libp2p.stream_muxer.mplex.mplex_stream import MplexStream
-from libp2p.tools.constants import GOSSIPSUB_PARAMS
-from libp2p.transport.tcp.tcp import TCP
-from libp2p.transport.typing import TMuxerOptions, TSecurityOptions
-from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.typing import TProtocol
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.security.secure_transport_interface import (
+    ISecureTransport,
+)
+from libp2p.stream_muxer.mplex.mplex import (
+    MPLEX_PROTOCOL_ID,
+    Mplex,
+)
+from libp2p.stream_muxer.mplex.mplex_stream import (
+    MplexStream,
+)
+from libp2p.tools.constants import (
+    GOSSIPSUB_PARAMS,
+)
+from libp2p.transport.tcp.tcp import (
+    TCP,
+)
+from libp2p.transport.typing import (
+    TMuxerOptions,
+    TSecurityOptions,
+)
+from libp2p.transport.upgrader import (
+    TransportUpgrader,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .constants import FLOODSUB_PROTOCOL_ID, GOSSIPSUB_PROTOCOL_ID, LISTEN_MADDR
-from .utils import connect, connect_swarm
+from .constants import (
+    FLOODSUB_PROTOCOL_ID,
+    GOSSIPSUB_PROTOCOL_ID,
+    LISTEN_MADDR,
+)
+from .utils import (
+    connect,
+    connect_swarm,
+)
 
 DEFAULT_SECURITY_PROTOCOL_ID = PLAINTEXT_PROTOCOL_ID
 
@@ -105,7 +193,7 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 
 
 def security_options_factory_factory(
-    protocol_id: TProtocol = None
+    protocol_id: TProtocol = None,
 ) -> Callable[[KeyPair], TSecurityOptions]:
     if protocol_id is None:
         protocol_id = DEFAULT_SECURITY_PROTOCOL_ID
@@ -135,7 +223,7 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 
 @asynccontextmanager
 async def raw_conn_factory(
-    nursery: trio.Nursery
+    nursery: trio.Nursery,
 ) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
     conn_0 = None
     conn_1 = None
@@ -158,7 +246,7 @@ async def raw_conn_factory(
 
 @asynccontextmanager
 async def noise_conn_factory(
-    nursery: trio.Nursery
+    nursery: trio.Nursery,
 ) -> AsyncIterator[Tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
@@ -188,7 +276,8 @@ async def noise_conn_factory(
         if local_secure_conn is None or remote_secure_conn is None:
             raise Exception(
                 "local or remote secure conn has not been successfully upgraded"
-                f"local_secure_conn={local_secure_conn}, remote_secure_conn={remote_secure_conn}"
+                f"local_secure_conn={local_secure_conn}, "
+                f"remote_secure_conn={remote_secure_conn}"
             )
         yield local_secure_conn, remote_secure_conn
 
@@ -223,8 +312,8 @@ class SwarmFactory(factory.Factory):
         muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[Swarm]:
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
-        # an argument explicitly with `None`. If an argument is `None`, we don't pass it to
-        # `factory.Factory.__init__`, in order to let the function initialize it.
+        # an argument explicitly with `None`. If an argument is `None`, we don't pass it
+        # to `factory.Factory.__init__`, in order to let the function initialize it.
         optional_kwargs: Dict[str, Any] = {}
         if key_pair is not None:
             optional_kwargs["key_pair"] = key_pair
@@ -541,7 +630,7 @@ async def swarm_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_conn_pair_factory(
-    security_protocol: TProtocol = None
+    security_protocol: TProtocol = None,
 ) -> AsyncIterator[Tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
         security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
@@ -554,7 +643,7 @@ async def mplex_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_stream_pair_factory(
-    security_protocol: TProtocol = None
+    security_protocol: TProtocol = None,
 ) -> AsyncIterator[Tuple[MplexStream, MplexStream]]:
     async with mplex_conn_pair_factory(
         security_protocol=security_protocol

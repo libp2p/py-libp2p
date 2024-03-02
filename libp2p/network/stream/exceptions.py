@@ -1,4 +1,6 @@
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import (
+    IOException,
+)
 
 
 class StreamError(IOException):

@@ -1,22 +1,33 @@
-from typing import Optional
+from typing import (
+    Optional,
+)
 
-from libp2p.stream_muxer.abc import IMuxedStream
+from libp2p.stream_muxer.abc import (
+    IMuxedStream,
+)
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
     MuxedStreamReset,
 )
-from libp2p.typing import TProtocol
+from libp2p.typing import (
+    TProtocol,
+)
 
-from .exceptions import StreamClosed, StreamEOF, StreamReset
-from .net_stream_interface import INetStream
+from .exceptions import (
+    StreamClosed,
+    StreamEOF,
+    StreamReset,
+)
+from .net_stream_interface import (
+    INetStream,
+)
 
 
 # TODO: Handle exceptions from `muxed_stream`
 # TODO: Add stream state
 #   - Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501
 class NetStream(INetStream):
-
     muxed_stream: IMuxedStream
     protocol_id: Optional[TProtocol]
 
@@ -39,7 +50,7 @@ class NetStream(INetStream):
 
     async def read(self, n: int = None) -> bytes:
         """
-        reads from stream.
+        Read from stream.
 
         :param n: number of bytes to read
         :return: bytes of input
@@ -53,7 +64,7 @@ class NetStream(INetStream):
 
     async def write(self, data: bytes) -> None:
         """
-        write to stream.
+        Write to stream.
 
         :return: number of bytes written
         """
@@ -63,7 +74,7 @@ class NetStream(INetStream):
             raise StreamClosed() from error
 
     async def close(self) -> None:
-        """close stream."""
+        """Close stream."""
         await self.muxed_stream.close()
 
     async def reset(self) -> None:

@@ -1,4 +1,6 @@
-from libp2p.exceptions import BaseLibp2pError
+from libp2p.exceptions import (
+    BaseLibp2pError,
+)
 
 
 class CryptographyError(BaseLibp2pError):
@@ -6,7 +8,7 @@ class CryptographyError(BaseLibp2pError):
 
 
 class MissingDeserializerError(CryptographyError):
-    """Raise if the requested deserialization routine is missing for some type
-    of cryptographic key."""
-
-    pass
+    """
+    Raise if the requested deserialization routine is missing for some type
+    of cryptographic key.
+    """

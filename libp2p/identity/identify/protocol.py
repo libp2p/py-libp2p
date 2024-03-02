@@ -1,13 +1,26 @@
 import logging
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.host.host_interface import IHost
-from libp2p.network.stream.exceptions import StreamClosed
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.host.host_interface import (
+    IHost,
+)
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.typing import (
+    StreamHandlerFn,
+    TProtocol,
+)
 
-from .pb.identify_pb2 import Identify
+from .pb.identify_pb2 import (
+    Identify,
+)
 
 ID = TProtocol("/ipfs/id/1.0.0")
 PROTOCOL_VERSION = "ipfs/0.1.0"

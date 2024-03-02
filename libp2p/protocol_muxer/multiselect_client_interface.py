@@ -1,16 +1,26 @@
-from abc import ABC, abstractmethod
-from typing import Sequence
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Sequence,
+)
 
 from libp2p.protocol_muxer.multiselect_communicator_interface import (
     IMultiselectCommunicator,
 )
-from libp2p.typing import TProtocol
+from libp2p.typing import (
+    TProtocol,
+)
 
 
 class IMultiselectClient(ABC):
-    """Client for communicating with receiver's multiselect module in order to
-    select a protocol id to communicate over."""
+    """
+    Client for communicating with receiver's multiselect module in order to
+    select a protocol id to communicate over.
+    """
 
+    @abstractmethod
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Ensure that the client and multiselect are both using the same
@@ -34,6 +44,7 @@ class IMultiselectClient(ABC):
         :return: selected protocol
         """
 
+    @abstractmethod
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
     ) -> TProtocol:

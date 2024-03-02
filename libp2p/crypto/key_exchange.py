@@ -1,9 +1,21 @@
-from typing import Callable, Tuple, cast
+from typing import (
+    Callable,
+    Tuple,
+    cast,
+)
 
-from fastecdsa.encoding import util
+from fastecdsa.encoding import (
+    util,
+)
 
-from libp2p.crypto.ecc import ECCPrivateKey, ECCPublicKey, create_new_key_pair
-from libp2p.crypto.keys import PublicKey
+from libp2p.crypto.ecc import (
+    ECCPrivateKey,
+    ECCPublicKey,
+    create_new_key_pair,
+)
+from libp2p.crypto.keys import (
+    PublicKey,
+)
 
 SharedKeyGenerator = Callable[[bytes], bytes]
 

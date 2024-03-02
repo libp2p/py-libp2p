@@ -1,6 +1,12 @@
-from abc import ABC, abstractmethod
+from abc import (
+    ABC,
+    abstractmethod,
+)
 import subprocess
-from typing import Iterable, List
+from typing import (
+    Iterable,
+    List,
+)
 
 import trio
 
@@ -54,7 +60,7 @@ class BaseInteractiveProcess(AbstractInterativeProcess):
         self.proc = await trio.open_process(  # type: ignore
             [self.cmd] + self.args,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Redirect stderr to stdout, which makes parsing easier
+            stderr=subprocess.STDOUT,  # Redirect stderr to stdout, which makes parsing easier  # noqa: E501
             bufsize=0,
         )
         await self.wait_until_ready()

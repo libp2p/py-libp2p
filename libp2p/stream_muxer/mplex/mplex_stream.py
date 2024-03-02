@@ -1,16 +1,32 @@
-from typing import TYPE_CHECKING
+from typing import (
+    TYPE_CHECKING,
+)
 
 import trio
 
-from libp2p.stream_muxer.abc import IMuxedStream
-from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
+from libp2p.stream_muxer.abc import (
+    IMuxedStream,
+)
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
+)
 
-from .constants import HeaderTags
-from .datastructures import StreamID
-from .exceptions import MplexStreamClosed, MplexStreamEOF, MplexStreamReset
+from .constants import (
+    HeaderTags,
+)
+from .datastructures import (
+    StreamID,
+)
+from .exceptions import (
+    MplexStreamClosed,
+    MplexStreamEOF,
+    MplexStreamReset,
+)
 
 if TYPE_CHECKING:
-    from libp2p.stream_muxer.mplex.mplex import Mplex
+    from libp2p.stream_muxer.mplex.mplex import (
+        Mplex,
+    )
 
 
 class MplexStream(IMuxedStream):
@@ -44,7 +60,7 @@ class MplexStream(IMuxedStream):
         incoming_data_channel: "trio.MemoryReceiveChannel[bytes]",
     ) -> None:
         """
-        create new MuxedStream in muxer.
+        Create new MuxedStream in muxer.
 
         :param stream_id: stream id of this stream
         :param muxed_conn: muxed connection of this muxed_stream
@@ -93,8 +109,8 @@ class MplexStream(IMuxedStream):
         """
         if n is not None and n < 0:
             raise ValueError(
-                f"the number of bytes to read `n` must be non-negative or "
-                "`None` to indicate read until EOF"
+                "the number of bytes to read `n` must be non-negative or "
+                f"`None` to indicate read until EOF, got n={n}"
             )
         if self.event_reset.is_set():
             raise MplexStreamReset
@@ -102,16 +118,16 @@ class MplexStream(IMuxedStream):
             return await self._read_until_eof()
         if len(self._buf) == 0:
             data: bytes
-            # Peek whether there is data available. If yes, we just read until there is no data,
-            # and then return.
+            # Peek whether there is data available. If yes, we just read until there is
+            # no data, then return.
             try:
                 data = self.incoming_data_channel.receive_nowait()
                 self._buf.extend(data)
             except trio.EndOfChannel:
                 raise MplexStreamEOF
             except trio.WouldBlock:
-                # We know `receive` will be blocked here. Wait for data here with `receive` and
-                # catch all kinds of errors here.
+                # We know `receive` will be blocked here. Wait for data here with
+                # `receive` and catch all kinds of errors here.
                 try:
                     data = await self.incoming_data_channel.receive()
                     self._buf.extend(data)
@@ -121,8 +137,8 @@ class MplexStream(IMuxedStream):
                     if self.event_remote_closed.is_set():
                         raise MplexStreamEOF
                 except trio.ClosedResourceError as error:
-                    # Probably `incoming_data_channel` is closed in `reset` when we are waiting
-                    # for `receive`.
+                    # Probably `incoming_data_channel` is closed in `reset` when we are
+                    # waiting for `receive`.
                     if self.event_reset.is_set():
                         raise MplexStreamReset
                     raise Exception(
@@ -136,7 +152,7 @@ class MplexStream(IMuxedStream):
 
     async def write(self, data: bytes) -> None:
         """
-        write to stream.
+        Write to stream.
 
         :return: number of bytes written
         """
@@ -150,8 +166,10 @@ class MplexStream(IMuxedStream):
         await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
-        """Closing a stream closes it for writing and closes the remote end for
-        reading but allows writing in the other direction."""
+        """
+        Closing a stream closes it for writing and closes the remote end for
+        reading but allows writing in the other direction.
+        """
         # TODO error handling with timeout
 
         async with self.close_lock:
@@ -175,7 +193,7 @@ class MplexStream(IMuxedStream):
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
     async def reset(self) -> None:
-        """closes both ends of the stream tells this remote side to hang up."""
+        """Close both ends of the stream tells this remote side to hang up."""
         async with self.close_lock:
             # Both sides have been closed. No need to event_reset.
             if self.event_remote_closed.is_set() and self.event_local_closed.is_set():
@@ -190,7 +208,8 @@ class MplexStream(IMuxedStream):
                     if self.is_initiator
                     else HeaderTags.ResetReceiver
                 )
-                # Try to send reset message to the other side. Ignore if there is anything wrong.
+                # Try to send reset message to the other side.
+                # Ignore if there is anything wrong.
                 try:
                     await self.muxed_conn.send_message(flag, None, self.stream_id)
                 except MuxedConnUnavailable:
@@ -208,7 +227,7 @@ class MplexStream(IMuxedStream):
     # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:
         """
-        set deadline for muxed stream.
+        Set deadline for muxed stream.
 
         :return: True if successful
         """
@@ -218,7 +237,7 @@ class MplexStream(IMuxedStream):
 
     def set_read_deadline(self, ttl: int) -> bool:
         """
-        set read deadline for muxed stream.
+        Set read deadline for muxed stream.
 
         :return: True if successful
         """
@@ -227,7 +246,7 @@ class MplexStream(IMuxedStream):
 
     def set_write_deadline(self, ttl: int) -> bool:
         """
-        set write deadline for muxed stream.
+        Set write deadline for muxed stream.
 
         :return: True if successful
         """

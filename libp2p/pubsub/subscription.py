@@ -1,11 +1,23 @@
-from types import TracebackType
-from typing import AsyncIterator, Optional, Type
+from types import (
+    TracebackType,
+)
+from typing import (
+    AsyncIterator,
+    Optional,
+    Type,
+)
 
 import trio
 
-from .abc import ISubscriptionAPI
-from .pb import rpc_pb2
-from .typing import UnsubscribeFn
+from .abc import (
+    ISubscriptionAPI,
+)
+from .pb import (
+    rpc_pb2,
+)
+from .typing import (
+    UnsubscribeFn,
+)
 
 
 class BaseSubscriptionAPI(ISubscriptionAPI):
@@ -32,11 +44,11 @@ class TrioSubscriptionAPI(BaseSubscriptionAPI):
         unsubscribe_fn: UnsubscribeFn,
     ) -> None:
         self.receive_channel = receive_channel
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427  # noqa: E501
         self.unsubscribe_fn = unsubscribe_fn  # type: ignore
 
     async def unsubscribe(self) -> None:
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427  # noqa: E501
         await self.unsubscribe_fn()  # type: ignore
 
     def __aiter__(self) -> AsyncIterator[rpc_pb2.Message]:

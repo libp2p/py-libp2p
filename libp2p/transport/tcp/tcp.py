@@ -1,17 +1,41 @@
 import logging
-from typing import Awaitable, Callable, List, Sequence, Tuple
+from typing import (
+    Awaitable,
+    Callable,
+    List,
+    Sequence,
+    Tuple,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import trio
-from trio_typing import TaskStatus
+from trio_typing import (
+    TaskStatus,
+)
 
-from libp2p.io.trio import TrioTCPStream
-from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.transport.exceptions import OpenConnectionError
-from libp2p.transport.listener_interface import IListener
-from libp2p.transport.transport_interface import ITransport
-from libp2p.transport.typing import THandler
+from libp2p.io.trio import (
+    TrioTCPStream,
+)
+from libp2p.network.connection.raw_connection import (
+    RawConnection,
+)
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.transport.exceptions import (
+    OpenConnectionError,
+)
+from libp2p.transport.listener_interface import (
+    IListener,
+)
+from libp2p.transport.transport_interface import (
+    ITransport,
+)
+from libp2p.transport.typing import (
+    THandler,
+)
 
 logger = logging.getLogger("libp2p.transport.tcp")
 
@@ -26,7 +50,7 @@ class TCPListener(IListener):
     # TODO: Get rid of `nursery`?
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
-        put listener in listening mode and wait for incoming connections.
+        Put listener in listening mode and wait for incoming connections.
 
         :param maddr: maddr of peer
         :return: return True if successful
@@ -56,7 +80,7 @@ class TCPListener(IListener):
 
     def get_addrs(self) -> Tuple[Multiaddr, ...]:
         """
-        retrieve list of addresses the listener is listening on.
+        Retrieve list of addresses the listener is listening on.
 
         :return: return list of addrs
         """
@@ -73,7 +97,7 @@ class TCPListener(IListener):
 class TCP(ITransport):
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
-        dial a transport to peer listening on multiaddr.
+        Dial a transport to peer listening on multiaddr.
 
         :param maddr: multiaddr of peer
         :return: `RawConnection` if successful
@@ -92,7 +116,7 @@ class TCP(ITransport):
 
     def create_listener(self, handler_function: THandler) -> TCPListener:
         """
-        create listener on transport.
+        Create listener on transport.
 
         :param handler_function: a function called when a new connection is received
             that takes a connection as argument which implements interface-connection

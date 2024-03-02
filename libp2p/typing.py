@@ -1,4 +1,9 @@
-from typing import TYPE_CHECKING, Awaitable, Callable, NewType
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Callable,
+    NewType,
+)
 
 if TYPE_CHECKING:
     from libp2p.network.stream.net_stream_interface import INetStream  # noqa: F401

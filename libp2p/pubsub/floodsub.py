@@ -1,16 +1,34 @@
 import logging
-from typing import Iterable, List, Sequence
+from typing import (
+    Iterable,
+    List,
+    Sequence,
+)
 
 import trio
 
-from libp2p.network.stream.exceptions import StreamClosed
-from libp2p.peer.id import ID
-from libp2p.typing import TProtocol
-from libp2p.utils import encode_varint_prefixed
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.typing import (
+    TProtocol,
+)
+from libp2p.utils import (
+    encode_varint_prefixed,
+)
 
-from .abc import IPubsubRouter
-from .pb import rpc_pb2
-from .pubsub import Pubsub
+from .abc import (
+    IPubsubRouter,
+)
+from .pb import (
+    rpc_pb2,
+)
+from .pubsub import (
+    Pubsub,
+)
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
@@ -18,7 +36,6 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 
 
 class FloodSub(IPubsubRouter):
-
     protocols: List[TProtocol]
 
     pubsub: Pubsub
@@ -80,7 +97,6 @@ class FloodSub(IPubsubRouter):
         :param msg_forwarder: peer ID of the peer who forwards the message to us
         :param pubsub_msg: pubsub message in protobuf.
         """
-
         peers_gen = set(
             self._get_peers_to_send(
                 pubsub_msg.topicIDs,

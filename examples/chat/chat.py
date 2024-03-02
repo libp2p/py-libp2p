@@ -4,13 +4,21 @@ import sys
 import multiaddr
 import trio
 
-from libp2p import new_host
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.typing import TProtocol
+from libp2p import (
+    new_host,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
+from libp2p.typing import (
+    TProtocol,
+)
 
 PROTOCOL_ID = TProtocol("/chat/1.0.0")
-MAX_READ_LEN = 2 ** 32 - 1
+MAX_READ_LEN = 2**32 - 1
 
 
 async def read_data(stream: INetStream) -> None:
@@ -58,7 +66,8 @@ async def run(port: int, destination: str) -> None:
             # Associate the peer with local ip address
             await host.connect(info)
             # Start a stream with the destination.
-            # Multiaddress of the destination peer is fetched from the peerstore using 'peerId'.
+            # Multiaddress of the destination peer is fetched from the peerstore
+            # using 'peerId'.
             stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
 
             nursery.start_soon(read_data, stream)

@@ -1,12 +1,27 @@
-from typing import Awaitable, Callable
+from typing import (
+    Awaitable,
+    Callable,
+)
 
-from libp2p.host.host_interface import IHost
-from libp2p.network.stream.exceptions import StreamError
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.network.swarm import Swarm
-from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.host.host_interface import (
+    IHost,
+)
+from libp2p.network.stream.exceptions import (
+    StreamError,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.network.swarm import (
+    Swarm,
+)
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
 
-from .constants import MAX_READ_LEN
+from .constants import (
+    MAX_READ_LEN,
+)
 
 
 async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:
@@ -30,7 +45,7 @@ async def connect(node1: IHost, node2: IHost) -> None:
 
 
 def create_echo_stream_handler(
-    ack_prefix: str
+    ack_prefix: str,
 ) -> Callable[[INetStream], Awaitable[None]]:
     async def echo_stream_handler(stream: INetStream) -> None:
         while True:

@@ -1,10 +1,17 @@
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import (
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
-from .pb import rpc_pb2
+from .pb import (
+    rpc_pb2,
+)
 
 
 class CacheEntry:
-
     mid: Tuple[bytes, bytes]
     topics: List[str]
 
@@ -24,7 +31,6 @@ class CacheEntry:
 
 
 class MessageCache:
-
     window_size: int
     history_size: int
 
@@ -91,8 +97,9 @@ class MessageCache:
         return mids
 
     def shift(self) -> None:
-        """Shift the window over by 1 position, dropping the last element of
-        the history."""
+        """
+        Shift the window over by 1 position, dropping the last element of the history.
+        """
         last_entries: List[CacheEntry] = self.history[len(self.history) - 1]
 
         for entry in last_entries:

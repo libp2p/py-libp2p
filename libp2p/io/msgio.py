@@ -5,13 +5,26 @@ from that repo: "a simple package to r/w length-delimited slices."
 
 NOTE: currently missing the capability to indicate lengths by "varint" method.
 """
-from abc import abstractmethod
+from abc import (
+    abstractmethod,
+)
 
-from libp2p.io.abc import MsgReadWriteCloser, Reader, ReadWriteCloser
-from libp2p.io.utils import read_exactly
-from libp2p.utils import decode_uvarint_from_stream, encode_varint_prefixed
+from libp2p.io.abc import (
+    MsgReadWriteCloser,
+    Reader,
+    ReadWriteCloser,
+)
+from libp2p.io.utils import (
+    read_exactly,
+)
+from libp2p.utils import (
+    decode_uvarint_from_stream,
+    encode_varint_prefixed,
+)
 
-from .exceptions import MessageTooLarge
+from .exceptions import (
+    MessageTooLarge,
+)
 
 BYTE_ORDER = "big"
 

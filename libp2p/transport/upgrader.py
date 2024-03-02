@@ -1,16 +1,43 @@
-from libp2p.network.connection.raw_connection_interface import IRawConnection
-from libp2p.peer.id import ID
-from libp2p.protocol_muxer.exceptions import MultiselectClientError, MultiselectError
-from libp2p.security.exceptions import HandshakeFailure
-from libp2p.security.secure_conn_interface import ISecureConn
-from libp2p.security.security_multistream import SecurityMultistream
-from libp2p.stream_muxer.abc import IMuxedConn
-from libp2p.stream_muxer.muxer_multistream import MuxerMultistream
-from libp2p.transport.exceptions import MuxerUpgradeFailure, SecurityUpgradeFailure
-from libp2p.transport.typing import TMuxerOptions, TSecurityOptions
+from libp2p.network.connection.raw_connection_interface import (
+    IRawConnection,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.protocol_muxer.exceptions import (
+    MultiselectClientError,
+    MultiselectError,
+)
+from libp2p.security.exceptions import (
+    HandshakeFailure,
+)
+from libp2p.security.secure_conn_interface import (
+    ISecureConn,
+)
+from libp2p.security.security_multistream import (
+    SecurityMultistream,
+)
+from libp2p.stream_muxer.abc import (
+    IMuxedConn,
+)
+from libp2p.stream_muxer.muxer_multistream import (
+    MuxerMultistream,
+)
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+    SecurityUpgradeFailure,
+)
+from libp2p.transport.typing import (
+    TMuxerOptions,
+    TSecurityOptions,
+)
 
-from .listener_interface import IListener
-from .transport_interface import ITransport
+from .listener_interface import (
+    IListener,
+)
+from .transport_interface import (
+    ITransport,
+)
 
 
 class TransportUpgrader:
@@ -28,7 +55,6 @@ class TransportUpgrader:
     def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
         """Upgrade multiaddr listeners to libp2p-transport listeners."""
         # TODO: Figure out what to do with this function.
-        pass
 
     async def upgrade_security(
         self, raw_conn: IRawConnection, peer_id: ID, is_initiator: bool

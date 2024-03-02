@@ -1,19 +1,34 @@
-from typing import Dict, Tuple
+from typing import (
+    Dict,
+    Tuple,
+)
 
-from libp2p.typing import StreamHandlerFn, TProtocol
+from libp2p.typing import (
+    StreamHandlerFn,
+    TProtocol,
+)
 
-from .exceptions import MultiselectCommunicatorError, MultiselectError
-from .multiselect_communicator_interface import IMultiselectCommunicator
-from .multiselect_muxer_interface import IMultiselectMuxer
+from .exceptions import (
+    MultiselectCommunicatorError,
+    MultiselectError,
+)
+from .multiselect_communicator_interface import (
+    IMultiselectCommunicator,
+)
+from .multiselect_muxer_interface import (
+    IMultiselectMuxer,
+)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 
 
 class Multiselect(IMultiselectMuxer):
-    """Multiselect module that is responsible for responding to a multiselect
+    """
+    Multiselect module that is responsible for responding to a multiselect
     client and deciding on a specific protocol and handler pair to use for
-    communication."""
+    communication.
+    """
 
     handlers: Dict[TProtocol, StreamHandlerFn]
 

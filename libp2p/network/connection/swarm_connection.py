@@ -1,11 +1,24 @@
-from typing import TYPE_CHECKING, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Set,
+    Tuple,
+)
 
 import trio
 
-from libp2p.network.connection.net_connection_interface import INetConn
-from libp2p.network.stream.net_stream import NetStream
-from libp2p.stream_muxer.abc import IMuxedConn, IMuxedStream
-from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
+from libp2p.network.connection.net_connection_interface import (
+    INetConn,
+)
+from libp2p.network.stream.net_stream import (
+    NetStream,
+)
+from libp2p.stream_muxer.abc import (
+    IMuxedConn,
+    IMuxedStream,
+)
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
+)
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
@@ -48,8 +61,8 @@ class SwarmConn(INetConn):
         # We *could* optimize this but it really isn't worth it.
         for stream in self.streams.copy():
             await stream.reset()
-        # Force context switch for stream handlers to process the stream reset event we just emit
-        # before we cancel the stream handler tasks.
+        # Force context switch for stream handlers to process the stream reset event we
+        # just emit before we cancel the stream handler tasks.
         await trio.sleep(0.1)
 
         await self._notify_disconnected()
@@ -63,13 +76,15 @@ class SwarmConn(INetConn):
                 except MuxedConnUnavailable:
                     await self.close()
                     break
-                # Asynchronously handle the accepted stream, to avoid blocking the next stream.
+                # Asynchronously handle the accepted stream, to avoid blocking
+                # the next stream.
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         net_stream = await self._add_stream(muxed_stream)
         try:
-            # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427
+            # Ignore type here since mypy complains:
+            # https://github.com/python/mypy/issues/2427
             await self.swarm.common_stream_handler(net_stream)  # type: ignore
         finally:
             # As long as `common_stream_handler`, remove the stream.

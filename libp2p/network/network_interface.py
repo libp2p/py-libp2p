@@ -1,23 +1,45 @@
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, Sequence
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Sequence,
+)
 
-from async_service import ServiceAPI
-from multiaddr import Multiaddr
+from async_service import (
+    ServiceAPI,
+)
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.network.connection.net_connection_interface import INetConn
-from libp2p.peer.id import ID
-from libp2p.peer.peerstore_interface import IPeerStore
-from libp2p.transport.listener_interface import IListener
-from libp2p.typing import StreamHandlerFn
+from libp2p.network.connection.net_connection_interface import (
+    INetConn,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerstore_interface import (
+    IPeerStore,
+)
+from libp2p.transport.listener_interface import (
+    IListener,
+)
+from libp2p.typing import (
+    StreamHandlerFn,
+)
 
-from .stream.net_stream_interface import INetStream
+from .stream.net_stream_interface import (
+    INetStream,
+)
 
 if TYPE_CHECKING:
     from .notifee_interface import INotifee  # noqa: F401
 
 
 class INetwork(ABC):
-
     peerstore: IPeerStore
     connections: Dict[ID, INetConn]
     listeners: Dict[str, IListener]

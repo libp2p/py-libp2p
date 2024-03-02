@@ -3,10 +3,20 @@ import random
 import pytest
 import trio
 
-from libp2p.pubsub.gossipsub import PROTOCOL_ID
-from libp2p.tools.factories import IDFactory, PubsubFactory
-from libp2p.tools.pubsub.utils import dense_connect, one_to_all_connect
-from libp2p.tools.utils import connect
+from libp2p.pubsub.gossipsub import (
+    PROTOCOL_ID,
+)
+from libp2p.tools.factories import (
+    IDFactory,
+    PubsubFactory,
+)
+from libp2p.tools.pubsub.utils import (
+    dense_connect,
+    one_to_all_connect,
+)
+from libp2p.tools.utils import (
+    connect,
+)
 
 
 @pytest.mark.trio
@@ -353,11 +363,11 @@ async def test_mesh_heartbeat(initial_mesh_peer_count, monkeypatch):
         1, heartbeat_initial_delay=100
     ) as pubsubs_gsub:
         # It's difficult to set up the initial peer subscription condition.
-        # Ideally I would like to have initial mesh peer count that's below ``GossipSubDegree``
-        # so I can test if `mesh_heartbeat` return correct peers to GRAFT.
-        # The problem is that I can not set it up so that we have peers subscribe to the topic
-        # but not being part of our mesh peers (as these peers are the peers to GRAFT).
-        # So I monkeypatch the peer subscriptions and our mesh peers.
+        # Ideally I would like to have initial mesh peer count that's below
+        # ``GossipSubDegree`` so I can test if `mesh_heartbeat` return correct peers to
+        # GRAFT. The problem is that I can not set it up so that we have peers subscribe
+        # to the topic but not being part of our mesh peers (as these peers are the
+        # peers to GRAFT). So I monkeypatch the peer subscriptions and our mesh peers.
         total_peer_count = 14
         topic = "TEST_MESH_HEARTBEAT"
 
@@ -408,9 +418,9 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
     async with PubsubFactory.create_batch_with_gossipsub(
         1, heartbeat_initial_delay=100
     ) as pubsubs_gsub:
-        # The problem is that I can not set it up so that we have peers subscribe to the topic
-        # but not being part of our mesh peers (as these peers are the peers to GRAFT).
-        # So I monkeypatch the peer subscriptions and our mesh peers.
+        # The problem is that I can not set it up so that we have peers subscribe to the
+        # topic but not being part of our mesh peers (as these peers are the peers to
+        # GRAFT). So I monkeypatch the peer subscriptions and our mesh peers.
         total_peer_count = 28
         topic_mesh = "TEST_GOSSIP_HEARTBEAT_1"
         topic_fanout = "TEST_GOSSIP_HEARTBEAT_2"
@@ -455,8 +465,8 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         monkeypatch.setattr(pubsubs_gsub[0].router.mcache, "window", window)
 
         peers_to_gossip = pubsubs_gsub[0].router.gossip_heartbeat()
-        # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up to
-        # `GossipSubDegree` peers (exclude mesh peers).
+        # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up
+        # to `GossipSubDegree` peers (exclude mesh peers).
         if topic_mesh_peer_count - initial_peer_count < pubsubs_gsub[0].router.degree:
             # The same goes for fanout so it's two times the number of peers to gossip.
             assert len(peers_to_gossip) == 2 * (

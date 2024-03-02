@@ -3,8 +3,12 @@ import math
 import pytest
 import trio
 
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.subscription import TrioSubscriptionAPI
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+)
+from libp2p.pubsub.subscription import (
+    TrioSubscriptionAPI,
+)
 
 GET_TIMEOUT = 0.001
 

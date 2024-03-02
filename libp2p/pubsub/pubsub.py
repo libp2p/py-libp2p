@@ -15,32 +15,77 @@ from typing import (
     cast,
 )
 
-from async_service import Service
+from async_service import (
+    Service,
+)
 import base58
-from lru import LRU
+from lru import (
+    LRU,
+)
 import trio
 
-from libp2p.crypto.keys import PrivateKey
-from libp2p.exceptions import ParseError, ValidationError
-from libp2p.host.host_interface import IHost
-from libp2p.io.exceptions import IncompleteReadError
-from libp2p.network.exceptions import SwarmException
-from libp2p.network.stream.exceptions import StreamClosed, StreamEOF, StreamReset
-from libp2p.network.stream.net_stream_interface import INetStream
-from libp2p.peer.id import ID
-from libp2p.typing import TProtocol
-from libp2p.utils import encode_varint_prefixed, read_varint_prefixed_bytes
+from libp2p.crypto.keys import (
+    PrivateKey,
+)
+from libp2p.exceptions import (
+    ParseError,
+    ValidationError,
+)
+from libp2p.host.host_interface import (
+    IHost,
+)
+from libp2p.io.exceptions import (
+    IncompleteReadError,
+)
+from libp2p.network.exceptions import (
+    SwarmException,
+)
+from libp2p.network.stream.exceptions import (
+    StreamClosed,
+    StreamEOF,
+    StreamReset,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.typing import (
+    TProtocol,
+)
+from libp2p.utils import (
+    encode_varint_prefixed,
+    read_varint_prefixed_bytes,
+)
 
-from .abc import IPubsub, ISubscriptionAPI
-from .pb import rpc_pb2
-from .pubsub_notifee import PubsubNotifee
-from .subscription import TrioSubscriptionAPI
-from .typing import AsyncValidatorFn, SyncValidatorFn, ValidatorFn
-from .validators import PUBSUB_SIGNING_PREFIX, signature_validator
+from .abc import (
+    IPubsub,
+    ISubscriptionAPI,
+)
+from .pb import (
+    rpc_pb2,
+)
+from .pubsub_notifee import (
+    PubsubNotifee,
+)
+from .subscription import (
+    TrioSubscriptionAPI,
+)
+from .typing import (
+    AsyncValidatorFn,
+    SyncValidatorFn,
+    ValidatorFn,
+)
+from .validators import (
+    PUBSUB_SIGNING_PREFIX,
+    signature_validator,
+)
 
 if TYPE_CHECKING:
-    from .abc import IPubsubRouter  # noqa: F401
     from typing import Any  # noqa: F401
+
+    from .abc import IPubsubRouter  # noqa: F401
 
 
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
@@ -64,7 +109,6 @@ class TopicValidator(NamedTuple):
 
 
 class Pubsub(Service, IPubsub):
-
     host: IHost
 
     router: "IPubsubRouter"
@@ -186,8 +230,10 @@ class Pubsub(Service, IPubsub):
         return self.subscribed_topics_receive.keys()
 
     def get_hello_packet(self) -> rpc_pb2.RPC:
-        """Generate subscription message with all topics we are subscribed to
-        only send hello packet if we have subscribed topics."""
+        """
+        Generate subscription message with all topics we are subscribed to
+        only send hello packet if we have subscribed topics.
+        """
         packet = rpc_pb2.RPC()
         for topic_id in self.topic_ids:
             packet.subscriptions.extend(
@@ -254,7 +300,7 @@ class Pubsub(Service, IPubsub):
         :param topic: the topic to register validator under
         :param validator: the validator used to validate messages published to the topic
         :param is_async_validator: indicate if the validator is an asynchronous validator
-        """
+        """  # noqa: E501
         self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
 
     def remove_topic_validator(self, topic: str) -> None:
@@ -341,9 +387,11 @@ class Pubsub(Service, IPubsub):
         logger.debug("removed dead peer %s", peer_id)
 
     async def handle_peer_queue(self) -> None:
-        """Continuously read from peer queue and each time a new peer is found,
+        """
+        Continuously read from peer queue and each time a new peer is found,
         open a stream to the peer using a supported pubsub protocol pubsub
-        protocols we support."""
+        protocols we support.
+        """
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
@@ -351,9 +399,10 @@ class Pubsub(Service, IPubsub):
                 self.manager.run_task(self._handle_new_peer, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
-        """Continuously read from dead peer channel and close the stream
-        between that peer and remove peer info from pubsub and pubsub
-        router."""
+        """
+        Continuously read from dead peer channel and close the stream
+        between that peer and remove peer info from pubsub and pubsub router.
+        """
         async with self.dead_peer_receive_channel:
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
@@ -373,7 +422,7 @@ class Pubsub(Service, IPubsub):
         """
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = set([origin_id])
+                self.peer_topics[sub_message.topicid] = {origin_id}
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
@@ -388,7 +437,6 @@ class Pubsub(Service, IPubsub):
 
         :param publish_message: RPC.Message format
         """
-
         # Check if this message has any topics that we are subscribed to
         for topic in publish_message.topicIDs:
             if topic in self.topic_ids:
@@ -409,7 +457,6 @@ class Pubsub(Service, IPubsub):
 
         :param topic_id: topic_id to subscribe to
         """
-
         logger.debug("subscribing to topic %s", topic_id)
 
         # Already subscribed
@@ -448,7 +495,6 @@ class Pubsub(Service, IPubsub):
 
         :param topic_id: topic_id to unsubscribe from
         """
-
         logger.debug("unsubscribing from topic %s", topic_id)
 
         # Return if we already unsubscribed from the topic
@@ -479,7 +525,6 @@ class Pubsub(Service, IPubsub):
 
         :param raw_msg: raw contents of the message to broadcast
         """
-
         # Broadcast message
         for stream in self.peers.values():
             # Write message to stream
@@ -571,7 +616,7 @@ class Pubsub(Service, IPubsub):
 
         # TODO: Check if the `from` is in the blacklist. If yes, reject.
 
-        # If the message is processed before, return(i.e., don't further process the message).
+        # If the message is processed before, return(i.e., don't further process the message)  # noqa: E501
         if self._is_msg_seen(msg):
             return
 
@@ -588,7 +633,7 @@ class Pubsub(Service, IPubsub):
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
             logger.debug(
-                "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",
+                "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",  # noqa: E501
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
@@ -612,8 +657,8 @@ class Pubsub(Service, IPubsub):
 
     def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
         msg_id = self._msg_id_constructor(msg)
-        # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there is a
-        #   more appropriate way.
+        # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there
+        # is a more appropriate way.
         self.seen_messages[msg_id] = 1
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:

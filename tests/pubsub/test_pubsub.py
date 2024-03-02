@@ -1,17 +1,40 @@
-from contextlib import contextmanager
-from typing import NamedTuple
+from contextlib import (
+    contextmanager,
+)
+from typing import (
+    NamedTuple,
+)
 
 import pytest
 import trio
 
-from libp2p.exceptions import ValidationError
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.pubsub import PUBSUB_SIGNING_PREFIX, SUBSCRIPTION_CHANNEL_SIZE
-from libp2p.tools.constants import MAX_READ_LEN
-from libp2p.tools.factories import IDFactory, PubsubFactory, net_stream_pair_factory
-from libp2p.tools.pubsub.utils import make_pubsub_msg
-from libp2p.tools.utils import connect
-from libp2p.utils import encode_varint_prefixed
+from libp2p.exceptions import (
+    ValidationError,
+)
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+)
+from libp2p.pubsub.pubsub import (
+    PUBSUB_SIGNING_PREFIX,
+    SUBSCRIPTION_CHANNEL_SIZE,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
+from libp2p.tools.factories import (
+    IDFactory,
+    PubsubFactory,
+    net_stream_pair_factory,
+)
+from libp2p.tools.pubsub.utils import (
+    make_pubsub_msg,
+)
+from libp2p.tools.utils import (
+    connect,
+)
+from libp2p.utils import (
+    encode_varint_prefixed,
+)
 
 TESTING_TOPIC = "TEST_SUBSCRIBE"
 TESTING_DATA = b"data"
@@ -77,7 +100,8 @@ async def test_get_hello_packet():
             packet = pubsubs_fsub[0].get_hello_packet()
             return tuple(sub.topicid for sub in packet.subscriptions)
 
-        # Test: No subscription, so there should not be any topic ids in the hello packet.
+        # Test: No subscription, so there should not be any topic ids in the
+        # hello packet.
         assert len(_get_hello_packet_topic_ids()) == 0
 
         # Test: After subscriptions, topic ids should be in the hello packet.
@@ -469,7 +493,8 @@ async def test_subscribe_and_publish_full_channel():
         for data in list_data:
             await pubsub.publish(TESTING_TOPIC, data)
 
-        # Publish `extra_data_0` which should be dropped since the channel is already full.
+        # Publish `extra_data_0` which should be dropped since the channel is
+        # already full.
         await pubsub.publish(TESTING_TOPIC, extra_data_0)
         # Consume a message and there is an empty slot in the channel.
         assert (await subscription.get()).data == expected_list_data.pop(0)
@@ -520,7 +545,6 @@ async def test_push_msg(monkeypatch):
 
         @contextmanager
         def mock_router_publish():
-
             event = trio.Event()
 
             async def router_publish(*args, **kwargs):

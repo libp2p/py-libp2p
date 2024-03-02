@@ -1,10 +1,21 @@
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    TYPE_CHECKING,
+)
 
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.network.connection.net_connection_interface import INetConn
-from libp2p.network.stream.net_stream_interface import INetStream
+from libp2p.network.connection.net_connection_interface import (
+    INetConn,
+)
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
 
 if TYPE_CHECKING:
     from .network_interface import INetwork  # noqa: F401

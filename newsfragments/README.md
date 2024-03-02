@@ -6,15 +6,17 @@ commit message and PR description, which are a description of the change as
 relevant to people working on the code itself.)
 
 Each file should be named like `<ISSUE>.<TYPE>.rst`, where
-`<ISSUE>` is an issue numbers, and `<TYPE>` is one of:
+`<ISSUE>` is an issue number, and `<TYPE>` is one of:
 
-* `feature`
-* `bugfix`
-* `performance`
-* `doc`
-* `internal`
-* `removal`
-* `misc`
+- `breaking`
+- `bugfix`
+- `deprecation`
+- `docs`
+- `feature`
+- `internal`
+- `misc`
+- `performance`
+- `removal`
 
 So for example: `123.feature.rst`, `456.bugfix.rst`
 
@@ -23,5 +25,5 @@ then open up the PR first and use the PR number for the newsfragment.
 
 Note that the `towncrier` tool will automatically
 reflow your text, so don't try to do any fancy formatting. Run
- `towncrier --draft` to get a preview of what the release notes entry
- will look like in the final release notes.
+`towncrier build --draft` to get a preview of what the release notes entry
+will look like in the final release notes.

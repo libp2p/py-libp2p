@@ -1,9 +1,19 @@
-from typing import Sequence
+from typing import (
+    Sequence,
+)
 
-from libp2p.host.host_interface import IHost
-from libp2p.peer.id import ID
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.tools.utils import connect
+from libp2p.host.host_interface import (
+    IHost,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+)
+from libp2p.tools.utils import (
+    connect,
+)
 
 
 def make_pubsub_msg(

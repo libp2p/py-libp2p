@@ -1,7 +1,14 @@
-from abc import ABC, abstractmethod
-from typing import Any
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Any,
+)
 
-from .id import ID
+from .id import (
+    ID,
+)
 
 
 class IPeerMetadata(ABC):

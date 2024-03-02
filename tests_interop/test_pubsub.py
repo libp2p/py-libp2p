@@ -1,17 +1,33 @@
 import functools
 import math
 
-from p2pclient.pb import p2pd_pb2
+from p2pclient.pb import (
+    p2pd_pb2,
+)
 import pytest
 import trio
 
-from libp2p.io.trio import TrioTCPStream
-from libp2p.peer.id import ID
-from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.subscription import TrioSubscriptionAPI
-from libp2p.tools.factories import PubsubFactory
-from libp2p.tools.interop.utils import connect
-from libp2p.utils import read_varint_prefixed_bytes
+from libp2p.io.trio import (
+    TrioTCPStream,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+)
+from libp2p.pubsub.subscription import (
+    TrioSubscriptionAPI,
+)
+from libp2p.tools.factories import (
+    PubsubFactory,
+)
+from libp2p.tools.interop.utils import (
+    connect,
+)
+from libp2p.utils import (
+    read_varint_prefixed_bytes,
+)
 
 TOPIC_0 = "ABALA"
 TOPIC_1 = "YOOOO"

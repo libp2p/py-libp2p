@@ -1,4 +1,6 @@
-from libp2p.io.abc import ReadWriteCloser
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
 
 
 class IRawConnection(ReadWriteCloser):
