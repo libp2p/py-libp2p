@@ -1,3 +1,5 @@
+from importlib.metadata import version as __version
+
 from libp2p.crypto.keys import (
     KeyPair,
 )
@@ -132,3 +134,6 @@ def new_host(
     else:
         host = BasicHost(swarm)
     return host
+
+
+__version__ = __version("libp2p")
