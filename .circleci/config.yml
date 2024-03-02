@@ -95,6 +95,22 @@ docs: &docs
           sudo apt-get update
           sudo apt-get install latexmk tex-gyre texlive-fonts-extra
 
+interop: &interop
+  docker:
+    - image: common
+  steps:
+    - run:
+        name: install interop test dependencies
+        command: |
+          sudo apt-get update
+          sudo apt-get install latexmk tex-gyre texlive-fonts-extra
+          wget https://dl.google.com/go/$GOBINPKG
+          sudo tar -C /usr/local -xzf $GOBINPKG
+          export GOPATH=$HOME/go
+          export GOROOT=/usr/local/go
+          export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
+          ./tests_interop/go_pkgs/install_interop_go_pkgs.sh
+
 jobs:
   docs:
     <<: *docs
@@ -222,6 +238,37 @@ jobs:
       - <<: *run-tox-step
       - <<: *save-cache-step
 
+  py38-interop:
+    <<: *interop
+    docker:
+      - image: cimg/python:3.8
+        environment:
+          TOXENV: py38-interop
+  py39-interop:
+    <<: *interop
+    docker:
+      - image: cimg/python:3.9
+        environment:
+          TOXENV: py39-interop
+  py310-interop:
+    <<: *interop
+    docker:
+      - image: cimg/python:3.10
+        environment:
+          TOXENV: py310-interop
+  py311-interop:
+    <<: *interop
+    docker:
+      - image: cimg/python:3.11
+        environment:
+          TOXENV: py311-interop
+  py312-interop:
+    <<: *interop
+    docker:
+      - image: cimg/python:3.12
+        environment:
+          TOXENV: py312-interop
+
 workflows:
   version: 2
   test:
@@ -244,3 +291,8 @@ workflows:
       - py312-wheel
       # - py311-windows-wheel
       # - py312-windows-wheel
+      # - py38-interop
+      # - py39-interop
+      # - py310-interop
+      # - py311-interop
+      # - py312-interop
