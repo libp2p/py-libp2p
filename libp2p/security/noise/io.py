@@ -72,7 +72,7 @@ class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):
         return self.noise_state.write_message(data)
 
     def decrypt(self, data: bytes) -> bytes:
-        return self.noise_state.read_message(data)
+        return bytes(self.noise_state.read_message(data))
 
 
 class NoiseTransportReadWriter(BaseNoiseMsgReadWriter):
