@@ -68,6 +68,10 @@ On Debian Linux you will need to ensure that you have the [GNU Multiprecision Ar
 sudo apt-get install libgmp-dev
 ```
 
+### Testing
+
+Running `pytest` doesn't work with this project. The correct way to execute tests is to run `make test`.
+
 ### Release setup
 
 Releases follow the same basic pattern as releases of some tangentially-related projects,
