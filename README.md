@@ -28,7 +28,7 @@ This project is graciously sponsored by the Ethereum Foundation through [Wave 5 
 
 ## Maintainers
 
-Currently maintained by [@pacrob](https://github.com/pacrob), looking for assistance!
+Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
 
 The py-libp2p team previously consisted of:
 
@@ -47,12 +47,30 @@ python -m pip install -e .[dev]
 pre-commit install
 ```
 
+Or if you use zsh, you will need to escape the `[` and `]` when running the the `pip install` command; like so:
+
+```zsh
+python -m pip install -e .\[dev\]
+```
+
 We use [pre-commit](https://pre-commit.com/) to maintain consistent code style. Once
 installed, it will run automatically with every commit. You can also run it manually
 with `make lint`. If you need to make a commit that skips the `pre-commit` checks, you
 can do so with `git commit --no-verify`.
 
 Note that tests/test_libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of concept.
+
+### Dependencies
+
+On Debian Linux you will need to ensure that you have the [GNU Multiprecision Arithmetic Library](https://gmplib.org/) installed since it is a dependency of the fastecdsa package. You can install it using the following command:
+
+```sh
+sudo apt-get install libgmp-dev
+```
+
+### Testing
+
+Running `pytest` doesn't work with this project. The correct way to execute tests is to run `make test`.
 
 ### Release setup
 
