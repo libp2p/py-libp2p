@@ -12,7 +12,6 @@ libp2p.security.noise.pb.noise\_pb2 module
    :undoc-members:
    :show-inheritance:
 
-
 Module contents
 ---------------
 
