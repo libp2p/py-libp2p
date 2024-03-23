@@ -5,6 +5,7 @@ Subpackages
 -----------
 
 .. toctree::
+   :maxdepth: 4
 
    libp2p.security.insecure
    libp2p.security.noise
@@ -45,6 +46,14 @@ libp2p.security.secure\_conn\_interface module
    :undoc-members:
    :show-inheritance:
 
+libp2p.security.secure\_session module
+--------------------------------------
+
+.. automodule:: libp2p.security.secure_session
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.security.secure\_transport\_interface module
 ---------------------------------------------------
 
@@ -60,7 +69,6 @@ libp2p.security.security\_multistream module
    :members:
    :undoc-members:
    :show-inheritance:
-
 
 Module contents
 ---------------

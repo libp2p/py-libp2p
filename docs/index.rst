@@ -7,15 +7,24 @@ Contents
 --------
 
 .. toctree::
-    :maxdepth: 3
+    :maxdepth: 1
+    :caption: General
 
-    libp2p
+    introduction
+    quickstart
     release_notes
+
+
+.. toctree::
+    :maxdepth: 1
+    :caption: py-libp2p
+
     examples
+    API <libp2p>
 
+.. toctree::
+    :maxdepth: 1
+    :caption: Community
 
-Indices and tables
-------------------
-
-* :ref:`genindex`
-* :ref:`modindex`
+    contributing
+    code_of_conduct

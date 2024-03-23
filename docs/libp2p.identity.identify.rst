@@ -5,8 +5,9 @@ Subpackages
 -----------
 
 .. toctree::
+   :maxdepth: 4
 
-    libp2p.identity.identify.pb
+   libp2p.identity.identify.pb
 
 Submodules
 ----------
@@ -15,15 +16,14 @@ libp2p.identity.identify.protocol module
 ----------------------------------------
 
 .. automodule:: libp2p.identity.identify.protocol
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Module contents
 ---------------
 
 .. automodule:: libp2p.identity.identify
-    :members:
-    :undoc-members:
-    :show-inheritance:
+   :members:
+   :undoc-members:
+   :show-inheritance:

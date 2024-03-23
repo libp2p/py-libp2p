@@ -5,6 +5,7 @@ Subpackages
 -----------
 
 .. toctree::
+   :maxdepth: 4
 
    libp2p.security.noise.pb
 
@@ -50,7 +51,6 @@ libp2p.security.noise.transport module
    :members:
    :undoc-members:
    :show-inheritance:
-
 
 Module contents
 ---------------
