@@ -32,6 +32,7 @@ extras_require = {
 extras_require["dev"] = (
     extras_require["dev"] + extras_require["docs"] + extras_require["test"]
 )
+extras_require["docs"] = extras_require["docs"] + extras_require["test"]
 
 fastecdsa = [
     # No official fastecdsa==1.7.4,1.7.5 wheels for Windows, using a pypi package that includes
