@@ -50,3 +50,11 @@ repos:
 #         additional_dependencies:
 #         -   mypy-protobuf
 #         exclude: 'tests/|tests_interop/|crypto/|identity/|pubsub/|insecure/|noise/|security/'
+-   repo: local
+    hooks:
+    -   id: check-rst-files
+        name: Check for .rst files in the top-level directory
+        entry: sh -c 'ls *.rst 1>/dev/null 2>&1 && { echo "found .rst file in top-level folder"; exit 1; } || exit 0'
+        language: system
+        always_run: true
+        pass_filenames: false

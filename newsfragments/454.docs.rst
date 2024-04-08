@@ -1,0 +1,1 @@
+Move contributing and history info from README to docs
