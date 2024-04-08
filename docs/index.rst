@@ -19,7 +19,7 @@ Contents
     :maxdepth: 1
     :caption: py-libp2p
 
-    examples
+    Examples <examples>
     API <libp2p>
 
 .. toctree::

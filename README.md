@@ -22,41 +22,9 @@ The Python implementation of the libp2p networking stack
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
-## Sponsorship
-
-This project is graciously sponsored by the Ethereum Foundation through [Wave 5 of their Grants Program](https://blog.ethereum.org/2019/02/21/ethereum-foundation-grants-program-wave-5/).
-
 ## Maintainers
 
 Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
-
-The py-libp2p team previously consisted of:
-
-[@zixuanzh](https://github.com/zixuanzh) [@alexh](https://github.com/alexh) [@stuckinaboot](https://github.com/stuckinaboot) [@robzajac](https://github.com/robzajac) [@carver](https://github.com/carver)
-
-## Development
-
-py-libp2p requires Python 3.8+ and the best way to guarantee a clean Python environment is with [`virtualenv`](https://virtualenv.pypa.io/en/stable/)
-
-```sh
-git clone git@github.com:libp2p/py-libp2p.git
-cd py-libp2p
-virtualenv -p python venv
-. venv/bin/activate
-python -m pip install -e .[dev]
-pre-commit install
-```
-
-Or if you use zsh, you will need to escape the `[` and `]` when running the the `pip install` command; like so:
-
-```zsh
-python -m pip install -e .\[dev\]
-```
-
-We use [pre-commit](https://pre-commit.com/) to maintain consistent code style. Once
-installed, it will run automatically with every commit. You can also run it manually
-with `make lint`. If you need to make a commit that skips the `pre-commit` checks, you
-can do so with `git commit --no-verify`.
 
 Note that tests/test_libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of concept.
 
