@@ -9,7 +9,7 @@ from setuptools import (
 extras_require = {
     "dev": [
         "build>=0.9.0",
-        "bumpversion>=0.5.3",
+        "bump-my-version>=0.5.3",
         "ipython",
         "pre-commit>=3.4.0",
         "tox>=4.0.0",
@@ -98,7 +98,7 @@ setup(
     license="MIT/APACHE2.0",
     zip_safe=False,
     keywords="libp2p p2p",
-    packages=find_packages(exclude=["tests", "tests.*"]),
+    packages=find_packages(exclude=["scripts", "scripts.*", "tests", "tests.*"]),
     package_data={"libp2p": ["py.typed"]},
     classifiers=[
         "Development Status :: 4 - Beta",

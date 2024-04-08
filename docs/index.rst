@@ -27,4 +27,5 @@ Contents
     :caption: Community
 
     contributing
+    history
     code_of_conduct
