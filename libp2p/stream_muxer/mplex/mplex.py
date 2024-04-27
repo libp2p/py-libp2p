@@ -189,7 +189,8 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        return await self.write_to_stream(_bytes)
+        # type ignored TODO figure out return for this and write_to_stream
+        return await self.write_to_stream(_bytes)  # type: ignore
 
     async def write_to_stream(self, _bytes: bytes) -> None:
         """

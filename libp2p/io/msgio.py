@@ -8,6 +8,9 @@ NOTE: currently missing the capability to indicate lengths by "varint" method.
 from abc import (
     abstractmethod,
 )
+from typing import (
+    Literal,
+)
 
 from libp2p.io.abc import (
     MsgReadWriteCloser,
@@ -26,7 +29,7 @@ from .exceptions import (
     MessageTooLarge,
 )
 
-BYTE_ORDER = "big"
+BYTE_ORDER: Literal["big", "little"] = "big"
 
 
 async def read_length(reader: Reader, size_len_bytes: int) -> int:

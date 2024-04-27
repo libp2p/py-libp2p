@@ -43,13 +43,14 @@ repos:
     -   id: mdformat
         additional_dependencies:
         -   mdformat-gfm
-# -   repo: https://github.com/pre-commit/mirrors-mypy
-#     rev: v1.5.1
-#     hooks:
-#     -   id: mypy
-#         additional_dependencies:
-#         -   mypy-protobuf
-#         exclude: 'tests/|tests_interop/|crypto/|identity/|pubsub/|insecure/|noise/|security/'
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.5.1
+    hooks:
+    -   id: mypy
+        additional_dependencies:
+        -   mypy-protobuf
+        # exclude: 'tests/|crypto/|identity/|pubsub/|insecure/|noise/|security/'
+        exclude: 'tests/'
 -   repo: local
     hooks:
     -   id: check-rst-files

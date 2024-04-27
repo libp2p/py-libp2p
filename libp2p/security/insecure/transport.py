@@ -182,7 +182,9 @@ class InsecureTransport(BaseSecureTransport):
 
 def make_exchange_message(pubkey: PublicKey) -> plaintext_pb2.Exchange:
     pubkey_pb = crypto_pb2.PublicKey(
-        key_type=pubkey.get_type().value, data=pubkey.to_bytes()
+        # type ignored - TODO add ECD_P256 to KeyType
+        key_type=pubkey.get_type().value,  # type: ignore
+        data=pubkey.to_bytes(),
     )
     id_bytes = ID.from_pubkey(pubkey).to_bytes()
     return plaintext_pb2.Exchange(id=id_bytes, pubkey=pubkey_pb)

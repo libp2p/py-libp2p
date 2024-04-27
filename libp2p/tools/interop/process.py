@@ -56,8 +56,7 @@ class BaseInteractiveProcess(AbstractInterativeProcess):
     async def start(self) -> None:
         if self.proc is not None:
             return
-        # NOTE: Ignore type checks here since mypy complains about bufsize=0
-        self.proc = await trio.open_process(  # type: ignore
+        self.proc = await trio.open_process(
             [self.cmd] + self.args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Redirect stderr to stdout, which makes parsing easier  # noqa: E501

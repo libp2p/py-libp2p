@@ -113,9 +113,7 @@ class Swarm(Service, INetworkService):
         # Create Notifee array
         self.notifees = []
 
-        # Ignore type here since mypy complains:
-        # https://github.com/python/mypy/issues/2427
-        self.common_stream_handler = create_default_stream_handler(self)  # type: ignore
+        self.common_stream_handler = create_default_stream_handler(self)
 
         self.listener_nursery = None
         self.event_listener_nursery_created = trio.Event()
@@ -137,9 +135,7 @@ class Swarm(Service, INetworkService):
         return self.self_id
 
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        # Ignore type here since mypy complains:
-        # https://github.com/python/mypy/issues/2427
-        self.common_stream_handler = stream_handler  # type: ignore
+        self.common_stream_handler = stream_handler
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
@@ -273,7 +269,7 @@ class Swarm(Service, INetworkService):
                 return True
 
             async def conn_handler(
-                read_write_closer: ReadWriteCloser, maddr=maddr
+                read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
                 raw_conn = RawConnection(read_write_closer, False)
 
