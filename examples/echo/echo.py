@@ -78,8 +78,8 @@ async def run(port: int, destination: str, seed: int = None) -> None:
             await stream.close()
             response = await stream.read()
 
-            print(f"Sent: {msg}")
-            print(f"Got: {response}")
+            print(f"Sent: {msg.decode('utf-8')}")
+            print(f"Got: {response.decode('utf-8')}")
 
 
 def main() -> None:

@@ -1,3 +1,6 @@
+from contextlib import (
+    asynccontextmanager,
+)
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -6,9 +9,6 @@ from typing import (
     Sequence,
 )
 
-from async_generator import (
-    asynccontextmanager,
-)
 from async_service import (
     background_trio_service,
 )
@@ -145,8 +145,7 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    # type ignored because asynccontextmanager decorator is untyped
-    @asynccontextmanager  # type: ignore
+    @asynccontextmanager
     async def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
     ) -> AsyncIterator[None]:

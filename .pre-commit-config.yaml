@@ -49,7 +49,6 @@ repos:
     -   id: mypy
         additional_dependencies:
         -   mypy-protobuf
-        # exclude: 'tests/|crypto/|identity/|pubsub/|insecure/|noise/|security/'
         exclude: 'tests/'
 -   repo: local
     hooks:
