@@ -15,11 +15,11 @@ from .pb import crypto_pb2 as protobuf
 
 @unique
 class KeyType(Enum):
-    RSA = 0
-    Ed25519 = 1
-    Secp256k1 = 2
-    ECDSA = 3
-    ECC_P256 = 4
+    RSA = protobuf.KeyType.RSA
+    Ed25519 = protobuf.KeyType.Ed25519
+    Secp256k1 = protobuf.KeyType.Secp256k1
+    ECDSA = protobuf.KeyType.ECDSA
+    ECC_P256 = protobuf.KeyType.ECC_P256
 
 
 class Key(ABC):
@@ -56,8 +56,7 @@ class PublicKey(Key):
         """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
-        # type ignored - TODO add ECD_P256 to KeyType
-        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)  # type: ignore
+        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
@@ -84,8 +83,7 @@ class PrivateKey(Key):
         """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
-        # type ignored - TODO add ECD_P256 to KeyType
-        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)  # type: ignore
+        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
