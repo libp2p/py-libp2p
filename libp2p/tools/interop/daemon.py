@@ -1,10 +1,10 @@
+from contextlib import (
+    asynccontextmanager,
+)
 from typing import (
     AsyncIterator,
 )
 
-from async_generator import (
-    asynccontextmanager,
-)
 import multiaddr
 from multiaddr import (
     Multiaddr,

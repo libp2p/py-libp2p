@@ -61,7 +61,6 @@ install_requires = [
     "protobuf>=3.10.0",
     "coincurve>=10.0.0",
     "pynacl==1.3.0",
-    "async_generator==1.10",
     "trio>=0.15.0",
     "async-service>=0.1.0a6",
     "async-exit-stack==1.0.1",

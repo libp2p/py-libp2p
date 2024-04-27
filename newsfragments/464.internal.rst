@@ -1,0 +1,1 @@
+Turn ``mypy`` checks on and remove ``async_generator`` dependency

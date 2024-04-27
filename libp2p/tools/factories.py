@@ -1,3 +1,6 @@
+from contextlib import (
+    asynccontextmanager,
+)
 from typing import (
     Any,
     AsyncIterator,
@@ -11,9 +14,6 @@ from typing import (
 
 from async_exit_stack import (
     AsyncExitStack,
-)
-from async_generator import (
-    asynccontextmanager,
 )
 from async_service import (
     background_trio_service,
