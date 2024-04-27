@@ -83,9 +83,7 @@ class SwarmConn(INetConn):
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
         net_stream = await self._add_stream(muxed_stream)
         try:
-            # Ignore type here since mypy complains:
-            # https://github.com/python/mypy/issues/2427
-            await self.swarm.common_stream_handler(net_stream)  # type: ignore
+            await self.swarm.common_stream_handler(net_stream)
         finally:
             # As long as `common_stream_handler`, remove the stream.
             self.remove_stream(net_stream)

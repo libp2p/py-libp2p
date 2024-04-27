@@ -44,12 +44,10 @@ class TrioSubscriptionAPI(BaseSubscriptionAPI):
         unsubscribe_fn: UnsubscribeFn,
     ) -> None:
         self.receive_channel = receive_channel
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427  # noqa: E501
-        self.unsubscribe_fn = unsubscribe_fn  # type: ignore
+        self.unsubscribe_fn = unsubscribe_fn
 
     async def unsubscribe(self) -> None:
-        # Ignore type here since mypy complains: https://github.com/python/mypy/issues/2427  # noqa: E501
-        await self.unsubscribe_fn()  # type: ignore
+        await self.unsubscribe_fn()
 
     def __aiter__(self) -> AsyncIterator[rpc_pb2.Message]:
         return self.receive_channel.__aiter__()

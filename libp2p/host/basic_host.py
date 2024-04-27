@@ -145,7 +145,8 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    @asynccontextmanager
+    # type ignored because asynccontextmanager decorator is untyped
+    @asynccontextmanager  # type: ignore
     async def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
     ) -> AsyncIterator[None]:
