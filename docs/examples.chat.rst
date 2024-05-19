@@ -1,21 +1,19 @@
-examples.chat package
-=====================
+Chat Demo
+=========
 
-Submodules
-----------
+Copy the code below into a file called ``chat.py``.
+Install dependencies, preferably in a virtual environment, with:
 
-examples.chat.chat module
--------------------------
+.. code-block:: bash
 
-.. automodule:: examples.chat.chat
-   :members:
-   :undoc-members:
-   :show-inheritance:
+    python -m pip install libp2p
 
-Module contents
----------------
 
-.. automodule:: examples.chat
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Run the demo with ``python chat.py`` and copy the output.
+
+Open a second terminal, navigate to the folder that contains ``chat.py``, then paste
+and run the copied line.
+
+.. literalinclude:: ../examples/chat/chat.py
+    :language: python
+    :linenos:

@@ -68,7 +68,6 @@ install_requires = [
     # added during debugging
     "anyio",
     "p2pclient",
-    "mypy-protobuf",
 ]
 
 

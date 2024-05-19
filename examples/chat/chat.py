@@ -53,10 +53,9 @@ async def run(port: int, destination: str) -> None:
             host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
             print(
-                f"Run 'python ./examples/chat/chat.py "
-                f"-p {int(port) + 1} "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}' "
-                "on another console."
+                "Run this from the same folder in another console:\n\n"
+                f"python chat.py -p {int(port) + 1} "
+                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
             print("Waiting for incoming connection...")
 
