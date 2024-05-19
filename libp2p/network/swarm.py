@@ -5,9 +5,6 @@ from typing import (
     Optional,
 )
 
-from async_service import (
-    Service,
-)
 from multiaddr import (
     Multiaddr,
 )
@@ -30,6 +27,9 @@ from libp2p.peer.peerstore_interface import (
 )
 from libp2p.stream_muxer.abc import (
     IMuxedConn,
+)
+from libp2p.tools.async_service import (
+    Service,
 )
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,

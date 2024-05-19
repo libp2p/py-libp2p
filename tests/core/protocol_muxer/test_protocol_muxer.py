@@ -1,4 +1,7 @@
 import pytest
+from trio.testing import (
+    RaisesGroup,
+)
 
 from libp2p.host.exceptions import (
     StreamFailure,
@@ -58,7 +61,13 @@ async def test_single_protocol_succeeds(security_protocol):
 
 @pytest.mark.trio
 async def test_single_protocol_fails(security_protocol):
-    with pytest.raises(StreamFailure):
+    # using trio.testing.RaisesGroup b/c pytest.raises does not handle ExceptionGroups
+    # yet: https://github.com/pytest-dev/pytest/issues/11538
+    # but switch to that once they do
+
+    # the StreamFailure is within 2 nested ExceptionGroups, so we use strict=False
+    # to unwrap down to the core Exception
+    with RaisesGroup(StreamFailure, strict=False):
         await perform_simple_test(
             "", [PROTOCOL_ECHO], [PROTOCOL_POTATO], security_protocol
         )
@@ -96,7 +105,14 @@ async def test_multiple_protocol_second_is_valid_succeeds(security_protocol):
 async def test_multiple_protocol_fails(security_protocol):
     protocols_for_client = [PROTOCOL_ROCK, PROTOCOL_FOO, "/bar/1.0.0"]
     protocols_for_listener = ["/aspyn/1.0.0", "/rob/1.0.0", "/zx/1.0.0", "/alex/1.0.0"]
-    with pytest.raises(StreamFailure):
+
+    # using trio.testing.RaisesGroup b/c pytest.raises does not handle ExceptionGroups
+    # yet: https://github.com/pytest-dev/pytest/issues/11538
+    # but switch to that once they do
+
+    # the StreamFailure is within 2 nested ExceptionGroups, so we use strict=False
+    # to unwrap down to the core Exception
+    with RaisesGroup(StreamFailure, strict=False):
         await perform_simple_test(
             "", protocols_for_client, protocols_for_listener, security_protocol
         )

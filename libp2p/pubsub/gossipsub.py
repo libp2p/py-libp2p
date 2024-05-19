@@ -17,9 +17,6 @@ from typing import (
     Tuple,
 )
 
-from async_service import (
-    Service,
-)
 import trio
 
 from libp2p.network.stream.exceptions import (
@@ -30,6 +27,9 @@ from libp2p.peer.id import (
 )
 from libp2p.pubsub import (
     floodsub,
+)
+from libp2p.tools.async_service import (
+    Service,
 )
 from libp2p.typing import (
     TProtocol,

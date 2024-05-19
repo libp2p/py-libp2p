@@ -56,7 +56,8 @@ class BaseInteractiveProcess(AbstractInterativeProcess):
     async def start(self) -> None:
         if self.proc is not None:
             return
-        self.proc = await trio.open_process(
+        # mypy says that `open_process` is not an attribute of trio, suggests run_process instead.  # noqa: E501
+        self.proc = await trio.open_process(  # type: ignore[attr-defined]
             [self.cmd] + self.args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Redirect stderr to stdout, which makes parsing easier  # noqa: E501

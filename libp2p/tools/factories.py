@@ -15,9 +15,6 @@ from typing import (
 from async_exit_stack import (
     AsyncExitStack,
 )
-from async_service import (
-    background_trio_service,
-)
 import factory
 from multiaddr import (
     Multiaddr,
@@ -110,6 +107,9 @@ from libp2p.stream_muxer.mplex.mplex import (
 )
 from libp2p.stream_muxer.mplex.mplex_stream import (
     MplexStream,
+)
+from libp2p.tools.async_service import (
+    background_trio_service,
 )
 from libp2p.tools.constants import (
     GOSSIPSUB_PARAMS,

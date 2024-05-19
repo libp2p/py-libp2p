@@ -7,6 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   libp2p.tools.async_service
    libp2p.tools.pubsub
 
 Submodules

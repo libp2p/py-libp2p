@@ -10,14 +10,14 @@ features are implemented in swarm
 """
 import enum
 
-from async_service import (
-    background_trio_service,
-)
 import pytest
 import trio
 
 from libp2p.network.notifee_interface import (
     INotifee,
+)
+from libp2p.tools.async_service import (
+    background_trio_service,
 )
 from libp2p.tools.constants import (
     LISTEN_MADDR,

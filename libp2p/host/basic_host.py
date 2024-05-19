@@ -9,9 +9,6 @@ from typing import (
     Sequence,
 )
 
-from async_service import (
-    background_trio_service,
-)
 import multiaddr
 
 from libp2p.crypto.keys import (
@@ -51,6 +48,9 @@ from libp2p.protocol_muxer.multiselect_client import (
 )
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
+)
+from libp2p.tools.async_service import (
+    background_trio_service,
 )
 from libp2p.typing import (
     StreamHandlerFn,

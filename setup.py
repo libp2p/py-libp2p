@@ -62,9 +62,10 @@ install_requires = [
     "coincurve>=10.0.0",
     "pynacl==1.3.0",
     "trio>=0.15.0",
-    "async-service>=0.1.0a6",
     "async-exit-stack==1.0.1",
     "noiseprotocol>=0.3.0",
+    "trio-typing>=0.0.4",
+    "exceptiongroup>=1.2.0; python_version < '3.11'",
     # added during debugging
     "anyio",
     "p2pclient",
