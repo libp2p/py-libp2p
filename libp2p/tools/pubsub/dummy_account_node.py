@@ -10,16 +10,16 @@ from typing import (
 from async_exit_stack import (
     AsyncExitStack,
 )
-from async_service import (
-    Service,
-    background_trio_service,
-)
 
 from libp2p.host.host_interface import (
     IHost,
 )
 from libp2p.pubsub.pubsub import (
     Pubsub,
+)
+from libp2p.tools.async_service import (
+    Service,
+    background_trio_service,
 )
 from libp2p.tools.factories import (
     PubsubFactory,

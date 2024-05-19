@@ -32,7 +32,7 @@ class MultiselectClient(IMultiselectClient):
         Ensure that the client and multiselect are both using the same
         multiselect protocol.
 
-        :param stream: stream to communicate with multiselect over
+        :param communicator: communicator to use to communicate with counterparty
         :raise MultiselectClientError: raised when handshake failed
         """
         try:
@@ -57,7 +57,7 @@ class MultiselectClient(IMultiselectClient):
         protocol that multiselect agrees on (i.e. that multiselect selects)
 
         :param protocol: protocol to select
-        :param stream: stream to communicate with multiselect over
+        :param communicator: communicator to use to communicate with counterparty
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """

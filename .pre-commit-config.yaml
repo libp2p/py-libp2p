@@ -49,6 +49,7 @@ repos:
     -   id: mypy
         additional_dependencies:
         -   mypy-protobuf
+        -   trio-typing
         exclude: 'tests/'
 -   repo: local
     hooks:

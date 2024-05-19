@@ -8,9 +8,6 @@ from typing import (
     Sequence,
 )
 
-from async_service import (
-    ServiceAPI,
-)
 from multiaddr import (
     Multiaddr,
 )
@@ -23,6 +20,9 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore_interface import (
     IPeerStore,
+)
+from libp2p.tools.async_service import (
+    ServiceAPI,
 )
 from libp2p.transport.listener_interface import (
     IListener,

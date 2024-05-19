@@ -15,9 +15,6 @@ from typing import (
     cast,
 )
 
-from async_service import (
-    Service,
-)
 import base58
 from lru import (
     LRU,
@@ -50,6 +47,9 @@ from libp2p.network.stream.net_stream_interface import (
 )
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.tools.async_service import (
+    Service,
 )
 from libp2p.typing import (
     TProtocol,
