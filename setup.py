@@ -60,14 +60,11 @@ install_requires = [
     "lru-dict>=1.1.6",
     "protobuf>=3.10.0",
     "coincurve>=10.0.0",
-    "pynacl==1.3.0",
+    "pynacl>=1.3.0",
     "trio>=0.15.0",
     "noiseprotocol>=0.3.0",
     "trio-typing>=0.0.4",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
-    # added during debugging
-    "anyio",
-    "p2pclient",
 ]
 
 
