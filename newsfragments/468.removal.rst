@@ -1,1 +1,1 @@
-Drop ``async-exit-stack`` dep, as of py37 can import ``AsyncExitStack`` from contextlib
+Drop ``async-exit-stack`` dep, as of py37 can import ``AsyncExitStack`` from contextlib, also open ``pynacl`` dep to bottom pin only
