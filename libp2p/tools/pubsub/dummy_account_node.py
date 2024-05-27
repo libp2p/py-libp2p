@@ -1,14 +1,11 @@
 from contextlib import (
+    AsyncExitStack,
     asynccontextmanager,
 )
 from typing import (
     AsyncIterator,
     Dict,
     Tuple,
-)
-
-from async_exit_stack import (
-    AsyncExitStack,
 )
 
 from libp2p.host.host_interface import (
