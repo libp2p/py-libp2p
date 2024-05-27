@@ -47,8 +47,19 @@ repos:
     rev: v1.5.1
     hooks:
     -   id: mypy
-        additional_dependencies:
+        additional_dependencies:  # keep in sync with setup.py install_requires
+        -   base58
+        -   coincurve
+        -   lru-dict
+        -   multiaddr
         -   mypy-protobuf
+        -   noiseprotocol
+        -   protobuf
+        -   pycryptodome
+        -   pymultihash
+        -   pynacl
+        -   rpcudp
+        -   trio
         -   trio-typing
         exclude: 'tests/'
 -   repo: local

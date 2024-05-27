@@ -50,21 +50,22 @@ fastecdsa = [
 with open("./README.md") as readme:
     long_description = readme.read()
 
-
+# keep in sync with pre-commit mypy hook
 install_requires = [
-    "pycryptodome>=3.9.2",
     "base58>=1.0.3",
-    "pymultihash>=0.8.2",
-    "multiaddr>=0.0.9",
-    "rpcudp>=3.0.0",
-    "lru-dict>=1.1.6",
-    "protobuf>=3.10.0",
     "coincurve>=10.0.0",
-    "pynacl>=1.3.0",
-    "trio>=0.15.0",
-    "noiseprotocol>=0.3.0",
-    "trio-typing>=0.0.4",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "lru-dict>=1.1.6",
+    "multiaddr>=0.0.9",
+    "mypy-protobuf>=3.1.0",
+    "noiseprotocol>=0.3.0",
+    "protobuf>=3.10.0",
+    "pycryptodome>=3.9.2",
+    "pymultihash>=0.8.2",
+    "pynacl>=1.3.0",
+    "rpcudp>=3.0.0",
+    "trio-typing>=0.0.4",
+    "trio>=0.15.0",
 ]
 
 

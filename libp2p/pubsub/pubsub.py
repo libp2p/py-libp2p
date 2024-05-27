@@ -1,3 +1,7 @@
+from __future__ import (
+    annotations,
+)
+
 import base64
 import functools
 import hashlib
@@ -6,12 +10,8 @@ import time
 from typing import (
     TYPE_CHECKING,
     Callable,
-    Dict,
     KeysView,
-    List,
     NamedTuple,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -111,20 +111,20 @@ class TopicValidator(NamedTuple):
 class Pubsub(Service, IPubsub):
     host: IHost
 
-    router: "IPubsubRouter"
+    router: IPubsubRouter
 
-    peer_receive_channel: "trio.MemoryReceiveChannel[ID]"
-    dead_peer_receive_channel: "trio.MemoryReceiveChannel[ID]"
+    peer_receive_channel: trio.MemoryReceiveChannel[ID]
+    dead_peer_receive_channel: trio.MemoryReceiveChannel[ID]
 
-    seen_messages: LRU
+    seen_messages: LRU[bytes, int]
 
-    subscribed_topics_send: Dict[str, "trio.MemorySendChannel[rpc_pb2.Message]"]
-    subscribed_topics_receive: Dict[str, "TrioSubscriptionAPI"]
+    subscribed_topics_send: dict[str, trio.MemorySendChannel[rpc_pb2.Message]]
+    subscribed_topics_receive: dict[str, TrioSubscriptionAPI]
 
-    peer_topics: Dict[str, Set[ID]]
-    peers: Dict[ID, INetStream]
+    peer_topics: dict[str, set[ID]]
+    peers: dict[ID, INetStream]
 
-    topic_validators: Dict[str, TopicValidator]
+    topic_validators: dict[str, TopicValidator]
 
     counter: int  # uint64
 
@@ -138,7 +138,7 @@ class Pubsub(Service, IPubsub):
     def __init__(
         self,
         host: IHost,
-        router: "IPubsubRouter",
+        router: IPubsubRouter,
         cache_size: int = None,
         strict_signing: bool = True,
         msg_id_constructor: Callable[
@@ -191,7 +191,7 @@ class Pubsub(Service, IPubsub):
         else:
             self.sign_key = None
 
-        self.seen_messages = LRU(self.cache_size)
+        self.seen_messages = LRU[bytes, int](self.cache_size)
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
@@ -222,7 +222,7 @@ class Pubsub(Service, IPubsub):
         return self.host.get_id()
 
     @property
-    def protocols(self) -> Tuple[TProtocol, ...]:
+    def protocols(self) -> tuple[TProtocol, ...]:
         return tuple(self.router.get_protocols())
 
     @property
@@ -311,7 +311,7 @@ class Pubsub(Service, IPubsub):
         """
         self.topic_validators.pop(topic, None)
 
-    def get_msg_validators(self, msg: rpc_pb2.Message) -> Tuple[TopicValidator, ...]:
+    def get_msg_validators(self, msg: rpc_pb2.Message) -> tuple[TopicValidator, ...]:
         """
         Get all validators corresponding to the topics in the message.
 
@@ -569,8 +569,8 @@ class Pubsub(Service, IPubsub):
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
-        sync_topic_validators: List[SyncValidatorFn] = []
-        async_topic_validators: List[AsyncValidatorFn] = []
+        sync_topic_validators: list[SyncValidatorFn] = []
+        async_topic_validators: list[AsyncValidatorFn] = []
         for topic_validator in self.get_msg_validators(msg):
             if topic_validator.is_async:
                 async_topic_validators.append(

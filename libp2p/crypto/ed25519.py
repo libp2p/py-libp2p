@@ -67,7 +67,7 @@ class Ed25519PrivateKey(PrivateKey):
         return KeyType.Ed25519
 
     def sign(self, data: bytes) -> bytes:
-        h = SHA256.new(data)
+        h = SHA256.new(data).digest()
         signing_key = SigningKey(self.to_bytes())
         return signing_key.sign(h)
 
