@@ -1,7 +1,8 @@
-import anyio
-from async_exit_stack import (
+from contextlib import (
     AsyncExitStack,
 )
+
+import anyio
 from p2pclient.datastructures import (
     StreamInfo,
 )

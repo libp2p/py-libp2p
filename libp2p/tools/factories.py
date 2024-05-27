@@ -1,4 +1,5 @@
 from contextlib import (
+    AsyncExitStack,
     asynccontextmanager,
 )
 from typing import (
@@ -12,9 +13,6 @@ from typing import (
     cast,
 )
 
-from async_exit_stack import (
-    AsyncExitStack,
-)
 import factory
 from multiaddr import (
     Multiaddr,
