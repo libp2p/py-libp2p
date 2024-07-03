@@ -1,0 +1,1 @@
+Bump to ``mypy==1.10.0``, run ``pre-commit`` local hook instead of ``mirrors-mypy``
