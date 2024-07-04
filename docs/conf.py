@@ -82,6 +82,7 @@ release = __version__
 exclude_patterns = [
     "_build",
     "modules.rst",
+    "libp2p.crypto.pb.rst",
 ]
 
 # The reST default role (used for this markup: `text`) to use for all
