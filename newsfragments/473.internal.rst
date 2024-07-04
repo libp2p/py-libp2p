@@ -1,0 +1,1 @@
+Bump ``protobufs`` dep to ``>=5.27.2`` and rebuild protobuf definition with ``protoc==27.2``
