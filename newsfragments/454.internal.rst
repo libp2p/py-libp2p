@@ -1,1 +1,0 @@
-Fix docs CI, drop ``bumpversion`` for ``bump-my-version``, reorg tests

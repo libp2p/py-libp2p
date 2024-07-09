@@ -3,6 +3,46 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.0 (2024-07-09)
+-----------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- Drop support for ``python<3.8`` (`#447 <https://github.com/ethereum/py-libp2p/issues/447>`__)
+- Drop dep for unmaintained ``async-service`` and copy relevant functions into a local tool of the same name (`#467 <https://github.com/ethereum/py-libp2p/issues/467>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Move contributing and history info from README to docs (`#454 <https://github.com/ethereum/py-libp2p/issues/454>`__)
+- Display example usage and full code in docs (`#466 <https://github.com/ethereum/py-libp2p/issues/466>`__)
+
+
+Features
+~~~~~~~~
+
+- Add basic support for ``python3.8, 3.9, 3.10, 3.11, 3.12`` (`#447 <https://github.com/ethereum/py-libp2p/issues/447>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Merge updates from ethereum python project template, including using ``pre-commit`` for linting, change name of ``master`` branch to ``main``, lots of linting changes (`#447 <https://github.com/ethereum/py-libp2p/issues/447>`__)
+- Fix docs CI, drop ``bumpversion`` for ``bump-my-version``, reorg tests (`#454 <https://github.com/ethereum/py-libp2p/issues/454>`__)
+- Turn ``mypy`` checks on and remove ``async_generator`` dependency (`#464 <https://github.com/ethereum/py-libp2p/issues/464>`__)
+- Convert ``KeyType`` enum to use ``protobuf.KeyType`` options rather than ints, rebuild protobufs to include ``ECC_P256`` (`#465 <https://github.com/ethereum/py-libp2p/issues/465>`__)
+- Bump to ``mypy==1.10.0``, run ``pre-commit`` local hook instead of ``mirrors-mypy`` (`#472 <https://github.com/ethereum/py-libp2p/issues/472>`__)
+- Bump ``protobufs`` dep to ``>=5.27.2`` and rebuild protobuf definition with ``protoc==27.2`` (`#473 <https://github.com/ethereum/py-libp2p/issues/473>`__)
+
+
+Removals
+~~~~~~~~
+
+- Drop ``async-exit-stack`` dep, as of py37 can import ``AsyncExitStack`` from contextlib, also open ``pynacl`` dep to bottom pin only (`#468 <https://github.com/ethereum/py-libp2p/issues/468>`__)
+
+
 libp2p v0.1.5 (2020-03-25)
 ---------------------------
 

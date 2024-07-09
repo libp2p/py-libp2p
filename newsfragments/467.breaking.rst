@@ -1,1 +1,0 @@
-Drop dep for unmaintained ``async-service`` and copy relevant functions into a local tool of the same name
