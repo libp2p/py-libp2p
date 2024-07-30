@@ -1,0 +1,43 @@
+name: Run tox
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - github-actions
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tox:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        toxenv: [core, lint, wheel]
+        include:
+          - python: '3.9'
+            toxenv: docs
+      fail-fast: false
+    steps:
+      - env:
+          python: ${{ matrix.python }}
+          toxenv: ${{ matrix.toxenv }}
+        run: |
+          if [[ "$toxenv" == 'docs' ]]; then
+            echo 'TOXENV=docs' | tee -a $GITHUB_ENV
+          else
+            echo "TOXENV=${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install tox
+      - run: |
+          python -m tox run -r
