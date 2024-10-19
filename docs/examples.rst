@@ -12,6 +12,7 @@ Example Scripts
 
     examples.chat
     examples.echo
+    examples.ping
 
 Module contents
 ---------------
