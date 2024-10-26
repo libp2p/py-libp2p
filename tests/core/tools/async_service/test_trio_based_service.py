@@ -135,7 +135,9 @@ async def test_trio_service_lifecycle_run_and_exception():
 
     async def do_service_run():
         with RaisesGroup(
-            Matcher(RuntimeError, match="Service throwing error"), strict=False
+            Matcher(RuntimeError, match="Service throwing error"),
+            allow_unwrapped=True,
+            flatten_subgroups=True,
         ):
             await manager.run()
 
@@ -164,7 +166,9 @@ async def test_trio_service_lifecycle_run_and_task_exception():
 
     async def do_service_run():
         with RaisesGroup(
-            Matcher(RuntimeError, match="Service throwing error"), strict=False
+            Matcher(RuntimeError, match="Service throwing error"),
+            allow_unwrapped=True,
+            flatten_subgroups=True,
         ):
             await manager.run()
 
@@ -226,7 +230,11 @@ async def test_trio_service_lifecycle_run_and_daemon_task_exit():
     manager = TrioManager(service)
 
     async def do_service_run():
-        with RaisesGroup(Matcher(DaemonTaskExit, match="Daemon task"), strict=False):
+        with RaisesGroup(
+            Matcher(DaemonTaskExit, match="Daemon task"),
+            allow_unwrapped=True,
+            flatten_subgroups=True,
+        ):
             await manager.run()
 
     await do_service_lifecycle_check(
@@ -388,7 +396,9 @@ async def test_trio_service_manager_run_task_reraises_exceptions():
             await trio.sleep_forever()
 
     with RaisesGroup(
-        Matcher(Exception, match="task exception in run_task"), strict=False
+        Matcher(Exception, match="task exception in run_task"),
+        allow_unwrapped=True,
+        flatten_subgroups=True,
     ):
         async with background_trio_service(RunTaskService()):
             task_event.set()
@@ -413,7 +423,8 @@ async def test_trio_service_manager_run_daemon_task_cancels_if_exits():
         Matcher(
             DaemonTaskExit, match=r"Daemon task daemon_task_fn\[daemon=True\] exited"
         ),
-        strict=False,
+        allow_unwrapped=True,
+        flatten_subgroups=True,
     ):
         async with background_trio_service(RunTaskService()):
             task_event.set()
@@ -432,7 +443,11 @@ async def test_trio_service_manager_propogates_and_records_exceptions():
 
     assert manager.did_error is False
 
-    with RaisesGroup(Matcher(RuntimeError, match="this is the error"), strict=False):
+    with RaisesGroup(
+        Matcher(RuntimeError, match="this is the error"),
+        allow_unwrapped=True,
+        flatten_subgroups=True,
+    ):
         await manager.run()
 
     assert manager.did_error is True
@@ -645,7 +660,7 @@ async def test_error_in_service_run():
             self.manager.run_daemon_task(self.manager.wait_finished)
             raise ValueError("Exception inside run()")
 
-    with RaisesGroup(ValueError, strict=False):
+    with RaisesGroup(ValueError, allow_unwrapped=True, flatten_subgroups=True):
         await TrioManager.run_service(ServiceTest())
 
 
@@ -664,5 +679,5 @@ async def test_daemon_task_finishes_leaving_children():
         async def run(self):
             self.manager.run_daemon_task(self.buggy_daemon)
 
-    with RaisesGroup(DaemonTaskExit, strict=False):
+    with RaisesGroup(DaemonTaskExit, allow_unwrapped=True, flatten_subgroups=True):
         await TrioManager.run_service(ServiceTest())
