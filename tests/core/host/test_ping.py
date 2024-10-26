@@ -6,6 +6,7 @@ import trio
 from libp2p.host.ping import (
     ID,
     PING_LENGTH,
+    PingService,
 )
 from libp2p.tools.factories import (
     host_pair_factory,
@@ -47,3 +48,28 @@ async def test_ping_several(security_protocol):
             # NOTE: this interval can be `0` for this test.
             await trio.sleep(0)
         await stream.close()
+
+
+@pytest.mark.trio
+async def test_ping_service_once(security_protocol):
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        ping_service = PingService(host_b)
+        rtts = await ping_service.ping(host_a.get_id())
+        assert len(rtts) == 1
+        assert rtts[0] < 10**6
+
+
+@pytest.mark.trio
+async def test_ping_service_several(security_protocol):
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        ping_service = PingService(host_b)
+        rtts = await ping_service.ping(host_a.get_id(), ping_amt=SOME_PING_COUNT)
+        assert len(rtts) == SOME_PING_COUNT
+        for rtt in rtts:
+            assert rtt < 10**6
