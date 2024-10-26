@@ -1,8 +1,15 @@
 import logging
-import time
-import trio
 import secrets
+import time
+from typing import (
+    List,
+)
 
+import trio
+
+from libp2p.host.host_interface import (
+    IHost,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
@@ -15,11 +22,6 @@ from libp2p.peer.id import ID as PeerID
 from libp2p.typing import (
     TProtocol,
 )
-
-from libp2p.host.host_interface import (
-    IHost,
-)
-from typing import List
 
 ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -71,7 +73,7 @@ async def handle_ping(stream: INetStream) -> None:
         try:
             should_continue = await _handle_ping(stream, peer_id)
             if not should_continue:
-                stream.close()
+                await stream.close()
                 return
         except Exception:
             await stream.reset()
@@ -79,7 +81,7 @@ async def handle_ping(stream: INetStream) -> None:
 
 
 async def _ping(stream: INetStream) -> int:
-    """ 
+    """
     Helper function to perform a single ping operation on a given stream,
     returns integer value rtt - which denotes round trip time for a ping request in ms
     """
@@ -87,14 +89,15 @@ async def _ping(stream: INetStream) -> int:
     before = time.time()
     await stream.write(ping_bytes)
     pong_bytes = await stream.read(PING_LENGTH)
-    rtt = int((time.time() - before) * (10 ** 6)) 
+    rtt = int((time.time() - before) * (10**6))
     if ping_bytes != pong_bytes:
         logger.debug("invalid pong response")
         raise
     return rtt
 
+
 class PingService:
-    """ PingService executes pings and returns RTT in miliseconds. """
+    """PingService executes pings and returns RTT in miliseconds."""
 
     def __init__(self, host: IHost):
         self._host = host
@@ -103,9 +106,7 @@ class PingService:
         stream = await self._host.new_stream(peer_id, [ID])
 
         try:
-            rtts = [
-                await _ping(stream) for _ in range(ping_amt)
-            ]
+            rtts = [await _ping(stream) for _ in range(ping_amt)]
             await stream.close()
             return rtts
         except Exception:
