@@ -26,13 +26,13 @@ async def handle_ping(stream: INetStream) -> None:
         try:
             payload = await stream.read(PING_LENGTH)
             peer_id = stream.muxed_conn.peer_id
-            if payload != None:
+            if payload is not None:
                 print(f"received ping from {peer_id}")
 
                 await stream.write(payload)
                 print(f"responded with pong to {peer_id}")
 
-        except:
+        except Exception:
             await stream.reset()
 
 
