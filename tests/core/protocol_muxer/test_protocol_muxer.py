@@ -67,7 +67,7 @@ async def test_single_protocol_fails(security_protocol):
 
     # the StreamFailure is within 2 nested ExceptionGroups, so we use strict=False
     # to unwrap down to the core Exception
-    with RaisesGroup(StreamFailure, strict=False):
+    with RaisesGroup(StreamFailure, allow_unwrapped=True, flatten_subgroups=True):
         await perform_simple_test(
             "", [PROTOCOL_ECHO], [PROTOCOL_POTATO], security_protocol
         )
@@ -112,7 +112,7 @@ async def test_multiple_protocol_fails(security_protocol):
 
     # the StreamFailure is within 2 nested ExceptionGroups, so we use strict=False
     # to unwrap down to the core Exception
-    with RaisesGroup(StreamFailure, strict=False):
+    with RaisesGroup(StreamFailure, allow_unwrapped=True, flatten_subgroups=True):
         await perform_simple_test(
             "", protocols_for_client, protocols_for_listener, security_protocol
         )

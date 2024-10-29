@@ -83,7 +83,6 @@ build-docs:
 check-docs-ci: build-docs build-docs-ci validate-newsfragments
 
 build-docs-ci:
-	$(MAKE) -C docs latexpdf
 	$(MAKE) -C docs epub
 
 # release commands
