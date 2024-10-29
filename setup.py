@@ -66,7 +66,7 @@ install_requires = [
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
-    "trio>=0.15.0",
+    "trio>=0.26.0",
 ]
 
 
