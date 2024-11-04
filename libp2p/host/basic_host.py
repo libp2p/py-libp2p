@@ -145,6 +145,9 @@ class BasicHost(IHost):
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
+    def get_connected_peers(self) -> List[ID]:
+        return list(self.get_network().connections.keys())
+
     @asynccontextmanager
     async def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]

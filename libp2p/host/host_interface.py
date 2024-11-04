@@ -72,6 +72,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_connected_peers(self) -> List[ID]:
+        """
+        :return: all the ids of peers this host is currently connected to
+        """
+
+    @abstractmethod
     def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
     ) -> AsyncContextManager[None]:
