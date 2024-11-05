@@ -146,7 +146,10 @@ class BasicHost(IHost):
         return addrs
 
     def get_connected_peers(self) -> List[ID]:
-        return list(self.get_network().connections.keys())
+        """
+        :return: all the ids of peers this host is currently connected to
+        """
+        return list(self._network.connections.keys())
 
     @asynccontextmanager
     async def run(
