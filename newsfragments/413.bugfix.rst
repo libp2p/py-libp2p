@@ -1,0 +1,1 @@
+Added missing check to reject messages claiming to be from ourselves but not locally published in pubsub's ``push_msg`` function
