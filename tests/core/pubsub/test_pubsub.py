@@ -535,7 +535,7 @@ async def test_publish_push_msg_is_called(monkeypatch):
 
 @pytest.mark.trio
 async def test_push_msg(monkeypatch):
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
         msg_0 = make_pubsub_msg(
             origin_id=pubsubs_fsub[0].my_id,
             topic_ids=[TESTING_TOPIC],
@@ -568,6 +568,18 @@ async def test_push_msg(monkeypatch):
             # Test: `push_msg` the message again and it will be reject.
             #   `router_publish` is not called then.
             await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg_0)
+            await trio.sleep(0.01)
+            assert not event.is_set()
+
+            # Test: `push_msg` a new msg but forwarder as not self, it will be reject.
+            #   `router_publish` is not called then.
+            msg_0A = make_pubsub_msg(
+                origin_id=pubsubs_fsub[0].my_id,
+                topic_ids=[TESTING_TOPIC],
+                data=TESTING_DATA,
+                seqno=b"\x33" * 8,
+            )
+            await pubsubs_fsub[0].push_msg(pubsubs_fsub[1].my_id, msg_0A)
             await trio.sleep(0.01)
             assert not event.is_set()
 
