@@ -106,7 +106,7 @@ async def connect_and_disconnect(host_a, host_b, host_c):
     ],
 )
 @pytest.mark.trio
-async def test_chat(test, security_protocol):
+async def test_connected_peers(test, security_protocol):
     print("!@# ", security_protocol)
     async with HostFactory.create_batch_and_listen(
         3, security_protocol=security_protocol
