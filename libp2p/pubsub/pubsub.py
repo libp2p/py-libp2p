@@ -643,6 +643,19 @@ class Pubsub(Service, IPubsub):
             return
 
         self._mark_msg_seen(msg)
+
+        # reject messages claiming to be from ourselves but not locally published
+        self_id = self.host.get_id()
+        if (
+            base58.b58encode(msg.from_id).decode() == self_id
+            and msg_forwarder != self_id
+        ):
+            logger.debug(
+                "dropping message claiming to be from self but forwarded from %s",
+                msg_forwarder,
+            )
+            return
+
         self.notify_subscriptions(msg)
         await self.router.publish(msg_forwarder, msg)
 
