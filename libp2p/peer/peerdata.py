@@ -55,7 +55,9 @@ class PeerData(IPeerData):
         """
         :param addrs: multiaddresses to add
         """
-        self.addrs.extend(addrs)
+        for addr in addrs:
+            if addr not in self.addrs:
+                self.addrs.append(addr)
 
     def get_addrs(self) -> List[Multiaddr]:
         """
