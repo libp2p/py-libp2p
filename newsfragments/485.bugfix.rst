@@ -1,0 +1,1 @@
+Added missing check in ``add_addrs`` function for duplicate addresses in ``peerdata``
