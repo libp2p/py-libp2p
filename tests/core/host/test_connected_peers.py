@@ -107,12 +107,7 @@ async def connect_and_disconnect(host_a, host_b, host_c):
 )
 @pytest.mark.trio
 async def test_connected_peers(test, security_protocol):
-    print("!@# ", security_protocol)
     async with HostFactory.create_batch_and_listen(
         3, security_protocol=security_protocol
     ) as hosts:
-        # addr = hosts[0].get_addrs()[0]
-        # info = info_from_p2p_addr(addr)
-        # await hosts[1].connect(info)
-
         await test(hosts[0], hosts[1], hosts[2])
