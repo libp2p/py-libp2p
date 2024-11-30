@@ -66,6 +66,7 @@ class IPubsubRouter(ABC):
         Notifies the router that a new peer has been connected.
 
         :param peer_id: id of peer to add
+        :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
 
     @abstractmethod
@@ -81,10 +82,9 @@ class IPubsubRouter(ABC):
         """
         Invoked to process control messages in the RPC envelope.
         It is invoked after subscriptions and payload messages have been processed
-        TODO: Check if this interface is ok. It's not the exact same as the go code, but
-        the go code is really confusing with the msg origin, they specify `rpc.from`
-        even when the rpc shouldn't have a from
+
         :param rpc: rpc message
+        :param sender_peer_id: id of the peer who sent the message
         """
 
     @abstractmethod
