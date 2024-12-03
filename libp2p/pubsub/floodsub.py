@@ -75,10 +75,11 @@ class FloodSub(IPubsubRouter):
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
-        Invoked to process control messages in the RPC envelope. It is invoked
-        after subscriptions and payload messages have been processed.
+        Invoked to process control messages in the RPC envelope.
+        It is invoked after subscriptions and payload messages have been processed
 
-        :param rpc: rpc message
+        :param rpc: RPC message
+        :param sender_peer_id: id of the peer who sent the message
         """
         # Checkpoint
         await trio.lowlevel.checkpoint()
