@@ -3,6 +3,36 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.1 (2024-12-20)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Added missing check to reject messages claiming to be from ourselves but not locally published in pubsub's ``push_msg`` function (`#413 <https://github.com/ethereum/py-libp2p/issues/413>`__)
+- Added missing check in ``add_addrs`` function for duplicate addresses in ``peerdata`` (`#485 <https://github.com/ethereum/py-libp2p/issues/485>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- added missing details of params in ``IPubsubRouter`` (`#486 <https://github.com/ethereum/py-libp2p/issues/486>`__)
+
+
+Features
+~~~~~~~~
+
+- Added ``PingService`` class in ``host/ping.py`` which can be used to initiate ping requests to peers and added tests for the same (`#344 <https://github.com/ethereum/py-libp2p/issues/344>`__)
+- Added ``get_connected_peers`` method in class ``IHost`` which can be used to get a list of peer ids of currently connected peers (`#419 <https://github.com/ethereum/py-libp2p/issues/419>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Update ``sphinx_rtd_theme`` options and drop pdf build of docs (`#481 <https://github.com/ethereum/py-libp2p/issues/481>`__)
+- Update ``trio`` package version dependency (`#482 <https://github.com/ethereum/py-libp2p/issues/482>`__)
+
+
 py-libp2p v0.2.0 (2024-07-09)
 -----------------------------
 
