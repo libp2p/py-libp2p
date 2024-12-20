@@ -80,7 +80,7 @@ if not readthedocs_is_building:
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. Use `make bump`, as described in readme
-    version="0.2.0",
+    version="0.2.1",
     description="""libp2p: The Python implementation of the libp2p networking stack""",
     long_description=long_description,
     long_description_content_type="text/markdown",
