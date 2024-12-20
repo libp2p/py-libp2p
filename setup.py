@@ -111,4 +111,11 @@ setup(
         "Programming Language :: Python :: 3.12",
     ],
     platforms=["unix", "linux", "osx"],
+    entry_points={
+        "console_scripts": [
+            "chat-demo=examples.chat.chat:main",
+            "echo-demo=examples.echo.echo:main",
+            "ping-demo=examples.ping.ping:main",
+        ],
+    },
 )

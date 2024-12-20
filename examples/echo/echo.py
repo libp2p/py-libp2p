@@ -53,7 +53,7 @@ async def run(port: int, destination: str, seed: int = None) -> None:
 
             print(
                 "Run this from the same folder in another console:\n\n"
-                f"python echo.py -p {int(port) + 1} "
+                f"echo-demo -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
             print("Waiting for incoming connections...")
