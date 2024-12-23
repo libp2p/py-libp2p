@@ -1,5 +1,11 @@
 # py-libp2p
 
+<h1 align="center">
+  <a href="https://libp2p.io/"><img width="250" src="https://github.com/libp2p/py-libp2p/blob/main/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" /></a>
+</h1>
+
+<h3 align="center">The Python implementation of the libp2p networking stack.</h3>
+
 [![Join the chat at https://gitter.im/py-libp2p/Lobby](https://badges.gitter.im/py-libp2p/Lobby.png)](https://gitter.im/py-libp2p/Lobby)
 [![Build Status](https://circleci.com/gh/libp2p/py-libp2p.svg?style=shield)](https://circleci.com/gh/libp2p/py-libp2p)
 [![PyPI version](https://badge.fury.io/py/libp2p.svg)](https://badge.fury.io/py/libp2p)
@@ -9,24 +15,13 @@
 [![Matrix](https://img.shields.io/badge/matrix-%23libp2p%3Apermaweb.io-blue.svg)](https://riot.permaweb.io/#/room/#libp2p:permaweb.io)
 [![Discord](https://img.shields.io/discord/475789330380488707?color=blueviolet&label=discord)](https://discord.gg/66KBrm2)
 
-<h1 align="center">
-  <a href="https://libp2p.io/"><img width="250" src="https://github.com/libp2p/py-libp2p/blob/main/assets/py-libp2p-logo.png?raw=true" alt="py-libp2p hex logo" /></a>
-</h1>
-
-## WARNING
-
-py-libp2p is an experimental and work-in-progress repo under development. We do not yet recommend using py-libp2p in production environments.
-Right now, `tests_interop` are turned off for CI, and a number of `tests` are failing. WIP.
-
-The Python implementation of the libp2p networking stack
+> ⚠️ **Warning:** py-libp2p is an experimental and work-in-progress repo under development. We do not yet recommend using py-libp2p in production environments.
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
 ## Maintainers
 
 Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
-
-Note that tests/core/test_libp2p/test_libp2p.py contains an end-to-end messaging test between two libp2p hosts, which is the bulk of our proof of concept.
 
 ## Feature Breakdown
 
@@ -38,13 +33,15 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | ------------ | :-----------: |
 | **`libp2p`** | :green_apple: |
 
-| Identify Protocol | Status  |
-| ----------------- | :-----: |
-| **`Identify`**    | :lemon: |
+| Core Protocols |    Status     |
+| -------------- | :-----------: |
+| **`Ping`**     | :green_apple: |
+| **`Identify`** | :green_apple: |
 
 | Transport Protocols |    Status     |
 | ------------------- | :-----------: |
 | **`TCP`**           | :green_apple: |
+| **`QUIC`**          |    :lemon:    |
 | **`UDP`**           |   :tomato:    |
 | **`WebSockets`**    |  :chestnut:   |
 | **`UTP`**           |  :chestnut:   |
@@ -56,7 +53,6 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://github.
 | **`Bluetooth LE`**  |  :chestnut:   |
 | **`Audio TP`**      |  :chestnut:   |
 | **`Zerotier`**      |  :chestnut:   |
-| **`QUIC`**          |  :chestnut:   |
 
 | Stream Muxers    |    Status     |
 | ---------------- | :-----------: |
