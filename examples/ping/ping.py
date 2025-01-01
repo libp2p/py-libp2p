@@ -34,6 +34,7 @@ async def handle_ping(stream: INetStream) -> None:
 
         except Exception:
             await stream.reset()
+            break
 
 
 async def send_ping(stream: INetStream) -> None:
