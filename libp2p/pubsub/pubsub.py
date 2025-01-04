@@ -116,7 +116,7 @@ class Pubsub(Service, IPubsub):
     peer_receive_channel: trio.MemoryReceiveChannel[ID]
     dead_peer_receive_channel: trio.MemoryReceiveChannel[ID]
 
-    seen_messages: LRU[bytes, int]
+    seen_messages: LRU[bytes, bool]
 
     subscribed_topics_send: dict[str, trio.MemorySendChannel[rpc_pb2.Message]]
     subscribed_topics_receive: dict[str, TrioSubscriptionAPI]
@@ -670,9 +670,7 @@ class Pubsub(Service, IPubsub):
 
     def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
         msg_id = self._msg_id_constructor(msg)
-        # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there
-        # is a more appropriate way.
-        self.seen_messages[msg_id] = 1
+        self.seen_messages[msg_id] = True
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
