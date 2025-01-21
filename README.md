@@ -25,7 +25,7 @@ Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](http
 
 ## Feature Breakdown
 
-py-libp2p aims for conformity with [the standard libp2p modules](https://github.com/libp2p/libp2p/blob/master/REQUIREMENTS.md#libp2p-modules-implementations). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
+py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
 
 > Legend: :green_apple: Done   :lemon: In Progress   :tomato: Missing   :chestnut: Not planned
 
