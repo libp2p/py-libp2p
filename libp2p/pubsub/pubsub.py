@@ -3,6 +3,9 @@ from __future__ import (
 )
 
 import base64
+from collections.abc import (
+    KeysView,
+)
 import functools
 import hashlib
 import logging
@@ -10,7 +13,6 @@ import time
 from typing import (
     TYPE_CHECKING,
     Callable,
-    KeysView,
     NamedTuple,
     cast,
 )

@@ -2,11 +2,12 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
     AsyncContextManager,
-    List,
-    Sequence,
 )
 
 import multiaddr
@@ -66,13 +67,13 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def get_addrs(self) -> List[multiaddr.Multiaddr]:
+    def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening to
         """
 
     @abstractmethod
-    def get_connected_peers(self) -> List[ID]:
+    def get_connected_peers(self) -> list[ID]:
         """
         :return: all the ids of peers this host is currently connected to
         """

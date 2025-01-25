@@ -1,9 +1,8 @@
-import logging
-from typing import (
+from collections.abc import (
     Iterable,
-    List,
     Sequence,
 )
+import logging
 
 import trio
 
@@ -36,7 +35,7 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 
 
 class FloodSub(IPubsubRouter):
-    protocols: List[TProtocol]
+    protocols: list[TProtocol]
 
     pubsub: Pubsub
 
@@ -44,7 +43,7 @@ class FloodSub(IPubsubRouter):
         self.protocols = list(protocols)
         self.pubsub = None
 
-    def get_protocols(self) -> List[TProtocol]:
+    def get_protocols(self) -> list[TProtocol]:
         """
         :return: the list of protocols supported by the router
         """

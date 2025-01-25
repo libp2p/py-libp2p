@@ -1,8 +1,6 @@
 import logging
 from typing import (
-    Dict,
     Optional,
-    Tuple,
 )
 
 import trio
@@ -64,9 +62,9 @@ class Mplex(IMuxedConn):
     secured_conn: ISecureConn
     peer_id: ID
     next_channel_id: int
-    streams: Dict[StreamID, MplexStream]
+    streams: dict[StreamID, MplexStream]
     streams_lock: trio.Lock
-    streams_msg_channels: Dict[StreamID, "trio.MemorySendChannel[bytes]"]
+    streams_msg_channels: dict[StreamID, "trio.MemorySendChannel[bytes]"]
     new_stream_send_channel: "trio.MemorySendChannel[IMuxedStream]"
     new_stream_receive_channel: "trio.MemoryReceiveChannel[IMuxedStream]"
 
@@ -222,7 +220,7 @@ class Mplex(IMuxedConn):
         # We should clean things up.
         await self._cleanup()
 
-    async def read_message(self) -> Tuple[int, int, bytes]:
+    async def read_message(self) -> tuple[int, int, bytes]:
         """
         Read a single message off of the secured connection.
 

@@ -7,18 +7,17 @@ import asyncio
 from collections import (
     Counter,
 )
+from collections.abc import (
+    Awaitable,
+    Iterable,
+    Sequence,
+)
 import logging
 import sys
 from typing import (
     Any,
-    Awaitable,
     Callable,
-    Iterable,
-    List,
     Optional,
-    Sequence,
-    Set,
-    Type,
     TypeVar,
     cast,
 )
@@ -79,7 +78,7 @@ class Service(ServiceAPI):
 LogicFnType = Callable[..., Awaitable[Any]]
 
 
-def as_service(service_fn: LogicFnType) -> Type[ServiceAPI]:
+def as_service(service_fn: LogicFnType) -> type[ServiceAPI]:
     """
     Create a service out of a simple function
     """
@@ -143,7 +142,7 @@ T = TypeVar("T", bound="BaseFunctionTask")
 
 class BaseFunctionTask(BaseTaskWithChildren):
     @classmethod
-    def iterate_tasks(cls: Type[T], *tasks: TaskAPI) -> Iterable[T]:
+    def iterate_tasks(cls: type[T], *tasks: TaskAPI) -> Iterable[T]:
         for task in tasks:
             if isinstance(task, cls):
                 yield task
@@ -206,7 +205,7 @@ class BaseManager(InternalManagerAPI):
 
     _service: ServiceAPI
 
-    _errors: List[EXC_INFO]
+    _errors: list[EXC_INFO]
 
     def __init__(self, service: ServiceAPI) -> None:
         if hasattr(service, "_manager"):
@@ -220,7 +219,7 @@ class BaseManager(InternalManagerAPI):
         self._errors = []
 
         # tasks
-        self._root_tasks: Set[TaskAPI] = set()
+        self._root_tasks: set[TaskAPI] = set()
 
         # stats
         self._total_task_count = 0

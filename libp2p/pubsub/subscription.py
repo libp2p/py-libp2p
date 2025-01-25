@@ -1,8 +1,10 @@
+from collections.abc import (
+    AsyncIterator,
+)
 from types import (
     TracebackType,
 )
 from typing import (
-    AsyncIterator,
     Optional,
     Type,
 )

@@ -1,10 +1,10 @@
+from collections.abc import (
+    Awaitable,
+    Sequence,
+)
 import logging
 from typing import (
-    Awaitable,
     Callable,
-    List,
-    Sequence,
-    Tuple,
 )
 
 from multiaddr import (
@@ -41,7 +41,7 @@ logger = logging.getLogger("libp2p.transport.tcp")
 
 
 class TCPListener(IListener):
-    listeners: List[trio.SocketListener]
+    listeners: list[trio.SocketListener]
 
     def __init__(self, handler_function: THandler) -> None:
         self.listeners = []
@@ -78,7 +78,7 @@ class TCPListener(IListener):
         )
         self.listeners.extend(listeners)
 
-    def get_addrs(self) -> Tuple[Multiaddr, ...]:
+    def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
         Retrieve list of addresses the listener is listening on.
 

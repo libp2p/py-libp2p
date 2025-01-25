@@ -1,7 +1,5 @@
 import logging
 from typing import (
-    Dict,
-    List,
     Optional,
 )
 
@@ -88,13 +86,13 @@ class Swarm(Service, INetworkService):
     transport: ITransport
     # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
     #   whereas in Go one `peer_id` may point to multiple connections.
-    connections: Dict[ID, INetConn]
-    listeners: Dict[str, IListener]
+    connections: dict[ID, INetConn]
+    listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
     listener_nursery: Optional[trio.Nursery]
     event_listener_nursery_created: trio.Event
 
-    notifees: List[INotifee]
+    notifees: list[INotifee]
 
     def __init__(
         self,
@@ -161,7 +159,7 @@ class Swarm(Service, INetworkService):
         if not addrs:
             raise SwarmException(f"No known addresses to peer {peer_id}")
 
-        exceptions: List[SwarmException] = []
+        exceptions: list[SwarmException] = []
 
         # Try all known addresses
         for multiaddr in addrs:

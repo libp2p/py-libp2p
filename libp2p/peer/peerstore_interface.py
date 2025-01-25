@@ -1,10 +1,11 @@
 from abc import (
     abstractmethod,
 )
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
-    List,
-    Sequence,
 )
 
 from multiaddr import (
@@ -40,7 +41,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def get_protocols(self, peer_id: ID) -> List[str]:
+    def get_protocols(self, peer_id: ID) -> list[str]:
         """
         :param peer_id: peer ID to get protocols for
         :return: protocols (as list of strings)
@@ -62,7 +63,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def peer_ids(self) -> List[ID]:
+    def peer_ids(self) -> list[ID]:
         """
         :return: all of the peer IDs stored in peer store
         """
@@ -101,7 +102,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def addrs(self, peer_id: ID) -> List[Multiaddr]:
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
         :param peer_id: peer ID to get addrs for
         :return: list of addrs
@@ -114,7 +115,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def peers_with_addrs(self) -> List[ID]:
+    def peers_with_addrs(self) -> list[ID]:
         """
         :return: all of the peer IDs which has addrs stored in peer store
         """

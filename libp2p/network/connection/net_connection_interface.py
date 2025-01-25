@@ -1,9 +1,6 @@
 from abc import (
     abstractmethod,
 )
-from typing import (
-    Tuple,
-)
 
 import trio
 
@@ -27,5 +24,5 @@ class INetConn(Closer):
         ...
 
     @abstractmethod
-    def get_streams(self) -> Tuple[INetStream, ...]:
+    def get_streams(self) -> tuple[INetStream, ...]:
         ...

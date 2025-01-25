@@ -1,15 +1,14 @@
+from collections.abc import (
+    AsyncIterator,
+    Sequence,
+)
 from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
 )
 from typing import (
     Any,
-    AsyncIterator,
     Callable,
-    Dict,
-    List,
-    Sequence,
-    Tuple,
     cast,
 )
 
@@ -222,7 +221,7 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 @asynccontextmanager
 async def raw_conn_factory(
     nursery: trio.Nursery,
-) -> AsyncIterator[Tuple[IRawConnection, IRawConnection]]:
+) -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
     conn_0 = None
     conn_1 = None
     event = trio.Event()
@@ -245,7 +244,7 @@ async def raw_conn_factory(
 @asynccontextmanager
 async def noise_conn_factory(
     nursery: trio.Nursery,
-) -> AsyncIterator[Tuple[ISecureConn, ISecureConn]]:
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
     )
@@ -312,7 +311,7 @@ class SwarmFactory(factory.Factory):
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
         # an argument explicitly with `None`. If an argument is `None`, we don't pass it
         # to `factory.Factory.__init__`, in order to let the function initialize it.
-        optional_kwargs: Dict[str, Any] = {}
+        optional_kwargs: dict[str, Any] = {}
         if key_pair is not None:
             optional_kwargs["key_pair"] = key_pair
         if security_protocol is not None:
@@ -331,7 +330,7 @@ class SwarmFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[Tuple[Swarm, ...]]:
+    ) -> AsyncIterator[tuple[Swarm, ...]]:
         async with AsyncExitStack() as stack:
             ctx_mgrs = [
                 await stack.enter_async_context(
@@ -366,7 +365,7 @@ class HostFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[Tuple[BasicHost, ...]]:
+    ) -> AsyncIterator[tuple[BasicHost, ...]]:
         async with SwarmFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
         ) as swarms:
@@ -375,12 +374,12 @@ class HostFactory(factory.Factory):
 
 
 class DummyRouter(IPeerRouting):
-    _routing_table: Dict[ID, PeerInfo]
+    _routing_table: dict[ID, PeerInfo]
 
     def __init__(self) -> None:
         self._routing_table = dict()
 
-    def _add_peer(self, peer_id: ID, addrs: List[Multiaddr]) -> None:
+    def _add_peer(self, peer_id: ID, addrs: list[Multiaddr]) -> None:
         self._routing_table[peer_id] = PeerInfo(peer_id, addrs)
 
     async def find_peer(self, peer_id: ID) -> PeerInfo:
@@ -411,7 +410,7 @@ class RoutedHostFactory(factory.Factory):
         number: int,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[Tuple[RoutedHost, ...]]:
+    ) -> AsyncIterator[tuple[RoutedHost, ...]]:
         routing_table = DummyRouter()
         async with HostFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
@@ -487,7 +486,7 @@ class PubsubFactory(factory.Factory):
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
-    ) -> AsyncIterator[Tuple[Pubsub, ...]]:
+    ) -> AsyncIterator[tuple[Pubsub, ...]]:
         async with HostFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
         ) as hosts:
@@ -516,7 +515,7 @@ class PubsubFactory(factory.Factory):
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
-    ) -> AsyncIterator[Tuple[Pubsub, ...]]:
+    ) -> AsyncIterator[tuple[Pubsub, ...]]:
         if protocols is not None:
             floodsubs = FloodsubFactory.create_batch(number, protocols=list(protocols))
         else:
@@ -554,7 +553,7 @@ class PubsubFactory(factory.Factory):
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
-    ) -> AsyncIterator[Tuple[Pubsub, ...]]:
+    ) -> AsyncIterator[tuple[Pubsub, ...]]:
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
                 number,
@@ -595,7 +594,7 @@ class PubsubFactory(factory.Factory):
 @asynccontextmanager
 async def swarm_pair_factory(
     security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[Tuple[Swarm, Swarm]]:
+) -> AsyncIterator[tuple[Swarm, Swarm]]:
     async with SwarmFactory.create_batch_and_listen(
         2, security_protocol=security_protocol, muxer_opt=muxer_opt
     ) as swarms:
@@ -606,7 +605,7 @@ async def swarm_pair_factory(
 @asynccontextmanager
 async def host_pair_factory(
     security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[Tuple[BasicHost, BasicHost]]:
+) -> AsyncIterator[tuple[BasicHost, BasicHost]]:
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol, muxer_opt=muxer_opt
     ) as hosts:
@@ -617,7 +616,7 @@ async def host_pair_factory(
 @asynccontextmanager
 async def swarm_conn_pair_factory(
     security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[Tuple[SwarmConn, SwarmConn]]:
+) -> AsyncIterator[tuple[SwarmConn, SwarmConn]]:
     async with swarm_pair_factory(
         security_protocol=security_protocol, muxer_opt=muxer_opt
     ) as swarms:
@@ -629,7 +628,7 @@ async def swarm_conn_pair_factory(
 @asynccontextmanager
 async def mplex_conn_pair_factory(
     security_protocol: TProtocol = None,
-) -> AsyncIterator[Tuple[Mplex, Mplex]]:
+) -> AsyncIterator[tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
         security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
     ) as swarm_pair:
@@ -642,7 +641,7 @@ async def mplex_conn_pair_factory(
 @asynccontextmanager
 async def mplex_stream_pair_factory(
     security_protocol: TProtocol = None,
-) -> AsyncIterator[Tuple[MplexStream, MplexStream]]:
+) -> AsyncIterator[tuple[MplexStream, MplexStream]]:
     async with mplex_conn_pair_factory(
         security_protocol=security_protocol
     ) as mplex_conn_pair_info:
@@ -660,7 +659,7 @@ async def mplex_stream_pair_factory(
 @asynccontextmanager
 async def net_stream_pair_factory(
     security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[Tuple[INetStream, INetStream]]:
+) -> AsyncIterator[tuple[INetStream, INetStream]]:
     protocol_id = TProtocol("/example/id/1")
 
     stream_1: INetStream
