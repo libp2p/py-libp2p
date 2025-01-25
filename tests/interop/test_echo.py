@@ -1,12 +1,12 @@
 import re
 
+import pytest
 from multiaddr import (
     Multiaddr,
 )
 from p2pclient.utils import (
     get_unused_tcp_port,
 )
-import pytest
 import trio
 
 from libp2p.peer.peerinfo import (

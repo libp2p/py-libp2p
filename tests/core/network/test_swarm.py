@@ -1,7 +1,7 @@
+import pytest
 from multiaddr import (
     Multiaddr,
 )
-import pytest
 import trio
 from trio.testing import (
     wait_all_tasks_blocked,

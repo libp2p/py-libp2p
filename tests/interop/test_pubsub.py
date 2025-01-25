@@ -1,10 +1,10 @@
 import functools
 import math
 
+import pytest
 from p2pclient.pb import (
     p2pd_pb2,
 )
-import pytest
 import trio
 
 from libp2p.io.trio import (

@@ -2,6 +2,7 @@ from contextlib import (
     AsyncExitStack,
 )
 
+import pytest
 import anyio
 from p2pclient.datastructures import (
     StreamInfo,
@@ -9,7 +10,6 @@ from p2pclient.datastructures import (
 from p2pclient.utils import (
     get_unused_tcp_port,
 )
-import pytest
 import trio
 
 from libp2p.io.abc import (
