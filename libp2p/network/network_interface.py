@@ -2,10 +2,11 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     TYPE_CHECKING,
-    Dict,
-    Sequence,
 )
 
 from multiaddr import (
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
 
 class INetwork(ABC):
     peerstore: IPeerStore
-    connections: Dict[ID, INetConn]
-    listeners: Dict[str, IListener]
+    connections: dict[ID, INetConn]
+    listeners: dict[str, IListener]
 
     @abstractmethod
     def get_peer_id(self) -> ID:

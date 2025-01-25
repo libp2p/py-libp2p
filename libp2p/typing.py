@@ -1,6 +1,8 @@
+from collections.abc import (
+    Awaitable,
+)
 from typing import (
     TYPE_CHECKING,
-    Awaitable,
     Callable,
     NewType,
 )

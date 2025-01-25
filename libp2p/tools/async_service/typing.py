@@ -1,16 +1,16 @@
 # Copied from https://github.com/ethereum/async-service
 
+from collections.abc import (
+    Awaitable,
+)
 from types import (
     TracebackType,
 )
 from typing import (
     Any,
-    Awaitable,
     Callable,
-    Tuple,
-    Type,
 )
 
-EXC_INFO = Tuple[Type[BaseException], BaseException, TracebackType]
+EXC_INFO = tuple[type[BaseException], BaseException, TracebackType]
 
 AsyncFn = Callable[..., Awaitable[Any]]

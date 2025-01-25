@@ -1,12 +1,13 @@
+from collections.abc import (
+    AsyncIterator,
+    Sequence,
+)
 from contextlib import (
     asynccontextmanager,
 )
 import logging
 from typing import (
     TYPE_CHECKING,
-    AsyncIterator,
-    List,
-    Sequence,
 )
 
 import multiaddr
@@ -132,20 +133,20 @@ class BasicHost(IHost):
         """
         return self.multiselect
 
-    def get_addrs(self) -> List[multiaddr.Multiaddr]:
+    def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening to
         """
         # TODO: We don't need "/p2p/{peer_id}" postfix actually.
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
 
-        addrs: List[multiaddr.Multiaddr] = []
+        addrs: list[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def get_connected_peers(self) -> List[ID]:
+    def get_connected_peers(self) -> list[ID]:
         """
         :return: all the ids of peers this host is currently connected to
         """

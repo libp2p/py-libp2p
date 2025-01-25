@@ -1,9 +1,6 @@
 import logging
 import secrets
 import time
-from typing import (
-    List,
-)
 
 import trio
 
@@ -102,7 +99,7 @@ class PingService:
     def __init__(self, host: IHost):
         self._host = host
 
-    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> List[int]:
+    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
         stream = await self._host.new_stream(peer_id, [ID])
 
         try:

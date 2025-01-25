@@ -2,10 +2,6 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import (
-    Dict,
-    Tuple,
-)
 
 from libp2p.typing import (
     StreamHandlerFn,
@@ -24,7 +20,7 @@ class IMultiselectMuxer(ABC):
     communication.
     """
 
-    handlers: Dict[TProtocol, StreamHandlerFn]
+    handlers: dict[TProtocol, StreamHandlerFn]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -35,13 +31,13 @@ class IMultiselectMuxer(ABC):
         :param handler: handler function
         """
 
-    def get_protocols(self) -> Tuple[TProtocol, ...]:
+    def get_protocols(self) -> tuple[TProtocol, ...]:
         return tuple(self.handlers.keys())
 
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> Tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[TProtocol, StreamHandlerFn]:
         """
         Negotiate performs protocol selection.
 

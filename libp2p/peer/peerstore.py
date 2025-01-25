@@ -1,11 +1,11 @@
 from collections import (
     defaultdict,
 )
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
-    Dict,
-    List,
-    Sequence,
 )
 
 from multiaddr import (
@@ -34,7 +34,7 @@ from .peerstore_interface import (
 
 
 class PeerStore(IPeerStore):
-    peer_data_map: Dict[ID, PeerData]
+    peer_data_map: dict[ID, PeerData]
 
     def __init__(self) -> None:
         self.peer_data_map = defaultdict(PeerData)
@@ -49,7 +49,7 @@ class PeerStore(IPeerStore):
             return PeerInfo(peer_id, peer_data.get_addrs())
         raise PeerStoreError("peer ID not found")
 
-    def get_protocols(self, peer_id: ID) -> List[str]:
+    def get_protocols(self, peer_id: ID) -> list[str]:
         """
         :param peer_id: peer ID to get protocols for
         :return: protocols (as list of strings)
@@ -75,7 +75,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.set_protocols(list(protocols))
 
-    def peer_ids(self) -> List[ID]:
+    def peer_ids(self) -> list[ID]:
         """
         :return: all of the peer IDs stored in peer store
         """
@@ -123,7 +123,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.add_addrs(list(addrs))
 
-    def addrs(self, peer_id: ID) -> List[Multiaddr]:
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
         :param peer_id: peer ID to get addrs for
         :return: list of addrs
@@ -141,12 +141,12 @@ class PeerStore(IPeerStore):
         if peer_id in self.peer_data_map:
             self.peer_data_map[peer_id].clear_addrs()
 
-    def peers_with_addrs(self) -> List[ID]:
+    def peers_with_addrs(self) -> list[ID]:
         """
         :return: all of the peer IDs which has addrs stored in peer store
         """
         # Add all peers with addrs at least 1 to output
-        output: List[ID] = []
+        output: list[ID] = []
 
         for peer_id in self.peer_data_map:
             if len(self.peer_data_map[peer_id].get_addrs()) >= 1:

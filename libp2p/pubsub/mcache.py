@@ -1,9 +1,8 @@
-from typing import (
-    Dict,
-    List,
-    Optional,
+from collections.abc import (
     Sequence,
-    Tuple,
+)
+from typing import (
+    Optional,
 )
 
 from .pb import (
@@ -12,14 +11,14 @@ from .pb import (
 
 
 class CacheEntry:
-    mid: Tuple[bytes, bytes]
-    topics: List[str]
+    mid: tuple[bytes, bytes]
+    topics: list[str]
 
     """
     A logical representation of an entry in the mcache's _history_.
     """
 
-    def __init__(self, mid: Tuple[bytes, bytes], topics: Sequence[str]) -> None:
+    def __init__(self, mid: tuple[bytes, bytes], topics: Sequence[str]) -> None:
         """
         Constructor.
 
@@ -34,9 +33,9 @@ class MessageCache:
     window_size: int
     history_size: int
 
-    msgs: Dict[Tuple[bytes, bytes], rpc_pb2.Message]
+    msgs: dict[tuple[bytes, bytes], rpc_pb2.Message]
 
-    history: List[List[CacheEntry]]
+    history: list[list[CacheEntry]]
 
     def __init__(self, window_size: int, history_size: int) -> None:
         """
@@ -62,12 +61,12 @@ class MessageCache:
 
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
-        mid: Tuple[bytes, bytes] = (msg.seqno, msg.from_id)
+        mid: tuple[bytes, bytes] = (msg.seqno, msg.from_id)
         self.msgs[mid] = msg
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
-    def get(self, mid: Tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
+    def get(self, mid: tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
         """
         Get a message from the mcache.
 
@@ -79,14 +78,14 @@ class MessageCache:
 
         return None
 
-    def window(self, topic: str) -> List[Tuple[bytes, bytes]]:
+    def window(self, topic: str) -> list[tuple[bytes, bytes]]:
         """
         Get the window for this topic.
 
         :param topic: Topic whose message ids we desire.
         :return: List of mids in the current window.
         """
-        mids: List[Tuple[bytes, bytes]] = []
+        mids: list[tuple[bytes, bytes]] = []
 
         for entries_list in self.history[: self.window_size]:
             for entry in entries_list:
@@ -100,7 +99,7 @@ class MessageCache:
         """
         Shift the window over by 1 position, dropping the last element of the history.
         """
-        last_entries: List[CacheEntry] = self.history[len(self.history) - 1]
+        last_entries: list[CacheEntry] = self.history[len(self.history) - 1]
 
         for entry in last_entries:
             self.msgs.pop(entry.mid)

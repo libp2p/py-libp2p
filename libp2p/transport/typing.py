@@ -1,8 +1,9 @@
-from typing import (
+from collections.abc import (
     Awaitable,
-    Callable,
     Mapping,
-    Type,
+)
+from typing import (
+    Callable,
 )
 
 from libp2p.io.abc import (
@@ -20,5 +21,5 @@ from libp2p.typing import (
 
 THandler = Callable[[ReadWriteCloser], Awaitable[None]]
 TSecurityOptions = Mapping[TProtocol, ISecureTransport]
-TMuxerClass = Type[IMuxedConn]
+TMuxerClass = type[IMuxedConn]
 TMuxerOptions = Mapping[TProtocol, TMuxerClass]

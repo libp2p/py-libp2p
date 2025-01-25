@@ -1,11 +1,9 @@
+from collections.abc import (
+    AsyncIterator,
+)
 from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
-)
-from typing import (
-    AsyncIterator,
-    Dict,
-    Tuple,
 )
 
 from libp2p.host.host_interface import (
@@ -45,7 +43,7 @@ class DummyAccountNode(Service):
 
     def __init__(self, pubsub: Pubsub) -> None:
         self.pubsub = pubsub
-        self.balances: Dict[str, int] = {}
+        self.balances: dict[str, int] = {}
 
     @property
     def host(self) -> IHost:
@@ -58,7 +56,7 @@ class DummyAccountNode(Service):
 
     @classmethod
     @asynccontextmanager
-    async def create(cls, number: int) -> AsyncIterator[Tuple["DummyAccountNode", ...]]:
+    async def create(cls, number: int) -> AsyncIterator[tuple["DummyAccountNode", ...]]:
         """
         Create a new DummyAccountNode and attach a libp2p node, a floodsub, and
         a pubsub instance to this new node.

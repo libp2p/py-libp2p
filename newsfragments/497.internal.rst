@@ -1,0 +1,1 @@
+Drop CI runs for python 3.8, run ``pyupgrade`` to bring code up to python 3.9.

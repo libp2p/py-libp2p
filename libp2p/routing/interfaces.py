@@ -2,7 +2,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import (
+from collections.abc import (
     Iterable,
 )
 

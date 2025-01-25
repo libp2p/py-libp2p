@@ -4,7 +4,6 @@ from dataclasses import (
 import itertools
 from typing import (
     Optional,
-    Tuple,
 )
 
 import multihash
@@ -243,7 +242,7 @@ def _select_parameter_from_order(
 
 def _select_encryption_parameters(
     local_proposal: Proposal, remote_proposal: Proposal
-) -> Tuple[str, str, str, int]:
+) -> tuple[str, str, str, int]:
     first_score = _mk_score(remote_proposal.public_key, local_proposal.nonce)
     second_score = _mk_score(local_proposal.public_key, remote_proposal.nonce)
 
@@ -276,7 +275,7 @@ async def _establish_session_parameters(
     remote_peer: Optional[PeerID],
     conn: SecioPacketReadWriter,
     nonce: bytes,
-) -> Tuple[SessionParameters, bytes]:
+) -> tuple[SessionParameters, bytes]:
     # establish shared encryption parameters
     session_parameters = SessionParameters()
     session_parameters.local_peer = local_peer

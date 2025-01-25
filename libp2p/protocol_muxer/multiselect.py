@@ -1,8 +1,3 @@
-from typing import (
-    Dict,
-    Tuple,
-)
-
 from libp2p.typing import (
     StreamHandlerFn,
     TProtocol,
@@ -30,10 +25,10 @@ class Multiselect(IMultiselectMuxer):
     communication.
     """
 
-    handlers: Dict[TProtocol, StreamHandlerFn]
+    handlers: dict[TProtocol, StreamHandlerFn]
 
     def __init__(
-        self, default_handlers: Dict[TProtocol, StreamHandlerFn] = None
+        self, default_handlers: dict[TProtocol, StreamHandlerFn] = None
     ) -> None:
         if not default_handlers:
             default_handlers = {}
@@ -50,7 +45,7 @@ class Multiselect(IMultiselectMuxer):
 
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> Tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[TProtocol, StreamHandlerFn]:
         """
         Negotiate performs protocol selection.
 

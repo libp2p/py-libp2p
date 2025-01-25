@@ -2,10 +2,11 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
-    List,
-    Sequence,
 )
 
 from multiaddr import (
@@ -24,7 +25,7 @@ from .peermetadata_interface import (
 
 class IPeerData(ABC):
     @abstractmethod
-    def get_protocols(self) -> List[str]:
+    def get_protocols(self) -> list[str]:
         """
         :return: all protocols associated with given peer
         """
@@ -48,7 +49,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def get_addrs(self) -> List[Multiaddr]:
+    def get_addrs(self) -> list[Multiaddr]:
         """
         :return: all multiaddresses
         """

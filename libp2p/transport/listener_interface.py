@@ -2,9 +2,6 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import (
-    Tuple,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -23,7 +20,7 @@ class IListener(ABC):
         """
 
     @abstractmethod
-    def get_addrs(self) -> Tuple[Multiaddr, ...]:
+    def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
         Retrieve list of addresses the listener is listening on.
 

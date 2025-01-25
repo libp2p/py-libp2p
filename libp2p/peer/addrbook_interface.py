@@ -2,8 +2,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import (
-    List,
+from collections.abc import (
     Sequence,
 )
 
@@ -41,7 +40,7 @@ class IAddrBook(ABC):
         """  # noqa: E501
 
     @abstractmethod
-    def addrs(self, peer_id: ID) -> List[Multiaddr]:
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
         :param peer_id: peer to get addresses of
         :return: all known (and valid) addresses for the given peer
@@ -56,7 +55,7 @@ class IAddrBook(ABC):
         """
 
     @abstractmethod
-    def peers_with_addrs(self) -> List[ID]:
+    def peers_with_addrs(self) -> list[ID]:
         """
         :return: all of the peer IDs stored with addresses
         """

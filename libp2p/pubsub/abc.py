@@ -2,13 +2,13 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import (
+    AsyncIterable,
+    KeysView,
+)
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
-    AsyncIterable,
-    KeysView,
-    List,
-    Tuple,
 )
 
 from libp2p.peer.id import (
@@ -46,7 +46,7 @@ class ISubscriptionAPI(
 
 class IPubsubRouter(ABC):
     @abstractmethod
-    def get_protocols(self) -> List[TProtocol]:
+    def get_protocols(self) -> list[TProtocol]:
         """
         :return: the list of protocols supported by the router
         """
@@ -123,7 +123,7 @@ class IPubsub(ServiceAPI):
 
     @property
     @abstractmethod
-    def protocols(self) -> Tuple[TProtocol, ...]:
+    def protocols(self) -> tuple[TProtocol, ...]:
         ...
 
     @property
