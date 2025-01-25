@@ -27,96 +27,112 @@ Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](http
 
 py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
 
-> Legend: :green_apple: Done   :lemon: In Progress   :tomato: Missing   :chestnut: Not planned
+> Legend: :green_apple: Done   :lemon: In Progress / Usable  :tomato: Prototype/ Unstable   :chestnut: Missing
 
-| libp2p Node  |    Status     |
-| ------------ | :-----------: |
-| **`libp2p`** | :green_apple: |
+______________________________________________________________________
 
-| Core Protocols |    Status     |
-| -------------- | :-----------: |
-| **`Ping`**     | :green_apple: |
-| **`Identify`** | :green_apple: |
+### Transports
 
-| Transport Protocols |    Status     |
+| **Transport**                          |  **Status**   |
+| -------------------------------------- | :-----------: |
+| **`libp2p-tcp`**                       | :green_apple: |
+| **`libp2p-quic`**                      |   :tomato:    |
+| **`libp2p-websocket`**                 |  :chestnut:   |
+| **`libp2p-webrtc-browser-to-server`**  |  :chestnut:   |
+| **`libp2p-webrtc-private-to-private`** |  :chestnut:   |
+
+______________________________________________________________________
+
+### NAT Traversal
+
+| **NAT Traversal**             | **Status** |
+| ----------------------------- | :--------: |
+| **`libp2p-circuit-relay-v2`** | :chestnut: |
+| **`libp2p-autonat`**          | :chestnut: |
+| **`libp2p-hole-punching`**    | :chestnut: |
+
+______________________________________________________________________
+
+### Secure Communication
+
+| **Secure Communication** | **Status** |
+| ------------------------ | :--------: |
+| **`libp2p-noise`**       |  :tomato:  |
+| **`libp2p-tls`**         | :chestnut: |
+
+______________________________________________________________________
+
+### Discovery
+
+| **Discovery**        | **Status** |
+| -------------------- | :--------: |
+| **`bootstrap`**      |  :tomato:  |
+| **`random-walk`**    | :chestnut: |
+| **`mdns-discovery`** | :chestnut: |
+| **`rendezvous`**     | :chestnut: |
+
+______________________________________________________________________
+
+### Peer Routing
+
+| **Peer Routing**     | **Status** |
+| -------------------- | :--------: |
+| **`libp2p-kad-dht`** | :chestnut: |
+
+______________________________________________________________________
+
+### Publish/Subscribe
+
+| **Publish/Subscribe**  |  **Status**   |
+| ---------------------- | :-----------: |
+| **`libp2p-floodsub`**  | :green_apple: |
+| **`libp2p-gossipsub`** | :green_apple: |
+
+______________________________________________________________________
+
+### Stream Muxers
+
+| **Stream Muxers**  | **Status** |
+| ------------------ | :--------: |
+| **`libp2p-yamux`** |  :tomato:  |
+| **`libp2p-mplex`** |  :lemon:   |
+
+______________________________________________________________________
+
+### Storage
+
+| **Storage**         | **Status** |
+| ------------------- | :--------: |
+| **`libp2p-record`** | :chestnut: |
+
+______________________________________________________________________
+
+### General Purpose Utilities & Datatypes
+
+| **Utility/Datatype**  |  **Status**   |
+| --------------------- | :-----------: |
+| **`libp2p-ping`**     | :green_apple: |
+| **`libp2p-peer`**     | :green_apple: |
+| **`libp2p-identify`** | :green_apple: |
+
+______________________________________________________________________
+
+### Protocol Muxers
+
+| **Protocol Muxers** |  **Status**   |
 | ------------------- | :-----------: |
-| **`TCP`**           | :green_apple: |
-| **`QUIC`**          |    :lemon:    |
-| **`UDP`**           |   :tomato:    |
-| **`WebSockets`**    |  :chestnut:   |
-| **`UTP`**           |  :chestnut:   |
-| **`WebRTC`**        |  :chestnut:   |
-| **`SCTP`**          |  :chestnut:   |
-| **`Tor`**           |  :chestnut:   |
-| **`i2p`**           |  :chestnut:   |
-| **`cjdns`**         |  :chestnut:   |
-| **`Bluetooth LE`**  |  :chestnut:   |
-| **`Audio TP`**      |  :chestnut:   |
-| **`Zerotier`**      |  :chestnut:   |
+| **`multiselect`**   | :green_apple: |
 
-| Stream Muxers    |    Status     |
-| ---------------- | :-----------: |
-| **`multiplex`**  | :green_apple: |
-| **`yamux`**      |   :tomato:    |
-| **`benchmarks`** |  :chestnut:   |
-| **`muxado`**     |  :chestnut:   |
-| **`spdystream`** |  :chestnut:   |
-| **`spdy`**       |  :chestnut:   |
-| **`http2`**      |  :chestnut:   |
-| **`QUIC`**       |  :chestnut:   |
+______________________________________________________________________
 
-| Protocol Muxers   |    Status     |
-| ----------------- | :-----------: |
-| **`multiselect`** | :green_apple: |
+### Switch (Swarm)
 
-| Switch (Swarm)     |    Status     |
+| **Switch (Swarm)** |  **Status**   |
 | ------------------ | :-----------: |
 | **`Switch`**       | :green_apple: |
 | **`Dialer stack`** | :green_apple: |
 
-| Peer Discovery       |   Status   |
-| -------------------- | :--------: |
-| **`bootstrap list`** |  :tomato:  |
-| **`Kademlia DHT`**   | :chestnut: |
-| **`mDNS`**           | :chestnut: |
-| **`PEX`**            | :chestnut: |
-| **`DNS`**            | :chestnut: |
-
-| Content Routing    |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  :chestnut:   |
-| **`floodsub`**     | :green_apple: |
-| **`gossipsub`**    | :green_apple: |
-| **`PHT`**          |  :chestnut:   |
-
-| Peer Routing       |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  :chestnut:   |
-| **`floodsub`**     | :green_apple: |
-| **`gossipsub`**    | :green_apple: |
-| **`PHT`**          |  :chestnut:   |
-
-| NAT Traversal            |   Status   |
-| ------------------------ | :--------: |
-| **`nat-pmp`**            | :chestnut: |
-| **`upnp`**               | :chestnut: |
-| **`ext addr discovery`** | :chestnut: |
-| **`STUN-like`**          | :chestnut: |
-| **`line-switch relay`**  | :chestnut: |
-| **`pkt-switch relay`**   | :chestnut: |
-
-| Exchange         |   Status   |
-| ---------------- | :--------: |
-| **`HTTP`**       | :chestnut: |
-| **`Bitswap`**    | :chestnut: |
-| **`Bittorrent`** | :chestnut: |
-
-| Consensus      |   Status   |
-| -------------- | :--------: |
-| **`Paxos`**    | :chestnut: |
-| **`Raft`**     | :chestnut: |
-| **`PBTF`**     | :chestnut: |
-| **`Nakamoto`** | :chestnut: |
+______________________________________________________________________
 
 ## Explanation of Basic Two Node Communication
 
