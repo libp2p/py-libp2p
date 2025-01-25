@@ -1,5 +1,5 @@
-import multiaddr
 import pytest
+import multiaddr
 
 from libp2p.network.stream.exceptions import (
     StreamError,

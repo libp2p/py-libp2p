@@ -1,12 +1,12 @@
 import re
 
+import pytest
 from multiaddr import (
     Multiaddr,
 )
 from p2pclient.utils import (
     get_unused_tcp_port,
 )
-import pytest
 import trio
 
 from libp2p.peer.peerinfo import (
@@ -16,14 +16,14 @@ from libp2p.peer.peerinfo import (
 from libp2p.tools.factories import (
     HostFactory,
 )
-from libp2p.tools.interop.envs import (
-    GO_BIN_PATH,
-)
-from libp2p.tools.interop.process import (
-    BaseInteractiveProcess,
-)
 from libp2p.typing import (
     TProtocol,
+)
+from tests.utils.interop.envs import (
+    GO_BIN_PATH,
+)
+from tests.utils.interop.process import (
+    BaseInteractiveProcess,
 )
 
 ECHO_PATH = GO_BIN_PATH / "echo"

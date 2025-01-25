@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - main
       - github-actions
 
 defaults:
@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
         toxenv: [core, lint, wheel]
         include:
-          - python: '3.9'
+          - python: '3.10'
             toxenv: docs
       fail-fast: false
     steps:

@@ -6,16 +6,18 @@ help:
 	@echo "clean-build - remove build artifacts"
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "clean - run clean-build and clean-pyc"
+	@echo "dist - build package and cat contents of the dist directory"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
 	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
-	@echo "notes - consume towncrier newsfragments/ and update release notes in docs/"
-	@echo "release - package and upload a release (does not run notes target)"
-	@echo "dist - package"
+	@echo "package-test - build package and install it in a venv for manual testing"
+	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
+	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
 
 clean-build:
 	rm -fr build/
 	rm -fr dist/
+	rm -fr *.egg-info
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -25,6 +27,10 @@ clean-pyc:
 
 clean: clean-build clean-pyc
 
+dist: clean
+	python -m build
+	ls -l dist
+
 lint:
 	@pre-commit run --all-files --show-diff-on-failure || ( \
 		echo "\n\n\n * pre-commit should have fixed the errors above. Running again to make sure everything is good..." \
@@ -32,7 +38,8 @@ lint:
 	)
 
 test:
-	pytest tests
+	# remove core specification once interop tests pass
+	python -m pytest tests/core
 
 # protobufs management
 
@@ -73,12 +80,10 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . setup.py "*conftest*" "libp2p/tools/interop*"
+	sphinx-apidoc -o docs/ . setup.py "*conftest*"
 	$(MAKE) -C docs clean
 	$(MAKE) -C docs html
 	$(MAKE) -C docs doctest
-
-# docs helpers for CI, which requires extra dependencies
 
 check-docs-ci: build-docs build-docs-ci validate-newsfragments
 
@@ -93,14 +98,14 @@ package-test: clean
 
 notes: check-bump validate-newsfragments
 	# Let UPCOMING_VERSION be the version that is used for the current bump
-	$(eval UPCOMING_VERSION=$(shell bump-my-version show --increment $(bump) new_version))
+	$(eval UPCOMING_VERSION=$(shell bump-my-version bump --dry-run $(bump) -v | awk -F"'" '/New version will be / {print $$2}'))
 	# Now generate the release notes to have them included in the release commit
 	towncrier build --yes --version $(UPCOMING_VERSION)
 	# Before we bump the version, make sure that the towncrier-generated docs will build
 	make build-docs
 	git commit -m "Compile release notes for v$(UPCOMING_VERSION)"
 
-release: check-bump clean
+release: check-bump check-git clean
 	# verify that notes command ran correctly
 	./newsfragments/validate_files.py is-empty
 	CURRENT_SIGN_SETTING=$(git config commit.gpgSign)
@@ -115,15 +120,10 @@ release: check-bump clean
 
 check-bump:
 ifndef bump
-	$(error bump must be one of: major, minor, patch, stage, or devnum)
+	$(error bump must be set, typically: major, minor, patch, or devnum)
 endif
 
 check-git:
-	# require that you be on a branch that's linked to upstream/main
-	@if ! git status -s -b | head -1 | grep -q "\.\.upstream/main"; then \
-		echo "Error: You must be on a branch that's linked to upstream/main"; \
-		exit 1; \
-	fi
 	# require that upstream is configured for ethereum/py-libp2p
 	@if ! git remote -v | grep "upstream[[:space:]]git@github.com:ethereum/py-libp2p.git (push)\|upstream[[:space:]]https://github.com/ethereum/py-libp2p (push)"; then \
 		echo "Error: You must have a remote named 'upstream' that points to 'py-libp2p'"; \

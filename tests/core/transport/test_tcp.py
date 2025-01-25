@@ -1,7 +1,7 @@
+import pytest
 from multiaddr import (
     Multiaddr,
 )
-import pytest
 import trio
 
 from libp2p.network.connection.raw_connection import (
