@@ -4,7 +4,7 @@ import trio
 from libp2p.tools.factories import (
     HostFactory,
 )
-from libp2p.tools.interop.utils import (
+from tests.utils.interop.utils import (
     connect,
 )
 

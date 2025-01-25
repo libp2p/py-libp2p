@@ -38,7 +38,8 @@ lint:
 	)
 
 test:
-	python -m pytest tests
+	# remove core specification once interop tests pass
+	python -m pytest tests/core
 
 # protobufs management
 

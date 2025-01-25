@@ -23,6 +23,7 @@ extras_require = {
         "towncrier>=24,<25",
     ],
     "test": [
+        "p2pclient==0.2.0",
         "pytest>=7.0.0",
         "pytest-xdist>=2.4.0",
         "pytest-trio>=0.5.2",
