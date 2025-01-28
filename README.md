@@ -27,96 +27,96 @@ Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](http
 
 py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
 
-> Legend: :green_apple: Done   :lemon: In Progress   :tomato: Missing   :chestnut: Not planned
+> Legend: ✅: Done   🛠️: In Progress   🚫: Missing   ❌: Not planned
 
 | libp2p Node  |    Status     |
 | ------------ | :-----------: |
-| **`libp2p`** | :green_apple: |
+| **`libp2p`** | ✅ |
 
 | Core Protocols |    Status     |
 | -------------- | :-----------: |
-| **`Ping`**     | :green_apple: |
-| **`Identify`** | :green_apple: |
+| **`Ping`**     | ✅ |
+| **`Identify`** | ✅ |
 
 | Transport Protocols |    Status     |
 | ------------------- | :-----------: |
-| **`TCP`**           | :green_apple: |
-| **`QUIC`**          |    :lemon:    |
-| **`UDP`**           |   :tomato:    |
-| **`WebSockets`**    |  :chestnut:   |
-| **`UTP`**           |  :chestnut:   |
-| **`WebRTC`**        |  :chestnut:   |
-| **`SCTP`**          |  :chestnut:   |
-| **`Tor`**           |  :chestnut:   |
-| **`i2p`**           |  :chestnut:   |
-| **`cjdns`**         |  :chestnut:   |
-| **`Bluetooth LE`**  |  :chestnut:   |
-| **`Audio TP`**      |  :chestnut:   |
-| **`Zerotier`**      |  :chestnut:   |
+| **`TCP`**           | ✅|
+| **`QUIC`**          |    🛠️    |
+| **`UDP`**           |   🚫    |
+| **`WebSockets`**    |  ❌   |
+| **`UTP`**           |  ❌  |
+| **`WebRTC`**        |  ❌   |
+| **`SCTP`**          |  ❌   |
+| **`Tor`**           |  ❌   |
+| **`i2p`**           |  ❌   |
+| **`cjdns`**         |  ❌   |
+| **`Bluetooth LE`**  |  ❌   |
+| **`Audio TP`**      |  ❌   |
+| **`Zerotier`**      |  ❌   |
 
 | Stream Muxers    |    Status     |
 | ---------------- | :-----------: |
-| **`multiplex`**  | :green_apple: |
-| **`yamux`**      |   :tomato:    |
-| **`benchmarks`** |  :chestnut:   |
-| **`muxado`**     |  :chestnut:   |
-| **`spdystream`** |  :chestnut:   |
-| **`spdy`**       |  :chestnut:   |
-| **`http2`**      |  :chestnut:   |
-| **`QUIC`**       |  :chestnut:   |
+| **`multiplex`**  | ✅ |
+| **`yamux`**      |   🚫   |
+| **`benchmarks`** |  ❌   |
+| **`muxado`**     |  ❌   |
+| **`spdystream`** |  ❌   |
+| **`spdy`**       |  ❌   |
+| **`http2`**      |  ❌   |
+| **`QUIC`**       |  ❌   |
 
 | Protocol Muxers   |    Status     |
 | ----------------- | :-----------: |
-| **`multiselect`** | :green_apple: |
+| **`multiselect`** | ✅ |
 
 | Switch (Swarm)     |    Status     |
 | ------------------ | :-----------: |
-| **`Switch`**       | :green_apple: |
-| **`Dialer stack`** | :green_apple: |
+| **`Switch`**       | ✅ |
+| **`Dialer stack`** | ✅ |
 
 | Peer Discovery       |   Status   |
 | -------------------- | :--------: |
-| **`bootstrap list`** |  :tomato:  |
-| **`Kademlia DHT`**   | :chestnut: |
-| **`mDNS`**           | :chestnut: |
-| **`PEX`**            | :chestnut: |
-| **`DNS`**            | :chestnut: |
+| **`bootstrap list`** |  🚫  |
+| **`Kademlia DHT`**   | ❌ |
+| **`mDNS`**           | ❌ |
+| **`PEX`**            | ❌ |
+| **`DNS`**            | ❌ |
 
 | Content Routing    |    Status     |
 | ------------------ | :-----------: |
-| **`Kademlia DHT`** |  :chestnut:   |
-| **`floodsub`**     | :green_apple: |
-| **`gossipsub`**    | :green_apple: |
-| **`PHT`**          |  :chestnut:   |
+| **`Kademlia DHT`** |  ❌   |
+| **`floodsub`**     | ✅ |
+| **`gossipsub`**    | ✅ |
+| **`PHT`**          |  ❌   |
 
 | Peer Routing       |    Status     |
 | ------------------ | :-----------: |
-| **`Kademlia DHT`** |  :chestnut:   |
-| **`floodsub`**     | :green_apple: |
-| **`gossipsub`**    | :green_apple: |
-| **`PHT`**          |  :chestnut:   |
+| **`Kademlia DHT`** |  ❌   |
+| **`floodsub`**     | ✅|
+| **`gossipsub`**    | ✅ |
+| **`PHT`**          |  ❌   |
 
 | NAT Traversal            |   Status   |
 | ------------------------ | :--------: |
-| **`nat-pmp`**            | :chestnut: |
-| **`upnp`**               | :chestnut: |
-| **`ext addr discovery`** | :chestnut: |
-| **`STUN-like`**          | :chestnut: |
-| **`line-switch relay`**  | :chestnut: |
-| **`pkt-switch relay`**   | :chestnut: |
+| **`nat-pmp`**            | ❌ |
+| **`upnp`**               | ❌ |
+| **`ext addr discovery`** | ❌ |
+| **`STUN-like`**          | ❌ |
+| **`line-switch relay`**  | ❌ |
+| **`pkt-switch relay`**   | ❌ |
 
 | Exchange         |   Status   |
 | ---------------- | :--------: |
-| **`HTTP`**       | :chestnut: |
-| **`Bitswap`**    | :chestnut: |
-| **`Bittorrent`** | :chestnut: |
+| **`HTTP`**       | ❌ |
+| **`Bitswap`**    | ❌ |
+| **`Bittorrent`** | ❌ |
 
 | Consensus      |   Status   |
 | -------------- | :--------: |
-| **`Paxos`**    | :chestnut: |
-| **`Raft`**     | :chestnut: |
-| **`PBTF`**     | :chestnut: |
-| **`Nakamoto`** | :chestnut: |
+| **`Paxos`**    | ❌ |
+| **`Raft`**     | ❌ |
+| **`PBTF`**     | ❌ |
+| **`Nakamoto`** | ❌ |
 
 ## Explanation of Basic Two Node Communication
 
