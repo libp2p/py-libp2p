@@ -16,6 +16,10 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.custom_types import (
+    StreamHandlerFn,
+    TProtocol,
+)
 from libp2p.host.defaults import (
     get_default_protocols,
 )
@@ -52,10 +56,6 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 )
 from libp2p.tools.async_service import (
     background_trio_service,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
-    TProtocol,
 )
 
 from .host_interface import (

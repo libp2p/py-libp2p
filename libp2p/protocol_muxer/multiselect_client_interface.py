@@ -6,11 +6,11 @@ from collections.abc import (
     Sequence,
 )
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.protocol_muxer.multiselect_communicator_interface import (
     IMultiselectCommunicator,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 

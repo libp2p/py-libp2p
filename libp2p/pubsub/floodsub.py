@@ -6,14 +6,14 @@ import logging
 
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from libp2p.utils import (
     encode_varint_prefixed,

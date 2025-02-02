@@ -1,4 +1,4 @@
-from libp2p.typing import (
+from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )

@@ -18,7 +18,7 @@ from libp2p.identity.identify.protocol import (
 from libp2p.identity.identify.protocol import ID as IdentifyID
 
 if TYPE_CHECKING:
-    from libp2p.typing import (
+    from libp2p.custom_types import (
         StreamHandlerFn,
         TProtocol,
     )

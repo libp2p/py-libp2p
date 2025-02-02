@@ -14,6 +14,9 @@ from p2pclient import (
 )
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -23,9 +26,6 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.typing import (
-    TProtocol,
-)
 
 from .constants import (
     LOCALHOST_IP,

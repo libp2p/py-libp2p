@@ -5,6 +5,9 @@ from collections import (
     OrderedDict,
 )
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.connection.raw_connection_interface import (
     IRawConnection,
 )
@@ -28,9 +31,6 @@ from libp2p.security.secure_transport_interface import (
 )
 from libp2p.transport.typing import (
     TSecurityOptions,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 """

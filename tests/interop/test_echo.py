@@ -9,15 +9,15 @@ from p2pclient.utils import (
 )
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.peer.peerinfo import (
     PeerInfo,
     info_from_p2p_addr,
 )
 from libp2p.tools.factories import (
     HostFactory,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from tests.utils.interop.envs import (
     GO_BIN_PATH,

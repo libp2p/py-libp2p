@@ -2,6 +2,9 @@ from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.connection.raw_connection_interface import (
     IRawConnection,
 )
@@ -13,9 +16,6 @@ from libp2p.security.secure_conn_interface import (
 )
 from libp2p.security.secure_transport_interface import (
     ISecureTransport,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .patterns import (

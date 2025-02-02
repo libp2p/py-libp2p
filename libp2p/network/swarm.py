@@ -8,6 +8,9 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.custom_types import (
+    StreamHandlerFn,
+)
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
@@ -42,9 +45,6 @@ from libp2p.transport.transport_interface import (
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
 )
 
 from ..exceptions import (

@@ -32,10 +32,10 @@ libp2p.exceptions module
    :undoc-members:
    :show-inheritance:
 
-libp2p.typing module
---------------------
+libp2p.custom_types module
+--------------------------
 
-.. automodule:: libp2p.typing
+.. automodule:: libp2p.custom_types
    :members:
    :undoc-members:
    :show-inheritance:

@@ -4,6 +4,9 @@ import time
 
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.host.host_interface import (
     IHost,
 )
@@ -16,9 +19,6 @@ from libp2p.network.stream.net_stream_interface import (
     INetStream,
 )
 from libp2p.peer.id import ID as PeerID
-from libp2p.typing import (
-    TProtocol,
-)
 
 ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32

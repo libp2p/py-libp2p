@@ -17,6 +17,9 @@ from typing import (
 
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
@@ -28,9 +31,6 @@ from libp2p.pubsub import (
 )
 from libp2p.tools.async_service import (
     Service,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from libp2p.utils import (
     encode_varint_prefixed,

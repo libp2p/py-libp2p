@@ -6,14 +6,14 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")

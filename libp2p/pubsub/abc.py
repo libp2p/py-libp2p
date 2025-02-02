@@ -11,14 +11,14 @@ from typing import (
     AsyncContextManager,
 )
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.tools.async_service import (
     ServiceAPI,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .pb import (
