@@ -13,6 +13,9 @@ from multiaddr import (
     Multiaddr,
 )
 
+from libp2p.custom_types import (
+    StreamHandlerFn,
+)
 from libp2p.network.connection.net_connection_interface import (
     INetConn,
 )
@@ -27,9 +30,6 @@ from libp2p.tools.async_service import (
 )
 from libp2p.transport.listener_interface import (
     IListener,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
 )
 
 from .stream.net_stream_interface import (

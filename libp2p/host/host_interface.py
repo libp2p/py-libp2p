@@ -16,6 +16,10 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.custom_types import (
+    StreamHandlerFn,
+    TProtocol,
+)
 from libp2p.network.network_interface import (
     INetworkService,
 )
@@ -27,10 +31,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
-    TProtocol,
 )
 
 

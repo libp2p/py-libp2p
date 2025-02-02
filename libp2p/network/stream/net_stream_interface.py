@@ -2,14 +2,14 @@ from abc import (
     abstractmethod,
 )
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
 from libp2p.stream_muxer.abc import (
     IMuxedConn,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 

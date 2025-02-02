@@ -6,6 +6,9 @@ from libp2p.crypto.keys import (
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -51,9 +54,6 @@ from libp2p.transport.typing import (
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 

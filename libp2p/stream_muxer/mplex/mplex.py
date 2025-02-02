@@ -5,6 +5,9 @@ from typing import (
 
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.exceptions import (
     ParseError,
 )
@@ -23,9 +26,6 @@ from libp2p.security.secure_conn_interface import (
 from libp2p.stream_muxer.abc import (
     IMuxedConn,
     IMuxedStream,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from libp2p.utils import (
     decode_uvarint_from_stream,

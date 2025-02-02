@@ -26,6 +26,9 @@ import trio
 from libp2p.crypto.keys import (
     PrivateKey,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
@@ -52,9 +55,6 @@ from libp2p.peer.id import (
 )
 from libp2p.tools.async_service import (
     Service,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from libp2p.utils import (
     encode_varint_prefixed,

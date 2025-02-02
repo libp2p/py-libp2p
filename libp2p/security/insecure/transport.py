@@ -11,6 +11,9 @@ from libp2p.crypto.pb import (
 from libp2p.crypto.serialization import (
     deserialize_public_key,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
@@ -37,9 +40,6 @@ from libp2p.security.exceptions import (
 )
 from libp2p.security.secure_conn_interface import (
     ISecureConn,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .pb import (

@@ -34,6 +34,9 @@ from libp2p.crypto.keys import (
 from libp2p.crypto.serialization import (
     deserialize_public_key,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
 )
@@ -56,9 +59,6 @@ from libp2p.security.secure_conn_interface import (
 )
 from libp2p.security.secure_session import (
     SecureSession,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .exceptions import (

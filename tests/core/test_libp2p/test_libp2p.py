@@ -1,6 +1,9 @@
 import pytest
 import multiaddr
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.exceptions import (
     StreamError,
 )
@@ -13,9 +16,6 @@ from libp2p.tools.factories import (
 from libp2p.tools.utils import (
     connect,
     create_echo_stream_handler,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 PROTOCOL_ID_0 = TProtocol("/echo/0")

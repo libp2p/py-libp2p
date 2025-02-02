@@ -9,14 +9,14 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
