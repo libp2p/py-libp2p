@@ -1,4 +1,5 @@
-from libp2p.io.abc import (
+from libp2p.abc import (
+    IRawConnection,
     ReadWriteCloser,
 )
 from libp2p.io.exceptions import (
@@ -7,9 +8,6 @@ from libp2p.io.exceptions import (
 
 from .exceptions import (
     RawConnError,
-)
-from .raw_connection_interface import (
-    IRawConnection,
 )
 
 

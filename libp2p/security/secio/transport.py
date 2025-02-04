@@ -8,6 +8,11 @@ from typing import (
 
 import multihash
 
+from libp2p.abc import (
+    EncryptedMsgReadWriter,
+    IRawConnection,
+    ISecureConn,
+)
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
 )
@@ -37,9 +42,6 @@ from libp2p.crypto.serialization import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.io.abc import (
-    EncryptedMsgReadWriter,
-)
 from libp2p.io.exceptions import (
     DecryptionFailedException,
     IOException,
@@ -47,15 +49,9 @@ from libp2p.io.exceptions import (
 from libp2p.io.msgio import (
     FixedSizeLenMsgReadWriter,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_transport import (
     BaseSecureTransport,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
 )
 from libp2p.security.secure_session import (
     SecureSession,
@@ -454,7 +450,8 @@ class Transport(BaseSecureTransport):
         node via conn, for an inbound connection (i.e. we are not the
         initiator)
 
-        :return: secure connection object (that implements secure_conn_interface)
+        :return: secure connection object that implements ISecureConn (from libp2p.abc)
+
         """
         local_nonce = self.get_nonce()
         local_peer = self.local_peer
@@ -471,7 +468,8 @@ class Transport(BaseSecureTransport):
         Secure the connection, either locally or by communicating with opposing
         node via conn, for an inbound connection (i.e. we are the initiator)
 
-        :return: secure connection object (that implements secure_conn_interface)
+        :return: secure connection object that implements ISecureConn (from libp2p.abc)
+
         """
         local_nonce = self.get_nonce()
         local_peer = self.local_peer

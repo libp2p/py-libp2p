@@ -4,19 +4,17 @@ import time
 
 import trio
 
+from libp2p.abc import (
+    IHost,
+    INetStream,
+)
 from libp2p.custom_types import (
     TProtocol,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamReset,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.peer.id import ID as PeerID
 

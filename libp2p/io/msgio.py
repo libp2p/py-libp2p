@@ -5,6 +5,7 @@ from that repo: "a simple package to r/w length-delimited slices."
 
 NOTE: currently missing the capability to indicate lengths by "varint" method.
 """
+
 from abc import (
     abstractmethod,
 )
@@ -12,7 +13,7 @@ from typing import (
     Literal,
 )
 
-from libp2p.io.abc import (
+from libp2p.abc import (
     MsgReadWriteCloser,
     Reader,
     ReadWriteCloser,

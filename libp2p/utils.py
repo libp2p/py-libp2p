@@ -1,11 +1,11 @@
 import itertools
 import math
 
+from libp2p.abc import (
+    Reader,
+)
 from libp2p.exceptions import (
     ParseError,
-)
-from libp2p.io.abc import (
-    Reader,
 )
 
 from .io.utils import (

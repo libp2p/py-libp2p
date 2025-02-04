@@ -1,4 +1,4 @@
-from libp2p.io.abc import (
+from libp2p.abc import (
     Reader,
 )
 from libp2p.io.exceptions import (

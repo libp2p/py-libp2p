@@ -15,23 +15,19 @@ from trio_typing import (
     TaskStatus,
 )
 
+from libp2p.abc import (
+    IListener,
+    IRawConnection,
+    ITransport,
+)
 from libp2p.io.trio import (
     TrioTCPStream,
 )
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.transport.exceptions import (
     OpenConnectionError,
-)
-from libp2p.transport.listener_interface import (
-    IListener,
-)
-from libp2p.transport.transport_interface import (
-    ITransport,
 )
 from libp2p.transport.typing import (
     THandler,
@@ -120,7 +116,8 @@ class TCP(ITransport):
 
         :param handler_function: a function called when a new connection is received
             that takes a connection as argument which implements interface-connection
-        :return: a listener object that implements listener_interface.py
+        ::return: a listener object that implements IListener (from libp2p.abc)
+
         """
         return TCPListener(handler_function)
 

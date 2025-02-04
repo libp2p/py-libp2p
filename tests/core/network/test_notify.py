@@ -13,7 +13,7 @@ import enum
 import pytest
 import trio
 
-from libp2p.network.notifee_interface import (
+from libp2p.abc import (
     INotifee,
 )
 from libp2p.tools.async_service import (

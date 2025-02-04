@@ -23,6 +23,10 @@ from lru import (
 )
 import trio
 
+from libp2p.abc import (
+    IHost,
+    INetStream,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
 )
@@ -32,9 +36,6 @@ from libp2p.custom_types import (
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.io.exceptions import (
     IncompleteReadError,
@@ -46,9 +47,6 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamReset,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.peer.id import (
     ID,

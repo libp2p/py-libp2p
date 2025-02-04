@@ -2,7 +2,7 @@ import logging
 
 import trio
 
-from libp2p.io.abc import (
+from libp2p.abc import (
     ReadWriteCloser,
 )
 from libp2p.io.exceptions import (

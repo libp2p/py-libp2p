@@ -1,11 +1,11 @@
 import io
 
+from libp2p.abc import (
+    EncryptedMsgReadWriter,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
-)
-from libp2p.io.abc import (
-    EncryptedMsgReadWriter,
 )
 from libp2p.peer.id import (
     ID,

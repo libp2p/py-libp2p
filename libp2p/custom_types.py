@@ -8,8 +8,10 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from libp2p.network.stream.net_stream_interface import INetStream  # noqa: F401
-    from libp2p.stream_muxer.abc import IMuxedStream  # noqa: F401
+    from libp2p.abc import (  # noqa: F401
+        IMuxedStream,
+        INetStream,
+    )
 
 TProtocol = NewType("TProtocol", str)
 StreamHandlerFn = Callable[["INetStream"], Awaitable[None]]

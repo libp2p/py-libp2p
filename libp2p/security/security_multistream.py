@@ -5,11 +5,13 @@ from collections import (
     OrderedDict,
 )
 
+from libp2p.abc import (
+    IRawConnection,
+    ISecureConn,
+    ISecureTransport,
+)
 from libp2p.custom_types import (
     TProtocol,
-)
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
 )
 from libp2p.peer.id import (
     ID,
@@ -22,12 +24,6 @@ from libp2p.protocol_muxer.multiselect_client import (
 )
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
 )
 from libp2p.transport.typing import (
     TSecurityOptions,
@@ -82,7 +78,8 @@ class SecurityMultistream(ABC):
         node via conn, for an inbound connection (i.e. we are not the
         initiator)
 
-        :return: secure connection object (that implements secure_conn_interface)
+        :return: secure connection object that implements ISecureConn (from libp2p.abc)
+
         """
         transport = await self.select_transport(conn, False)
         secure_conn = await transport.secure_inbound(conn)
@@ -93,7 +90,8 @@ class SecurityMultistream(ABC):
         Secure the connection, either locally or by communicating with opposing
         node via conn, for an inbound connection (i.e. we are the initiator)
 
-        :return: secure connection object (that implements secure_conn_interface)
+        :return: secure connection object that implements ISecureConn (from libp2p.abc)
+
         """
         transport = await self.select_transport(conn, True)
         secure_conn = await transport.secure_outbound(conn, peer_id)

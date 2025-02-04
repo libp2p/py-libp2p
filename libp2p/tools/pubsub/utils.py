@@ -2,7 +2,7 @@ from collections.abc import (
     Sequence,
 )
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
 )
 from libp2p.peer.id import (
