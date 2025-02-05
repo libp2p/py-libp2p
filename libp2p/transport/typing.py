@@ -3,14 +3,17 @@ from collections.abc import (
     Mapping,
 )
 from typing import (
+    TYPE_CHECKING,
     Callable,
 )
 
-from libp2p.abc import (
-    IMuxedConn,
-    ISecureTransport,
-    ReadWriteCloser,
-)
+if TYPE_CHECKING:
+    from libp2p.abc import (
+        IMuxedConn,
+        ISecureTransport,
+        ReadWriteCloser,
+    )
+
 from libp2p.custom_types import (
     TProtocol,
 )
