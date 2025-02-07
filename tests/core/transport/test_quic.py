@@ -1,6 +1,8 @@
-import trio
+from aioquic.quic.configuration import QuicConfiguration
 import pytest
-from libp2p.core.quic import QuicProtocol, QuicConfiguration
+import trio
+
+from libp2p.transport.quic.quic import QuicProtocol
 
 
 @pytest.mark.trio
@@ -10,4 +12,6 @@ async def test_quic_handshake():
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(protocol.run)
-        # Add additional assertions or conditions as needed
+        await trio.sleep(1)  # Wait for the handshake to complete
+
+    assert protocol._handshake_complete.is_set()
