@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 
 from multiaddr import Multiaddr
 from libp2p.peer.id import ID
-from libp2p.transport.transport import Transport
+from libp2p.transport.transport_interface import Transport
 from libp2p.transport.listener_interface import IListener
 from libp2p.network.stream.net_stream_interface import INetStream
 
