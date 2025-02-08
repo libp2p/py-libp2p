@@ -1,5 +1,6 @@
 import trio
 import logging
+import structlog
 from typing import Optional, Tuple, Dict, List
 from contextlib import asynccontextmanager
 from datetime import datetime
