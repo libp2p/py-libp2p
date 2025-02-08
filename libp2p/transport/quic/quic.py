@@ -17,7 +17,7 @@ from aioquic.quic.events import (
     ConnectionIdRetired
 )
 
-from libp2p.typing import TProtocol
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID as PeerID
 from .errors import QuicError, QuicStreamError, QuicConnectionError, QuicProtocolError
 from .metrics import QuicMetrics
