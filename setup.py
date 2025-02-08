@@ -68,6 +68,7 @@ install_requires = [
     "trio-typing>=0.0.4",
     "aioquic>=0.9.20",
     "trio>=0.26.0",
+    "structlog>=24.1.0",
 ]
 
 
