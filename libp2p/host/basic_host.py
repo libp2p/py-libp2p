@@ -14,6 +14,7 @@ import multiaddr
 
 from libp2p.abc import (
     IHost,
+    INetworkService,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -28,9 +29,6 @@ from libp2p.host.defaults import (
 )
 from libp2p.host.exceptions import (
     StreamFailure,
-)
-from libp2p.network.network_interface import (
-    INetworkService,
 )
 from libp2p.network.stream.net_stream_interface import (
     INetStream,

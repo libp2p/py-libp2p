@@ -18,7 +18,7 @@ from libp2p.network.stream.net_stream_interface import (
 )
 
 if TYPE_CHECKING:
-    from .network_interface import INetwork  # noqa: F401
+    from libp2p.abc import INetwork  # noqa: F401
 
 
 class INotifee(ABC):

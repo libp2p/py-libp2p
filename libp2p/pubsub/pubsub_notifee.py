@@ -7,11 +7,11 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.abc import (
+    INetwork,
+)
 from libp2p.network.connection.net_connection_interface import (
     INetConn,
-)
-from libp2p.network.network_interface import (
-    INetwork,
 )
 from libp2p.network.notifee_interface import (
     INotifee,
