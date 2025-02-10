@@ -2,6 +2,7 @@ from importlib.metadata import version as __version
 
 from libp2p.abc import (
     IHost,
+    INetworkService,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -17,9 +18,6 @@ from libp2p.host.basic_host import (
 )
 from libp2p.host.routed_host import (
     RoutedHost,
-)
-from libp2p.network.network_interface import (
-    INetworkService,
 )
 from libp2p.network.swarm import (
     Swarm,

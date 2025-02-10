@@ -8,6 +8,9 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.abc import (
+    INetworkService,
+)
 from libp2p.custom_types import (
     StreamHandlerFn,
 )
@@ -58,9 +61,6 @@ from .connection.swarm_connection import (
 )
 from .exceptions import (
     SwarmException,
-)
-from .network_interface import (
-    INetworkService,
 )
 from .notifee_interface import (
     INotifee,
