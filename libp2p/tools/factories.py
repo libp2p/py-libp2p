@@ -22,6 +22,9 @@ from libp2p import (
     generate_new_rsa_identity,
     generate_peer_id_from,
 )
+from libp2p.abc import (
+    IHost,
+)
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.keys import (
     KeyPair,
@@ -33,9 +36,6 @@ from libp2p.custom_types import (
 )
 from libp2p.host.basic_host import (
     BasicHost,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.host.routed_host import (
     RoutedHost,

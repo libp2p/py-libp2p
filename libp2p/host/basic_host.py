@@ -12,6 +12,9 @@ from typing import (
 
 import multiaddr
 
+from libp2p.abc import (
+    IHost,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -56,10 +59,6 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 )
 from libp2p.tools.async_service import (
     background_trio_service,
-)
-
-from .host_interface import (
-    IHost,
 )
 
 if TYPE_CHECKING:
