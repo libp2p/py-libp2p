@@ -10,6 +10,7 @@ import trio
 
 from libp2p.abc import (
     INetworkService,
+    INotifee,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
@@ -61,9 +62,6 @@ from .connection.swarm_connection import (
 )
 from .exceptions import (
     SwarmException,
-)
-from .notifee_interface import (
-    INotifee,
 )
 from .stream.net_stream_interface import (
     INetStream,
