@@ -29,94 +29,94 @@ py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.
 
 > Legend: ✅: Done   🛠️: In Progress   🚫: Missing   ❌: Not planned
 
-| libp2p Node  |    Status     |
-| ------------ | :-----------: |
-| **`libp2p`** | ✅ |
+| libp2p Node  | Status |
+| ------------ | :----: |
+| **`libp2p`** |   ✅   |
 
-| Core Protocols |    Status     |
-| -------------- | :-----------: |
-| **`Ping`**     | ✅ |
-| **`Identify`** | ✅ |
+| Core Protocols | Status |
+| -------------- | :----: |
+| **`Ping`**     |   ✅   |
+| **`Identify`** |   ✅   |
 
-| Transport Protocols |    Status     |
-| ------------------- | :-----------: |
-| **`TCP`**           | ✅|
-| **`QUIC`**          |    🛠️    |
-| **`UDP`**           |   🚫    |
-| **`WebSockets`**    |  ❌   |
-| **`UTP`**           |  ❌  |
-| **`WebRTC`**        |  ❌   |
-| **`SCTP`**          |  ❌   |
-| **`Tor`**           |  ❌   |
-| **`i2p`**           |  ❌   |
-| **`cjdns`**         |  ❌   |
-| **`Bluetooth LE`**  |  ❌   |
-| **`Audio TP`**      |  ❌   |
-| **`Zerotier`**      |  ❌   |
+| Transport Protocols | Status |
+| ------------------- | :----: |
+| **`TCP`**           |   ✅   |
+| **`QUIC`**          |   🛠️   |
+| **`UDP`**           |   🚫   |
+| **`WebSockets`**    |   ❌   |
+| **`UTP`**           |   ❌   |
+| **`WebRTC`**        |   ❌   |
+| **`SCTP`**          |   ❌   |
+| **`Tor`**           |   ❌   |
+| **`i2p`**           |   ❌   |
+| **`cjdns`**         |   ❌   |
+| **`Bluetooth LE`**  |   ❌   |
+| **`Audio TP`**      |   ❌   |
+| **`Zerotier`**      |   ❌   |
 
-| Stream Muxers    |    Status     |
-| ---------------- | :-----------: |
-| **`multiplex`**  | ✅ |
+| Stream Muxers    | Status |
+| ---------------- | :----: |
+| **`multiplex`**  |   ✅   |
 | **`yamux`**      |   🚫   |
-| **`benchmarks`** |  ❌   |
-| **`muxado`**     |  ❌   |
-| **`spdystream`** |  ❌   |
-| **`spdy`**       |  ❌   |
-| **`http2`**      |  ❌   |
-| **`QUIC`**       |  ❌   |
+| **`benchmarks`** |   ❌   |
+| **`muxado`**     |   ❌   |
+| **`spdystream`** |   ❌   |
+| **`spdy`**       |   ❌   |
+| **`http2`**      |   ❌   |
+| **`QUIC`**       |   ❌   |
 
-| Protocol Muxers   |    Status     |
-| ----------------- | :-----------: |
-| **`multiselect`** | ✅ |
+| Protocol Muxers   | Status |
+| ----------------- | :----: |
+| **`multiselect`** |   ✅   |
 
-| Switch (Swarm)     |    Status     |
-| ------------------ | :-----------: |
-| **`Switch`**       | ✅ |
-| **`Dialer stack`** | ✅ |
+| Switch (Swarm)     | Status |
+| ------------------ | :----: |
+| **`Switch`**       |   ✅   |
+| **`Dialer stack`** |   ✅   |
 
-| Peer Discovery       |   Status   |
-| -------------------- | :--------: |
-| **`bootstrap list`** |  🚫  |
-| **`Kademlia DHT`**   | ❌ |
-| **`mDNS`**           | ❌ |
-| **`PEX`**            | ❌ |
-| **`DNS`**            | ❌ |
+| Peer Discovery       | Status |
+| -------------------- | :----: |
+| **`bootstrap list`** |   🚫   |
+| **`Kademlia DHT`**   |   ❌   |
+| **`mDNS`**           |   ❌   |
+| **`PEX`**            |   ❌   |
+| **`DNS`**            |   ❌   |
 
-| Content Routing    |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  ❌   |
-| **`floodsub`**     | ✅ |
-| **`gossipsub`**    | ✅ |
-| **`PHT`**          |  ❌   |
+| Content Routing    | Status |
+| ------------------ | :----: |
+| **`Kademlia DHT`** |   ❌   |
+| **`floodsub`**     |   ✅   |
+| **`gossipsub`**    |   ✅   |
+| **`PHT`**          |   ❌   |
 
-| Peer Routing       |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  ❌   |
-| **`floodsub`**     | ✅|
-| **`gossipsub`**    | ✅ |
-| **`PHT`**          |  ❌   |
+| Peer Routing       | Status |
+| ------------------ | :----: |
+| **`Kademlia DHT`** |   ❌   |
+| **`floodsub`**     |   ✅   |
+| **`gossipsub`**    |   ✅   |
+| **`PHT`**          |   ❌   |
 
-| NAT Traversal            |   Status   |
-| ------------------------ | :--------: |
-| **`nat-pmp`**            | ❌ |
-| **`upnp`**               | ❌ |
-| **`ext addr discovery`** | ❌ |
-| **`STUN-like`**          | ❌ |
-| **`line-switch relay`**  | ❌ |
-| **`pkt-switch relay`**   | ❌ |
+| NAT Traversal            | Status |
+| ------------------------ | :----: |
+| **`nat-pmp`**            |   ❌   |
+| **`upnp`**               |   ❌   |
+| **`ext addr discovery`** |   ❌   |
+| **`STUN-like`**          |   ❌   |
+| **`line-switch relay`**  |   ❌   |
+| **`pkt-switch relay`**   |   ❌   |
 
-| Exchange         |   Status   |
-| ---------------- | :--------: |
-| **`HTTP`**       | ❌ |
-| **`Bitswap`**    | ❌ |
-| **`Bittorrent`** | ❌ |
+| Exchange         | Status |
+| ---------------- | :----: |
+| **`HTTP`**       |   ❌   |
+| **`Bitswap`**    |   ❌   |
+| **`Bittorrent`** |   ❌   |
 
-| Consensus      |   Status   |
-| -------------- | :--------: |
-| **`Paxos`**    | ❌ |
-| **`Raft`**     | ❌ |
-| **`PBTF`**     | ❌ |
-| **`Nakamoto`** | ❌ |
+| Consensus      | Status |
+| -------------- | :----: |
+| **`Paxos`**    |   ❌   |
+| **`Raft`**     |   ❌   |
+| **`PBTF`**     |   ❌   |
+| **`Nakamoto`** |   ❌   |
 
 ## Explanation of Basic Two Node Communication
 

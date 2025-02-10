@@ -5,7 +5,7 @@ from typing import (
     Callable,
 )
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
 )
 from libp2p.network.stream.exceptions import (

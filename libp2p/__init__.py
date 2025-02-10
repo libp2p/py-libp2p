@@ -1,5 +1,8 @@
 from importlib.metadata import version as __version
 
+from libp2p.abc import (
+    IHost,
+)
 from libp2p.crypto.keys import (
     KeyPair,
 )
@@ -11,9 +14,6 @@ from libp2p.custom_types import (
 )
 from libp2p.host.basic_host import (
     BasicHost,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.host.routed_host import (
     RoutedHost,

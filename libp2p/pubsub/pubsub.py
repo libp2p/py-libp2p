@@ -23,6 +23,9 @@ from lru import (
 )
 import trio
 
+from libp2p.abc import (
+    IHost,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
 )
@@ -32,9 +35,6 @@ from libp2p.custom_types import (
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.io.exceptions import (
     IncompleteReadError,
