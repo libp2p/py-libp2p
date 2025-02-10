@@ -14,6 +14,7 @@ import multiaddr
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -23,8 +24,8 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
-from libp2p.network.connection.net_connection_interface import (
-    INetConn,
+from libp2p.io.abc import (
+    Closer,
 )
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
@@ -38,12 +39,30 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore_interface import (
     IPeerStore,
 )
+from libp2p.stream_muxer.abc import (
+    IMuxedConn,
+)
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
 from libp2p.transport.listener_interface import (
     IListener,
 )
+
+
+# net_connection_interface
+class INetConn(Closer):
+    muxed_conn: IMuxedConn
+    event_started: trio.Event
+
+    @abstractmethod
+    async def new_stream(self) -> INetStream:
+        ...
+
+    @abstractmethod
+    def get_streams(self) -> tuple[INetStream, ...]:
+        ...
+
 
 # network_interface
 

@@ -9,6 +9,7 @@ from multiaddr import (
 import trio
 
 from libp2p.abc import (
+    INetConn,
     INetworkService,
     INotifee,
 )
@@ -17,9 +18,6 @@ from libp2p.custom_types import (
 )
 from libp2p.io.abc import (
     ReadWriteCloser,
-)
-from libp2p.network.connection.net_connection_interface import (
-    INetConn,
 )
 from libp2p.peer.id import (
     ID,

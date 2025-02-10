@@ -4,7 +4,7 @@ from typing import (
 
 import trio
 
-from libp2p.network.connection.net_connection_interface import (
+from libp2p.abc import (
     INetConn,
 )
 from libp2p.network.stream.net_stream import (

@@ -8,11 +8,9 @@ from multiaddr import (
 import trio
 
 from libp2p.abc import (
+    INetConn,
     INetwork,
     INotifee,
-)
-from libp2p.network.connection.net_connection_interface import (
-    INetConn,
 )
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
