@@ -1,3 +1,6 @@
+from libp2p.abc import (
+    IMultiselectCommunicator,
+)
 from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
@@ -6,9 +9,6 @@ from libp2p.custom_types import (
 from .exceptions import (
     MultiselectCommunicatorError,
     MultiselectError,
-)
-from .multiselect_communicator_interface import (
-    IMultiselectCommunicator,
 )
 from .multiselect_muxer_interface import (
     IMultiselectMuxer,

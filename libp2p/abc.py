@@ -35,9 +35,6 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.protocol_muxer.multiselect_communicator_interface import (
-    IMultiselectCommunicator,
-)
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
@@ -682,6 +679,27 @@ class IPeerData(ABC):
         :return: private key of the peer
         :raise PeerDataError: if private key not found
         """
+
+
+# multiselect_communicator_interface
+class IMultiselectCommunicator(ABC):
+    """
+    Communicator helper class that ensures both the client and multistream
+    module will follow the same multistream protocol, which is necessary for
+    them to work.
+    """
+
+    @abstractmethod
+    async def write(self, msg_str: str) -> None:
+        """
+        Write message to stream.
+
+        :param msg_str: message to write
+        """
+
+    @abstractmethod
+    async def read(self) -> str:
+        """Reads message from stream until EOF."""
 
 
 # multiselect_client_interface
