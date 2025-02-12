@@ -1,5 +1,6 @@
 from libp2p.abc import (
     IMultiselectCommunicator,
+    IMultiselectMuxer,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
@@ -9,9 +10,6 @@ from libp2p.custom_types import (
 from .exceptions import (
     MultiselectCommunicatorError,
     MultiselectError,
-)
-from .multiselect_muxer_interface import (
-    IMultiselectMuxer,
 )
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
