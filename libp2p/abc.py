@@ -35,9 +35,6 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peermetadata_interface import (
-    IPeerMetadata,
-)
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
@@ -192,6 +189,27 @@ class INetConn(Closer):
     @abstractmethod
     def get_streams(self) -> tuple[INetStream, ...]:
         ...
+
+
+# peermetadata_interface
+class IPeerMetadata(ABC):
+    @abstractmethod
+    def get(self, peer_id: ID, key: str) -> Any:
+        """
+        :param peer_id: peer ID to lookup key for
+        :param key: key to look up
+        :return: value at key for given peer
+        :raise Exception: peer ID not found
+        """
+
+    @abstractmethod
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
+        """
+        :param peer_id: peer ID to lookup key for
+        :param key: key to associate with peer
+        :param val: value to associated with key
+        :raise Exception: unsuccessful put
+        """
 
 
 # addrbook_interface
