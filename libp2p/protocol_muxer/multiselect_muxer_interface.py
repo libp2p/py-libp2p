@@ -3,13 +3,12 @@ from abc import (
     abstractmethod,
 )
 
+from libp2p.abc import (
+    IMultiselectCommunicator,
+)
 from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
-)
-
-from .multiselect_communicator_interface import (
-    IMultiselectCommunicator,
 )
 
 
