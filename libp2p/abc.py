@@ -39,9 +39,6 @@ from libp2p.peer.peerinfo import (
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
-from libp2p.transport.listener_interface import (
-    IListener,
-)
 
 # raw_connection_interface
 
@@ -392,6 +389,32 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         :param key_pair:
         :raise PeerStoreError: if peer ID already has pubkey or privkey set
         """
+
+
+# listener_interface
+
+
+class IListener(ABC):
+    @abstractmethod
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+        """
+        Put listener in listening mode and wait for incoming connections.
+
+        :param maddr: multiaddr of peer
+        :return: return True if successful
+        """
+
+    @abstractmethod
+    def get_addrs(self) -> tuple[Multiaddr, ...]:
+        """
+        Retrieve list of addresses the listener is listening on.
+
+        :return: return list of addrs
+        """
+
+    @abstractmethod
+    async def close(self) -> None:
+        ...
 
 
 # network_interface

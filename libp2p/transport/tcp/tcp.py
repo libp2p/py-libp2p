@@ -16,6 +16,7 @@ from trio_typing import (
 )
 
 from libp2p.abc import (
+    IListener,
     IRawConnection,
 )
 from libp2p.io.trio import (
@@ -26,9 +27,6 @@ from libp2p.network.connection.raw_connection import (
 )
 from libp2p.transport.exceptions import (
     OpenConnectionError,
-)
-from libp2p.transport.listener_interface import (
-    IListener,
 )
 from libp2p.transport.transport_interface import (
     ITransport,

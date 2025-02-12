@@ -8,12 +8,10 @@ from multiaddr import (
 )
 
 from libp2p.abc import (
+    IListener,
     IRawConnection,
 )
 
-from .listener_interface import (
-    IListener,
-)
 from .typing import (
     THandler,
 )
