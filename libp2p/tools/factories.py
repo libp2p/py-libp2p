@@ -25,6 +25,7 @@ from libp2p import (
 from libp2p.abc import (
     IHost,
     INetStream,
+    IPeerRouting,
     IRawConnection,
     ISecureConn,
 )
@@ -77,9 +78,6 @@ import libp2p.pubsub.pb.rpc_pb2 as rpc_pb2
 from libp2p.pubsub.pubsub import (
     Pubsub,
     get_peer_and_seqno_msg_id,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
