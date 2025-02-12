@@ -14,6 +14,7 @@ from libp2p.abc import (
     INetStream,
     INetworkService,
     INotifee,
+    IPeerStore,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
@@ -26,9 +27,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore import (
     PeerStoreError,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
 )
 from libp2p.tools.async_service import (
     Service,

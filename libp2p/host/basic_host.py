@@ -16,6 +16,7 @@ from libp2p.abc import (
     IHost,
     INetStream,
     INetworkService,
+    IPeerStore,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -36,9 +37,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
 )
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,

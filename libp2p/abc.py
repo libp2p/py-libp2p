@@ -17,6 +17,7 @@ from multiaddr import (
 import trio
 
 from libp2p.crypto.keys import (
+    KeyPair,
     PrivateKey,
     PublicKey,
 )
@@ -34,8 +35,8 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
+from libp2p.peer.peermetadata_interface import (
+    IPeerMetadata,
 )
 from libp2p.tools.async_service import (
     ServiceAPI,
@@ -191,6 +192,187 @@ class INetConn(Closer):
     @abstractmethod
     def get_streams(self) -> tuple[INetStream, ...]:
         ...
+
+
+# addrbook_interface
+
+
+class IAddrBook(ABC):
+    @abstractmethod
+    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+        """
+        Calls add_addrs(peer_id, [addr], ttl)
+
+        :param peer_id: the peer to add address for
+        :param addr: multiaddress of the peer
+        :param ttl: time-to-live for the address (after this time, address is no longer valid)
+        """  # noqa: E501
+
+    @abstractmethod
+    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """
+        Adds addresses for a given peer all with the same time-to-live. If one
+        of the addresses already exists for the peer and has a longer TTL, no
+        operation should take place. If one of the addresses exists with a
+        shorter TTL, extend the TTL to equal param ttl.
+
+        :param peer_id: the peer to add address for
+        :param addr: multiaddresses of the peer
+        :param ttl: time-to-live for the address (after this time, address is no longer valid
+        """  # noqa: E501
+
+    @abstractmethod
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
+        """
+        :param peer_id: peer to get addresses of
+        :return: all known (and valid) addresses for the given peer
+        """
+
+    @abstractmethod
+    def clear_addrs(self, peer_id: ID) -> None:
+        """
+        Removes all previously stored addresses.
+
+        :param peer_id: peer to remove addresses of
+        """
+
+    @abstractmethod
+    def peers_with_addrs(self) -> list[ID]:
+        """
+        :return: all of the peer IDs stored with addresses
+        """
+
+
+# peerstore_interface
+
+
+class IPeerStore(IAddrBook, IPeerMetadata):
+    @abstractmethod
+    def peer_info(self, peer_id: ID) -> PeerInfo:
+        """
+        :param peer_id: peer ID to get info for
+        :return: peer info object
+        """
+
+    @abstractmethod
+    def get_protocols(self, peer_id: ID) -> list[str]:
+        """
+        :param peer_id: peer ID to get protocols for
+        :return: protocols (as list of strings)
+        :raise PeerStoreError: if peer ID not found
+        """
+
+    @abstractmethod
+    def add_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """
+        :param peer_id: peer ID to add protocols for
+        :param protocols: protocols to add
+        """
+
+    @abstractmethod
+    def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """
+        :param peer_id: peer ID to set protocols for
+        :param protocols: protocols to set
+        """
+
+    @abstractmethod
+    def peer_ids(self) -> list[ID]:
+        """
+        :return: all of the peer IDs stored in peer store
+        """
+
+    @abstractmethod
+    def get(self, peer_id: ID, key: str) -> Any:
+        """
+        :param peer_id: peer ID to get peer data for
+        :param key: the key to search value for
+        :return: value corresponding to the key
+        :raise PeerStoreError: if peer ID or value not found
+        """
+
+    @abstractmethod
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
+        """
+        :param peer_id: peer ID to put peer data for
+        :param key:
+        :param value:
+        """
+
+    @abstractmethod
+    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+        """
+        :param peer_id: peer ID to add address for
+        :param addr:
+        :param ttl: time-to-live for the this record
+        """
+
+    @abstractmethod
+    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """
+        :param peer_id: peer ID to add address for
+        :param addrs:
+        :param ttl: time-to-live for the this record
+        """
+
+    @abstractmethod
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
+        """
+        :param peer_id: peer ID to get addrs for
+        :return: list of addrs
+        """
+
+    @abstractmethod
+    def clear_addrs(self, peer_id: ID) -> None:
+        """
+        :param peer_id: peer ID to clear addrs for
+        """
+
+    @abstractmethod
+    def peers_with_addrs(self) -> list[ID]:
+        """
+        :return: all of the peer IDs which has addrs stored in peer store
+        """
+
+    @abstractmethod
+    def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
+        """
+        :param peer_id: peer ID to add public key for
+        :param pubkey:
+        :raise PeerStoreError: if peer ID already has pubkey set
+        """
+
+    @abstractmethod
+    def pubkey(self, peer_id: ID) -> PublicKey:
+        """
+        :param peer_id: peer ID to get public key for
+        :return: public key of the peer
+        :raise PeerStoreError: if peer ID not found
+        """
+
+    @abstractmethod
+    def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
+        """
+        :param peer_id: peer ID to add private key for
+        :param privkey:
+        :raise PeerStoreError: if peer ID already has privkey set
+        """
+
+    @abstractmethod
+    def privkey(self, peer_id: ID) -> PrivateKey:
+        """
+        :param peer_id: peer ID to get private key for
+        :return: private key of the peer
+        :raise PeerStoreError: if peer ID not found
+        """
+
+    @abstractmethod
+    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
+        """
+        :param peer_id: peer ID to add private key for
+        :param key_pair:
+        :raise PeerStoreError: if peer ID already has pubkey or privkey set
+        """
 
 
 # network_interface
