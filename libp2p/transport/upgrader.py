@@ -1,4 +1,5 @@
 from libp2p.abc import (
+    IListener,
     IMuxedConn,
     IRawConnection,
     ISecureConn,
@@ -28,9 +29,6 @@ from libp2p.transport.typing import (
     TSecurityOptions,
 )
 
-from .listener_interface import (
-    IListener,
-)
 from .transport_interface import (
     ITransport,
 )

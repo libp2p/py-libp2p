@@ -9,6 +9,7 @@ from multiaddr import (
 import trio
 
 from libp2p.abc import (
+    IListener,
     IMuxedConn,
     INetConn,
     INetStream,
@@ -35,9 +36,6 @@ from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     OpenConnectionError,
     SecurityUpgradeFailure,
-)
-from libp2p.transport.listener_interface import (
-    IListener,
 )
 from libp2p.transport.transport_interface import (
     ITransport,
