@@ -3,6 +3,7 @@ from importlib.metadata import version as __version
 from libp2p.abc import (
     IHost,
     INetworkService,
+    IPeerRouting,
     IPeerStore,
 )
 from libp2p.crypto.keys import (
@@ -28,9 +29,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore import (
     PeerStore,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,

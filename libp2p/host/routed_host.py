@@ -1,5 +1,6 @@
 from libp2p.abc import (
     INetworkService,
+    IPeerRouting,
 )
 from libp2p.host.basic_host import (
     BasicHost,
@@ -9,9 +10,6 @@ from libp2p.host.exceptions import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 
 
