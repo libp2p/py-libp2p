@@ -8,6 +8,7 @@ from collections import (
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
+    ISecureTransport,
 )
 from libp2p.custom_types import (
     TProtocol,
@@ -23,9 +24,6 @@ from libp2p.protocol_muxer.multiselect_client import (
 )
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
-)
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
 )
 from libp2p.transport.typing import (
     TSecurityOptions,

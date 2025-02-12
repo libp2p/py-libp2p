@@ -28,6 +28,7 @@ from libp2p.abc import (
     IPeerRouting,
     IRawConnection,
     ISecureConn,
+    ISecureTransport,
 )
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.keys import (
@@ -90,9 +91,6 @@ from libp2p.security.noise.messages import (
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
-)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
