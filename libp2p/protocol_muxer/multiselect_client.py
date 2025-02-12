@@ -2,6 +2,9 @@ from collections.abc import (
     Sequence,
 )
 
+from libp2p.abc import (
+    IMultiselectClient,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -9,9 +12,6 @@ from libp2p.custom_types import (
 from .exceptions import (
     MultiselectClientError,
     MultiselectCommunicatorError,
-)
-from .multiselect_client_interface import (
-    IMultiselectClient,
 )
 from .multiselect_communicator_interface import (
     IMultiselectCommunicator,
