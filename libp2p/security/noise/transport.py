@@ -1,6 +1,7 @@
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
+    ISecureTransport,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -11,9 +12,6 @@ from libp2p.custom_types import (
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
 )
 
 from .patterns import (
