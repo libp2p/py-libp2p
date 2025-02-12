@@ -26,9 +26,7 @@ from libp2p.custom_types import (
 )
 from libp2p.io.abc import (
     Closer,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
+    ReadWriteCloser,
 )
 from libp2p.peer.id import (
     ID,
@@ -39,15 +37,146 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore_interface import (
     IPeerStore,
 )
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
-)
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
 from libp2p.transport.listener_interface import (
     IListener,
 )
+
+# raw_connection_interface
+
+
+class IRawConnection(ReadWriteCloser):
+    """A Raw Connection provides a Reader and a Writer."""
+
+    is_initiator: bool
+
+
+# secure_conn_interface
+"""
+Represents a secured connection object, which includes a connection and details about
+the security involved in the secured connection
+
+Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
+"""
+
+
+class AbstractSecureConn(ABC):
+    @abstractmethod
+    def get_local_peer(self) -> ID:
+        pass
+
+    @abstractmethod
+    def get_local_private_key(self) -> PrivateKey:
+        pass
+
+    @abstractmethod
+    def get_remote_peer(self) -> ID:
+        pass
+
+    @abstractmethod
+    def get_remote_public_key(self) -> PublicKey:
+        pass
+
+
+class ISecureConn(AbstractSecureConn, IRawConnection):
+    pass
+
+
+# stream_muxer abc.py
+
+
+class IMuxedConn(ABC):
+    """
+    reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
+    """
+
+    peer_id: ID
+    event_started: trio.Event
+
+    @abstractmethod
+    def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
+        """
+        Create a new muxed connection.
+
+        :param conn: an instance of secured connection
+        for new muxed streams
+        :param peer_id: peer_id of peer the connection is to
+        """
+
+    @property
+    @abstractmethod
+    def is_initiator(self) -> bool:
+        """If this connection is the initiator."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the multiplexer."""
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close connection."""
+
+    @property
+    @abstractmethod
+    def is_closed(self) -> bool:
+        """
+        Check connection is fully closed.
+
+        :return: true if successful
+        """
+
+    @abstractmethod
+    async def open_stream(self) -> "IMuxedStream":
+        """
+        Create a new muxed_stream.
+
+        :return: a new ``IMuxedStream`` stream
+        """
+
+    @abstractmethod
+    async def accept_stream(self) -> "IMuxedStream":
+        """Accept a muxed stream opened by the other end."""
+
+
+class IMuxedStream(ReadWriteCloser):
+    muxed_conn: IMuxedConn
+
+    @abstractmethod
+    async def reset(self) -> None:
+        """Close both ends of the stream tells this remote side to hang up."""
+
+    @abstractmethod
+    def set_deadline(self, ttl: int) -> bool:
+        """
+        Set deadline for muxed stream.
+
+        :return: a new stream
+        """
+
+
+# net_stream_interface
+
+
+class INetStream(ReadWriteCloser):
+    muxed_conn: IMuxedConn
+
+    @abstractmethod
+    def get_protocol(self) -> TProtocol:
+        """
+        :return: protocol id that stream runs on
+        """
+
+    @abstractmethod
+    def set_protocol(self, protocol_id: TProtocol) -> None:
+        """
+        :param protocol_id: protocol id that stream runs on
+        """
+
+    @abstractmethod
+    async def reset(self) -> None:
+        """Close both ends of the stream."""
 
 
 # net_connection_interface

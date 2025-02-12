@@ -3,14 +3,12 @@ from abc import (
     abstractmethod,
 )
 
-from libp2p.network.connection.raw_connection_interface import (
+from libp2p.abc import (
     IRawConnection,
+    ISecureConn,
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
 )
 
 """

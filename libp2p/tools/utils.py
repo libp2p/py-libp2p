@@ -7,12 +7,10 @@ from typing import (
 
 from libp2p.abc import (
     IHost,
+    INetStream,
 )
 from libp2p.network.stream.exceptions import (
     StreamError,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.network.swarm import (
     Swarm,

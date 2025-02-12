@@ -9,11 +9,9 @@ import trio
 
 from libp2p.abc import (
     INetConn,
+    INetStream,
     INetwork,
     INotifee,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 
 if TYPE_CHECKING:

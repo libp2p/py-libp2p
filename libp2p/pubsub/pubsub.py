@@ -25,6 +25,7 @@ import trio
 
 from libp2p.abc import (
     IHost,
+    INetStream,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -46,9 +47,6 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamReset,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.peer.id import (
     ID,
