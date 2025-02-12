@@ -6,6 +6,7 @@ from multiaddr import (
 
 from libp2p.abc import (
     IHost,
+    INetStream,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
@@ -13,9 +14,6 @@ from libp2p.custom_types import (
 )
 from libp2p.network.stream.exceptions import (
     StreamClosed,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 
 from .pb.identify_pb2 import (

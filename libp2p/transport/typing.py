@@ -6,6 +6,9 @@ from typing import (
     Callable,
 )
 
+from libp2p.abc import (
+    IMuxedConn,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -14,9 +17,6 @@ from libp2p.io.abc import (
 )
 from libp2p.security.secure_transport_interface import (
     ISecureTransport,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 
 THandler = Callable[[ReadWriteCloser], Awaitable[None]]

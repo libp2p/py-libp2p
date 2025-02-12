@@ -7,7 +7,7 @@ from multiaddr import (
     Multiaddr,
 )
 
-from libp2p.network.connection.raw_connection_interface import (
+from libp2p.abc import (
     IRawConnection,
 )
 

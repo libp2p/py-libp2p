@@ -15,14 +15,14 @@ from trio_typing import (
     TaskStatus,
 )
 
+from libp2p.abc import (
+    IRawConnection,
+)
 from libp2p.io.trio import (
     TrioTCPStream,
 )
 from libp2p.network.connection.raw_connection import (
     RawConnection,
-)
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
 )
 from libp2p.transport.exceptions import (
     OpenConnectionError,

@@ -9,7 +9,9 @@ from multiaddr import (
 import trio
 
 from libp2p.abc import (
+    IMuxedConn,
     INetConn,
+    INetStream,
     INetworkService,
     INotifee,
 )
@@ -27,9 +29,6 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.peer.peerstore_interface import (
     IPeerStore,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 from libp2p.tools.async_service import (
     Service,
@@ -60,9 +59,6 @@ from .connection.swarm_connection import (
 )
 from .exceptions import (
     SwarmException,
-)
-from .stream.net_stream_interface import (
-    INetStream,
 )
 
 logger = logging.getLogger("libp2p.network.swarm")

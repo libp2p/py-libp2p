@@ -1,5 +1,7 @@
-from libp2p.network.connection.raw_connection_interface import (
+from libp2p.abc import (
+    IMuxedConn,
     IRawConnection,
+    ISecureConn,
 )
 from libp2p.peer.id import (
     ID,
@@ -11,14 +13,8 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.security.exceptions import (
     HandshakeFailure,
 )
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
 from libp2p.security.security_multistream import (
     SecurityMultistream,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 from libp2p.stream_muxer.muxer_multistream import (
     MuxerMultistream,
