@@ -1,12 +1,48 @@
-from typing import Optional, Tuple
+from typing import (
+    Any,
+    AsyncIterator,
+    Optional,
+    Tuple,
+)
 
+<<<<<<< HEAD
 from multiaddr import Multiaddr
 from libp2p.peer.id import ID
 from libp2p.transport.transport_interface import ITransport
 from libp2p.transport.listener_interface import IListener
 from libp2p.network.stream.net_stream_interface import INetStream
+=======
+from aioquic.asyncio import (
+    QuicServer,
+    serve,
+)
+from aioquic.quic.configuration import (
+    QuicConfiguration,
+)
+from multiaddr import (
+    Multiaddr,
+)
+from trio import (
+    Nursery,
+)
+>>>>>>> fabebacf046c4b67ee2e03beafaa89fc4b1cc384
 
-from .quic import QuicProtocol, QuicRawConnection
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.transport.listener_interface import (
+    IListener,
+)
+from libp2p.transport.transport import (
+    Transport,
+)
+
+from .quic import (
+    QuicProtocol,
+)
 
 
 class QuicTransport(Transport):
@@ -39,15 +75,29 @@ class QuicListener(IListener):
         self.configuration = configuration
         self.host = host
         self.port = port
-        self.server = None
+        self.server: Optional[QuicServer] = None  # Explicitly type as Optional
 
     async def start(self) -> None:
-        self.server = await serve(self.host, self.port, configuration=self.configuration, create_protocol=QuicProtocol)
+        self.server = await serve(
+            self.host,
+            self.port,
+            configuration=self.configuration,
+            create_protocol=QuicProtocol,
+        )
 
     async def stop(self) -> None:
         if self.server:
             self.server.close()
             await self.server.wait_closed()
+
+    async def close(self) -> None:
+        """Closes the listener."""
+        await self.stop()
+
+    async def listen(self, maddr: Any, nursery: Nursery) -> bool:
+        """Start listening for incoming QUIC connections."""
+        await self.start()
+        return True  # Indicate that listening started successfully
 
     def get_addrs(self) -> AsyncIterator[Multiaddr]:
         yield Multiaddr(f"/ip4/{self.host}/udp/{self.port}/quic")

@@ -1,4 +1,6 @@
-from .quic.transport import QuicTransport
+from .quic.transport import (
+    QuicTransport,
+)
 
 __all__ = [
     "QuicTransport",

@@ -1,8 +1,18 @@
+<<<<<<< HEAD
 from aioquic.quic.configuration import QuicConfiguration
 import pytest
 import trio
 
 from libp2p.transport.quic.quic import QuicProtocol
+=======
+import pytest
+import trio
+
+from libp2p.core.quic import (
+    QuicConfiguration,
+    QuicProtocol,
+)
+>>>>>>> fabebacf046c4b67ee2e03beafaa89fc4b1cc384
 
 
 @pytest.mark.trio
