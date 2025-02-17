@@ -35,10 +35,7 @@ from trio_typing import (
     TaskStatus,
 )
 
-<<<<<<< HEAD
 from libp2p.custom_types import TProtocol
-=======
->>>>>>> fabebacf046c4b67ee2e03beafaa89fc4b1cc384
 from libp2p.peer.id import ID as PeerID
 
 from .errors import (
