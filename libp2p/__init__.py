@@ -13,7 +13,9 @@ from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
 from libp2p.custom_types import (
+    TMuxerOptions,
     TProtocol,
+    TSecurityOptions,
 )
 from libp2p.host.basic_host import (
     BasicHost,
@@ -41,10 +43,6 @@ from libp2p.stream_muxer.mplex.mplex import (
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
-)
-from libp2p.transport.typing import (
-    TMuxerOptions,
-    TSecurityOptions,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,

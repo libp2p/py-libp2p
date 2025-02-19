@@ -8,6 +8,8 @@ from libp2p.abc import (
     ISecureConn,
 )
 from libp2p.custom_types import (
+    TMuxerClass,
+    TMuxerOptions,
     TProtocol,
 )
 from libp2p.peer.id import (
@@ -21,10 +23,6 @@ from libp2p.protocol_muxer.multiselect_client import (
 )
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
-)
-from libp2p.transport.typing import (
-    TMuxerClass,
-    TMuxerOptions,
 )
 
 # FIXME: add negotiate timeout to `MuxerMultistream`

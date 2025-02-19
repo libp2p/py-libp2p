@@ -31,7 +31,10 @@ from libp2p.crypto.keys import (
     PrivateKey,
 )
 from libp2p.custom_types import (
+    AsyncValidatorFn,
+    SyncValidatorFn,
     TProtocol,
+    ValidatorFn,
 )
 from libp2p.exceptions import (
     ParseError,
@@ -71,11 +74,6 @@ from .pubsub_notifee import (
 )
 from .subscription import (
     TrioSubscriptionAPI,
-)
-from .typing import (
-    AsyncValidatorFn,
-    SyncValidatorFn,
-    ValidatorFn,
 )
 from .validators import (
     PUBSUB_SIGNING_PREFIX,

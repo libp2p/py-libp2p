@@ -12,6 +12,7 @@ from libp2p.abc import (
 )
 from libp2p.custom_types import (
     TProtocol,
+    TSecurityOptions,
 )
 from libp2p.peer.id import (
     ID,
@@ -24,9 +25,6 @@ from libp2p.protocol_muxer.multiselect_client import (
 )
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
-)
-from libp2p.transport.typing import (
-    TSecurityOptions,
 )
 
 """
