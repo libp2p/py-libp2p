@@ -1,10 +1,11 @@
 Examples
 ========
 
-These are functional demonstrations of aspects of the library.
-
 .. toctree::
+   :maxdepth: 2
+   :caption: Examples:
 
-    examples.chat
-    examples.echo
-    examples.ping
+   examples.identify
+   examples.chat
+   examples.echo
+   examples.ping

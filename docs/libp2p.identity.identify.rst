@@ -12,10 +12,10 @@ Subpackages
 Submodules
 ----------
 
-libp2p.identity.identify.protocol module
+libp2p.identity.identify.identify module
 ----------------------------------------
 
-.. automodule:: libp2p.identity.identify.protocol
+.. automodule:: libp2p.identity.identify.identify
    :members:
    :undoc-members:
    :show-inheritance:
