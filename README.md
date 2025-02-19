@@ -19,6 +19,79 @@
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
+## Getting Started
+
+### Prerequisites
+- Python 3.9 or higher
+- pip (Python package installer)
+- Git
+
+### Local Development Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/libp2p/py-libp2p.git
+cd py-libp2p
+```
+
+2. Create and activate a virtual environment:
+```bash
+# On Unix/macOS
+python -m venv venv
+source venv/bin/activate
+
+# On Windows
+python -m venv venv
+venv\Scripts\activate
+```
+
+3. Install development dependencies:
+```bash
+pip install -e ".[dev]"
+```
+
+4. Run tests to verify your setup:
+```bash
+pytest tests/
+```
+
+### Running Examples
+
+The repository includes several example applications to demonstrate libp2p functionality:
+
+1. Ping Example:
+```bash
+python -m examples.ping.ping
+```
+
+2. Chat Example:
+```bash
+python -m examples.chat.chat
+```
+
+3. Echo Example:
+```bash
+python -m examples.echo.echo
+```
+
+### Contributing
+
+1. Create a new branch for your feature:
+```bash
+git checkout -b feature/your-feature-name
+```
+
+2. Make your changes and ensure tests pass:
+```bash
+pytest tests/
+```
+
+3. Commit your changes following [conventional commits](https://www.conventionalcommits.org/)
+
+4. Push your branch and create a Pull Request
+
+For more detailed information, check our [Contributing Guide](CONTRIBUTING.md).
+
 ## Maintainers
 
 Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
