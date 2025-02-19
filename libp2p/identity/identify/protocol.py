@@ -15,16 +15,22 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.network.stream.net_stream_interface import (
+    INetStream,
+)
+from libp2p.utils import (
+    get_agent_version,
+)
 
 from .pb.identify_pb2 import (
     Identify,
 )
 
+logger = logging.getLogger("libp2p.identity.identify")
+
 ID = TProtocol("/ipfs/id/1.0.0")
 PROTOCOL_VERSION = "ipfs/0.1.0"
-# TODO dynamically generate the agent version
-AGENT_VERSION = "py-libp2p/alpha"
-logger = logging.getLogger("libp2p.identity.identify")
+AGENT_VERSION = get_agent_version()
 
 
 def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
