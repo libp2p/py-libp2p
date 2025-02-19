@@ -16,6 +16,7 @@ from libp2p.abc import (
     INetworkService,
     INotifee,
     IPeerStore,
+    ITransport,
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
@@ -36,9 +37,6 @@ from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     OpenConnectionError,
     SecurityUpgradeFailure,
-)
-from libp2p.transport.transport_interface import (
-    ITransport,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,

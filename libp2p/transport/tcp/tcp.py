@@ -18,6 +18,10 @@ from trio_typing import (
 from libp2p.abc import (
     IListener,
     IRawConnection,
+    ITransport,
+)
+from libp2p.custom_types import (
+    THandler,
 )
 from libp2p.io.trio import (
     TrioTCPStream,
@@ -27,12 +31,6 @@ from libp2p.network.connection.raw_connection import (
 )
 from libp2p.transport.exceptions import (
     OpenConnectionError,
-)
-from libp2p.transport.transport_interface import (
-    ITransport,
-)
-from libp2p.transport.typing import (
-    THandler,
 )
 
 logger = logging.getLogger("libp2p.transport.tcp")

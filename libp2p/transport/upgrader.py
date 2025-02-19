@@ -3,6 +3,11 @@ from libp2p.abc import (
     IMuxedConn,
     IRawConnection,
     ISecureConn,
+    ITransport,
+)
+from libp2p.custom_types import (
+    TMuxerOptions,
+    TSecurityOptions,
 )
 from libp2p.peer.id import (
     ID,
@@ -23,14 +28,6 @@ from libp2p.stream_muxer.muxer_multistream import (
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     SecurityUpgradeFailure,
-)
-from libp2p.transport.typing import (
-    TMuxerOptions,
-    TSecurityOptions,
-)
-
-from .transport_interface import (
-    ITransport,
 )
 
 

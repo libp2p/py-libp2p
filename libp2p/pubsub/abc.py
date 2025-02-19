@@ -13,6 +13,7 @@ from typing import (
 
 from libp2p.custom_types import (
     TProtocol,
+    ValidatorFn,
 )
 from libp2p.peer.id import (
     ID,
@@ -23,9 +24,6 @@ from libp2p.tools.async_service import (
 
 from .pb import (
     rpc_pb2,
-)
-from .typing import (
-    ValidatorFn,
 )
 
 if TYPE_CHECKING:

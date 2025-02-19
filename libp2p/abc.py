@@ -11,7 +11,6 @@ from typing import (
     AsyncContextManager,
 )
 
-import multiaddr
 from multiaddr import (
     Multiaddr,
 )
@@ -24,6 +23,7 @@ from libp2p.crypto.keys import (
 )
 from libp2p.custom_types import (
     StreamHandlerFn,
+    THandler,
     TProtocol,
 )
 from libp2p.io.abc import (
@@ -40,7 +40,7 @@ from libp2p.tools.async_service import (
     ServiceAPI,
 )
 
-# raw_connection_interface
+# -------------------------- raw_connection interface.py --------------------------
 
 
 class IRawConnection(ReadWriteCloser):
@@ -49,7 +49,9 @@ class IRawConnection(ReadWriteCloser):
     is_initiator: bool
 
 
-# secure_conn_interface
+# -------------------------- secure_conn interface.py --------------------------
+
+
 """
 Represents a secured connection object, which includes a connection and details about
 the security involved in the secured connection
@@ -80,7 +82,7 @@ class ISecureConn(AbstractSecureConn, IRawConnection):
     pass
 
 
-# stream_muxer abc.py
+# -------------------------- stream_muxer abc.py --------------------------
 
 
 class IMuxedConn(ABC):
@@ -152,7 +154,7 @@ class IMuxedStream(ReadWriteCloser):
         """
 
 
-# net_stream_interface
+# -------------------------- net_stream interface.py --------------------------
 
 
 class INetStream(ReadWriteCloser):
@@ -175,7 +177,9 @@ class INetStream(ReadWriteCloser):
         """Close both ends of the stream."""
 
 
-# net_connection_interface
+# -------------------------- net_connection interface.py --------------------------
+
+
 class INetConn(Closer):
     muxed_conn: IMuxedConn
     event_started: trio.Event
@@ -189,7 +193,9 @@ class INetConn(Closer):
         ...
 
 
-# peermetadata_interface
+# -------------------------- peermetadata interface.py --------------------------
+
+
 class IPeerMetadata(ABC):
     @abstractmethod
     def get(self, peer_id: ID, key: str) -> Any:
@@ -210,7 +216,7 @@ class IPeerMetadata(ABC):
         """
 
 
-# addrbook_interface
+# -------------------------- addrbook interface.py --------------------------
 
 
 class IAddrBook(ABC):
@@ -259,7 +265,7 @@ class IAddrBook(ABC):
         """
 
 
-# peerstore_interface
+# -------------------------- peerstore interface.py --------------------------
 
 
 class IPeerStore(IAddrBook, IPeerMetadata):
@@ -391,7 +397,7 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
 
-# listener_interface
+# -------------------------- listener interface.py --------------------------
 
 
 class IListener(ABC):
@@ -417,7 +423,7 @@ class IListener(ABC):
         ...
 
 
-# network_interface
+# -------------------------- network interface.py --------------------------
 
 
 class INetwork(ABC):
@@ -480,7 +486,7 @@ class INetworkService(INetwork, ServiceAPI):
     pass
 
 
-# notifee_interface
+# -------------------------- notifee interface.py --------------------------
 
 
 class INotifee(ABC):
@@ -527,7 +533,9 @@ class INotifee(ABC):
         """
 
 
-# host_interface
+# -------------------------- host interface.py --------------------------
+
+
 class IHost(ABC):
     @abstractmethod
     def get_id(self) -> ID:
@@ -561,7 +569,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def get_addrs(self) -> list[multiaddr.Multiaddr]:
+    def get_addrs(self) -> list[Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening to
         """
@@ -573,9 +581,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def run(
-        self, listen_addrs: Sequence[multiaddr.Multiaddr]
-    ) -> AsyncContextManager[None]:
+    def run(self, listen_addrs: Sequence[Multiaddr]) -> AsyncContextManager[None]:
         """
         Run the host instance and listen to ``listen_addrs``.
 
@@ -627,7 +633,9 @@ class IHost(ABC):
         pass
 
 
-# peerdata_interface
+# -------------------------- peerdata interface.py --------------------------
+
+
 class IPeerData(ABC):
     @abstractmethod
     def get_protocols(self) -> list[str]:
@@ -705,7 +713,9 @@ class IPeerData(ABC):
         """
 
 
-# multiselect_communicator_interface
+# ------------------ multiselect_communicator interface.py ------------------
+
+
 class IMultiselectCommunicator(ABC):
     """
     Communicator helper class that ensures both the client and multistream
@@ -726,7 +736,9 @@ class IMultiselectCommunicator(ABC):
         """Reads message from stream until EOF."""
 
 
-# multiselect_client_interface
+# -------------------------- multiselect_client interface.py --------------------------
+
+
 class IMultiselectClient(ABC):
     """
     Client for communicating with receiver's multiselect module in order to
@@ -771,7 +783,9 @@ class IMultiselectClient(ABC):
         """
 
 
-# multiselect_muxer_interface
+# -------------------------- multiselect_muxer interface.py --------------------------
+
+
 class IMultiselectMuxer(ABC):
     """
     Multiselect module that is responsible for responding to a multiselect
@@ -806,7 +820,7 @@ class IMultiselectMuxer(ABC):
         """
 
 
-# interfaces
+# -------------------------- routing interface.py --------------------------
 
 
 class IContentRouting(ABC):
@@ -837,7 +851,9 @@ class IPeerRouting(ABC):
         """
 
 
-# security_transport_interface
+# -------------------------- security_transport interface.py --------------------------
+
+
 """
 Transport that is used to secure a connection. This transport is
 chosen by a security transport multistream module.
@@ -864,4 +880,29 @@ class ISecureTransport(ABC):
         node via conn, for an inbound connection (i.e. we are the initiator)
 
         :return: secure connection object (that implements secure_conn_interface)
+        """
+
+
+# -------------------------- transport interface.py --------------------------
+
+
+class ITransport(ABC):
+    @abstractmethod
+    async def dial(self, maddr: Multiaddr) -> IRawConnection:
+        """
+        Dial a transport to peer listening on multiaddr.
+
+        :param multiaddr: multiaddr of peer
+        :param self_id: peer_id of the dialer (to send to receiver)
+        :return: list of multiaddrs
+        """
+
+    @abstractmethod
+    def create_listener(self, handler_function: THandler) -> IListener:
+        """
+        Create listener on transport.
+
+        :param handler_function: a function called when a new conntion is received
+            that takes a connection as argument which implements interface-connection
+        :return: a listener object that implements listener_interface.py
         """

@@ -11,14 +11,15 @@ from typing import (
 
 import trio
 
+from libp2p.custom_types import (
+    UnsubscribeFn,
+)
+
 from .abc import (
     ISubscriptionAPI,
 )
 from .pb import (
     rpc_pb2,
-)
-from .typing import (
-    UnsubscribeFn,
 )
 
 
