@@ -21,102 +21,100 @@ Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io
 
 ## Maintainers
 
-Currently maintained by [@pacrob](https://github.com/pacrob) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
+Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby), looking for assistance!
 
 ## Feature Breakdown
 
 py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
 
-> Legend: ✅: Done   🛠️: In Progress   🚫: Missing   ❌: Not planned
+> Legend: ✅: Done  🛠️: In Progress/Usable  🌱 Prototype/Unstable  ❌: Missing
 
-| libp2p Node  |    Status     |
-| ------------ | :-----------: |
-| **`libp2p`** | ✅ |
+______________________________________________________________________
 
-| Core Protocols |    Status     |
-| -------------- | :-----------: |
-| **`Ping`**     | ✅ |
-| **`Identify`** | ✅ |
+### Transports
 
-| Transport Protocols |    Status     |
-| ------------------- | :-----------: |
-| **`TCP`**           | ✅|
-| **`QUIC`**          |    🛠️    |
-| **`UDP`**           |   🚫    |
-| **`WebSockets`**    |  ❌   |
-| **`UTP`**           |  ❌  |
-| **`WebRTC`**        |  ❌   |
-| **`SCTP`**          |  ❌   |
-| **`Tor`**           |  ❌   |
-| **`i2p`**           |  ❌   |
-| **`cjdns`**         |  ❌   |
-| **`Bluetooth LE`**  |  ❌   |
-| **`Audio TP`**      |  ❌   |
-| **`Zerotier`**      |  ❌   |
+| **Transport**                          | **Status** |                                     **Source**                                      |
+| -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
+| **`libp2p-tcp`**                       |     ✅      | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
+| **`libp2p-quic`**                      |     🌱      |                                                                                     |
+| **`libp2p-websocket`**                 |     ❌      |                                                                                     |
+| **`libp2p-webrtc-browser-to-server`**  |     ❌      |                                                                                     |
+| **`libp2p-webrtc-private-to-private`** |     ❌      |                                                                                     |
 
-| Stream Muxers    |    Status     |
-| ---------------- | :-----------: |
-| **`multiplex`**  | ✅ |
-| **`yamux`**      |   🚫   |
-| **`benchmarks`** |  ❌   |
-| **`muxado`**     |  ❌   |
-| **`spdystream`** |  ❌   |
-| **`spdy`**       |  ❌   |
-| **`http2`**      |  ❌   |
-| **`QUIC`**       |  ❌   |
+______________________________________________________________________
 
-| Protocol Muxers   |    Status     |
-| ----------------- | :-----------: |
-| **`multiselect`** | ✅ |
+### NAT Traversal
 
-| Switch (Swarm)     |    Status     |
-| ------------------ | :-----------: |
-| **`Switch`**       | ✅ |
-| **`Dialer stack`** | ✅ |
+| **NAT Traversal**             | **Status** |
+| ----------------------------- | :--------: |
+| **`libp2p-circuit-relay-v2`** |     ❌      |
+| **`libp2p-autonat`**          |     ❌      |
+| **`libp2p-hole-punching`**    |     ❌      |
 
-| Peer Discovery       |   Status   |
+______________________________________________________________________
+
+### Secure Communication
+
+| **Secure Communication** | **Status** |                                  **Source**                                   |
+| ------------------------ | :--------: | :---------------------------------------------------------------------------: |
+| **`libp2p-noise`**       |     🌱      | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
+| **`libp2p-tls`**         |     ❌      |                                                                               |
+
+______________________________________________________________________
+
+### Discovery
+
+| **Discovery**        | **Status** |
 | -------------------- | :--------: |
-| **`bootstrap list`** |  🚫  |
-| **`Kademlia DHT`**   | ❌ |
-| **`mDNS`**           | ❌ |
-| **`PEX`**            | ❌ |
-| **`DNS`**            | ❌ |
+| **`bootstrap`**      |     ❌      |
+| **`random-walk`**    |     ❌      |
+| **`mdns-discovery`** |     ❌      |
+| **`rendezvous`**     |     ❌      |
 
-| Content Routing    |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  ❌   |
-| **`floodsub`**     | ✅ |
-| **`gossipsub`**    | ✅ |
-| **`PHT`**          |  ❌   |
+______________________________________________________________________
 
-| Peer Routing       |    Status     |
-| ------------------ | :-----------: |
-| **`Kademlia DHT`** |  ❌   |
-| **`floodsub`**     | ✅|
-| **`gossipsub`**    | ✅ |
-| **`PHT`**          |  ❌   |
+### Peer Routing
 
-| NAT Traversal            |   Status   |
-| ------------------------ | :--------: |
-| **`nat-pmp`**            | ❌ |
-| **`upnp`**               | ❌ |
-| **`ext addr discovery`** | ❌ |
-| **`STUN-like`**          | ❌ |
-| **`line-switch relay`**  | ❌ |
-| **`pkt-switch relay`**   | ❌ |
+| **Peer Routing**     | **Status** |
+| -------------------- | :--------: |
+| **`libp2p-kad-dht`** |     ❌      |
 
-| Exchange         |   Status   |
-| ---------------- | :--------: |
-| **`HTTP`**       | ❌ |
-| **`Bitswap`**    | ❌ |
-| **`Bittorrent`** | ❌ |
+______________________________________________________________________
 
-| Consensus      |   Status   |
-| -------------- | :--------: |
-| **`Paxos`**    | ❌ |
-| **`Raft`**     | ❌ |
-| **`PBTF`**     | ❌ |
-| **`Nakamoto`** | ❌ |
+### Publish/Subscribe
+
+| **Publish/Subscribe**  | **Status** |                                     **Source**                                     |
+| ---------------------- | :--------: | :--------------------------------------------------------------------------------: |
+| **`libp2p-floodsub`**  |     ✅      | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/pubsub/floodsub.py)  |
+| **`libp2p-gossipsub`** |     ✅      | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/pubsub/gossipsub.py) |
+
+______________________________________________________________________
+
+### Stream Muxers
+
+| **Stream Muxers**  | **Status** |                                         **Status**                                         |
+| ------------------ | :--------: | :----------------------------------------------------------------------------------------: |
+| **`libp2p-yamux`** |     🌱      |                                                                                            |
+| **`libp2p-mplex`** |     🛠️     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/stream_muxer/mplex/mplex.py) |
+
+______________________________________________________________________
+
+### Storage
+
+| **Storage**         | **Status** |
+| ------------------- | :--------: |
+| **`libp2p-record`** |     ❌      |
+
+______________________________________________________________________
+
+### General Purpose Utilities & Datatypes
+
+| **Utility/Datatype** | **Status** |                                 **Source**                                  |
+| -------------------- | :--------: | :-------------------------------------------------------------------------: |
+| **`libp2p-ping`**    |     ✅      | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/host/ping.py) |
+| **`libp2p-peer`**    |     ✅      |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/peer)     |
+
+______________________________________________________________________
 
 ## Explanation of Basic Two Node Communication
 
