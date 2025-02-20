@@ -81,7 +81,7 @@ if not readthedocs_is_building:
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. See Contributing docs for the release process.
-    version="0.2.1",
+    version="0.2.2",
     description="""libp2p: The Python implementation of the libp2p networking stack""",
     long_description=long_description,
     long_description_content_type="text/markdown",
