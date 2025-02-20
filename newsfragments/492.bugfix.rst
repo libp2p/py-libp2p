@@ -1,1 +1,0 @@
-- This fix issue #492 adding a missing break statement that lowers GIL usage from 99% to 0%-2%.

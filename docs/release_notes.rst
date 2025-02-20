@@ -3,6 +3,29 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.2 (2025-02-20)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- - This fix issue #492 adding a missing break statement that lowers GIL usage from 99% to 0%-2%. (`#492 <https://github.com/ethereum/py-libp2p/issues/492>`__)
+
+
+Features
+~~~~~~~~
+
+- Create entry points for demos to be run directly from installed package (`#490 <https://github.com/ethereum/py-libp2p/issues/490>`__)
+- Merge template, adding python 3.13 to CI checks. (`#496 <https://github.com/ethereum/py-libp2p/issues/496>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Drop CI runs for python 3.8, run ``pyupgrade`` to bring code up to python 3.9. (`#497 <https://github.com/ethereum/py-libp2p/issues/497>`__)
+- Rename ``typing.py`` to ``custom_types.py`` for clarity. (`#500 <https://github.com/ethereum/py-libp2p/issues/500>`__)
+
+
 py-libp2p v0.2.1 (2024-12-20)
 -----------------------------
 
