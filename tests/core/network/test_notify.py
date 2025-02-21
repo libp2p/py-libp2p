@@ -22,11 +22,11 @@ from libp2p.tools.async_service import (
 from libp2p.tools.constants import (
     LISTEN_MADDR,
 )
-from libp2p.tools.factories import (
-    SwarmFactory,
-)
 from libp2p.tools.utils import (
     connect_swarm,
+)
+from tests.factories import (
+    SwarmFactory,
 )
 
 

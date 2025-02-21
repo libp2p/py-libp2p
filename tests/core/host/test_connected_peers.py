@@ -3,7 +3,7 @@ import pytest
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
 )
 

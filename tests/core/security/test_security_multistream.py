@@ -12,7 +12,7 @@ from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
 from libp2p.security.secure_session import (
     SecureSession,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     host_pair_factory,
 )
 
