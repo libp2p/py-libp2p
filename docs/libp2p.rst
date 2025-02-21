@@ -15,7 +15,6 @@ Subpackages
    libp2p.peer
    libp2p.protocol_muxer
    libp2p.pubsub
-   libp2p.routing
    libp2p.security
    libp2p.stream_muxer
    libp2p.tools
@@ -23,6 +22,14 @@ Subpackages
 
 Submodules
 ----------
+
+libp2p.abc module
+--------------------------
+
+.. automodule:: libp2p.abc
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 libp2p.exceptions module
 ------------------------

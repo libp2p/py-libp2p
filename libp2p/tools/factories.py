@@ -68,7 +68,7 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore import (
     PeerStore,
 )
-from libp2p.pubsub.abc import (
+from libp2p.abc import (
     IPubsubRouter,
 )
 from libp2p.pubsub.floodsub import (

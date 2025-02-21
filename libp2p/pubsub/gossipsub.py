@@ -36,7 +36,7 @@ from libp2p.utils import (
     encode_varint_prefixed,
 )
 
-from .abc import (
+from libp2p.abc import (
     IPubsubRouter,
 )
 from .exceptions import (

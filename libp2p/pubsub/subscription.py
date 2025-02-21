@@ -15,7 +15,7 @@ from libp2p.custom_types import (
     UnsubscribeFn,
 )
 
-from .abc import (
+from libp2p.abc import (
     ISubscriptionAPI,
 )
 from .pb import (

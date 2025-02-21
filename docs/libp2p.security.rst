@@ -38,26 +38,10 @@ libp2p.security.exceptions module
    :undoc-members:
    :show-inheritance:
 
-libp2p.security.secure\_conn\_interface module
-----------------------------------------------
-
-.. automodule:: libp2p.security.secure_conn_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.security.secure\_session module
 --------------------------------------
 
 .. automodule:: libp2p.security.secure_session
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.security.secure\_transport\_interface module
----------------------------------------------------
-
-.. automodule:: libp2p.security.secure_transport_interface
    :members:
    :undoc-members:
    :show-inheritance:

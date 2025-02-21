@@ -26,6 +26,8 @@ import trio
 from libp2p.abc import (
     IHost,
     INetStream,
+    IPubsub,
+    ISubscriptionAPI,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -60,11 +62,6 @@ from libp2p.tools.async_service import (
 from libp2p.utils import (
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
-)
-
-from .abc import (
-    IPubsub,
-    ISubscriptionAPI,
 )
 from .pb import (
     rpc_pb2,

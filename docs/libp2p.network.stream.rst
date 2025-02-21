@@ -20,14 +20,6 @@ libp2p.network.stream.net\_stream module
    :undoc-members:
    :show-inheritance:
 
-libp2p.network.stream.net\_stream\_interface module
----------------------------------------------------
-
-.. automodule:: libp2p.network.stream.net_stream_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Module contents
 ---------------
 
