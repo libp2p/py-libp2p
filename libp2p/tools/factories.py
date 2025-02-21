@@ -26,6 +26,7 @@ from libp2p.abc import (
     IHost,
     INetStream,
     IPeerRouting,
+    IPubsubRouter,
     IRawConnection,
     ISecureConn,
     ISecureTransport,
@@ -67,9 +68,6 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import (
     PeerStore,
-)
-from libp2p.abc import (
-    IPubsubRouter,
 )
 from libp2p.pubsub.floodsub import (
     FloodSub,

@@ -63,6 +63,7 @@ from libp2p.utils import (
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
 )
+
 from .pb import (
     rpc_pb2,
 )

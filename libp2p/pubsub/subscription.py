@@ -11,13 +11,13 @@ from typing import (
 
 import trio
 
+from libp2p.abc import (
+    ISubscriptionAPI,
+)
 from libp2p.custom_types import (
     UnsubscribeFn,
 )
 
-from libp2p.abc import (
-    ISubscriptionAPI,
-)
 from .pb import (
     rpc_pb2,
 )

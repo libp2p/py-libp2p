@@ -3,16 +3,17 @@ from abc import (
     abstractmethod,
 )
 from collections.abc import (
-    Iterable,
-    Sequence,
     AsyncIterable,
+    Iterable,
     KeysView,
+    Sequence,
 )
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncContextManager,
-    TYPE_CHECKING,
 )
+
 from multiaddr import (
     Multiaddr,
 )
@@ -39,10 +40,12 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+
 if TYPE_CHECKING:
     from libp2p.pubsub.pubsub import (
         Pubsub,
     )
+
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
