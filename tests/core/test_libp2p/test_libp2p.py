@@ -10,12 +10,12 @@ from libp2p.network.stream.exceptions import (
 from libp2p.tools.constants import (
     MAX_READ_LEN,
 )
-from libp2p.tools.factories import (
-    HostFactory,
-)
 from libp2p.tools.utils import (
     connect,
     create_echo_stream_handler,
+)
+from tests.factories import (
+    HostFactory,
 )
 
 PROTOCOL_ID_0 = TProtocol("/echo/0")

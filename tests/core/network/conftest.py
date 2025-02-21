@@ -1,6 +1,6 @@
 import pytest
 
-from libp2p.tools.factories import (
+from tests.factories import (
     net_stream_pair_factory,
     swarm_conn_pair_factory,
     swarm_pair_factory,

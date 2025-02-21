@@ -6,11 +6,11 @@ from trio.testing import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
-from libp2p.tools.factories import (
-    HostFactory,
-)
 from libp2p.tools.utils import (
     create_echo_stream_handler,
+)
+from tests.factories import (
+    HostFactory,
 )
 
 PROTOCOL_ECHO = "/echo/1.0.0"
