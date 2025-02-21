@@ -4,6 +4,9 @@ from typing import (
 
 from noise.connection import NoiseConnection as NoiseState
 
+from libp2p.abc import (
+    IRawConnection,
+)
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
     MsgReadWriteCloser,
@@ -11,9 +14,6 @@ from libp2p.io.abc import (
 )
 from libp2p.io.msgio import (
     FixedSizeLenMsgReadWriter,
-)
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
 )
 
 SIZE_NOISE_MESSAGE_LEN = 2

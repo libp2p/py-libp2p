@@ -1,3 +1,6 @@
+from libp2p.abc import (
+    IMultiselectCommunicator,
+)
 from libp2p.exceptions import (
     ParseError,
 )
@@ -14,9 +17,6 @@ from libp2p.utils import (
 
 from .exceptions import (
     MultiselectCommunicatorError,
-)
-from .multiselect_communicator_interface import (
-    IMultiselectCommunicator,
 )
 
 

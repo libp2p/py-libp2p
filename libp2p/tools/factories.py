@@ -22,6 +22,15 @@ from libp2p import (
     generate_new_rsa_identity,
     generate_peer_id_from,
 )
+from libp2p.abc import (
+    IHost,
+    INetStream,
+    IPeerRouting,
+    IPubsubRouter,
+    IRawConnection,
+    ISecureConn,
+    ISecureTransport,
+)
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.keys import (
     KeyPair,
@@ -29,13 +38,12 @@ from libp2p.crypto.keys import (
 )
 from libp2p.crypto.secp256k1 import create_new_key_pair as create_secp256k1_key_pair
 from libp2p.custom_types import (
+    TMuxerOptions,
     TProtocol,
+    TSecurityOptions,
 )
 from libp2p.host.basic_host import (
     BasicHost,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.host.routed_host import (
     RoutedHost,
@@ -46,14 +54,8 @@ from libp2p.io.abc import (
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.network.connection.swarm_connection import (
     SwarmConn,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.network.swarm import (
     Swarm,
@@ -67,9 +69,6 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore import (
     PeerStore,
 )
-from libp2p.pubsub.abc import (
-    IPubsubRouter,
-)
 from libp2p.pubsub.floodsub import (
     FloodSub,
 )
@@ -80,9 +79,6 @@ import libp2p.pubsub.pb.rpc_pb2 as rpc_pb2
 from libp2p.pubsub.pubsub import (
     Pubsub,
     get_peer_and_seqno_msg_id,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -95,12 +91,6 @@ from libp2p.security.noise.messages import (
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
-)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
@@ -116,10 +106,6 @@ from libp2p.tools.constants import (
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
-)
-from libp2p.transport.typing import (
-    TMuxerOptions,
-    TSecurityOptions,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,

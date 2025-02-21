@@ -1,5 +1,13 @@
-from libp2p.network.connection.raw_connection_interface import (
+from libp2p.abc import (
+    IListener,
+    IMuxedConn,
     IRawConnection,
+    ISecureConn,
+    ITransport,
+)
+from libp2p.custom_types import (
+    TMuxerOptions,
+    TSecurityOptions,
 )
 from libp2p.peer.id import (
     ID,
@@ -11,14 +19,8 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.security.exceptions import (
     HandshakeFailure,
 )
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
 from libp2p.security.security_multistream import (
     SecurityMultistream,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 from libp2p.stream_muxer.muxer_multistream import (
     MuxerMultistream,
@@ -26,17 +28,6 @@ from libp2p.stream_muxer.muxer_multistream import (
 from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     SecurityUpgradeFailure,
-)
-from libp2p.transport.typing import (
-    TMuxerOptions,
-    TSecurityOptions,
-)
-
-from .listener_interface import (
-    IListener,
-)
-from .transport_interface import (
-    ITransport,
 )
 
 

@@ -2,11 +2,12 @@ from typing import (
     Optional,
 )
 
+from libp2p.abc import (
+    IMuxedStream,
+    INetStream,
+)
 from libp2p.custom_types import (
     TProtocol,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedStream,
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
@@ -18,9 +19,6 @@ from .exceptions import (
     StreamClosed,
     StreamEOF,
     StreamReset,
-)
-from .net_stream_interface import (
-    INetStream,
 )
 
 

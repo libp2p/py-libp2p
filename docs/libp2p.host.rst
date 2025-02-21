@@ -28,14 +28,6 @@ libp2p.host.exceptions module
    :undoc-members:
    :show-inheritance:
 
-libp2p.host.host\_interface module
-----------------------------------
-
-.. automodule:: libp2p.host.host_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.host.ping module
 -----------------------
 

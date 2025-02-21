@@ -12,6 +12,12 @@ from typing import (
 
 import multiaddr
 
+from libp2p.abc import (
+    IHost,
+    INetStream,
+    INetworkService,
+    IPeerStore,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -26,20 +32,11 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
-from libp2p.network.network_interface import (
-    INetworkService,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
 )
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
@@ -56,10 +53,6 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 )
 from libp2p.tools.async_service import (
     background_trio_service,
-)
-
-from .host_interface import (
-    IHost,
 )
 
 if TYPE_CHECKING:

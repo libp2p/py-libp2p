@@ -8,26 +8,27 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.abc import (
+    IListener,
+    IMuxedConn,
+    INetConn,
+    INetStream,
+    INetworkService,
+    INotifee,
+    IPeerStore,
+    ITransport,
+)
 from libp2p.custom_types import (
     StreamHandlerFn,
 )
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
-from libp2p.network.connection.net_connection_interface import (
-    INetConn,
-)
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import (
     PeerStoreError,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 from libp2p.tools.async_service import (
     Service,
@@ -36,12 +37,6 @@ from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     OpenConnectionError,
     SecurityUpgradeFailure,
-)
-from libp2p.transport.listener_interface import (
-    IListener,
-)
-from libp2p.transport.transport_interface import (
-    ITransport,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
@@ -58,15 +53,6 @@ from .connection.swarm_connection import (
 )
 from .exceptions import (
     SwarmException,
-)
-from .network_interface import (
-    INetworkService,
-)
-from .notifee_interface import (
-    INotifee,
-)
-from .stream.net_stream_interface import (
-    INetStream,
 )
 
 logger = logging.getLogger("libp2p.network.swarm")

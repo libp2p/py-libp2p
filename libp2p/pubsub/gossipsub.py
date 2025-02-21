@@ -17,6 +17,9 @@ from typing import (
 
 import trio
 
+from libp2p.abc import (
+    IPubsubRouter,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -36,9 +39,6 @@ from libp2p.utils import (
     encode_varint_prefixed,
 )
 
-from .abc import (
-    IPubsubRouter,
-)
 from .exceptions import (
     NoPubsubAttached,
 )
