@@ -104,23 +104,20 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
+    FLOODSUB_PROTOCOL_ID,
     GOSSIPSUB_PARAMS,
+    GOSSIPSUB_PROTOCOL_ID,
+    LISTEN_MADDR,
+)
+from libp2p.tools.utils import (
+    connect,
+    connect_swarm,
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-
-from .constants import (
-    FLOODSUB_PROTOCOL_ID,
-    GOSSIPSUB_PROTOCOL_ID,
-    LISTEN_MADDR,
-)
-from .utils import (
-    connect,
-    connect_swarm,
 )
 
 DEFAULT_SECURITY_PROTOCOL_ID = PLAINTEXT_PROTOCOL_ID
