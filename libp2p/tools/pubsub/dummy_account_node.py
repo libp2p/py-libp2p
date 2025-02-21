@@ -16,7 +16,7 @@ from libp2p.tools.async_service import (
     Service,
     background_trio_service,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     PubsubFactory,
 )
 

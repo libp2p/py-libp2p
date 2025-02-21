@@ -6,16 +6,16 @@ import trio
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
 )
-from libp2p.tools.factories import (
-    IDFactory,
-    PubsubFactory,
-)
 from libp2p.tools.pubsub.utils import (
     dense_connect,
     one_to_all_connect,
 )
 from libp2p.tools.utils import (
     connect,
+)
+from tests.factories import (
+    IDFactory,
+    PubsubFactory,
 )
 
 
