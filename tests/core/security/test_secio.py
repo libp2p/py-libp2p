@@ -14,7 +14,7 @@ from libp2p.security.secio.transport import (
 from libp2p.tools.constants import (
     MAX_READ_LEN,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     raw_conn_factory,
 )
 

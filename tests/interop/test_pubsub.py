@@ -19,11 +19,11 @@ from libp2p.pubsub.pb import (
 from libp2p.pubsub.subscription import (
     TrioSubscriptionAPI,
 )
-from libp2p.tools.factories import (
-    PubsubFactory,
-)
 from libp2p.utils import (
     read_varint_prefixed_bytes,
+)
+from tests.factories import (
+    PubsubFactory,
 )
 from tests.utils.interop.utils import (
     connect,
