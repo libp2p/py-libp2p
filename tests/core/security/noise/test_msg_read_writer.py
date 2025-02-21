@@ -4,7 +4,7 @@ from libp2p.security.noise.io import (
     MAX_NOISE_MESSAGE_LEN,
     NoisePacketReadWriter,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     raw_conn_factory,
 )
 

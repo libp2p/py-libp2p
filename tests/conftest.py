@@ -1,6 +1,6 @@
 import pytest
 
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
 )
 
