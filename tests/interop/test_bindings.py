@@ -1,7 +1,7 @@
 import pytest
 import trio
 
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
 )
 from tests.utils.interop.utils import (

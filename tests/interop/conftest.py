@@ -17,7 +17,7 @@ from libp2p.io.abc import (
 )
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
     PubsubFactory,
 )
