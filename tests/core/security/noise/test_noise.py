@@ -3,7 +3,7 @@ import pytest
 from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     noise_conn_factory,
     noise_handshake_payload_factory,
 )

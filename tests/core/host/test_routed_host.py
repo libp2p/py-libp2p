@@ -6,7 +6,7 @@ from libp2p.host.exceptions import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
     RoutedHostFactory,
 )
