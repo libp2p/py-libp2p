@@ -1,10 +1,18 @@
 #!/usr/bin/env python
-import os
+import sys
 
 from setuptools import (
     find_packages,
     setup,
 )
+
+description = "libp2p: The Python implementation of the libp2p networking stack"
+
+# Platform-specific dependencies
+if sys.platform == "win32":
+    crypto_requires = []  # We'll use coincurve instead of fastecdsa on Windows
+else:
+    crypto_requires = ["fastecdsa==1.7.5"]
 
 extras_require = {
     "dev": [
@@ -35,23 +43,11 @@ extras_require["dev"] = (
     extras_require["dev"] + extras_require["docs"] + extras_require["test"]
 )
 
-fastecdsa = [
-    # No official fastecdsa==1.7.4,1.7.5 wheels for Windows, using a pypi package that includes
-    # the original library, but also windows-built wheels (32+64-bit) on those versions.
-    # Fixme: Remove section when fastecdsa has released a windows-compatible wheel
-    #  (specifically: both win32 and win_amd64 targets)
-    #  See the following issues for more information;
-    #  https://github.com/libp2p/py-libp2p/issues/363
-    #  https://github.com/AntonKueltz/fastecdsa/issues/11
-    "fastecdsa-any==1.7.5;sys_platform=='win32'",
-    # Wheels are provided for these platforms, or compiling one is minimally frustrating in a
-    # default python installation.
-    "fastecdsa==1.7.5;sys_platform!='win32'",
-]
-
-with open("./README.md") as readme:
-    long_description = readme.read()
-
+try:
+    with open("./README.md", encoding="utf-8") as readme:
+        long_description = readme.read()
+except FileNotFoundError:
+    long_description = description
 
 install_requires = [
     "base58>=1.0.3",
@@ -70,19 +66,14 @@ install_requires = [
     "trio>=0.26.0",
 ]
 
-
-# NOTE: Some dependencies break RTD builds. We can not install system dependencies on the
-# RTD system so we have to exclude these dependencies when we are in an RTD environment.
-readthedocs_is_building = os.environ.get("READTHEDOCS", False)
-if not readthedocs_is_building:
-    install_requires.extend(fastecdsa)
-
+# Add platform-specific dependencies
+install_requires.extend(crypto_requires)
 
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. See Contributing docs for the release process.
     version="0.2.3",
-    description="""libp2p: The Python implementation of the libp2p networking stack""",
+    description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="The Ethereum Foundation",
@@ -111,7 +102,7 @@ setup(
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
     ],
-    platforms=["unix", "linux", "osx"],
+    platforms=["unix", "linux", "osx", "win32"],
     entry_points={
         "console_scripts": [
             "chat-demo=examples.chat.chat:main",
