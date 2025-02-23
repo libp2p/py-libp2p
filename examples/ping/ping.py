@@ -9,7 +9,7 @@ from libp2p import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.network.stream.net_stream_interface import (
+from libp2p.network.stream.net_stream import (
     INetStream,
 )
 from libp2p.peer.peerinfo import (
