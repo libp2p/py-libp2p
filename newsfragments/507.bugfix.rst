@@ -1,0 +1,1 @@
+Added Windows compatibility by using coincurve instead of fastecdsa on Windows platforms
