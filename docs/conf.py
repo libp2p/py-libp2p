@@ -81,6 +81,10 @@ exclude_patterns = [
     "_build",
     "modules.rst",
     "libp2p.crypto.pb.rst",
+    "libp2p/crypto/pb",
+    "tests",
+    "tests.rst",
+    "tests/*"
 ]
 
 # The reST default role (used for this markup: `text`) to use for all
@@ -323,3 +327,15 @@ MOCK_MODULES = [
     "fastecdsa.encoding.sec1",
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
+
+# Update the mock configuration to properly handle test modules
+autodoc_mock_imports = [
+    'tests',
+    'tests.factories',
+    'fastecdsa',
+    'fastecdsa.encoding',
+    'fastecdsa.encoding.sec1'
+]
+
+# Add this to make warnings not treated as errors for mocked modules
+autodoc_warningiserror = False

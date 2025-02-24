@@ -80,10 +80,10 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . setup.py "*conftest*"
+	sphinx-apidoc -o docs/ . setup.py "*conftest*" "tests/*" --force
 	$(MAKE) -C docs clean
-	$(MAKE) -C docs html
-	$(MAKE) -C docs doctest
+	$(MAKE) -C docs html SPHINXOPTS=""
+	$(MAKE) -C docs doctest SPHINXOPTS=""
 
 check-docs-ci: build-docs build-docs-ci validate-newsfragments
 

@@ -24,9 +24,17 @@ Submodules
 ----------
 
 libp2p.abc module
---------------------------
+-----------------
 
 .. automodule:: libp2p.abc
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.custom\_types module
+---------------------------
+
+.. automodule:: libp2p.custom_types
    :members:
    :undoc-members:
    :show-inheritance:
@@ -38,15 +46,6 @@ libp2p.exceptions module
    :members:
    :undoc-members:
    :show-inheritance:
-
-libp2p.custom_types module
---------------------------
-
-.. automodule:: libp2p.custom_types
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :exclude-members: INetStream, IMuxedConn, ISecureTransport
 
 libp2p.utils module
 -------------------

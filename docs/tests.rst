@@ -1,13 +1,13 @@
-examples.echo package
-=====================
+tests package
+=============
 
 Submodules
 ----------
 
-examples.echo.echo module
--------------------------
+tests.factories module
+----------------------
 
-.. automodule:: examples.echo.echo
+.. automodule:: tests.factories
    :members:
    :undoc-members:
    :show-inheritance:
@@ -15,7 +15,7 @@ examples.echo.echo module
 Module contents
 ---------------
 
-.. automodule:: examples.echo
+.. automodule:: tests
    :members:
    :undoc-members:
    :show-inheritance:
