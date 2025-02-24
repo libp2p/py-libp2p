@@ -1,20 +1,16 @@
 from typing import (
     TYPE_CHECKING,
-    Set,
-    Tuple,
 )
 
 import trio
 
-from libp2p.network.connection.net_connection_interface import (
+from libp2p.abc import (
+    IMuxedConn,
+    IMuxedStream,
     INetConn,
 )
 from libp2p.network.stream.net_stream import (
     NetStream,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
-    IMuxedStream,
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
@@ -32,7 +28,7 @@ Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee
 class SwarmConn(INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
-    streams: Set[NetStream]
+    streams: set[NetStream]
     event_closed: trio.Event
 
     def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
@@ -104,7 +100,7 @@ class SwarmConn(INetConn):
         muxed_stream = await self.muxed_conn.open_stream()
         return await self._add_stream(muxed_stream)
 
-    def get_streams(self) -> Tuple[NetStream, ...]:
+    def get_streams(self) -> tuple[NetStream, ...]:
         return tuple(self.streams)
 
     def remove_stream(self, stream: NetStream) -> None:

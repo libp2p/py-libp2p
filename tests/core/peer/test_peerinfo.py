@@ -1,7 +1,7 @@
 import random
 
-import multiaddr
 import pytest
+import multiaddr
 
 from libp2p.peer.id import (
     ID,

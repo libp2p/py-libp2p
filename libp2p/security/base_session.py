@@ -2,15 +2,15 @@ from typing import (
     Optional,
 )
 
+from libp2p.abc import (
+    ISecureConn,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
 )
 
 

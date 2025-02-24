@@ -4,18 +4,16 @@ from multiaddr import (
     Multiaddr,
 )
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
+    INetStream,
+)
+from libp2p.custom_types import (
+    StreamHandlerFn,
+    TProtocol,
 )
 from libp2p.network.stream.exceptions import (
     StreamClosed,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
-    TProtocol,
 )
 
 from .pb.identify_pb2 import (

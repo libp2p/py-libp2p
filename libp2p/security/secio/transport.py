@@ -4,11 +4,14 @@ from dataclasses import (
 import itertools
 from typing import (
     Optional,
-    Tuple,
 )
 
 import multihash
 
+from libp2p.abc import (
+    IRawConnection,
+    ISecureConn,
+)
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
 )
@@ -35,6 +38,9 @@ from libp2p.crypto.keys import (
 from libp2p.crypto.serialization import (
     deserialize_public_key,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
 )
@@ -45,21 +51,12 @@ from libp2p.io.exceptions import (
 from libp2p.io.msgio import (
     FixedSizeLenMsgReadWriter,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_transport import (
     BaseSecureTransport,
 )
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
 from libp2p.security.secure_session import (
     SecureSession,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .exceptions import (
@@ -243,7 +240,7 @@ def _select_parameter_from_order(
 
 def _select_encryption_parameters(
     local_proposal: Proposal, remote_proposal: Proposal
-) -> Tuple[str, str, str, int]:
+) -> tuple[str, str, str, int]:
     first_score = _mk_score(remote_proposal.public_key, local_proposal.nonce)
     second_score = _mk_score(local_proposal.public_key, remote_proposal.nonce)
 
@@ -276,7 +273,7 @@ async def _establish_session_parameters(
     remote_peer: Optional[PeerID],
     conn: SecioPacketReadWriter,
     nonce: bytes,
-) -> Tuple[SessionParameters, bytes]:
+) -> tuple[SessionParameters, bytes]:
     # establish shared encryption parameters
     session_parameters = SessionParameters()
     session_parameters.local_peer = local_peer

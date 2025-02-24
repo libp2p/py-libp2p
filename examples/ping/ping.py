@@ -6,14 +6,14 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
@@ -34,6 +34,7 @@ async def handle_ping(stream: INetStream) -> None:
 
         except Exception:
             await stream.reset()
+            break
 
 
 async def send_ping(stream: INetStream) -> None:
@@ -64,7 +65,7 @@ async def run(port: int, destination: str) -> None:
 
             print(
                 "Run this from the same folder in another console:\n\n"
-                f"python ping.py -p {int(port) + 1} "
+                f"ping-demo -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
             print("Waiting for incoming connection...")

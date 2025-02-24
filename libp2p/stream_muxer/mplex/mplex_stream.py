@@ -4,7 +4,7 @@ from typing import (
 
 import trio
 
-from libp2p.stream_muxer.abc import (
+from libp2p.abc import (
     IMuxedStream,
 )
 from libp2p.stream_muxer.exceptions import (

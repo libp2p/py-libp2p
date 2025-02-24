@@ -1,7 +1,5 @@
 import logging
 from typing import (
-    Dict,
-    List,
     Optional,
 )
 
@@ -10,23 +8,27 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.abc import (
+    IListener,
+    IMuxedConn,
+    INetConn,
+    INetStream,
+    INetworkService,
+    INotifee,
+    IPeerStore,
+    ITransport,
+)
+from libp2p.custom_types import (
+    StreamHandlerFn,
+)
 from libp2p.io.abc import (
     ReadWriteCloser,
-)
-from libp2p.network.connection.net_connection_interface import (
-    INetConn,
 )
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import (
     PeerStoreError,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
 )
 from libp2p.tools.async_service import (
     Service,
@@ -36,17 +38,8 @@ from libp2p.transport.exceptions import (
     OpenConnectionError,
     SecurityUpgradeFailure,
 )
-from libp2p.transport.listener_interface import (
-    IListener,
-)
-from libp2p.transport.transport_interface import (
-    ITransport,
-)
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
 )
 
 from ..exceptions import (
@@ -60,15 +53,6 @@ from .connection.swarm_connection import (
 )
 from .exceptions import (
     SwarmException,
-)
-from .network_interface import (
-    INetworkService,
-)
-from .notifee_interface import (
-    INotifee,
-)
-from .stream.net_stream_interface import (
-    INetStream,
 )
 
 logger = logging.getLogger("libp2p.network.swarm")
@@ -88,13 +72,13 @@ class Swarm(Service, INetworkService):
     transport: ITransport
     # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
     #   whereas in Go one `peer_id` may point to multiple connections.
-    connections: Dict[ID, INetConn]
-    listeners: Dict[str, IListener]
+    connections: dict[ID, INetConn]
+    listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
     listener_nursery: Optional[trio.Nursery]
     event_listener_nursery_created: trio.Event
 
-    notifees: List[INotifee]
+    notifees: list[INotifee]
 
     def __init__(
         self,
@@ -161,7 +145,7 @@ class Swarm(Service, INetworkService):
         if not addrs:
             raise SwarmException(f"No known addresses to peer {peer_id}")
 
-        exceptions: List[SwarmException] = []
+        exceptions: list[SwarmException] = []
 
         # Try all known addresses
         for multiaddr in addrs:

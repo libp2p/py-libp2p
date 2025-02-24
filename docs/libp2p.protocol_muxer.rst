@@ -28,34 +28,10 @@ libp2p.protocol\_muxer.multiselect\_client module
    :undoc-members:
    :show-inheritance:
 
-libp2p.protocol\_muxer.multiselect\_client\_interface module
-------------------------------------------------------------
-
-.. automodule:: libp2p.protocol_muxer.multiselect_client_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.protocol\_muxer.multiselect\_communicator module
 -------------------------------------------------------
 
 .. automodule:: libp2p.protocol_muxer.multiselect_communicator
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.protocol\_muxer.multiselect\_communicator\_interface module
-------------------------------------------------------------------
-
-.. automodule:: libp2p.protocol_muxer.multiselect_communicator_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.protocol\_muxer.multiselect\_muxer\_interface module
------------------------------------------------------------
-
-.. automodule:: libp2p.protocol_muxer.multiselect_muxer_interface
    :members:
    :undoc-members:
    :show-inheritance:

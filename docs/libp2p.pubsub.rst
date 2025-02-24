@@ -12,14 +12,6 @@ Subpackages
 Submodules
 ----------
 
-libp2p.pubsub.abc module
-------------------------
-
-.. automodule:: libp2p.pubsub.abc
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.pubsub.exceptions module
 -------------------------------
 
@@ -72,14 +64,6 @@ libp2p.pubsub.subscription module
 ---------------------------------
 
 .. automodule:: libp2p.pubsub.subscription
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.pubsub.typing module
----------------------------
-
-.. automodule:: libp2p.pubsub.typing
    :members:
    :undoc-members:
    :show-inheritance:

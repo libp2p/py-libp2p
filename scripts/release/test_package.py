@@ -5,9 +5,6 @@ import subprocess
 from tempfile import (
     TemporaryDirectory,
 )
-from typing import (
-    Tuple,
-)
 import venv
 
 
@@ -25,23 +22,16 @@ def find_wheel(project_path: Path) -> Path:
 
     if len(wheels) != 1:
         raise Exception(
-            f"Expected one wheel. Instead found: {wheels} in project "
-            f"{project_path.absolute()}"
+            f"Expected one wheel. Instead found: {wheels} "
+            f"in project {project_path.absolute()}"
         )
 
     return wheels[0]
 
 
-def install_wheel(
-    venv_path: Path, wheel_path: Path, extras: Tuple[str, ...] = ()
-) -> None:
-    if extras:
-        extra_suffix = f"[{','.join(extras)}]"
-    else:
-        extra_suffix = ""
-
+def install_wheel(venv_path: Path, wheel_path: Path) -> None:
     subprocess.run(
-        [venv_path / "bin" / "pip", "install", f"{wheel_path}{extra_suffix}"],
+        [venv_path / "bin" / "pip", "install", f"{wheel_path}"],
         check=True,
     )
 

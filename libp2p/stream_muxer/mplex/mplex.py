@@ -1,12 +1,18 @@
 import logging
 from typing import (
-    Dict,
     Optional,
-    Tuple,
 )
 
 import trio
 
+from libp2p.abc import (
+    IMuxedConn,
+    IMuxedStream,
+    ISecureConn,
+)
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.exceptions import (
     ParseError,
 )
@@ -18,16 +24,6 @@ from libp2p.network.connection.exceptions import (
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
-    IMuxedStream,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 from libp2p.utils import (
     decode_uvarint_from_stream,
@@ -64,9 +60,9 @@ class Mplex(IMuxedConn):
     secured_conn: ISecureConn
     peer_id: ID
     next_channel_id: int
-    streams: Dict[StreamID, MplexStream]
+    streams: dict[StreamID, MplexStream]
     streams_lock: trio.Lock
-    streams_msg_channels: Dict[StreamID, "trio.MemorySendChannel[bytes]"]
+    streams_msg_channels: dict[StreamID, "trio.MemorySendChannel[bytes]"]
     new_stream_send_channel: "trio.MemorySendChannel[IMuxedStream]"
     new_stream_receive_channel: "trio.MemoryReceiveChannel[IMuxedStream]"
 
@@ -222,7 +218,7 @@ class Mplex(IMuxedConn):
         # We should clean things up.
         await self._cleanup()
 
-    async def read_message(self) -> Tuple[int, int, bytes]:
+    async def read_message(self) -> tuple[int, int, bytes]:
         """
         Read a single message off of the secured connection.
 

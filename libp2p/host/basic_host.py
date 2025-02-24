@@ -1,19 +1,30 @@
+from collections.abc import (
+    AsyncIterator,
+    Sequence,
+)
 from contextlib import (
     asynccontextmanager,
 )
 import logging
 from typing import (
     TYPE_CHECKING,
-    AsyncIterator,
-    List,
-    Sequence,
 )
 
 import multiaddr
 
+from libp2p.abc import (
+    IHost,
+    INetStream,
+    INetworkService,
+    IPeerStore,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
+)
+from libp2p.custom_types import (
+    StreamHandlerFn,
+    TProtocol,
 )
 from libp2p.host.defaults import (
     get_default_protocols,
@@ -21,20 +32,11 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
-from libp2p.network.network_interface import (
-    INetworkService,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
 )
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
@@ -51,14 +53,6 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 )
 from libp2p.tools.async_service import (
     background_trio_service,
-)
-from libp2p.typing import (
-    StreamHandlerFn,
-    TProtocol,
-)
-
-from .host_interface import (
-    IHost,
 )
 
 if TYPE_CHECKING:
@@ -132,20 +126,20 @@ class BasicHost(IHost):
         """
         return self.multiselect
 
-    def get_addrs(self) -> List[multiaddr.Multiaddr]:
+    def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
         :return: all the multiaddr addresses this host is listening to
         """
         # TODO: We don't need "/p2p/{peer_id}" postfix actually.
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
 
-        addrs: List[multiaddr.Multiaddr] = []
+        addrs: list[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
         return addrs
 
-    def get_connected_peers(self) -> List[ID]:
+    def get_connected_peers(self) -> list[ID]:
         """
         :return: all the ids of peers this host is currently connected to
         """

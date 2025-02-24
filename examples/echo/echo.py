@@ -9,14 +9,14 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.net_stream_interface import (
     INetStream,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
@@ -53,7 +53,7 @@ async def run(port: int, destination: str, seed: int = None) -> None:
 
             print(
                 "Run this from the same folder in another console:\n\n"
-                f"python echo.py -p {int(port) + 1} "
+                f"echo-demo -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
             print("Waiting for incoming connections...")

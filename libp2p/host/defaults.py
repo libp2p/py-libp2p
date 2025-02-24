@@ -5,7 +5,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
 )
 from libp2p.host.ping import (
@@ -18,7 +18,7 @@ from libp2p.identity.identify.protocol import (
 from libp2p.identity.identify.protocol import ID as IdentifyID
 
 if TYPE_CHECKING:
-    from libp2p.typing import (
+    from libp2p.custom_types import (
         StreamHandlerFn,
         TProtocol,
     )

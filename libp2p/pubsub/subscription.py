@@ -1,22 +1,25 @@
+from collections.abc import (
+    AsyncIterator,
+)
 from types import (
     TracebackType,
 )
 from typing import (
-    AsyncIterator,
     Optional,
     Type,
 )
 
 import trio
 
-from .abc import (
+from libp2p.abc import (
     ISubscriptionAPI,
 )
+from libp2p.custom_types import (
+    UnsubscribeFn,
+)
+
 from .pb import (
     rpc_pb2,
-)
-from .typing import (
-    UnsubscribeFn,
 )
 
 

@@ -1,17 +1,15 @@
+from libp2p.abc import (
+    INetworkService,
+    IPeerRouting,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
 from libp2p.host.exceptions import (
     ConnectionFailure,
 )
-from libp2p.network.network_interface import (
-    INetworkService,
-)
 from libp2p.peer.peerinfo import (
     PeerInfo,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 
 

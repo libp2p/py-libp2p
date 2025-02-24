@@ -4,11 +4,12 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import (
+    Hashable,
+)
 from typing import (
     Any,
-    Hashable,
     Optional,
-    Set,
 )
 
 import trio_typing
@@ -45,7 +46,7 @@ class TaskAPI(Hashable):
 
 
 class TaskWithChildrenAPI(TaskAPI):
-    children: Set[TaskAPI]
+    children: set[TaskAPI]
 
     @abstractmethod
     def add_child(self, child: TaskAPI) -> None:

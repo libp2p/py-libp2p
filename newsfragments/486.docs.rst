@@ -1,1 +1,0 @@
-added missing details of params in ``IPubsubRouter``

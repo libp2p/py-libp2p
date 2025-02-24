@@ -2,11 +2,10 @@ from abc import (
     ABC,
     abstractmethod,
 )
-import subprocess
-from typing import (
+from collections.abc import (
     Iterable,
-    List,
 )
+import subprocess
 
 import trio
 
@@ -26,7 +25,7 @@ class AbstractInterativeProcess(ABC):
 class BaseInteractiveProcess(AbstractInterativeProcess):
     proc: trio.Process = None
     cmd: str
-    args: List[str]
+    args: list[str]
     bytes_read: bytearray
     patterns: Iterable[bytes] = None
     event_ready: trio.Event

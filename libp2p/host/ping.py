@@ -1,27 +1,22 @@
 import logging
 import secrets
 import time
-from typing import (
-    List,
-)
 
 import trio
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
+    INetStream,
+)
+from libp2p.custom_types import (
+    TProtocol,
 )
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamReset,
 )
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
-)
 from libp2p.peer.id import ID as PeerID
-from libp2p.typing import (
-    TProtocol,
-)
 
 ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -102,7 +97,7 @@ class PingService:
     def __init__(self, host: IHost):
         self._host = host
 
-    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> List[int]:
+    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
         stream = await self._host.new_stream(peer_id, [ID])
 
         try:

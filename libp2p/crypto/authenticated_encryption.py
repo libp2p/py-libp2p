@@ -2,9 +2,6 @@ from dataclasses import (
     dataclass,
 )
 import hmac
-from typing import (
-    Tuple,
-)
 
 from Crypto.Cipher import (
     AES,
@@ -66,7 +63,7 @@ class MacAndCipher:
 
 def initialize_pair(
     cipher_type: str, hash_type: str, secret: bytes
-) -> Tuple[EncryptionParameters, EncryptionParameters]:
+) -> tuple[EncryptionParameters, EncryptionParameters]:
     """
     Return a pair of ``Keys`` for use in securing a communications channel
     with authenticated encryption derived from the ``secret`` and using the

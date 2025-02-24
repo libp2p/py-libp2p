@@ -1,3 +1,7 @@
+from libp2p.abc import (
+    IRawConnection,
+    ISecureConn,
+)
 from libp2p.crypto.exceptions import (
     MissingDeserializerError,
 )
@@ -11,6 +15,9 @@ from libp2p.crypto.pb import (
 from libp2p.crypto.serialization import (
     deserialize_public_key,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
@@ -19,9 +26,6 @@ from libp2p.io.msgio import (
 )
 from libp2p.network.connection.exceptions import (
     RawConnError,
-)
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
 )
 from libp2p.peer.id import (
     ID,
@@ -34,12 +38,6 @@ from libp2p.security.base_transport import (
 )
 from libp2p.security.exceptions import (
     HandshakeFailure,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 from .pb import (

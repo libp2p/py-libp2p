@@ -1,30 +1,29 @@
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     Any,
-    Dict,
-    List,
-    Sequence,
 )
 
 from multiaddr import (
     Multiaddr,
 )
 
+from libp2p.abc import (
+    IPeerData,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
-)
-
-from .peerdata_interface import (
-    IPeerData,
 )
 
 
 class PeerData(IPeerData):
     pubkey: PublicKey
     privkey: PrivateKey
-    metadata: Dict[Any, Any]
-    protocols: List[str]
-    addrs: List[Multiaddr]
+    metadata: dict[Any, Any]
+    protocols: list[str]
+    addrs: list[Multiaddr]
 
     def __init__(self) -> None:
         self.pubkey = None
@@ -33,7 +32,7 @@ class PeerData(IPeerData):
         self.protocols = []
         self.addrs = []
 
-    def get_protocols(self) -> List[str]:
+    def get_protocols(self) -> list[str]:
         """
         :return: all protocols associated with given peer
         """
@@ -59,7 +58,7 @@ class PeerData(IPeerData):
             if addr not in self.addrs:
                 self.addrs.append(addr)
 
-    def get_addrs(self) -> List[Multiaddr]:
+    def get_addrs(self) -> list[Multiaddr]:
         """
         :return: all multiaddresses
         """

@@ -3,6 +3,12 @@ from __future__ import (
     annotations,
 )
 
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Coroutine,
+    Sequence,
+)
 from contextlib import (
     asynccontextmanager,
 )
@@ -10,13 +16,8 @@ import functools
 import sys
 from typing import (
     Any,
-    AsyncIterator,
-    Awaitable,
     Callable,
-    Coroutine,
     Optional,
-    Sequence,
-    Tuple,
     TypeVar,
     cast,
 )
@@ -337,7 +338,7 @@ class TrioManager(BaseManager):
 TFunc = TypeVar("TFunc", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
-_ChannelPayload = Tuple[Optional[Any], Optional[BaseException]]
+_ChannelPayload = tuple[Optional[Any], Optional[BaseException]]
 
 
 async def _wait_finished(

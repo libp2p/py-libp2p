@@ -1,4 +1,4 @@
-exclude: '.project-template|docs/conf.py|.bumpversion.cfg|.*pb2\..*'
+exclude: '.project-template|docs/conf.py|.*pb2\..*'
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -11,7 +11,7 @@ repos:
     rev: v3.15.0
     hooks:
     -   id: pyupgrade
-        args: [--py38-plus]
+        args: [--py39-plus]
 -   repo: https://github.com/psf/black
     rev: 23.9.1
     hooks:

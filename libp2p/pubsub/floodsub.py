@@ -1,28 +1,27 @@
-import logging
-from typing import (
+from collections.abc import (
     Iterable,
-    List,
     Sequence,
 )
+import logging
 
 import trio
 
+from libp2p.abc import (
+    IPubsubRouter,
+)
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.typing import (
-    TProtocol,
-)
 from libp2p.utils import (
     encode_varint_prefixed,
 )
 
-from .abc import (
-    IPubsubRouter,
-)
 from .pb import (
     rpc_pb2,
 )
@@ -36,7 +35,7 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 
 
 class FloodSub(IPubsubRouter):
-    protocols: List[TProtocol]
+    protocols: list[TProtocol]
 
     pubsub: Pubsub
 
@@ -44,7 +43,7 @@ class FloodSub(IPubsubRouter):
         self.protocols = list(protocols)
         self.pubsub = None
 
-    def get_protocols(self) -> List[TProtocol]:
+    def get_protocols(self) -> list[TProtocol]:
         """
         :return: the list of protocols supported by the router
         """

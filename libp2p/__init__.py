@@ -1,22 +1,27 @@
 from importlib.metadata import version as __version
 
+from libp2p.abc import (
+    IHost,
+    INetworkService,
+    IPeerRouting,
+    IPeerStore,
+)
 from libp2p.crypto.keys import (
     KeyPair,
 )
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.custom_types import (
+    TMuxerOptions,
+    TProtocol,
+    TSecurityOptions,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
-from libp2p.host.host_interface import (
-    IHost,
-)
 from libp2p.host.routed_host import (
     RoutedHost,
-)
-from libp2p.network.network_interface import (
-    INetworkService,
 )
 from libp2p.network.swarm import (
     Swarm,
@@ -26,12 +31,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore import (
     PeerStore,
-)
-from libp2p.peer.peerstore_interface import (
-    IPeerStore,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -59,9 +58,6 @@ from libp2p.transport.typing import (
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-from libp2p.typing import (
-    TProtocol,
 )
 
 

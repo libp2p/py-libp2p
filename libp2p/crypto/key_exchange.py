@@ -1,6 +1,5 @@
 from typing import (
     Callable,
-    Tuple,
     cast,
 )
 
@@ -22,7 +21,7 @@ SharedKeyGenerator = Callable[[bytes], bytes]
 int_bytelen = util.int_bytelen
 
 
-def create_ephemeral_key_pair(curve_type: str) -> Tuple[PublicKey, SharedKeyGenerator]:
+def create_ephemeral_key_pair(curve_type: str) -> tuple[PublicKey, SharedKeyGenerator]:
     """Facilitates ECDH key exchange."""
     if curve_type != "P-256":
         raise NotImplementedError()
