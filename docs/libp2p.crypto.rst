@@ -1,14 +1,6 @@
 libp2p.crypto package
 =====================
 
-Subpackages
------------
-
-.. toctree::
-   :maxdepth: 4
-
-   libp2p.crypto.pb
-
 Submodules
 ----------
 

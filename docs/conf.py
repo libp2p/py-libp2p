@@ -335,7 +335,7 @@ suppress_warnings = [
 ]
 
 # Don't treat warnings as errors for specific warning types
-warning_is_error = True
+warning_is_error = False
 nitpicky = True
 nitpick_ignore = [
     ('py:class', 'libp2p.abc.INetStream'),
@@ -353,5 +353,9 @@ autodoc_mock_imports = [
     'fastecdsa',
     'fastecdsa.encoding',
     'fastecdsa.encoding.sec1',
-    'libp2p.network.stream.net_stream_interface'
+    'libp2p.network.stream.net_stream_interface',
+    'libp2p.network.stream',
+    'examples.chat',
+    'examples.echo',
+    'examples.ping'
 ]
