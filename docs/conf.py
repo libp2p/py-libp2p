@@ -328,14 +328,30 @@ MOCK_MODULES = [
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 
-# Update the mock configuration to properly handle test modules
+# Configure warning handling
+suppress_warnings = [
+    'ref.python',  # Suppress cross-reference warnings
+    'toc.excluded'  # Suppress warnings about excluded documents
+]
+
+# Don't treat warnings as errors for specific warning types
+warning_is_error = True
+nitpicky = True
+nitpick_ignore = [
+    ('py:class', 'libp2p.abc.INetStream'),
+    ('py:class', 'libp2p.custom_types.INetStream'),
+    ('py:class', 'libp2p.abc.IMuxedConn'),
+    ('py:class', 'libp2p.custom_types.IMuxedConn'),
+    ('py:class', 'libp2p.abc.ISecureTransport'),
+    ('py:class', 'libp2p.custom_types.ISecureTransport'),
+]
+
+# Update autodoc mock imports
 autodoc_mock_imports = [
     'tests',
     'tests.factories',
     'fastecdsa',
     'fastecdsa.encoding',
-    'fastecdsa.encoding.sec1'
+    'fastecdsa.encoding.sec1',
+    'libp2p.network.stream.net_stream_interface'
 ]
-
-# Add this to make warnings not treated as errors for mocked modules
-autodoc_warningiserror = False
