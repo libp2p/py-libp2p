@@ -33,13 +33,13 @@ docker run --name redis --network libp2p-test -d redis
 ### Running as a Listener
 
 ```bash
-docker run --network libp2p-test -e ROLE=listener -e TRANSPORT=tcp -e SECURE_CHANNEL=noise -e MUXER=mplex py-libp2p-interop
+docker run --network libp2p-test -e ROLE=listener -e TRANSPORT=tcp -e SECURE_CHANNEL=noise -e MUXER=mplex -e REDIS_HOST=redis py-libp2p-interop
 ```
 
 ### Running as a Dialer
 
 ```bash
-docker run --network libp2p-test -e ROLE=dialer -e TRANSPORT=tcp -e SECURE_CHANNEL=noise -e MUXER=mplex py-libp2p-interop
+docker run --network libp2p-test -e ROLE=dialer -e TRANSPORT=tcp -e SECURE_CHANNEL=noise -e MUXER=mplex -e REDIS_HOST=redis py-libp2p-interop
 ```
 
 ## Configuration Options
