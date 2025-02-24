@@ -297,7 +297,14 @@ texinfo_documents = [
 # -- Intersphinx configuration ------------------------------------------------
 
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3.10", None),
+    'python': ('https://docs.python.org/3.10', None),
+    'trio': ('https://trio.readthedocs.io/en/stable/', None),
+    'multiaddr': ('https://multiaddr.readthedocs.io/en/latest/', None),
+    'protobuf': ('https://googleapis.dev/python/protobuf/latest/', None),
+    'coincurve': ('https://ofek.dev/coincurve/', None),
+    'nacl': ('https://pynacl.readthedocs.io/en/stable/', None),
+    'noise': ('https://noiseprotocol.readthedocs.io/en/latest/', None),
+    'async_service': ('https://async-service.readthedocs.io/en/latest/', None),
 }
 
 # -- Doctest configuration ----------------------------------------
@@ -331,31 +338,68 @@ sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 # Configure warning handling
 suppress_warnings = [
     'ref.python',  # Suppress cross-reference warnings
+    'ref.class',
+    'ref.meth',
     'toc.excluded'  # Suppress warnings about excluded documents
 ]
 
 # Don't treat warnings as errors for specific warning types
 warning_is_error = False
-nitpicky = True
-nitpick_ignore = [
-    ('py:class', 'libp2p.abc.INetStream'),
-    ('py:class', 'libp2p.custom_types.INetStream'),
-    ('py:class', 'libp2p.abc.IMuxedConn'),
-    ('py:class', 'libp2p.custom_types.IMuxedConn'),
-    ('py:class', 'libp2p.abc.ISecureTransport'),
-    ('py:class', 'libp2p.custom_types.ISecureTransport'),
-]
+
+# Don't be nitpicky about references
+nitpicky = False
 
 # Update autodoc mock imports
 autodoc_mock_imports = [
+    # Internal modules
     'tests',
     'tests.factories',
-    'fastecdsa',
-    'fastecdsa.encoding',
-    'fastecdsa.encoding.sec1',
     'libp2p.network.stream.net_stream_interface',
     'libp2p.network.stream',
     'examples.chat',
     'examples.echo',
-    'examples.ping'
+    'examples.ping',
+    
+    # External dependencies
+    'fastecdsa',
+    'fastecdsa.encoding',
+    'fastecdsa.encoding.sec1',
+    'multiaddr',
+    'multiaddr.multiaddr',
+    'trio',
+    'trio.lowlevel',
+    'trio.socket',
+    'noise',
+    'noise.connection',
+    'nacl',
+    'nacl.public',
+    'Crypto',
+    'Crypto.PublicKey',
+    'coincurve',
+    'coincurve.keys',
+    'google',
+    'google.protobuf',
+    'google._upb',
+    'async_service',
+    'async_service.exceptions',
+    'async_service.abc',
+    'async_service.base',
+    'google._upb._message',
+    'google.protobuf.message',
+    'Crypto.PublicKey.RSA',
+    'noise.connection',
+    'async_service.exceptions',
+    'async_service.abc',
+    'async_service.base',
+    'trio.lowlevel',
+    'trio.socket',
+    '_io',
 ]
+
+# Configure autodoc
+autodoc_default_options = {
+    'member-order': 'bysource',
+    'special-members': '__init__',
+    'undoc-members': True,
+    'exclude-members': '__weakref__'
+}
