@@ -1,7 +1,7 @@
 exclude: '.project-template|docs/conf.py|.*pb2\..*'
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v5.0.0
     hooks:
     -   id: check-yaml
     -   id: check-toml
@@ -38,7 +38,7 @@ repos:
         additional_dependencies:
         -   tomli  # required until >= python311
 -   repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.17
+    rev: 0.7.22
     hooks:
     -   id: mdformat
         additional_dependencies:

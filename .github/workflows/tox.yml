@@ -30,7 +30,7 @@ jobs:
           if [[ "$toxenv" == 'docs' ]]; then
             echo 'TOXENV=docs' | tee -a $GITHUB_ENV
           else
-            echo "TOXENV=${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
+            echo "TOXENV=py${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
           fi
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
