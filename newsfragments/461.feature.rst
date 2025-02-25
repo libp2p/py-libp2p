@@ -1,0 +1,2 @@
+Added Python (py-libp2p) interoperability testing to the libp2p test-plans repository. The implementation allows py-libp2p to participate in the interoperability test suite alongside other libp2p implementations.
+
