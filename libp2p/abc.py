@@ -588,6 +588,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_peerstore(self) -> IPeerStore:
+        """
+        :return: the peerstore of the host
+        """
+
+    @abstractmethod
     def get_connected_peers(self) -> list[ID]:
         """
         :return: all the ids of peers this host is currently connected to
