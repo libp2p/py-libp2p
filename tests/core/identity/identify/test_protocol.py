@@ -1,4 +1,9 @@
+import logging
+
 import pytest
+from multiaddr import (
+    Multiaddr,
+)
 
 from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
@@ -14,6 +19,8 @@ from tests.factories import (
     host_pair_factory,
 )
 
+logger = logging.getLogger("libp2p.identity.identify-test")
+
 
 @pytest.mark.trio
 async def test_identify_protocol(security_protocol):
@@ -28,8 +35,8 @@ async def test_identify_protocol(security_protocol):
         identify_response = Identify()
         identify_response.ParseFromString(response)
 
-        # sanity check
-        assert identify_response == _mk_identify_protobuf(host_a)
+        logger.debug("host_a: %s", host_a.get_addrs())
+        logger.debug("host_b: %s", host_b.get_addrs())
 
         # Check protocol version
         assert identify_response.protocol_version == PROTOCOL_VERSION
@@ -45,8 +52,23 @@ async def test_identify_protocol(security_protocol):
             map(_multiaddr_to_bytes, host_a.get_addrs())
         )
 
-        # TODO: Check observed address
-        # assert identify_response.observed_addr == host_b.get_addrs()[0]
+        # Check observed address
+        host_b_addr = host_b.get_addrs()[0]
+        cleaned_addr = Multiaddr.join(
+            *(
+                host_b_addr.split()[:-1]
+                if str(host_b_addr.split()[-1]).startswith("/p2p/")
+                else host_b_addr.split()
+            )
+        )
+
+        logger.debug("observed_addr: %s", Multiaddr(identify_response.observed_addr))
+        logger.debug("host_b.get_addrs()[0]: %s", host_b.get_addrs()[0])
+        logger.debug("cleaned_addr= %s", cleaned_addr)
+        assert identify_response.observed_addr == _multiaddr_to_bytes(cleaned_addr)
 
         # Check protocols
         assert set(identify_response.protocols) == set(host_a.get_mux().get_protocols())
+
+        # sanity check
+        assert identify_response == _mk_identify_protobuf(host_a, cleaned_addr)

@@ -1132,6 +1132,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_peerstore(self) -> IPeerStore:
+        """
+        :return: the peerstore of the host
+        """
+
+    @abstractmethod
     def get_connected_peers(self) -> list[ID]:
         """
         Retrieve the identifiers of peers currently connected to the host.
