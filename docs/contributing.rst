@@ -5,18 +5,39 @@ Thank you for your interest in contributing! We welcome all contributions no mat
 their size. Please read along to learn how to get started. If you get stuck, feel free
 to ask for help in `Ethereum Python Discord server <https://discord.gg/GHryRvPB84>`_.
 
+Dependencies
+^^^^^^^^^^^^
+
+The following dependencies are needed to build py-libp2p:
+
+* `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+* `CMake <https://cmake.org>`
+* `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`
+
+On Debian Linux you can install them using the following command:
+
+.. code:: sh
+
+    sudo apt-get install cmake pkg-config libgmp-dev
+
+On MacOS, you can install them using the following command:
+
+.. code:: sh
+
+   brew install cmake pkgconfig gmp
+
 Setting the stage
 ~~~~~~~~~~~~~~~~~
 
-To get started, fork the repository to your own github account, then clone it to your
-development machine:
+To get started, fork the repository to your own github account, then clone it
+to your development machine:
 
 .. code:: sh
 
     git clone git@github.com:your-github-username/py-libp2p.git
 
-Next, install the development dependencies. We recommend using a virtual environment,
-such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
+Next, install the development dependencies. We recommend using a virtual
+environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
 
 .. code:: sh
 
@@ -26,19 +47,22 @@ such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
     python -m pip install -e ".[dev]"
     pre-commit install
 
-
-Dependencies
-^^^^^^^^^^^^
-
-On Debian Linux you will need to ensure that you have the
-`GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-installed since it is a dependency of the fastecdsa package. You can install it using
-the following command:
+An alternative to virtualenv is to use the built-in Python3 venv module:
 
 .. code:: sh
 
-    sudo apt-get install libgmp-dev
+   cd py-libp2p
+   python3 -m venv ./venv
+   . venv/bin/activate
+   python3 -m pip install -e ".[dev]"
+   pre-commit install
 
+Currently, on MacOS you must help the build command find and link against the
+gmp library. On MacOS run the following to build py-libp2p:
+
+.. code:: sh
+
+   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
 
 Requirements
 ^^^^^^^^^^^^
