@@ -1,7 +1,47 @@
 """
 Utility functions for async_service implementation.
 """
-from typing import Any
+
+from typing import (
+    Any,
+    Callable,
+    TypeVar,
+    cast,
+)
+
+from .abc import (
+    ServiceAPI,
+)
+
+
+class SimpleService:
+    """
+    A simple service implementation that wraps an async function.
+    """
+
+    def __init__(self, service_fn, *args, **kwargs):
+        self._service_fn = service_fn
+        self._args = args
+        self._kwargs = kwargs
+
+    async def run(self) -> None:
+        await self._service_fn(*self._args, **self._kwargs)
+
+
+TFunc = TypeVar("TFunc", bound=Callable[..., Any])
+TService = TypeVar("TService", bound=ServiceAPI)
+
+
+def as_service(service_fn: TFunc) -> Callable[..., TService]:
+    """
+    Convert a regular async function into a service class.
+    """
+
+    def create_service(*args: Any, **kwargs: Any) -> TService:
+        return cast(TService, SimpleService(service_fn, *args, **kwargs))
+
+    return create_service
+
 
 def get_task_name(value: Any, explicit_name: str = None) -> str:
     """
@@ -10,10 +50,12 @@ def get_task_name(value: Any, explicit_name: str = None) -> str:
     if explicit_name is not None:
         # if an explicit name was provided, just return that.
         return explicit_name
-    
+
     # Import here to avoid circular imports
-    from .abc import ServiceAPI
-    
+    from .abc import (
+        ServiceAPI,
+    )
+
     if isinstance(value, ServiceAPI):
         # Service instance naming rules:
         #

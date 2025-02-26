@@ -6,23 +6,23 @@ could be replaced with a simpler implementation using anyio.
 """
 
 from .abc import (
-    ServiceAPI,
-    ManagerAPI,
     InternalManagerAPI,
+    ManagerAPI,
+    ServiceAPI,
 )
 from .base import (
     Service,
     as_service,
 )
 from .exceptions import (
-    ServiceException,
-    LifecycleError,
     DaemonTaskExit,
+    LifecycleError,
+    ServiceException,
 )
 from .manager import (
     AnyIOManager,
-    run_service,
     background_service,
+    run_service,
 )
 from .stats import (
     Stats,

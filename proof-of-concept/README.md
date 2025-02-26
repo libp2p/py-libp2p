@@ -9,10 +9,10 @@ The current `async_service` implementation in py-libp2p was copied from the now 
 ## Benefits of Migration
 
 1. **Reduced Maintenance Burden**: By using anyio, we delegate the complex concurrency management to a well-maintained library.
-2. **Simplified Implementation**: The new implementation is significantly simpler (~400 lines vs. ~1000 lines) while preserving the core functionality.
-3. **Backend Agnostic**: The solution works with both Trio and asyncio through anyio's abstraction.
-4. **Modern Structured Concurrency**: Leverages anyio's task groups for cleaner task management and error propagation.
-5. **Preserved API Surface**: Existing code using `async_service` can be migrated with minimal changes.
+1. **Simplified Implementation**: The new implementation is significantly simpler (~400 lines vs. ~1000 lines) while preserving the core functionality.
+1. **Backend Agnostic**: The solution works with both Trio and asyncio through anyio's abstraction.
+1. **Modern Structured Concurrency**: Leverages anyio's task groups for cleaner task management and error propagation.
+1. **Preserved API Surface**: Existing code using `async_service` can be migrated with minimal changes.
 
 ## Implementation Details
 
@@ -35,8 +35,8 @@ The key changes are:
 For existing services, the migration would typically involve:
 
 1. Updating imports to point to the new implementation
-2. Testing to ensure behavior is preserved
-3. Potentially adjusting code that relied on implementation details
+1. Testing to ensure behavior is preserved
+1. Potentially adjusting code that relied on implementation details
 
 No changes should be needed to the service interface itself, as the API remains largely compatible.
 
@@ -55,13 +55,13 @@ class MyService(Service):
     async def run(self):
         # Schedule background tasks
         self.manager.run_daemon_task(self.background_task)
-        
+
         # Main service logic
         while True:
             await self.process_data()
             if self.manager.is_cancelled:
                 break
-    
+
     async def background_task(self):
         while True:
             await self.monitor_something()
@@ -77,6 +77,6 @@ See the `examples/` directory for more detailed examples.
 If this approach is accepted:
 
 1. Add comprehensive tests
-2. Create a full implementation with documentation
-3. Update existing py-libp2p services to use the new implementation
-4. Remove the old implementation
+1. Create a full implementation with documentation
+1. Update existing py-libp2p services to use the new implementation
+1. Remove the old implementation
