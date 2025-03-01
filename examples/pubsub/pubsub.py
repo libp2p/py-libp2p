@@ -115,7 +115,7 @@ def main() -> None:
         "-p",
         "--port",
         type=str,
-        help="Address of peer to connect to",
+        help="Port to listen on",
         default=8080,
     )
 
