@@ -61,7 +61,7 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
                         print("Exiting publish loop.")
                         nursery.cancel_scope.cancel()
                         break
-                    await gossipsub.publish(topic, message.encode())
+                    await pubsub.publish(topic, message.encode())
 
             nursery.start_soon(publish_loop)
 
