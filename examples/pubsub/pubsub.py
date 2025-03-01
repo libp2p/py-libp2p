@@ -78,7 +78,7 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
                     message = input("Enter message to publish (or 'quit' to exit): ")
                     if message.lower() == 'quit':
                         break
-                    await gossipsub.publish(topic, message.encode())
+                    await pubsub.publish(topic, message.encode())
              
             print("after publish loop") 
             nursery.start_soon(publish_loop)
