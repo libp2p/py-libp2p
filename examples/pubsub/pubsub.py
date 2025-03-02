@@ -48,7 +48,7 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
         if not destination:
             print(
                 "Run this script in another console with:\n"
-                f"python main.py -p {int(port) + 1} "
+                f"python pubsub.py -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
             print("Waiting for peers...")
