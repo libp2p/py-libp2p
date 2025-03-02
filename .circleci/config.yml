@@ -1,0 +1,35 @@
+jobs:
+  # ... other jobs ...
+
+  test-demos:
+    docker:
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "setup.py" }}
+            - v1-dependencies-
+      - run:
+          name: Install Dependencies
+          command: |
+            python -m venv venv
+            . venv/bin/activate
+            pip install -e ".[dev]"
+            pip install tox
+      - save_cache:
+          paths:
+            - ./venv
+          key: v1-dependencies-{{ checksum "setup.py" }}
+      - run:
+          name: Run Demo Tests
+          command: |
+            . venv/bin/activate
+            tox -e py39-demos
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      # ... other jobs ...
+      - test-demos
