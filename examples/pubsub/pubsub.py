@@ -69,7 +69,7 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
             # Client mode
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
-            await pubsub._handle_new_peer(info.peer_id)
+            await host.connect(info)
             print(f"Connected to peer: {info.peer_id.pretty()}")
              
             # Start message input loop
@@ -80,7 +80,6 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
                         break
                     await pubsub.publish(topic, message.encode())
              
-            print("after publish loop") 
             nursery.start_soon(publish_loop)
 
         await trio.sleep_forever()
