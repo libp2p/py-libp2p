@@ -1,6 +1,8 @@
 from typing import (
     Optional,
 )
+import trio
+from enum import IntEnum
 
 from libp2p.abc import (
     IMuxedStream,
@@ -21,10 +23,14 @@ from .exceptions import (
     StreamReset,
 )
 
+# Define StreamState Enum
+class StreamState(IntEnum):
+    STREAM_OPEN = 0
+    STREAM_CLOSE_READ = 1
+    STREAM_CLOSE_WRITE = 2
+    STREAM_CLOSE_BOTH = 3
+    STREAM_RESET = 4
 
-# TODO: Handle exceptions from `muxed_stream`
-# TODO: Add stream state
-#   - Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501
 class NetStream(INetStream):
     muxed_stream: IMuxedStream
     protocol_id: Optional[TProtocol]
@@ -33,6 +39,8 @@ class NetStream(INetStream):
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
+        self.state = StreamState.STREAM_OPEN
+        self.state_lock = trio.Lock()
 
     def get_protocol(self) -> TProtocol:
         """
@@ -73,11 +81,23 @@ class NetStream(INetStream):
 
     async def close(self) -> None:
         """Close stream."""
+        async with self.state_lock:
+            if self.state == StreamState.STREAM_OPEN:
+                self.state = StreamState.STREAM_CLOSE_WRITE
+            elif self.state == StreamState.STREAM_CLOSE_READ:
+                self.state = StreamState.STREAM_CLOSE_BOTH
+                await self.remove()
         await self.muxed_stream.close()
 
     async def reset(self) -> None:
+        async with self.state_lock:
+            if self.state in (StreamState.STREAM_OPEN, StreamState.STREAM_CLOSE_READ, StreamState.STREAM_CLOSE_WRITE):
+                self.state = StreamState.STREAM_RESET
+                await self.remove()
         await self.muxed_stream.reset()
 
-    # TODO: `remove`: Called by close and write when the stream is in specific states.
-    #   It notifies `ClosedStream` after `SwarmConn.remove_stream` is called.
-    # Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501
+    async def remove(self) -> None:
+        await self.muxed_conn.remove_stream(self)
+        # Notify `ClosedStream` after `SwarmConn.remove_stream`
+        async with self.swarm.notify_all_lock:
+            await self.swarm.notify_all(lambda f: f.closed_stream(self.swarm, self))
