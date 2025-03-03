@@ -4,18 +4,10 @@ import multiaddr
 from libp2p import new_host
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.custom_types import (
-    TProtocol,
-)
-from libp2p.peer.peerinfo import (
-    info_from_p2p_addr,
-)
-from libp2p.pubsub.pubsub import (
-    Pubsub
-)
+from libp2p.custom_types import TProtocol
+from libp2p.peer.peerinfo import info_from_p2p_addr
 
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
-
 
 async def receive_loop(subscription):
     while True:
@@ -50,7 +42,6 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
 
     pubsub = Pubsub(host, gossipsub)
     subscription = await pubsub.subscribe(topic)
-    subscription.get()
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         print(f"Node started with peer ID: {host.get_id().pretty()}")
         print(f"Subscribed to topic: {topic}")
@@ -64,17 +55,9 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
             )
             print("Waiting for peers...")
 
-            # Start message input loop
-            async def publish_loop():
-                while True:
-                    message = input("Enter message to publish (or 'quit' to exit): ")
-                    if message.lower() == 'quit':
-                        print("Exiting publish loop.")
-                        nursery.cancel_scope.cancel()
-                        break
-                    await pubsub.publish(topic, message.encode())
-
-            nursery.start_soon(publish_loop)
+            # Start message publish and receive loops
+            nursery.start_soon(receive_loop, subscription)
+            nursery.start_soon(publish_loop, pubsub, topic)
 
         else:
             # Client mode
@@ -83,15 +66,9 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
             await host.connect(info)
             print(f"Connected to peer: {info.peer_id.pretty()}")
              
-            # Start message input loop
-            async def publish_loop():
-                while True:
-                    message = input("Enter message to publish (or 'quit' to exit): ")
-                    if message.lower() == 'quit':
-                        break
-                    await pubsub.publish(topic, message.encode())
-             
-            nursery.start_soon(publish_loop)
+            # Start message publish and receive loops
+            nursery.start_soon(publish_loop, pubsub, topic)
+            nursery.start_soon(receive_loop, subscription)
 
         await trio.sleep_forever()
         
