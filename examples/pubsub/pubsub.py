@@ -16,10 +16,12 @@ from libp2p.pubsub.pubsub import (
 
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
-async def handle_message(message):
-    """Callback function to handle incoming messages"""
-    print(f"Received message: {message.data.decode('utf-8')}")
-    print(f"From peer: {message.from_id.pretty()}")
+
+async def receive_loop(subscription):
+    while True:
+        message = await subscription.get()
+        print(f"Received message: {message.data.decode('utf-8')}")
+        print(f"From peer: {message.from_id.pretty()}")
 
 async def run(topic: str, destination: str | None, port: int = 8080) -> None:
     # Initialize network settings
@@ -38,8 +40,8 @@ async def run(topic: str, destination: str | None, port: int = 8080) -> None:
     )
 
     pubsub = Pubsub(host, gossipsub)
-    await pubsub.subscribe(topic)
-
+    subscription = await pubsub.subscribe(topic)
+    subscription.get()
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         print(f"Node started with peer ID: {host.get_id().pretty()}")
         print(f"Subscribed to topic: {topic}")
