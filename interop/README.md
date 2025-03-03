@@ -107,6 +107,7 @@ docker-compose up
 ## Troubleshooting
 
 If you encounter Redis connection issues, ensure:
+
 1. Redis container is running and accessible
-2. All containers are on the same network
-3. Redis hostname resolution is working from your containers
+1. All containers are on the same network
+1. Redis hostname resolution is working from your containers
