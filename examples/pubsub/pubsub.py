@@ -25,10 +25,10 @@ async def publish_loop(pubsub: Pubsub, topic: str) -> None:
             break
         await pubsub.publish(topic, message.encode())
 
-async def run(topic: str, destination: str | None, port: int = 8080) -> None:
+async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/8080")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
     # Create a new libp2p host
     host = new_host()
@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument(
         "-p",
         "--port",
-        type=str,
+        type=int,
         help="Port to listen on",
         default=8080,
     )
