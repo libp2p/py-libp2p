@@ -16,8 +16,9 @@ async def receive_loop(subscription):
         print(f"From peer: {message.from_id.pretty()}")
 
 async def publish_loop(pubsub: Pubsub, topic: str) -> None:
+    print("Enter message to publish (or 'quit' to exit): ")
     while True:
-        message = await trio.to_thread.run_sync(input, "Enter message to publish (or 'quit' to exit): ")
+        message = await trio.to_thread.run_sync(input)
         if message.lower() == 'quit':
             print("Exiting publish loop.")
             nursery.cancel_scope.cancel()
