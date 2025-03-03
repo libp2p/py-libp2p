@@ -7,7 +7,7 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
-GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
+GOSSIPSUB_PROTOCOL_ID = TProtocol("/gossipsub/1.0.0")
 
 async def receive_loop(subscription):
     while True:
