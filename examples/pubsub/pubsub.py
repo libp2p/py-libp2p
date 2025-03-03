@@ -23,6 +23,15 @@ async def receive_loop(subscription):
         print(f"Received message: {message.data.decode('utf-8')}")
         print(f"From peer: {message.from_id.pretty()}")
 
+async def publish_loop(pubsub: Pubsub, topic: str) -> None:
+    while True:
+        message = input("Enter message to publish (or 'quit' to exit): ")
+        if message.lower() == 'quit':
+            print("Exiting publish loop.")
+            nursery.cancel_scope.cancel()
+            break
+        await pubsub.publish(topic, message.encode())
+
 async def run(topic: str, destination: str | None, port: int = 8080) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
