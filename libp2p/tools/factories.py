@@ -447,6 +447,7 @@ class PubsubFactory(factory.Factory):
         host: IHost,
         router: IPubsubRouter,
         cache_size: int,
+        seen_ttl: int,
         strict_signing: bool,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Pubsub]:
@@ -454,6 +455,7 @@ class PubsubFactory(factory.Factory):
             host=host,
             router=router,
             cache_size=cache_size,
+            seen_ttl=seen_ttl,
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
         )
@@ -468,6 +470,7 @@ class PubsubFactory(factory.Factory):
         number: int,
         routers: Sequence[IPubsubRouter],
         cache_size: int = None,
+        seen_ttl: int = None,
         strict_signing: bool = False,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
@@ -481,7 +484,12 @@ class PubsubFactory(factory.Factory):
                 pubsubs = [
                     await stack.enter_async_context(
                         cls.create_and_start(
-                            host, router, cache_size, strict_signing, msg_id_constructor
+                            host,
+                            router,
+                            cache_size,
+                            seen_ttl,
+                            strict_signing,
+                            msg_id_constructor,
                         )
                     )
                     for host, router in zip(hosts, routers)
@@ -494,6 +502,7 @@ class PubsubFactory(factory.Factory):
         cls,
         number: int,
         cache_size: int = None,
+        seen_ttl: int = 120,
         strict_signing: bool = False,
         protocols: Sequence[TProtocol] = None,
         security_protocol: TProtocol = None,
@@ -510,6 +519,7 @@ class PubsubFactory(factory.Factory):
             number,
             floodsubs,
             cache_size,
+            seen_ttl,
             strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,

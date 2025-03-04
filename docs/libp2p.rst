@@ -17,6 +17,7 @@ Subpackages
    libp2p.pubsub
    libp2p.security
    libp2p.stream_muxer
+   libp2p.timed_cache
    libp2p.tools
    libp2p.transport
 
