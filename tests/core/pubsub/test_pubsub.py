@@ -635,8 +635,8 @@ async def test_strict_signing():
         await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
         await trio.sleep(1)
 
-        assert len(pubsubs_fsub[0].seen_messages) == 1
-        assert len(pubsubs_fsub[1].seen_messages) == 1
+        assert pubsubs_fsub[0].seen_messages.length() == 1
+        assert pubsubs_fsub[1].seen_messages.length() == 1
 
 
 @pytest.mark.trio

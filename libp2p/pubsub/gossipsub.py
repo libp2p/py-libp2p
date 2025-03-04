@@ -580,7 +580,7 @@ class GossipSub(IPubsubRouter, Service):
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
-            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()
+            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.cache.keys()
         ]
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
