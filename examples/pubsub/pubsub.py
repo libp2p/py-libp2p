@@ -47,6 +47,11 @@ async def run(topic: str, destination: str | None, port: int) -> None:
         print(f"Node started with peer ID: {host.get_id().pretty()}")
         print(f"Subscribed to topic: {topic}")
         print(f"Destination is: {destination}")
+        print("Initializing pubsub...")
+        nursery.start_soon(pubsub.run)
+        print("Pubsub initialized.")
+        await pubsub.wait_until_ready()
+        print("Pubsub ready.")
 
         if not destination:
             print(
@@ -64,6 +69,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
             # Client mode
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
+            print(f"Connecting to peer: {info.peer_id.pretty()}")
             await host.connect(info)
             print(f"Connected to peer: {info.peer_id.pretty()}")
              
