@@ -1,0 +1,2 @@
+Added a maximum RSA key size limit of 4096 bits to prevent resource exhaustion attacks
+from malicious peers using oversized keys.
