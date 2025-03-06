@@ -1144,6 +1144,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_live_peers(self) -> list[ID]:
+        """
+        :return: List of peer IDs that have active connections
+        """
+
+    @abstractmethod
     def run(self, listen_addrs: Sequence[Multiaddr]) -> AsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
