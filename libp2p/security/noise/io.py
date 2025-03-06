@@ -1,3 +1,4 @@
+import logging
 from typing import (
     cast,
 )
@@ -68,6 +69,20 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
 
 
 class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):
+    def __init__(self, read_writer: IRawConnection, noise_state: NoiseState) -> None:
+        self.read_writer = NoisePacketReadWriter(cast(ReadWriteCloser, read_writer))
+        self.noise_state = noise_state
+        self.last_written_data = b""
+
+    async def write_msg(self, data: bytes, prefix_encoded: bool = False) -> None:
+        data_encrypted = self.encrypt(data)
+        if prefix_encoded:
+            await self.read_writer.write_msg(self.prefix + data_encrypted)
+        else:
+            await self.read_writer.write_msg(data_encrypted)
+        self.last_written_data = data_encrypted
+        logging.debug(f"Wrote encrypted message: {data_encrypted.hex()}")
+
     def encrypt(self, data: bytes) -> bytes:
         return self.noise_state.write_message(data)
 
