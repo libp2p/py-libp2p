@@ -138,3 +138,45 @@ async def test_live_peers_reconnect(security_protocol):
 
         # Verify reconnection
         assert host_b.get_id() in host_a.get_live_peers()
+
+
+@pytest.mark.trio
+async def test_live_peers_unexpected_drop(security_protocol):
+    """
+    Test that live peers are updated correctly when connections drop unexpectedly.
+    """
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
+        host_a, host_b = hosts
+
+        # Store peer IDs
+        peer_a_id = host_a.get_id()
+        peer_b_id = host_b.get_id()
+
+        # Initial connection
+        addr = host_b.get_addrs()[0]
+        info = info_from_p2p_addr(addr)
+        await host_a.connect(info)
+
+        # Verify initial connection
+        assert peer_b_id in host_a.get_live_peers()
+        assert peer_a_id in host_b.get_live_peers()
+
+        # Simulate unexpected connection drop by directly closing the connection
+        conn = host_a.get_network().connections[peer_b_id]
+        await conn.muxed_conn.close()
+
+        # Allow for connection cleanup
+        await trio.sleep(0.1)
+
+        # Verify peers are no longer in live peers
+        assert peer_b_id not in host_a.get_live_peers()
+        assert peer_a_id not in host_b.get_live_peers()
+
+        # Verify we can reconnect after unexpected drop
+        await host_a.connect(info)
+
+        # Verify reconnection successful
+        assert peer_b_id in host_a.get_live_peers()
+        assert peer_a_id in host_b.get_live_peers()
