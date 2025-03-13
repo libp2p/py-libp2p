@@ -1,5 +1,6 @@
 from typing import (
     TYPE_CHECKING,
+    Optional,
 )
 
 import trio
@@ -252,3 +253,7 @@ class MplexStream(IMuxedStream):
         """
         self.write_deadline = ttl
         return True
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Delegate to the parent Mplex connection."""
+        return self.muxed_conn.get_remote_address()
