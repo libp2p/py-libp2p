@@ -1,3 +1,7 @@
+from typing import (
+    Optional,
+)
+
 from libp2p.abc import (
     IRawConnection,
 )
@@ -42,3 +46,7 @@ class RawConnection(IRawConnection):
 
     async def close(self) -> None:
         await self.stream.close()
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Delegate to the underlying stream's get_remote_address method."""
+        return self.stream.get_remote_address()
