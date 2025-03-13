@@ -365,3 +365,7 @@ class Mplex(IMuxedConn):
                 await send_channel.aclose()
         self.event_closed.set()
         await self.new_stream_send_channel.aclose()
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Delegate to the underlying Mplex connection's secured_conn."""
+        return self.secured_conn.get_remote_address()

@@ -1,4 +1,7 @@
 import logging
+from typing import (
+    Optional,
+)
 
 import trio
 
@@ -42,3 +45,11 @@ class TrioTCPStream(ReadWriteCloser):
 
     async def close(self) -> None:
         await self.stream.aclose()
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Return the remote address as (host, port) tuple."""
+        try:
+            return self.stream.socket.getpeername()
+        except (AttributeError, OSError) as e:
+            logger.error("Error getting remote address: %s", e)
+            return None
