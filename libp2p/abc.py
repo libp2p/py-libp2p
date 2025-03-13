@@ -57,7 +57,18 @@ from libp2p.tools.async_service import (
 
 
 class IRawConnection(ReadWriteCloser):
-    """A Raw Connection provides a Reader and a Writer."""
+    """
+    Interface for a raw connection.
+
+    This interface provides a basic reader/writer connection abstraction.
+
+    Attributes
+    ----------
+    is_initiator (bool):
+        True if the local endpoint initiated
+        the connection.
+
+    """
 
     is_initiator: bool
 
@@ -66,33 +77,59 @@ class IRawConnection(ReadWriteCloser):
 
 
 """
-Represents a secured connection object, which includes a connection and details about
-the security involved in the secured connection
-
 Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
 """
 
 
 class AbstractSecureConn(ABC):
+    """
+    Abstract interface for secure connections.
+
+    Represents a secured connection object, including details about the
+    security involved in the connection.
+
+    """
+
     @abstractmethod
     def get_local_peer(self) -> ID:
-        pass
+        """
+        Retrieve the local peer's identifier.
+
+        :return: The local peer ID.
+        """
 
     @abstractmethod
     def get_local_private_key(self) -> PrivateKey:
-        pass
+        """
+        Retrieve the local peer's private key.
+
+        :return: The private key of the local peer.
+        """
 
     @abstractmethod
     def get_remote_peer(self) -> ID:
-        pass
+        """
+        Retrieve the remote peer's identifier.
+
+        :return: The remote peer ID.
+        """
 
     @abstractmethod
     def get_remote_public_key(self) -> PublicKey:
-        pass
+        """
+        Retrieve the remote peer's public key.
+
+        :return: The public key of the remote peer.
+        """
 
 
 class ISecureConn(AbstractSecureConn, IRawConnection):
-    pass
+    """
+    Interface for a secure connection.
+
+    Combines secure connection functionalities with raw I/O operations.
+
+    """
 
 
 # -------------------------- stream_muxer abc.py --------------------------
@@ -100,7 +137,19 @@ class ISecureConn(AbstractSecureConn, IRawConnection):
 
 class IMuxedConn(ABC):
     """
-    reference: https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
+    Interface for a multiplexed connection.
+
+    References
+    ----------
+    https://github.com/libp2p/go-stream-muxer/blob/master/muxer.go
+
+    Attributes
+    ----------
+    peer_id (ID):
+        The identifier of the connected peer.
+    event_started (trio.Event):
+        An event that signals when the multiplexer has started.
+
     """
 
     peer_id: ID
@@ -109,61 +158,95 @@ class IMuxedConn(ABC):
     @abstractmethod
     def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
         """
-        Create a new muxed connection.
+        Initialize a new multiplexed connection.
 
-        :param conn: an instance of secured connection
-        for new muxed streams
-        :param peer_id: peer_id of peer the connection is to
+        :param conn: An instance of a secure connection used for new
+            multiplexed streams.
+        :param peer_id: The peer ID associated with the connection.
         """
 
     @property
     @abstractmethod
     def is_initiator(self) -> bool:
-        """If this connection is the initiator."""
+        """
+        Determine if this connection is the initiator.
+
+        :return: True if this connection initiated the connection,
+            otherwise False.
+        """
 
     @abstractmethod
     async def start(self) -> None:
-        """Start the multiplexer."""
+        """
+        Start the multiplexer.
+
+        """
 
     @abstractmethod
     async def close(self) -> None:
-        """Close connection."""
+        """
+        Close the multiplexed connection.
+
+        """
 
     @property
     @abstractmethod
     def is_closed(self) -> bool:
         """
-        Check connection is fully closed.
+        Check if the connection is fully closed.
 
-        :return: true if successful
+        :return: True if the connection is closed, otherwise False.
         """
 
     @abstractmethod
     async def open_stream(self) -> "IMuxedStream":
         """
-        Create a new muxed_stream.
+        Create and open a new multiplexed stream.
 
-        :return: a new ``IMuxedStream`` stream
+        :return: A new instance of IMuxedStream.
         """
 
     @abstractmethod
     async def accept_stream(self) -> "IMuxedStream":
-        """Accept a muxed stream opened by the other end."""
+        """
+        Accept a new multiplexed stream initiated by the remote peer.
+
+        :return: A new instance of IMuxedStream.
+        """
 
 
 class IMuxedStream(ReadWriteCloser):
+    """
+    Interface for a multiplexed stream.
+
+    Represents a stream multiplexed over a single connection.
+
+    Attributes
+    ----------
+    muxed_conn (IMuxedConn):
+        The underlying multiplexed connection.
+
+    """
+
     muxed_conn: IMuxedConn
 
     @abstractmethod
     async def reset(self) -> None:
-        """Close both ends of the stream tells this remote side to hang up."""
+        """
+        Reset the stream.
+
+        This method closes both ends of the stream, instructing the remote
+        side to hang up.
+        """
 
     @abstractmethod
     def set_deadline(self, ttl: int) -> bool:
         """
-        Set deadline for muxed stream.
+        Set a deadline for the stream.
 
-        :return: a new stream
+        :param ttl: Time-to-live for the stream in seconds.
+        :return: True if the deadline was set successfully,
+            otherwise False.
         """
 
 
@@ -171,61 +254,113 @@ class IMuxedStream(ReadWriteCloser):
 
 
 class INetStream(ReadWriteCloser):
+    """
+    Interface for a network stream.
+
+    Represents a network stream operating over a multiplexed connection.
+
+    Attributes
+    ----------
+    muxed_conn (IMuxedConn):
+        The multiplexed connection that this stream belongs to.
+
+    """
+
     muxed_conn: IMuxedConn
 
     @abstractmethod
     def get_protocol(self) -> TProtocol:
         """
-        :return: protocol id that stream runs on
+        Retrieve the protocol identifier for the stream.
+
+        :return: The protocol ID associated with the stream.
         """
 
     @abstractmethod
     def set_protocol(self, protocol_id: TProtocol) -> None:
         """
-        :param protocol_id: protocol id that stream runs on
+        Set the protocol identifier for the stream.
+
+        :param protocol_id: The protocol ID to assign to the stream.
         """
 
     @abstractmethod
     async def reset(self) -> None:
-        """Close both ends of the stream."""
+        """
+        Reset the network stream.
+
+        This method closes both ends of the stream.
+        """
 
 
 # -------------------------- net_connection interface.py --------------------------
 
 
 class INetConn(Closer):
+    """
+    Interface for a network connection.
+
+    Defines a network connection capable of creating and managing streams.
+
+    Attributes
+    ----------
+    muxed_conn (IMuxedConn):
+        The underlying multiplexed connection.
+    event_started (trio.Event):
+        Event signaling when the connection has started.
+
+    """
+
     muxed_conn: IMuxedConn
     event_started: trio.Event
 
     @abstractmethod
     async def new_stream(self) -> INetStream:
-        ...
+        """
+        Create a new network stream over the connection.
+
+        :return: A new instance of INetStream.
+        """
 
     @abstractmethod
     def get_streams(self) -> tuple[INetStream, ...]:
-        ...
+        """
+        Retrieve all active streams associated with this connection.
+
+        :return: A tuple containing instances of INetStream.
+        """
 
 
 # -------------------------- peermetadata interface.py --------------------------
 
 
 class IPeerMetadata(ABC):
+    """
+    Interface for managing peer metadata.
+
+    Provides methods for storing and retrieving metadata associated with peers.
+    """
+
     @abstractmethod
     def get(self, peer_id: ID, key: str) -> Any:
         """
-        :param peer_id: peer ID to lookup key for
-        :param key: key to look up
-        :return: value at key for given peer
-        :raise Exception: peer ID not found
+        Retrieve metadata for a specified peer.
+
+        :param peer_id: The ID of the peer.
+        :param key: The key for the metadata to retrieve.
+        :return: The metadata value associated with the key.
+        :raises Exception: If the peer ID is not found.
         """
 
     @abstractmethod
     def put(self, peer_id: ID, key: str, val: Any) -> None:
         """
-        :param peer_id: peer ID to lookup key for
-        :param key: key to associate with peer
-        :param val: value to associated with key
-        :raise Exception: unsuccessful put
+        Store metadata for a specified peer.
+
+        :param peer_id: The ID of the peer.
+        :param key: The key for the metadata.
+        :param val: The value to store.
+        :raises Exception: If the operation is unsuccessful.
         """
 
 
@@ -233,48 +368,89 @@ class IPeerMetadata(ABC):
 
 
 class IAddrBook(ABC):
+    """
+    Interface for an address book.
+
+    Provides methods for managing peer addresses.
+    """
+
     @abstractmethod
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
         """
-        Calls add_addrs(peer_id, [addr], ttl)
+        Add a single address for a given peer.
 
-        :param peer_id: the peer to add address for
-        :param addr: multiaddress of the peer
-        :param ttl: time-to-live for the address (after this time, address is no longer valid)
-        """  # noqa: E501
+        This method calls ``add_addrs(peer_id, [addr], ttl)``.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier for which to add the address.
+        addr : Multiaddr
+            The multiaddress of the peer.
+        ttl : int
+            The time-to-live for the address, after which it is no longer valid.
+
+        """
 
     @abstractmethod
     def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
         """
-        Adds addresses for a given peer all with the same time-to-live. If one
-        of the addresses already exists for the peer and has a longer TTL, no
-        operation should take place. If one of the addresses exists with a
-        shorter TTL, extend the TTL to equal param ttl.
+        Add multiple addresses for a given peer, all with the same TTL.
 
-        :param peer_id: the peer to add address for
-        :param addr: multiaddresses of the peer
-        :param ttl: time-to-live for the address (after this time, address is no longer valid
-        """  # noqa: E501
+        If an address already exists with a longer TTL, no action should be taken.
+        If an address exists with a shorter TTL, its TTL should be extended to match
+        the provided TTL.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier for which to add addresses.
+        addrs : Sequence[Multiaddr]
+            A sequence of multiaddresses to add.
+        ttl : int
+            The time-to-live for the addresses, after which they become invalid.
+
+        """
 
     @abstractmethod
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
-        :param peer_id: peer to get addresses of
-        :return: all known (and valid) addresses for the given peer
+        Retrieve all known and valid addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose addresses are requested.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of valid multiaddresses for the given peer.
+
         """
 
     @abstractmethod
     def clear_addrs(self, peer_id: ID) -> None:
         """
-        Removes all previously stored addresses.
+        Remove all stored addresses for the specified peer.
 
-        :param peer_id: peer to remove addresses of
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose addresses are to be removed.
+
         """
 
     @abstractmethod
     def peers_with_addrs(self) -> list[ID]:
         """
-        :return: all of the peer IDs stored with addresses
+        Retrieve all peer identifiers that have stored addresses.
+
+        Returns
+        -------
+        list[ID]
+            A list of peer IDs with stored addresses.
+
         """
 
 
@@ -282,131 +458,304 @@ class IAddrBook(ABC):
 
 
 class IPeerStore(IAddrBook, IPeerMetadata):
+    """
+    Interface for a peer store.
+
+    Provides methods for managing peer information including address
+    management, protocol handling, and key storage.
+    """
+
     @abstractmethod
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
-        :param peer_id: peer ID to get info for
-        :return: peer info object
+        Retrieve the peer information for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PeerInfo
+            The peer information object for the given peer.
+
         """
 
     @abstractmethod
     def get_protocols(self, peer_id: ID) -> list[str]:
         """
-        :param peer_id: peer ID to get protocols for
-        :return: protocols (as list of strings)
-        :raise PeerStoreError: if peer ID not found
+        Retrieve the protocols associated with the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        list[str]
+            A list of protocol identifiers.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID is not found.
+
         """
 
     @abstractmethod
     def add_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
         """
-        :param peer_id: peer ID to add protocols for
-        :param protocols: protocols to add
+        Add additional protocols for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        protocols : Sequence[str]
+            The protocols to add.
+
         """
 
     @abstractmethod
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
         """
-        :param peer_id: peer ID to set protocols for
-        :param protocols: protocols to set
+        Set the protocols for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        protocols : Sequence[str]
+            The protocols to set.
+
         """
 
     @abstractmethod
     def peer_ids(self) -> list[ID]:
         """
-        :return: all of the peer IDs stored in peer store
+        Retrieve all peer identifiers stored in the peer store.
+
+        Returns
+        -------
+        list[ID]
+            A list of all peer IDs in the store.
+
         """
 
     @abstractmethod
     def get(self, peer_id: ID, key: str) -> Any:
         """
-        :param peer_id: peer ID to get peer data for
-        :param key: the key to search value for
-        :return: value corresponding to the key
-        :raise PeerStoreError: if peer ID or value not found
+        Retrieve the value associated with a key for a specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key : str
+            The key to look up.
+
+        Returns
+        -------
+        Any
+            The value corresponding to the specified key.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID or value is not found.
+
         """
 
     @abstractmethod
     def put(self, peer_id: ID, key: str, val: Any) -> None:
         """
-        :param peer_id: peer ID to put peer data for
-        :param key:
-        :param value:
+        Store a key-value pair for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key : str
+            The key for the data.
+        val : Any
+            The value to store.
+
         """
 
     @abstractmethod
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
         """
-        :param peer_id: peer ID to add address for
-        :param addr:
-        :param ttl: time-to-live for the this record
+        Add an address for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        addr : Multiaddr
+            The multiaddress to add.
+        ttl : int
+            The time-to-live for the record.
+
         """
 
     @abstractmethod
     def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
         """
-        :param peer_id: peer ID to add address for
-        :param addrs:
-        :param ttl: time-to-live for the this record
+        Add multiple addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        addrs : Sequence[Multiaddr]
+            A sequence of multiaddresses to add.
+        ttl : int
+            The time-to-live for the record.
+
         """
 
     @abstractmethod
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
-        :param peer_id: peer ID to get addrs for
-        :return: list of addrs
+        Retrieve the addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of multiaddresses.
+
         """
 
     @abstractmethod
     def clear_addrs(self, peer_id: ID) -> None:
         """
-        :param peer_id: peer ID to clear addrs for
+        Clear all addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
         """
 
     @abstractmethod
     def peers_with_addrs(self) -> list[ID]:
         """
-        :return: all of the peer IDs which has addrs stored in peer store
+        Retrieve all peer identifiers with stored addresses.
+
+        Returns
+        -------
+        list[ID]
+            A list of peer IDs.
+
         """
 
     @abstractmethod
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
         """
-        :param peer_id: peer ID to add public key for
-        :param pubkey:
-        :raise PeerStoreError: if peer ID already has pubkey set
+        Add a public key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        pubkey : PublicKey
+            The public key to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a public key set.
+
         """
 
     @abstractmethod
     def pubkey(self, peer_id: ID) -> PublicKey:
         """
-        :param peer_id: peer ID to get public key for
-        :return: public key of the peer
-        :raise PeerStoreError: if peer ID not found
+        Retrieve the public key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PublicKey
+            The public key of the peer.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID is not found.
+
         """
 
     @abstractmethod
     def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
         """
-        :param peer_id: peer ID to add private key for
-        :param privkey:
-        :raise PeerStoreError: if peer ID already has privkey set
+        Add a private key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        privkey : PrivateKey
+            The private key to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a private key set.
+
         """
 
     @abstractmethod
     def privkey(self, peer_id: ID) -> PrivateKey:
         """
-        :param peer_id: peer ID to get private key for
-        :return: private key of the peer
-        :raise PeerStoreError: if peer ID not found
+        Retrieve the private key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PrivateKey
+            The private key of the peer.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID is not found.
+
         """
 
     @abstractmethod
     def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
         """
-        :param peer_id: peer ID to add private key for
-        :param key_pair:
-        :raise PeerStoreError: if peer ID already has pubkey or privkey set
+        Add a key pair for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key_pair : KeyPair
+            The key pair to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a public or private key set.
+
         """
 
 
@@ -414,25 +763,50 @@ class IPeerStore(IAddrBook, IPeerMetadata):
 
 
 class IListener(ABC):
+    """
+    Interface for a network listener.
+
+    Provides methods for starting a listener, retrieving its addresses,
+    and closing it.
+    """
+
     @abstractmethod
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
-        Put listener in listening mode and wait for incoming connections.
+        Start listening on the specified multiaddress.
 
-        :param maddr: multiaddr of peer
-        :return: return True if successful
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress on which to listen.
+        nursery : trio.Nursery
+            The nursery for spawning listening tasks.
+
+        Returns
+        -------
+        bool
+            True if the listener started successfully, otherwise False.
+
         """
 
     @abstractmethod
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
-        Retrieve list of addresses the listener is listening on.
+        Retrieve the list of addresses on which the listener is active.
 
-        :return: return list of addrs
+        Returns
+        -------
+        tuple[Multiaddr, ...]
+            A tuple of multiaddresses.
+
         """
 
     @abstractmethod
     async def close(self) -> None:
+        """
+        Close the listener.
+
+        """
         ...
 
 
@@ -440,6 +814,22 @@ class IListener(ABC):
 
 
 class INetwork(ABC):
+    """
+    Interface for the network.
+
+    Provides methods for managing connections, streams, and listeners.
+
+    Attributes
+    ----------
+    peerstore : IPeerStore
+        The peer store for managing peer information.
+    connections : dict[ID, INetConn]
+        A mapping of peer IDs to network connections.
+    listeners : dict[str, IListener]
+        A mapping of listener identifiers to listener instances.
+
+    """
+
     peerstore: IPeerStore
     connections: dict[ID, INetConn]
     listeners: dict[str, IListener]
@@ -447,52 +837,112 @@ class INetwork(ABC):
     @abstractmethod
     def get_peer_id(self) -> ID:
         """
-        :return: the peer id
+        Retrieve the peer identifier for this network.
+
+        Returns
+        -------
+        ID
+            The identifier of this peer.
+
         """
 
     @abstractmethod
     async def dial_peer(self, peer_id: ID) -> INetConn:
         """
-        dial_peer try to create a connection to peer_id.
+        Create a connection to the specified peer.
 
-        :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when an error occurs
-        :return: muxed connection
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to dial.
+
+        Returns
+        -------
+        INetConn
+            The network connection instance to the specified peer.
+
+        Raises
+        ------
+        SwarmException
+            If an error occurs during dialing.
+
         """
 
     @abstractmethod
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
-        :param peer_id: peer_id of destination
-        :param protocol_ids: available protocol ids to use for stream
-        :return: net stream instance
+        Create a new network stream to the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the destination peer.
+
+        Returns
+        -------
+        INetStream
+            The newly created network stream.
+
         """
 
     @abstractmethod
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
-        """Set the stream handler for all incoming streams."""
+        """
+        Set the stream handler for incoming streams.
+
+        Parameters
+        ----------
+        stream_handler : StreamHandlerFn
+            The handler function to process incoming streams.
+
+        """
 
     @abstractmethod
     async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
         """
-        :param multiaddrs: one or many multiaddrs to start listening on
-        :return: True if at least one success
+        Start listening on one or more multiaddresses.
+
+        Parameters
+        ----------
+        multiaddrs : Sequence[Multiaddr]
+            One or more multiaddresses on which to start listening.
+
+        Returns
+        -------
+        bool
+            True if at least one listener started successfully, otherwise False.
+
         """
 
     @abstractmethod
     def register_notifee(self, notifee: "INotifee") -> None:
         """
-        :param notifee: object implementing Notifee interface
-        :return: true if notifee registered successfully, false otherwise
+        Register a notifee instance to receive network events.
+
+        Parameters
+        ----------
+        notifee : INotifee
+            An object implementing the INotifee interface.
+
         """
 
     @abstractmethod
     async def close(self) -> None:
-        pass
+        """
+        Close the network and all associated connections and listeners.
+        """
 
     @abstractmethod
     async def close_peer(self, peer_id: ID) -> None:
-        pass
+        """
+        Close the connection to the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose connection should be closed.
+
+        """
 
 
 class INetworkService(INetwork, ServiceAPI):
@@ -503,46 +953,96 @@ class INetworkService(INetwork, ServiceAPI):
 
 
 class INotifee(ABC):
+    """
+    Interface for a network service.
+
+    Extends the INetwork interface with additional service management
+    capabilities.
+
+    """
+
     @abstractmethod
     async def opened_stream(self, network: "INetwork", stream: INetStream) -> None:
         """
-        :param network: network the stream was opened on
-        :param stream: stream that was opened
+        Called when a new stream is opened.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance on which the stream was opened.
+        stream : INetStream
+            The stream that was opened.
+
         """
 
     @abstractmethod
     async def closed_stream(self, network: "INetwork", stream: INetStream) -> None:
         """
-        :param network: network the stream was closed on
-        :param stream: stream that was closed
+        Called when a stream is closed.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance on which the stream was closed.
+        stream : INetStream
+            The stream that was closed.
+
         """
 
     @abstractmethod
     async def connected(self, network: "INetwork", conn: INetConn) -> None:
         """
-        :param network: network the connection was opened on
-        :param conn: connection that was opened
+        Called when a new connection is established.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance where the connection was established.
+        conn : INetConn
+            The connection that was opened.
+
         """
 
     @abstractmethod
     async def disconnected(self, network: "INetwork", conn: INetConn) -> None:
         """
-        :param network: network the connection was closed on
-        :param conn: connection that was closed
+        Called when a connection is closed.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance where the connection was closed.
+        conn : INetConn
+            The connection that was closed.
+
         """
 
     @abstractmethod
     async def listen(self, network: "INetwork", multiaddr: Multiaddr) -> None:
         """
-        :param network: network the listener is listening on
-        :param multiaddr: multiaddress listener is listening on
+        Called when a listener starts on a multiaddress.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance where the listener is active.
+        multiaddr : Multiaddr
+            The multiaddress on which the listener is listening.
+
         """
 
     @abstractmethod
     async def listen_close(self, network: "INetwork", multiaddr: Multiaddr) -> None:
         """
-        :param network: network the connection was opened on
-        :param multiaddr: multiaddress listener is no longer listening on
+        Called when a listener stops listening on a multiaddress.
+
+        Parameters
+        ----------
+        network : INetwork
+            The network instance where the listener was active.
+        multiaddr : Multiaddr
+            The multiaddress that is no longer being listened on.
+
         """
 
 
@@ -550,55 +1050,109 @@ class INotifee(ABC):
 
 
 class IHost(ABC):
+    """
+    Interface for the host.
+
+    Provides methods for retrieving host information, managing
+    connections and streams, and running the host.
+
+    """
+
     @abstractmethod
     def get_id(self) -> ID:
         """
-        :return: peer_id of host
+        Retrieve the host's peer identifier.
+
+        Returns
+        -------
+        ID
+            The host's peer identifier.
+
         """
 
     @abstractmethod
     def get_public_key(self) -> PublicKey:
         """
-        :return: the public key belonging to the peer
+        Retrieve the public key of the host.
+
+        Returns
+        -------
+        PublicKey
+            The public key belonging to the host.
+
         """
 
     @abstractmethod
     def get_private_key(self) -> PrivateKey:
         """
-        :return: the private key belonging to the peer
+        Retrieve the private key of the host.
+
+        Returns
+        -------
+        PrivateKey
+            The private key belonging to the host.
+
         """
 
     @abstractmethod
     def get_network(self) -> INetworkService:
         """
-        :return: network instance of host
+        Retrieve the network service instance associated with the host.
+
+        Returns
+        -------
+        INetworkService
+            The network instance of the host.
+
         """
 
     # FIXME: Replace with correct return type
     @abstractmethod
     def get_mux(self) -> Any:
         """
-        :return: mux instance of host
+        Retrieve the muxer instance for the host.
+
+        Returns
+        -------
+        Any
+            The muxer instance of the host.
+
         """
 
     @abstractmethod
     def get_addrs(self) -> list[Multiaddr]:
         """
-        :return: all the multiaddr addresses this host is listening to
+        Retrieve all multiaddresses on which the host is listening.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of multiaddresses.
+
         """
 
     @abstractmethod
     def get_connected_peers(self) -> list[ID]:
         """
-        :return: all the ids of peers this host is currently connected to
+        Retrieve the identifiers of peers currently connected to the host.
+
+        Returns
+        -------
+        list[ID]
+            A list of peer identifiers.
+
         """
 
     @abstractmethod
     def run(self, listen_addrs: Sequence[Multiaddr]) -> AsyncContextManager[None]:
         """
-        Run the host instance and listen to ``listen_addrs``.
+        Run the host and start listening on the specified multiaddresses.
 
-        :param listen_addrs: a sequence of multiaddrs that we want to listen to
+        Parameters
+        ----------
+        listen_addrs : Sequence[Multiaddr]
+            A sequence of multiaddresses on which the host should listen.
+
         """
 
     @abstractmethod
@@ -606,10 +1160,15 @@ class IHost(ABC):
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
     ) -> None:
         """
-        Set stream handler for host.
+        Set the stream handler for the specified protocol.
 
-        :param protocol_id: protocol id used on stream
-        :param stream_handler: a stream handler function
+        Parameters
+        ----------
+        protocol_id : TProtocol
+            The protocol identifier used on the stream.
+        stream_handler : StreamHandlerFn
+            The stream handler function to be set.
+
         """
 
     # protocol_id can be a list of protocol_ids
@@ -619,110 +1178,230 @@ class IHost(ABC):
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> INetStream:
         """
-        :param peer_id: peer_id that host is connecting
-        :param protocol_ids: available protocol ids to use for stream
-        :return: stream: new stream created
+        Create a new stream to the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to connect.
+        protocol_ids : Sequence[TProtocol]
+            A sequence of available protocol identifiers to use for the stream.
+
+        Returns
+        -------
+        INetStream
+            The newly created network stream.
+
         """
 
     @abstractmethod
     async def connect(self, peer_info: PeerInfo) -> None:
         """
-        Ensure there is a connection between this host and the peer
-        with given peer_info.peer_id. connect will absorb the addresses in
-        peer_info into its internal peerstore. If there is not an active
-        connection, connect will issue a dial, and block until a connection is
-        opened, or an error is returned.
+        Establish a connection to the specified peer.
 
-        :param peer_info: peer_info of the peer we want to connect to
-        :type peer_info: peer.peerinfo.PeerInfo
+        This method ensures there is a connection between the host and the peer
+        represented by the provided peer information. It also absorbs the addresses
+        from ``peer_info`` into the host's internal peerstore. If no active connection
+        exists, the host will dial the peer and block until a connection is established
+        or an error occurs.
+
+        Parameters
+        ----------
+        peer_info : PeerInfo
+            The peer information of the peer to connect to.
+
         """
 
     @abstractmethod
     async def disconnect(self, peer_id: ID) -> None:
-        pass
+        """
+        Disconnect from the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to disconnect from.
+
+        """
 
     @abstractmethod
     async def close(self) -> None:
-        pass
+        """
+        Close the host and all underlying connections and services.
+
+        """
 
 
 # -------------------------- peerdata interface.py --------------------------
 
 
 class IPeerData(ABC):
+    """
+    Interface for managing peer data.
+
+    Provides methods for handling protocols, addresses, metadata, and keys
+    associated with a peer.
+    """
+
     @abstractmethod
     def get_protocols(self) -> list[str]:
         """
-        :return: all protocols associated with given peer
+        Retrieve all protocols associated with the peer.
+
+        Returns
+        -------
+        list[str]
+            A list of protocols associated with the peer.
+
         """
 
     @abstractmethod
     def add_protocols(self, protocols: Sequence[str]) -> None:
         """
-        :param protocols: protocols to add
+        Add one or more protocols to the peer's data.
+
+        Parameters
+        ----------
+        protocols : Sequence[str]
+            A sequence of protocols to add.
+
         """
 
     @abstractmethod
     def set_protocols(self, protocols: Sequence[str]) -> None:
         """
-        :param protocols: protocols to set
+        Set the protocols for the peer.
+
+        Parameters
+        ----------
+        protocols : Sequence[str]
+            A sequence of protocols to set.
+
         """
 
     @abstractmethod
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
-        :param addrs: multiaddresses to add
+        Add multiple multiaddresses to the peer's data.
+
+        Parameters
+        ----------
+        addrs : Sequence[Multiaddr]
+            A sequence of multiaddresses to add.
+
         """
 
     @abstractmethod
     def get_addrs(self) -> list[Multiaddr]:
         """
-        :return: all multiaddresses
+        Retrieve all multiaddresses associated with the peer.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of multiaddresses.
+
         """
 
     @abstractmethod
     def clear_addrs(self) -> None:
-        """Clear all addresses."""
+        """
+        Clear all addresses associated with the peer.
+
+        """
 
     @abstractmethod
     def put_metadata(self, key: str, val: Any) -> None:
         """
-        :param key: key in KV pair
-        :param val: val to associate with key
+        Store a metadata key-value pair for the peer.
+
+        Parameters
+        ----------
+        key : str
+            The metadata key.
+        val : Any
+            The value to associate with the key.
+
         """
 
     @abstractmethod
     def get_metadata(self, key: str) -> IPeerMetadata:
         """
-        :param key: key in KV pair
-        :return: val for key
-        :raise PeerDataError: key not found
+        Retrieve metadata for a given key.
+
+        Parameters
+        ----------
+        key : str
+            The metadata key.
+
+        Returns
+        -------
+        IPeerMetadata
+            The metadata value for the given key.
+
+        Raises
+        ------
+        PeerDataError
+            If the key is not found.
+
         """
 
     @abstractmethod
     def add_pubkey(self, pubkey: PublicKey) -> None:
         """
-        :param pubkey:
+        Add a public key to the peer's data.
+
+        Parameters
+        ----------
+        pubkey : PublicKey
+            The public key to add.
+
         """
 
     @abstractmethod
     def get_pubkey(self) -> PublicKey:
         """
-        :return: public key of the peer
-        :raise PeerDataError: if public key not found
+        Retrieve the public key for the peer.
+
+        Returns
+        -------
+        PublicKey
+            The public key of the peer.
+
+        Raises
+        ------
+        PeerDataError
+            If the public key is not found.
+
         """
 
     @abstractmethod
     def add_privkey(self, privkey: PrivateKey) -> None:
         """
-        :param privkey:
+        Add a private key to the peer's data.
+
+        Parameters
+        ----------
+        privkey : PrivateKey
+            The private key to add.
+
         """
 
     @abstractmethod
     def get_privkey(self) -> PrivateKey:
         """
-        :return: private key of the peer
-        :raise PeerDataError: if private key not found
+        Retrieve the private key for the peer.
+
+        Returns
+        -------
+        PrivateKey
+            The private key of the peer.
+
+        Raises
+        ------
+        PeerDataError
+            If the private key is not found.
+
         """
 
 
@@ -731,22 +1410,35 @@ class IPeerData(ABC):
 
 class IMultiselectCommunicator(ABC):
     """
-    Communicator helper class that ensures both the client and multistream
-    module will follow the same multistream protocol, which is necessary for
-    them to work.
+    Communicator helper for multiselect.
+
+    Ensures that both the client and multistream module follow the same
+    multistream protocol.
     """
 
     @abstractmethod
     async def write(self, msg_str: str) -> None:
         """
-        Write message to stream.
+        Write a message to the stream.
 
-        :param msg_str: message to write
+        Parameters
+        ----------
+        msg_str : str
+            The message string to write.
+
         """
 
     @abstractmethod
     async def read(self) -> str:
-        """Reads message from stream until EOF."""
+        """
+        Read a message from the stream until EOF.
+
+        Returns
+        -------
+        str
+            The message read from the stream.
+
+        """
 
 
 # -------------------------- multiselect_client interface.py --------------------------
@@ -754,18 +1446,28 @@ class IMultiselectCommunicator(ABC):
 
 class IMultiselectClient(ABC):
     """
-    Client for communicating with receiver's multiselect module in order to
-    select a protocol id to communicate over.
+    Client for multiselect negotiation.
+
+    Communicates with the receiver's multiselect module to select a protocol
+    for communication.
     """
 
     @abstractmethod
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
-        Ensure that the client and multiselect are both using the same
+        Ensure that the client and multiselect module are using the same
         multiselect protocol.
 
-        :param stream: stream to communicate with multiselect over
-        :raise Exception: multiselect protocol ID mismatch
+        Parameters
+        ----------
+        communicator : IMultiselectCommunicator
+            The communicator used for negotiating the multiselect protocol.
+
+        Raises
+        ------
+        Exception
+            If there is a multiselect protocol ID mismatch.
+
         """
 
     @abstractmethod
@@ -773,13 +1475,25 @@ class IMultiselectClient(ABC):
         self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
     ) -> TProtocol:
         """
-        For each protocol, send message to multiselect selecting protocol and
-        fail if multiselect does not return same protocol. Returns first
-        protocol that multiselect agrees on (i.e. that multiselect selects)
+        Select one protocol from a sequence by communicating with the multiselect
+        module.
 
-        :param protocol: protocol to select
-        :param stream: stream to communicate with multiselect over
-        :return: selected protocol
+        For each protocol in the provided sequence, the client sends a selection
+        message and expects the multiselect module to confirm the protocol. The
+        first confirmed protocol is returned.
+
+        Parameters
+        ----------
+        protocols : Sequence[TProtocol]
+            The protocols to attempt selection.
+        communicator : IMultiselectCommunicator
+            The communicator used for negotiating the protocol.
+
+        Returns
+        -------
+        TProtocol
+            The protocol selected by the multiselect module.
+
         """
 
     @abstractmethod
@@ -787,12 +1501,25 @@ class IMultiselectClient(ABC):
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
     ) -> TProtocol:
         """
-        Try to select the given protocol or raise exception if fails.
+        Attempt to select the given protocol.
 
-        :param communicator: communicator to use to communicate with counterparty
-        :param protocol: protocol to select
-        :raise Exception: error in protocol selection
-        :return: selected protocol
+        Parameters
+        ----------
+        communicator : IMultiselectCommunicator
+            The communicator used to interact with the counterparty.
+        protocol : TProtocol
+            The protocol to select.
+
+        Returns
+        -------
+        TProtocol
+            The protocol if successfully selected.
+
+        Raises
+        ------
+        Exception
+            If protocol selection fails.
+
         """
 
 
@@ -801,9 +1528,10 @@ class IMultiselectClient(ABC):
 
 class IMultiselectMuxer(ABC):
     """
-    Multiselect module that is responsible for responding to a multiselect
-    client and deciding on a specific protocol and handler pair to use for
-    communication.
+    Multiselect module for protocol negotiation.
+
+    Responsible for responding to a multiselect client by selecting a protocol
+    and its corresponding handler for communication.
     """
 
     handlers: dict[TProtocol, StreamHandlerFn]
@@ -811,13 +1539,27 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
         """
-        Store the handler with the given protocol.
+        Store a handler for the specified protocol.
 
-        :param protocol: protocol name
-        :param handler: handler function
+        Parameters
+        ----------
+        protocol : TProtocol
+            The protocol name.
+        handler : StreamHandlerFn
+            The handler function associated with the protocol.
+
         """
 
     def get_protocols(self) -> tuple[TProtocol, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names.
+
+        """
         return tuple(self.handlers.keys())
 
     @abstractmethod
@@ -825,11 +1567,23 @@ class IMultiselectMuxer(ABC):
         self, communicator: IMultiselectCommunicator
     ) -> tuple[TProtocol, StreamHandlerFn]:
         """
-        Negotiate performs protocol selection.
+        Negotiate a protocol selection with a multiselect client.
 
-        :param stream: stream to negotiate on
-        :return: selected protocol name, handler function
-        :raise Exception: negotiation failed exception
+        Parameters
+        ----------
+        communicator : IMultiselectCommunicator
+            The communicator used to negotiate the protocol.
+
+        Returns
+        -------
+        tuple[TProtocol, StreamHandlerFn]
+            A tuple containing the selected protocol and its handler.
+
+        Raises
+        ------
+        Exception
+            If negotiation fails.
+
         """
 
 
@@ -837,62 +1591,130 @@ class IMultiselectMuxer(ABC):
 
 
 class IContentRouting(ABC):
+    """
+    Interface for content routing.
+
+    Provides methods to advertise and search for content providers.
+    """
+
     @abstractmethod
     def provide(self, cid: bytes, announce: bool = True) -> None:
         """
-        Provide adds the given cid to the content routing system.
+        Advertise that the host can provide content identified by the given CID.
 
-        If announce is True, it also announces it, otherwise it is just
-        kept in the local accounting of which objects are being
-        provided.
+        If ``announce`` is True, the content is announced; otherwise, it is only
+        recorded locally.
+
+        Parameters
+        ----------
+        cid : bytes
+            The content identifier.
+        announce : bool, optional
+            Whether to announce the provided content (default is True).
+
         """
 
     @abstractmethod
     def find_provider_iter(self, cid: bytes, count: int) -> Iterable[PeerInfo]:
         """
-        Search for peers who are able to provide a given key returns an
-        iterator of peer.PeerInfo.
+        Search for peers that can provide the content identified by the given CID.
+
+        Parameters
+        ----------
+        cid : bytes
+            The content identifier.
+        count : int
+            The maximum number of providers to return.
+
+        Returns
+        -------
+        Iterable[PeerInfo]
+            An iterator of PeerInfo objects for peers that provide the content.
+
         """
 
 
 class IPeerRouting(ABC):
+    """
+    Interface for peer routing.
+
+    Provides methods to search for a specific peer.
+    """
+
     @abstractmethod
     async def find_peer(self, peer_id: ID) -> PeerInfo:
         """
-        Find specific Peer FindPeer searches for a peer with given peer_id,
-        returns a peer.PeerInfo with relevant addresses.
+        Search for a peer with the specified peer ID.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to search for.
+
+        Returns
+        -------
+        PeerInfo
+            The peer information containing relevant addresses.
+
         """
 
 
 # -------------------------- security_transport interface.py --------------------------
 
 
-"""
-Transport that is used to secure a connection. This transport is
-chosen by a security transport multistream module.
-
-Relevant go repo: https://github.com/libp2p/go-conn-security/blob/master/interface.go
-"""
-
-
 class ISecureTransport(ABC):
+    """
+    Interface for a security transport.
+
+    Used to secure connections by performing handshakes and negotiating secure
+    channels between peers.
+
+    References
+    ----------
+    https://github.com/libp2p/go-conn-security/blob/master/interface.go
+
+    """
+
     @abstractmethod
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing
-        node via conn, for an inbound connection (i.e. we are not the
-        initiator)
+        Secure an inbound connection (when we are not the initiator).
 
-        :return: secure connection object (that implements secure_conn_interface)
+        This method secures the connection by either performing local operations
+        or communicating with the opposing node.
+
+        Parameters
+        ----------
+        conn : IRawConnection
+            The raw connection to secure.
+
+        Returns
+        -------
+        ISecureConn
+            The secured connection instance.
+
         """
 
     @abstractmethod
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
-        Secure the connection, either locally or by communicating with opposing
-        node via conn, for an inbound connection (i.e. we are the initiator)
+        Secure an outbound connection (when we are the initiator).
 
-        :return: secure connection object (that implements secure_conn_interface)
+        This method secures the connection by either performing local operations
+        or communicating with the opposing node.
+
+        Parameters
+        ----------
+        conn : IRawConnection
+            The raw connection to secure.
+        peer_id : ID
+            The identifier of the remote peer.
+
+        Returns
+        -------
+        ISecureConn
+            The secured connection instance.
+
         """
 
 
@@ -900,24 +1722,47 @@ class ISecureTransport(ABC):
 
 
 class ITransport(ABC):
+    """
+    Interface for a transport.
+
+    Provides methods for dialing peers and creating listeners on a transport.
+
+    """
+
     @abstractmethod
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
-        Dial a transport to peer listening on multiaddr.
+        Dial a peer on the specified multiaddress.
 
-        :param multiaddr: multiaddr of peer
-        :param self_id: peer_id of the dialer (to send to receiver)
-        :return: list of multiaddrs
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress of the peer to dial.
+
+        Returns
+        -------
+        IRawConnection
+            The raw connection established to the peer.
+
         """
 
     @abstractmethod
     def create_listener(self, handler_function: THandler) -> IListener:
         """
-        Create listener on transport.
+        Create a listener on the transport.
 
-        :param handler_function: a function called when a new conntion is received
-            that takes a connection as argument which implements interface-connection
-        :return: a listener object that implements listener_interface.py
+        Parameters
+        ----------
+        handler_function : THandler
+            A function that is called when a new connection is received.
+            The function should accept a connection (that implements the
+            connection interface) as its argument.
+
+        Returns
+        -------
+        IListener
+            A listener instance.
+
         """
 
 
@@ -927,124 +1772,279 @@ class ITransport(ABC):
 class ISubscriptionAPI(
     AsyncContextManager["ISubscriptionAPI"], AsyncIterable[rpc_pb2.Message]
 ):
+    """
+    Interface for a subscription in pubsub.
+
+    Combines asynchronous context management and iteration over messages.
+
+    """
+
     @abstractmethod
     async def unsubscribe(self) -> None:
+        """
+        Unsubscribe from the current topic.
+
+        """
         ...
 
     @abstractmethod
     async def get(self) -> rpc_pb2.Message:
+        """
+        Retrieve the next message from the subscription.
+
+        Returns
+        -------
+        rpc_pb2.Message
+            The next pubsub message.
+
+        """
         ...
 
 
 class IPubsubRouter(ABC):
+    """
+    Interface for a pubsub router.
+
+    Provides methods to manage protocol support, peer attachments,
+    and message handling for pubsub.
+
+    """
+
     @abstractmethod
     def get_protocols(self) -> list[TProtocol]:
         """
-        :return: the list of protocols supported by the router
+        Retrieve the list of protocols supported by the router.
+
+        Returns
+        -------
+        list[TProtocol]
+            A list of supported protocol identifiers.
+
         """
 
     @abstractmethod
     def attach(self, pubsub: "Pubsub") -> None:
         """
-        Attach is invoked by the PubSub constructor to attach the router to a
-        freshly initialized PubSub instance.
+        Attach the router to a newly initialized PubSub instance.
 
-        :param pubsub: pubsub instance to attach to
+        Parameters
+        ----------
+        pubsub : Pubsub
+            The PubSub instance to attach to.
+
         """
 
     @abstractmethod
     def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
         """
-        Notifies the router that a new peer has been connected.
+        Notify the router that a new peer has connected.
 
-        :param peer_id: id of peer to add
-        :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        protocol_id : TProtocol
+            The protocol the peer supports (e.g., floodsub, gossipsub).
+
         """
 
     @abstractmethod
     def remove_peer(self, peer_id: ID) -> None:
         """
-        Notifies the router that a peer has been disconnected.
+        Notify the router that a peer has disconnected.
 
-        :param peer_id: id of peer to remove
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to remove.
+
         """
 
     @abstractmethod
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
-        Invoked to process control messages in the RPC envelope.
-        It is invoked after subscriptions and payload messages have been processed
+        Process an RPC message received from a peer.
 
-        :param rpc: RPC message
-        :param sender_peer_id: id of the peer who sent the message
+        Parameters
+        ----------
+        rpc : rpc_pb2.RPC
+            The RPC message to process.
+        sender_peer_id : ID
+            The identifier of the peer that sent the message.
+
         """
 
     @abstractmethod
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """
-        Invoked to forward a new message that has been validated.
+        Forward a validated pubsub message.
 
-        :param msg_forwarder: peer_id of message sender
-        :param pubsub_msg: pubsub message to forward
+        Parameters
+        ----------
+        msg_forwarder : ID
+            The identifier of the message sender.
+        pubsub_msg : rpc_pb2.Message
+            The pubsub message to forward.
+
         """
 
     @abstractmethod
     async def join(self, topic: str) -> None:
         """
-        Join notifies the router that we want to receive and forward messages
-        in a topic. It is invoked after the subscription announcement.
+        Join a topic to receive and forward messages.
 
-        :param topic: topic to join
+        Parameters
+        ----------
+        topic : str
+            The topic to join.
+
         """
 
     @abstractmethod
     async def leave(self, topic: str) -> None:
         """
-        Leave notifies the router that we are no longer interested in a topic.
-        It is invoked after the unsubscription announcement.
+        Leave a topic, stopping message forwarding for that topic.
 
-        :param topic: topic to leave
+        Parameters
+        ----------
+        topic : str
+            The topic to leave.
+
         """
 
 
 class IPubsub(ServiceAPI):
+    """
+    Interface for the pubsub system.
+
+    Provides properties and methods to manage topics, subscriptions, and
+    message publishing.
+    """
+
     @property
     @abstractmethod
     def my_id(self) -> ID:
+        """
+        Retrieve the identifier for this pubsub instance.
+
+        Returns
+        -------
+        ID
+            The pubsub identifier.
+
+        """
         ...
 
     @property
     @abstractmethod
     def protocols(self) -> tuple[TProtocol, ...]:
+        """
+        Retrieve the protocols used by the pubsub system.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of protocol identifiers.
+
+        """
         ...
 
     @property
     @abstractmethod
     def topic_ids(self) -> KeysView[str]:
+        """
+        Retrieve the set of topic identifiers.
+
+        Returns
+        -------
+        KeysView[str]
+            A view of the topic identifiers.
+
+        """
         ...
 
     @abstractmethod
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
     ) -> None:
+        """
+        Set a validator for a specific topic.
+
+        Parameters
+        ----------
+        topic : str
+            The topic for which to set the validator.
+        validator : ValidatorFn
+            The validator function.
+        is_async_validator : bool
+            Whether the validator is asynchronous.
+
+        """
         ...
 
     @abstractmethod
     def remove_topic_validator(self, topic: str) -> None:
+        """
+        Remove the validator for a specific topic.
+
+        Parameters
+        ----------
+        topic : str
+            The topic whose validator should be removed.
+
+        """
         ...
 
     @abstractmethod
     async def wait_until_ready(self) -> None:
+        """
+        Wait until the pubsub system is fully initialized and ready.
+
+        """
         ...
 
     @abstractmethod
     async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
+        """
+        Subscribe to a topic.
+
+        Parameters
+        ----------
+        topic_id : str
+            The identifier of the topic to subscribe to.
+
+        Returns
+        -------
+        ISubscriptionAPI
+            An object representing the subscription.
+
+        """
         ...
 
     @abstractmethod
     async def unsubscribe(self, topic_id: str) -> None:
+        """
+        Unsubscribe from a topic.
+
+        Parameters
+        ----------
+        topic_id : str
+            The identifier of the topic to unsubscribe from.
+
+        """
         ...
 
     @abstractmethod
     async def publish(self, topic_id: str, data: bytes) -> None:
+        """
+        Publish a message to a topic.
+
+        Parameters
+        ----------
+        topic_id : str
+            The identifier of the topic.
+        data : bytes
+            The data to publish.
+
+        """
         ...
