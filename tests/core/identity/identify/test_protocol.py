@@ -28,6 +28,9 @@ async def test_identify_protocol(security_protocol):
         host_a,
         host_b,
     ):
+        # Here, host_b is the requester and host_a is the responder.
+        # observed_addr represent host_b’s address as observed by host_a
+        # (i.e., the address from which host_b’s request was received).
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
         response = await stream.read()
         await stream.close()
@@ -53,6 +56,8 @@ async def test_identify_protocol(security_protocol):
         )
 
         # Check observed address
+        # TODO: use decapsulateCode(protocols('p2p').code)
+        # when the Multiaddr class will implement it
         host_b_addr = host_b.get_addrs()[0]
         cleaned_addr = Multiaddr.join(
             *(

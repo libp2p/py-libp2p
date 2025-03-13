@@ -39,6 +39,24 @@ def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
     return maddr.to_bytes()
 
 
+def _remote_address_to_multiaddr(
+    remote_address: Optional[tuple[str, int]]
+) -> Optional[Multiaddr]:
+    """Convert a (host, port) tuple to a Multiaddr."""
+    if remote_address is None:
+        return None
+
+    host, port = remote_address
+
+    # Check if the address is IPv6 (contains ':')
+    if ":" in host:
+        # IPv6 address
+        return Multiaddr(f"/ip6/{host}/tcp/{port}")
+    else:
+        # IPv4 address
+        return Multiaddr(f"/ip4/{host}/tcp/{port}")
+
+
 def _mk_identify_protobuf(
     host: IHost, observed_multiaddr: Optional[Multiaddr]
 ) -> Identify:
@@ -60,23 +78,28 @@ def _mk_identify_protobuf(
 def identify_handler_for(host: IHost) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         # get observed address from ``stream``
-        # class Swarm(Service, INetworkService):
-        # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
-        # whereas in Go one `peer_id` may point to multiple connections.
-        # connections: dict[ID, INetConn]
-        # Luca: So I'm assuming that the connection is 1-1 mapping for now
-        peer_id = stream.muxed_conn.peer_id  # remote peer_id
-        peer_store = host.get_peerstore()  # get the peer store from the host
-        remote_peer_multiaddrs = peer_store.addrs(
-            peer_id
-        )  # get the Multiaddrs for the remote peer_id
-        logger.debug("multiaddrs of remote peer is %s", remote_peer_multiaddrs)
-        logger.debug("received a request for %s from %s", ID, peer_id)
+        peer_id = (
+            stream.muxed_conn.peer_id
+        )  # remote peer_id is in class Mplex (mplex.py )
 
-        # Select the first address if available, else None
-        observed_multiaddr = (
-            remote_peer_multiaddrs[0] if remote_peer_multiaddrs else None
-        )
+        # Get the remote address
+        try:
+            remote_address = stream.get_remote_address()
+            # Convert to multiaddr
+            if remote_address:
+                observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+            else:
+                observed_multiaddr = None
+            logger.debug(
+                "Connection from remote peer %s, address: %s, multiaddr: %s",
+                peer_id,
+                remote_address,
+                observed_multiaddr,
+            )
+        except Exception as e:
+            logger.error("Error getting remote address: %s", e)
+            remote_address = None
+
         protobuf = _mk_identify_protobuf(host, observed_multiaddr)
         response = protobuf.SerializeToString()
 
