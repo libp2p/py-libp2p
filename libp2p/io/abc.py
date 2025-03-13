@@ -2,6 +2,9 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from typing import (
+    Optional,
+)
 
 
 class Closer(ABC):
@@ -35,7 +38,14 @@ class ReadWriter(Reader, Writer):
 
 
 class ReadWriteCloser(Reader, Writer, Closer):
-    pass
+    @abstractmethod
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """
+        Return the remote address of the connected peer.
+
+        :return: A tuple of (host, port) or None if not available
+        """
+        ...
 
 
 class MsgReader(ABC):
@@ -66,3 +76,9 @@ class Encrypter(ABC):
 
 class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):
     """Read/write message with encryption/decryption."""
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Get remote address if supported by the underlying connection."""
+        if hasattr(self, "conn") and hasattr(self.conn, "get_remote_address"):
+            return self.conn.get_remote_address()
+        return None
