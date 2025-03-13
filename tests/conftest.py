@@ -4,6 +4,8 @@ from libp2p.tools.factories import (
     HostFactory,
 )
 
+pytest_plugins = ["pytest_trio"]
+
 
 @pytest.fixture
 def security_protocol():
