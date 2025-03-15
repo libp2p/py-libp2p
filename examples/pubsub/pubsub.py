@@ -1,4 +1,6 @@
+
 import argparse
+import logging
 import trio
 import multiaddr
 from libp2p import new_host
@@ -7,23 +9,31 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("pubsub-chat")
+
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/gossipsub/1.0.0")
 
 async def receive_loop(subscription):
     while True:
         message = await subscription.get()
-        print(f"Received message: {message.data.decode('utf-8')}")
-        print(f"From peer: {message.from_id.pretty()}")
+        logger.info(f"Received message: {message.data.decode('utf-8')}")
+        logger.info(f"From peer: {message.from_id.pretty()}")
 
 async def publish_loop(pubsub: Pubsub, topic: str) -> None:
-    print("Enter message to publish (or 'quit' to exit): ")
+    logger.info("Enter message to publish (or 'quit' to exit): ")
     while True:
         message = await trio.to_thread.run_sync(input)
         if message.lower() == 'quit':
-            print("Exiting publish loop.")
+            logger.info("Exiting publish loop.")
             nursery.cancel_scope.cancel()
             break
         await pubsub.publish(topic, message.encode())
+        logger.debug(f"Published message to topic {topic}: {message}")
 
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
@@ -44,22 +54,22 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     pubsub = Pubsub(host, gossipsub)
     subscription = await pubsub.subscribe(topic)
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
-        print(f"Node started with peer ID: {host.get_id().pretty()}")
-        print(f"Subscribed to topic: {topic}")
-        print(f"Destination is: {destination}")
-        print("Initializing pubsub...")
+        logger.info(f"Node started with peer ID: {host.get_id().pretty()}")
+        logger.info(f"Subscribed to topic: {topic}")
+        logger.debug(f"Destination is: {destination}")
+        logger.info("Initializing pubsub...")
         nursery.start_soon(pubsub.run)
-        print("Pubsub initialized.")
+        logger.info("Pubsub initialized.")
         await pubsub.wait_until_ready()
-        print("Pubsub ready.")
+        logger.info("Pubsub ready.")
 
         if not destination:
-            print(
+            logger.info(
                 "Run this script in another console with:\n"
                 f"python pubsub.py -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
             )
-            print("Waiting for peers...")
+            logger.info("Waiting for peers...")
 
             # Start message publish and receive loops
             nursery.start_soon(receive_loop, subscription)
@@ -69,9 +79,9 @@ async def run(topic: str, destination: str | None, port: int) -> None:
             # Client mode
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
-            print(f"Connecting to peer: {info.peer_id.pretty()}")
+            logger.info(f"Connecting to peer: {info.peer_id.pretty()}")
             await host.connect(info)
-            print(f"Connected to peer: {info.peer_id.pretty()}")
+            logger.info(f"Connected to peer: {info.peer_id.pretty()}")
              
             # Start message publish and receive loops
             nursery.start_soon(publish_loop, pubsub, topic)
@@ -81,7 +91,6 @@ async def run(topic: str, destination: str | None, port: int) -> None:
         
 
 def main() -> None:
-
     description = """
     This program demonstrates a pubsub p2p chat application using libp2p.
     """
@@ -113,15 +122,27 @@ def main() -> None:
         default=8080,
     )
 
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable debug logging",
+    )
+
     args = parser.parse_args()
 
-    print("Running pubsub chat example...")
-    print(f"Your selected topic is: {args.topic}")
+    # Set debug level if verbose flag is provided
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+
+    logger.info("Running pubsub chat example...")
+    logger.info(f"Your selected topic is: {args.topic}")
 
     try:
         trio.run(run, *(args.topic, args.destination, args.port))
     except KeyboardInterrupt:
-        pass
+        logger.info("Application terminated by user")
 
 
 if __name__ == "__main__":
