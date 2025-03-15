@@ -5,15 +5,15 @@ from multiaddr import (
     Multiaddr,
 )
 
-from libp2p.identity.identify.pb.identify_pb2 import (
-    Identify,
-)
-from libp2p.identity.identify.protocol import (
+from libp2p.identity.identify.identify import (
     AGENT_VERSION,
     ID,
     PROTOCOL_VERSION,
     _mk_identify_protobuf,
     _multiaddr_to_bytes,
+)
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify,
 )
 from libp2p.tools.factories import (
     host_pair_factory,

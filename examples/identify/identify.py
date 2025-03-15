@@ -8,10 +8,10 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.identity.identify.identify import ID as IDENTIFY_PROTOCOL_ID
 from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
-from libp2p.identity.identify.protocol import ID as IDENTIFY_PROTOCOL_ID
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -87,7 +87,6 @@ async def run(port: int, destination: str) -> None:
                 response = await stream.read()
                 await stream.close()
                 identify_msg = Identify()
-                # print(f"Response: {response}")
                 identify_msg.ParseFromString(response)
                 print_identify_response(identify_msg)
             except Exception as e:
