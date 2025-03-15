@@ -8,6 +8,7 @@ from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.tools.async_service.trio_service import background_trio_service
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +23,7 @@ async def receive_loop(subscription):
     while True:
         message = await subscription.get()
         logger.info(f"Received message: {message.data.decode('utf-8')}")
-        logger.info(f"From peer: {message.from_id.pretty()}")
+        logger.info(f"From peer: {message.from_id}")
 
 async def publish_loop(pubsub: Pubsub, topic: str) -> None:
     logger.info("Enter message to publish (or 'quit' to exit): ")
@@ -54,40 +55,41 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     pubsub = Pubsub(host, gossipsub)
     subscription = await pubsub.subscribe(topic)
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
-        logger.info(f"Node started with peer ID: {host.get_id().pretty()}")
+        logger.info(f"Node started with peer ID: {host.get_id()}")
         logger.info(f"Subscribed to topic: {topic}")
         logger.debug(f"Destination is: {destination}")
         logger.info("Initializing pubsub...")
-        nursery.start_soon(pubsub.run)
-        logger.info("Pubsub initialized.")
-        await pubsub.wait_until_ready()
-        logger.info("Pubsub ready.")
+        async with background_trio_service(pubsub) as manager:
+            
+            logger.info("Pubsub initialized.")
+            await pubsub.wait_until_ready()
+            logger.info("Pubsub ready.")
 
-        if not destination:
-            logger.info(
-                "Run this script in another console with:\n"
-                f"python pubsub.py -p {int(port) + 1} "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
-            )
-            logger.info("Waiting for peers...")
+            if not destination:
+                logger.info(
+                    "Run this script in another console with:\n"
+                    f"python pubsub.py -p {int(port) + 1} "
+                    f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
+                )
+                logger.info("Waiting for peers...")
 
-            # Start message publish and receive loops
-            nursery.start_soon(receive_loop, subscription)
-            nursery.start_soon(publish_loop, pubsub, topic)
+                # Start message publish and receive loops
+                nursery.start_soon(receive_loop, subscription)
+                nursery.start_soon(publish_loop, pubsub, topic)
 
-        else:
-            # Client mode
-            maddr = multiaddr.Multiaddr(destination)
-            info = info_from_p2p_addr(maddr)
-            logger.info(f"Connecting to peer: {info.peer_id.pretty()}")
-            await host.connect(info)
-            logger.info(f"Connected to peer: {info.peer_id.pretty()}")
-             
-            # Start message publish and receive loops
-            nursery.start_soon(publish_loop, pubsub, topic)
-            nursery.start_soon(receive_loop, subscription)
+            else:
+                # Client mode
+                maddr = multiaddr.Multiaddr(destination)
+                info = info_from_p2p_addr(maddr)
+                logger.info(f"Connecting to peer: {info.peer_id}")
+                await host.connect(info)
+                logger.info(f"Connected to peer: {info.peer_id}")
+                
+                # Start message publish and receive loops
+                nursery.start_soon(publish_loop, pubsub, topic)
+                nursery.start_soon(receive_loop, subscription)
 
-        await trio.sleep_forever()
+            await trio.sleep_forever()
         
 
 def main() -> None:
