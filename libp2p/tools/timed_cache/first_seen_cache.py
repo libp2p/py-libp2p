@@ -1,11 +1,11 @@
 import time
 
-from .basic_time_cache import (
-    TimedCache,
+from .base_timed_cache import (
+    BaseTimedCache,
 )
 
 
-class FirstSeenCache(TimedCache):
+class FirstSeenCache(BaseTimedCache):
     """Cache where expiry is set only when first added."""
 
     def add(self, key: bytes) -> bool:

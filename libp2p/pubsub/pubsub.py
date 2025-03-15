@@ -11,11 +11,11 @@ import hashlib
 import logging
 import time
 from typing import (
-    TYPE_CHECKING,
     Callable,
     NamedTuple,
     cast,
 )
+from typing import Any  # noqa: F401
 
 import base58
 import trio
@@ -26,6 +26,7 @@ from libp2p.abc import (
     IPubsub,
     ISubscriptionAPI,
 )
+from libp2p.abc import IPubsubRouter  # noqa: F401
 from libp2p.crypto.keys import (
     PrivateKey,
 )
@@ -53,11 +54,11 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.timed_cache.last_seen_cache import (
-    LastSeenCache,
-)
 from libp2p.tools.async_service import (
     Service,
+)
+from libp2p.tools.timed_cache.last_seen_cache import (
+    LastSeenCache,
 )
 from libp2p.utils import (
     encode_varint_prefixed,
@@ -77,12 +78,6 @@ from .validators import (
     PUBSUB_SIGNING_PREFIX,
     signature_validator,
 )
-
-if TYPE_CHECKING:
-    from typing import Any  # noqa: F401
-
-    from .abc import IPubsubRouter  # noqa: F401
-
 
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
@@ -137,6 +132,7 @@ class Pubsub(Service, IPubsub):
         router: IPubsubRouter,
         cache_size: int = None,
         seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = True,
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
@@ -188,7 +184,7 @@ class Pubsub(Service, IPubsub):
         else:
             self.sign_key = None
 
-        self.seen_messages = LastSeenCache(seen_ttl)
+        self.seen_messages = LastSeenCache(seen_ttl, sweep_interval)
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message

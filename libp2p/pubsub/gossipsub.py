@@ -88,7 +88,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        time_to_live: int,
+        time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,

@@ -1,21 +1,24 @@
+from abc import (
+    ABC,
+    abstractmethod,
+)
 import threading
 import time
 
 
-class TimedCache:
+class BaseTimedCache(ABC):
     """Base class for Timed Cache with cleanup mechanism."""
 
     cache: dict[bytes, int]
 
-    SWEEP_INTERVAL = 60  # 1-minute interval between each sweep
-
-    def __init__(self, ttl: int) -> None:
+    def __init__(self, ttl: int, sweep_interval: int = 60) -> None:
         """
-        Initialize a new TimedCache with a time-to-live for cache entries
+        Initialize a new BaseTimedCache with a time-to-live for cache entries
 
         :param ttl: no of seconds as time-to-live for each cache entry
         """
         self.ttl = ttl
+        self.sweep_interval = sweep_interval
         self.lock = threading.Lock()
         self.cache = {}
         self._stop_event = threading.Event()
@@ -23,7 +26,7 @@ class TimedCache:
         self._thread.start()
 
     def _background_cleanup(self) -> None:
-        while not self._stop_event.wait(self.SWEEP_INTERVAL):
+        while not self._stop_event.wait(self.sweep_interval):
             self._sweep()
 
     def _sweep(self) -> None:
@@ -42,10 +45,10 @@ class TimedCache:
     def length(self) -> int:
         return len(self.cache)
 
+    @abstractmethod
     def add(self, key: bytes) -> bool:
         """To be implemented in subclasses."""
-        raise NotImplementedError
 
+    @abstractmethod
     def has(self, key: bytes) -> bool:
         """To be implemented in subclasses."""
-        raise NotImplementedError
