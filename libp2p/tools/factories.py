@@ -424,7 +424,6 @@ class GossipsubFactory(factory.Factory):
     degree = GOSSIPSUB_PARAMS.degree
     degree_low = GOSSIPSUB_PARAMS.degree_low
     degree_high = GOSSIPSUB_PARAMS.degree_high
-    time_to_live = GOSSIPSUB_PARAMS.time_to_live
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
@@ -447,6 +446,8 @@ class PubsubFactory(factory.Factory):
         host: IHost,
         router: IPubsubRouter,
         cache_size: int,
+        seen_ttl: int,
+        sweep_interval: int,
         strict_signing: bool,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Pubsub]:
@@ -454,6 +455,8 @@ class PubsubFactory(factory.Factory):
             host=host,
             router=router,
             cache_size=cache_size,
+            seen_ttl=seen_ttl,
+            sweep_interval=sweep_interval,
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
         )
@@ -468,6 +471,8 @@ class PubsubFactory(factory.Factory):
         number: int,
         routers: Sequence[IPubsubRouter],
         cache_size: int = None,
+        seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = False,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
@@ -481,7 +486,13 @@ class PubsubFactory(factory.Factory):
                 pubsubs = [
                     await stack.enter_async_context(
                         cls.create_and_start(
-                            host, router, cache_size, strict_signing, msg_id_constructor
+                            host,
+                            router,
+                            cache_size,
+                            seen_ttl,
+                            sweep_interval,
+                            strict_signing,
+                            msg_id_constructor,
                         )
                     )
                     for host, router in zip(hosts, routers)
@@ -494,6 +505,8 @@ class PubsubFactory(factory.Factory):
         cls,
         number: int,
         cache_size: int = None,
+        seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = False,
         protocols: Sequence[TProtocol] = None,
         security_protocol: TProtocol = None,
@@ -510,6 +523,8 @@ class PubsubFactory(factory.Factory):
             number,
             floodsubs,
             cache_size,
+            seen_ttl,
+            sweep_interval,
             strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
@@ -557,7 +572,6 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
-                time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
             )
