@@ -9,18 +9,18 @@ This example demonstrates the libp2p identify protocol, which allows peers to ex
     Collecting libp2p
     ...
     Successfully installed libp2p-x.x.x
-    $ python identify.py
+    $ identify-demo
     First host listening. Run this from another console:
 
-    python identify.py -p 8889 -d /ip4/0.0.0.0/tcp/8888/p2p/QmUe4tNG9naN6zxaQRhawehA5NvBPGJifRbL5xrj4wEwvG
+    identify-demo -p 8889 -d /ip4/0.0.0.0/tcp/8888/p2p/QmUe4tNG9naN6zxaQRhawehA5NvBPGJifRbL5xrj4wEwvG
 
     Waiting for incoming identify request...
 
 
-Copy the line that starts with ``python identify.py -p 8889``, open a new terminal and paste it in
+Copy the line that starts with ``identify-demo -p 8889``, open a new terminal and paste it in
 .. code-block:: console
 
-    $ python identify.py -p 8889 -d /ip4/0.0.0.0/tcp/8888/p2p/QmUe4tNG9naN6zxaQRhawehA5NvBPGJifRbL5xrj4wEwvG
+    $ identify-demo -p 8889 -d /ip4/0.0.0.0/tcp/8888/p2p/QmUe4tNG9naN6zxaQRhawehA5NvBPGJifRbL5xrj4wEwvG
     dialer (host_b) listening on /ip4/0.0.0.0/tcp/8889
     Second host connecting to peer: QmUe4tNG9naN6zxaQRhawehA5NvBPGJifRbL5xrj4wEwvG
     Starting identify protocol...
