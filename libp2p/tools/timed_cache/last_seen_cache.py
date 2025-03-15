@@ -1,11 +1,11 @@
 import time
 
-from .basic_time_cache import (
-    TimedCache,
+from .base_timed_cache import (
+    BaseTimedCache,
 )
 
 
-class LastSeenCache(TimedCache):
+class LastSeenCache(BaseTimedCache):
     """Cache where expiry is updated on every access."""
 
     def add(self, key: bytes) -> bool:
