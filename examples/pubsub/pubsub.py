@@ -25,16 +25,23 @@ async def receive_loop(subscription):
         logger.info(f"Received message: {message.data.decode('utf-8')}")
         logger.info(f"From peer: {message.from_id}")
 
-async def publish_loop(pubsub: Pubsub, topic: str) -> None:
-    logger.info("Enter message to publish (or 'quit' to exit): ")
+async def publish_loop(pubsub, topic):
+    """Continuously read input from user and publish to the topic."""
+    print("Starting publish loop...")
+    print("Type messages to send (press Enter to send):")
     while True:
-        message = await trio.to_thread.run_sync(input)
-        if message.lower() == 'quit':
-            logger.info("Exiting publish loop.")
-            nursery.cancel_scope.cancel()
-            break
-        await pubsub.publish(topic, message.encode())
-        logger.debug(f"Published message to topic {topic}: {message}")
+        try:
+            # Use trio's run_sync_in_worker_thread to avoid blocking the event loop
+            message = await trio.to_thread.run_sync(input)
+            if message.lower() == "quit":
+                print("Exiting publish loop.")
+                break
+            if message:
+                await pubsub.publish(topic, message.encode())
+                print(f"Published: {message}")
+        except Exception as e:
+            print(f"Error in publish loop: {e}")
+            await trio.sleep(1)  # Avoid tight loop on error
 
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
@@ -53,7 +60,6 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     )
 
     pubsub = Pubsub(host, gossipsub)
-    subscription = await pubsub.subscribe(topic)
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         logger.info(f"Node started with peer ID: {host.get_id()}")
         logger.info(f"Subscribed to topic: {topic}")
@@ -64,11 +70,11 @@ async def run(topic: str, destination: str | None, port: int) -> None:
             logger.info("Pubsub initialized.")
             await pubsub.wait_until_ready()
             logger.info("Pubsub ready.")
-
+            subscription = await pubsub.subscribe(topic)
             if not destination:
                 logger.info(
                     "Run this script in another console with:\n"
-                    f"python pubsub.py -p {int(port) + 1} "
+                    f"python3 pubsub.py -p {int(port) + 1} "
                     f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                 )
                 logger.info("Waiting for peers...")
