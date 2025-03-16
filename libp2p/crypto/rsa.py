@@ -22,18 +22,31 @@ from libp2p.crypto.keys import (
 MAX_RSA_KEY_SIZE = 4096
 
 
+def validate_rsa_key_length(key_length: int) -> None:
+    """
+    Validate that the RSA key length is positive and within the allowed maximum.
+
+    :param key_length: RSA key size in bits.
+    :raises CryptographyError:
+        If the key size is not positive or exceeds MAX_RSA_KEY_SIZE.
+    """
+    if key_length <= 0:
+        raise CryptographyError("RSA key size must be positive")
+    if key_length > MAX_RSA_KEY_SIZE:
+        raise CryptographyError(
+            f"RSA key size {key_length} exceeds maximum allowed size {MAX_RSA_KEY_SIZE}"
+        )
+
+
 def validate_rsa_key_size(key: RsaKey) -> None:
     """
     Validate that an RSA key's size is within acceptable bounds.
 
-    :param key: The RSA key to validate
-    :raises CryptographyError: If the key size exceeds the maximum allowed size
+    :param key: The RSA key to validate.
+    :raises CryptographyError: If the key size is invalid.
     """
     key_size = key.size_in_bits()
-    if key_size > MAX_RSA_KEY_SIZE:
-        msg = f"RSA key size {key_size} "
-        msg += f"exceeds maximum allowed size {MAX_RSA_KEY_SIZE}"
-        raise CryptographyError(msg)
+    validate_rsa_key_length(key_size)
 
 
 class RSAPublicKey(PublicKey):
@@ -69,10 +82,7 @@ class RSAPrivateKey(PrivateKey):
 
     @classmethod
     def new(cls, bits: int = 2048, e: int = 65537) -> "RSAPrivateKey":
-        if bits > MAX_RSA_KEY_SIZE:
-            msg = f"Requested RSA key size {bits} "
-            msg += f"exceeds maximum allowed size {MAX_RSA_KEY_SIZE}"
-            raise CryptographyError(msg)
+        validate_rsa_key_length(bits)
         private_key_impl = RSA.generate(bits, e=e)
         return cls(private_key_impl)
 
