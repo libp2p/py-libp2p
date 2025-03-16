@@ -121,18 +121,18 @@ from .utils import (
 
 DEFAULT_SECURITY_PROTOCOL_ID = PLAINTEXT_PROTOCOL_ID
 
-T = TypeVar("T")  # Generic type variable for factories
+T = TypeVar("T")
 
 
 def default_key_pair_factory() -> KeyPair:
     return generate_new_rsa_identity()
 
 
-class IDFactory(factory.Factory[ID]):
+class IDFactory(factory.Factory):
     class Meta:
         model = ID
 
-    peer_id_bytes = factory.LazyFunction(  # type: ignore[no-untyped-call]
+    peer_id_bytes = factory.LazyFunction(
         lambda: generate_peer_id_from(default_key_pair_factory())
     )
 
@@ -265,32 +265,32 @@ async def noise_conn_factory(
         yield local_secure_conn, remote_secure_conn
 
 
-class SwarmFactory(factory.Factory[Swarm]):
+class SwarmFactory(factory.Factory):
     class Meta:
         model = Swarm
 
     class Params:
         key_pair = factory.LazyFunction(
             default_key_pair_factory
-        )  # type: ignore[no-untyped-call]
+        )
         security_protocol = DEFAULT_SECURITY_PROTOCOL_ID
         muxer_opt = factory.LazyFunction(
             default_muxer_transport_factory
-        )  # type: ignore[no-untyped-call]
+        )
 
     peer_id = factory.LazyAttribute(
         lambda o: generate_peer_id_from(o.key_pair)
-    )  # type: ignore[no-untyped-call]
-    peerstore = factory.LazyAttribute(  # type: ignore[no-untyped-call]
+    )
+    peerstore = factory.LazyAttribute(
         lambda o: initialize_peerstore_with_our_keypair(o.peer_id, o.key_pair)
     )
-    upgrader = factory.LazyAttribute(  # type: ignore[no-untyped-call]
+    upgrader = factory.LazyAttribute(
         lambda o: TransportUpgrader(
             (security_options_factory_factory(o.security_protocol))(o.key_pair),
             o.muxer_opt,
         )
     )
-    transport = factory.LazyFunction(TCP)  # type: ignore[no-untyped-call]
+    transport = factory.LazyFunction(TCP)
 
     @classmethod
     @asynccontextmanager
@@ -300,6 +300,9 @@ class SwarmFactory(factory.Factory[Swarm]):
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[Swarm]:
+        # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
+        # an argument explicitly with `None`. If an argument is `None`, we don't pass it
+        # to `factory.Factory.__init__`, in order to let the function initialize it.
         optional_kwargs: dict[str, Any] = {}
         if key_pair is not None:
             optional_kwargs["key_pair"] = key_pair
@@ -307,30 +310,11 @@ class SwarmFactory(factory.Factory[Swarm]):
             optional_kwargs["security_protocol"] = security_protocol
         if muxer_opt is not None:
             optional_kwargs["muxer_opt"] = muxer_opt
-        swarm = Swarm(
-            peer_id=generate_peer_id_from(
-                optional_kwargs.get("key_pair", default_key_pair_factory())
-            ),
-            peerstore=initialize_peerstore_with_our_keypair(
-                generate_peer_id_from(
-                    optional_kwargs.get("key_pair", default_key_pair_factory())
-                ),
-                optional_kwargs.get("key_pair", default_key_pair_factory()),
-            ),
-            upgrader=TransportUpgrader(
-                security_options_factory_factory(
-                    optional_kwargs.get(
-                        "security_protocol", DEFAULT_SECURITY_PROTOCOL_ID
-                    )
-                )(optional_kwargs.get("key_pair", default_key_pair_factory())),
-                optional_kwargs.get("muxer_opt", default_muxer_transport_factory()),
-            ),
-            transport=TCP(),
-        )
+        swarm = cls(**optional_kwargs)  # type: ignore[misc]
         async with background_trio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
             yield swarm
-
+    
     @classmethod
     @asynccontextmanager
     async def create_batch_and_listen(
@@ -351,20 +335,24 @@ class SwarmFactory(factory.Factory[Swarm]):
             yield tuple(ctx_mgrs)
 
 
-class HostFactory(factory.Factory[BasicHost]):
+class HostFactory(factory.Factory):
     class Meta:
         model = BasicHost
 
     class Params:
         key_pair = factory.LazyFunction(
             default_key_pair_factory
-        )  # type: ignore[no-untyped-call]
+        )
         security_protocol: TProtocol = None
         muxer_opt = factory.LazyFunction(
             default_muxer_transport_factory
-        )  # type: ignore[no-untyped-call]
+        )
 
-    network = factory.SubFactory(SwarmFactory)  # type: ignore[no-untyped-call]
+    network = factory.LazyAttribute(
+        lambda o: SwarmFactory(
+            security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
+        )
+    )
 
     @classmethod
     @asynccontextmanager
@@ -395,21 +383,25 @@ class DummyRouter(IPeerRouting):
         return self._routing_table.get(peer_id, None)
 
 
-class RoutedHostFactory(factory.Factory[RoutedHost]):
+class RoutedHostFactory(factory.Factory):
     class Meta:
         model = RoutedHost
 
     class Params:
         key_pair = factory.LazyFunction(
             default_key_pair_factory
-        )  # type: ignore[no-untyped-call]
+        )
         security_protocol: TProtocol = None
         muxer_opt = factory.LazyFunction(
             default_muxer_transport_factory
-        )  # type: ignore[no-untyped-call]
+        )
 
-    network = factory.SubFactory(SwarmFactory)  # type: ignore[no-untyped-call]
-    router = factory.LazyFunction(DummyRouter)  # type: ignore[no-untyped-call]
+    network = factory.LazyAttribute(
+        lambda o: HostFactory(
+            security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
+        ).get_network()
+    )
+    router = factory.LazyFunction(DummyRouter)
 
     @classmethod
     @asynccontextmanager
@@ -431,14 +423,14 @@ class RoutedHostFactory(factory.Factory[RoutedHost]):
             yield routed_hosts
 
 
-class FloodsubFactory(factory.Factory[FloodSub]):
+class FloodsubFactory(factory.Factory):
     class Meta:
         model = FloodSub
 
     protocols = (FLOODSUB_PROTOCOL_ID,)
 
 
-class GossipsubFactory(factory.Factory[GossipSub]):
+class GossipsubFactory(factory.Factory):
     class Meta:
         model = GossipSub
 
@@ -453,11 +445,11 @@ class GossipsubFactory(factory.Factory[GossipSub]):
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
 
 
-class PubsubFactory(factory.Factory[Pubsub]):
+class PubsubFactory(factory.Factory):
     class Meta:
         model = Pubsub
 
-    host = factory.SubFactory(HostFactory)  # type: ignore[no-untyped-call]
+    host = factory.SubFactory(HostFactory)
     router = None
     cache_size = None
     strict_signing = False
@@ -498,6 +490,7 @@ class PubsubFactory(factory.Factory[Pubsub]):
         async with HostFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
         ) as hosts:
+            # Pubsubs should exit before hosts
             async with AsyncExitStack() as stack:
                 pubsubs = [
                     await stack.enter_async_context(
@@ -671,6 +664,8 @@ async def net_stream_pair_factory(
 
     stream_1: INetStream
 
+    # Just a proxy, we only care about the stream.
+    # Add a barrier to avoid stream being removed.
     event_handler_finished = trio.Event()
 
     async def handler(stream: INetStream) -> None:
