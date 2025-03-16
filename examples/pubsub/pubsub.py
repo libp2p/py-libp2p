@@ -2,6 +2,7 @@ import argparse
 import logging
 import trio
 import multiaddr
+import base58
 from libp2p import new_host
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.gossipsub import GossipSub
@@ -21,33 +22,41 @@ from libp2p.transport.typing import (
     TSecurityOptions,
 )
 from libp2p.tools.factories import security_options_factory_factory
+from libp2p.io.msgio import encode_varint_prefixed
+from libp2p.pubsub.pb import rpc_pb2
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    # format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,  # Set default to DEBUG for more verbose output
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("pubsub-chat")
+logger = logging.getLogger("pubsub-debug")
 
-GOSSIPSUB_PROTOCOL_ID = TProtocol("/gossipsub/1.0.0")
+GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 # Generate a key pair for the node
 key_pair = create_new_key_pair()
 logger.info(f"Node {key_pair.public_key}: Created key pair")
 
+# Security options
 NOISE_PROTOCOL_ID = TProtocol("/noise")
 security_options_factory = security_options_factory_factory()
 security_options = security_options_factory(key_pair)
 
 async def receive_loop(subscription):
+    logger.debug("Starting receive loop")
     while True:
-        message = await subscription.get()
-        logger.info(f"Received message: {message.data.decode('utf-8')}")
-        logger.info(f"From peer: {message.from_id}")
+        try:
+            message = await subscription.get()
+            logger.info(f"Received message: {message.data.decode('utf-8')}")
+            logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
+        except Exception as e:
+            logger.exception("Error in receive loop")
+            await trio.sleep(1)
 
 async def publish_loop(pubsub, topic):
     """Continuously read input from user and publish to the topic."""
-    print("Starting publish loop...")
+    logger.debug("Starting publish loop...")
     print("Type messages to send (press Enter to send):")
     while True:
         try:
@@ -61,57 +70,31 @@ async def publish_loop(pubsub, topic):
                 await pubsub.publish(topic, message.encode())
                 print(f"Published: {message}")
         except Exception as e:
-            # Log the complete exception traceback
             logger.exception("Error in publish loop")
             await trio.sleep(1)  # Avoid tight loop on error
-
-
-async def connection_monitor(host, pubsub, interval=5):
-    """Monitor and log connected peers periodically."""
-    while True:
-        try:
-            peers = host.get_connected_peers()
-            if peers:
-                print(f"Currently connected to {len(peers)} peers: {[p.pretty() for p in peers]}")
-                # Check if these peers are in the pubsub peers list
-                pubsub_peers = list(pubsub.peers.keys())
-                print(f"PubSub peers: {len(pubsub_peers)}")
-                if pubsub_peers:
-                    print(f"PubSub peer IDs: {[p.pretty() for p in pubsub_peers]}")
-                
-                # Check peer topics
-                if hasattr(pubsub, "peer_topics") and pubsub.peer_topics:
-                    for topic, peers_in_topic in pubsub.peer_topics.items():
-                        print(f"Peers subscribed to topic '{topic}': {len(peers_in_topic)}")
-                        if peers_in_topic:
-                            print(f"Topic '{topic}' peer IDs: {[p.pretty() for p in peers_in_topic]}")
-            else:
-                print("Not connected to any peers")
-        except Exception as e:
-            print(f"Error in connection monitor: {e}")
-        
-        await trio.sleep(interval)
 
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-    
-
     # Create a new libp2p host
     host = new_host(
-    key_pair=key_pair,
-    muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
-    sec_opt=security_options
+        key_pair=key_pair,
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
+        sec_opt=security_options
     )   
+    # Log available protocols
+    logger.debug(f"Host ID: {host.get_id()}")
+    logger.debug(f"Host multiselect protocols: {host.get_mux().get_protocols() if hasattr(host, 'get_mux') else 'N/A'}")
     # Create and start gossipsub
     gossipsub = GossipSub(
         protocols=[GOSSIPSUB_PROTOCOL_ID],
-        degree=6,          # Number of peers to maintain in mesh
-        degree_low=2,      # Lower bound for mesh peers
-        degree_high=12,    # Upper bound for mesh peers
-        time_to_live=30    # TTL for message cache in seconds
+        degree=3,          # Reduced for testing
+        degree_low=1,      # Lower bound for mesh peers
+        degree_high=5,     # Upper bound for mesh peers
+        time_to_live=60,   # TTL for message cache in seconds
+        heartbeat_interval=10  # More frequent heartbeats for testing
     )
 
     pubsub = Pubsub(host, gossipsub)
@@ -126,7 +109,6 @@ async def run(topic: str, destination: str | None, port: int) -> None:
             logger.info("Pubsub ready.")
             subscription = await pubsub.subscribe(topic)
             logger.info(f"Subscribed to topic: {topic}")
-            nursery.start_soon(connection_monitor, host, pubsub)
             if not destination:
                 logger.info(
                     "Run this script in another console with:\n"
@@ -146,15 +128,15 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                 logger.info(f"Connecting to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
                 try:
                     await host.connect(info)
-                    logger.info(f"Connected to peer: {info.peer_id}")   
+                    logger.info(f"Connected to peer: {info.peer_id}")
+                    await trio.sleep(2)
+                    logger.debug(f"After connection, pubsub.peers: {pubsub.peers} (keys types: {[type(p) for p in pubsub.peers.keys()]})")
+                    # nursery.start_soon(manual_protocol_test, host, info.peer_id, topic)
+                    nursery.start_soon(publish_loop, pubsub, topic)
+                    nursery.start_soon(receive_loop, subscription)
                 except Exception as e:
                     logger.exception(f"Failed to connect to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
                     return
-                # Debug: log the contents and types for pubsub.peers
-                logger.debug(f"After connection, pubsub.peers: {pubsub.peers} (keys types: {[type(p) for p in pubsub.peers.keys()]})")
-                # Start message publish and receive loops
-                nursery.start_soon(publish_loop, pubsub, topic)
-                nursery.start_soon(receive_loop, subscription)
 
             await trio.sleep_forever()
 
