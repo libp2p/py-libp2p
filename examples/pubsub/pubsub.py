@@ -24,6 +24,7 @@ from libp2p.transport.typing import (
 from libp2p.tools.factories import security_options_factory_factory
 from libp2p.io.msgio import encode_varint_prefixed
 from libp2p.pubsub.pb import rpc_pb2
+import socket
 
 # Configure logging
 logging.basicConfig(
@@ -73,9 +74,20 @@ async def publish_loop(pubsub, topic):
             logger.exception("Error in publish loop")
             await trio.sleep(1)  # Avoid tight loop on error
 
+def find_free_port():
+    """Find a free port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))  # Bind to a free port provided by the OS
+        return s.getsockname()[1]
+
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
+
+    if port is None or port == 0:
+        port = find_free_port()
+        logger.info(f"Using random available port: {port}")
+
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
     # Create a new libp2p host
@@ -119,7 +131,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     # Server mode
                     logger.info(
                         "Run this script in another console with:\n"
-                        f"python3 pubsub.py -p {int(port) + 1} "
+                        f"python3 pubsub.py "
                         f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     logger.info("Waiting for peers...")
