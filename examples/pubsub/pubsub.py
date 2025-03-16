@@ -27,7 +27,7 @@ from libp2p.pubsub.pb import rpc_pb2
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Set default to DEBUG for more verbose output
+    level=logging.INFO,  # Set default to DEBUG for more verbose output
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("pubsub-debug")
@@ -48,7 +48,7 @@ async def receive_loop(subscription):
     while True:
         try:
             message = await subscription.get()
-            logger.info(f"Received message: {message.data.decode('utf-8')}")
+            print(f"Received message: {message.data.decode('utf-8')}")
             logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
         except Exception as e:
             logger.exception("Error in receive loop")
@@ -87,58 +87,71 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     # Log available protocols
     logger.debug(f"Host ID: {host.get_id()}")
     logger.debug(f"Host multiselect protocols: {host.get_mux().get_protocols() if hasattr(host, 'get_mux') else 'N/A'}")
-    # Create and start gossipsub
+    # Create and start gossipsub with optimized parameters for testing
     gossipsub = GossipSub(
         protocols=[GOSSIPSUB_PROTOCOL_ID],
-        degree=3,          # Reduced for testing
-        degree_low=1,      # Lower bound for mesh peers
-        degree_high=5,     # Upper bound for mesh peers
+        degree=3,          # Number of peers to maintain in mesh
+        degree_low=2,      # Lower bound for mesh peers
+        degree_high=4,     # Upper bound for mesh peers
         time_to_live=60,   # TTL for message cache in seconds
-        heartbeat_interval=10  # More frequent heartbeats for testing
+        gossip_window=2,   # Smaller window for faster gossip
+        gossip_history=5,  # Keep more history
+        heartbeat_initial_delay=2.0,  # Start heartbeats sooner
+        heartbeat_interval=5  # More frequent heartbeats for testing
     )
 
     pubsub = Pubsub(host, gossipsub)
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         logger.info(f"Node started with peer ID: {host.get_id()}")
-        logger.info(f"Subscribed to topic: {topic}")
-        logger.debug(f"Destination is: {destination}")
-        logger.info("Initializing pubsub...")
-        async with background_trio_service(pubsub) as manager:
-            logger.info("Pubsub initialized.")
-            await pubsub.wait_until_ready()
-            logger.info("Pubsub ready.")
-            subscription = await pubsub.subscribe(topic)
-            logger.info(f"Subscribed to topic: {topic}")
-            if not destination:
-                logger.info(
-                    "Run this script in another console with:\n"
-                    f"python3 pubsub.py -p {int(port) + 1} "
-                    f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
-                )
-                logger.info("Waiting for peers...")
-                # Start message publish and receive loops
-                nursery.start_soon(receive_loop, subscription)
-                nursery.start_soon(publish_loop, pubsub, topic)
-            else:
-                # Client mode
-                maddr = multiaddr.Multiaddr(destination)
-                protocols_in_maddr = maddr.protocols()
-                info = info_from_p2p_addr(maddr)
-                logger.debug(f"Multiaddr protocols: {protocols_in_maddr}")
-                logger.info(f"Connecting to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
-                try:
-                    await host.connect(info)
-                    logger.info(f"Connected to peer: {info.peer_id}")
-                    await trio.sleep(2)
-                    logger.debug(f"After connection, pubsub.peers: {pubsub.peers} (keys types: {[type(p) for p in pubsub.peers.keys()]})")
-                    # nursery.start_soon(manual_protocol_test, host, info.peer_id, topic)
-                    nursery.start_soon(publish_loop, pubsub, topic)
+        logger.info(f"Listening on: {listen_addr}")
+        logger.info("Initializing PubSub and GossipSub...")
+        async with background_trio_service(pubsub) as pubsub_manager:
+            async with background_trio_service(gossipsub) as gossipsub_manager:
+                logger.info("Pubsub and GossipSub services started.")
+                await pubsub.wait_until_ready()
+                logger.info("Pubsub ready.")
+                
+                # Subscribe to the topic
+                subscription = await pubsub.subscribe(topic)
+                logger.info(f"Subscribed to topic: {topic}")
+                
+                if not destination:
+                    # Server mode
+                    logger.info(
+                        "Run this script in another console with:\n"
+                        f"python3 pubsub.py -p {int(port) + 1} "
+                        f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
+                    )
+                    logger.info("Waiting for peers...")
+                    # Start message publish and receive loops
                     nursery.start_soon(receive_loop, subscription)
-                except Exception as e:
-                    logger.exception(f"Failed to connect to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
-                    return
+                    nursery.start_soon(publish_loop, pubsub, topic)
+                else:
+                    # Client mode
+                    maddr = multiaddr.Multiaddr(destination)
+                    protocols_in_maddr = maddr.protocols()
+                    info = info_from_p2p_addr(maddr)
+                    logger.debug(f"Multiaddr protocols: {protocols_in_maddr}")
+                    logger.info(f"Connecting to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
+                    try:
+                        await host.connect(info)
+                        logger.info(f"Connected to peer: {info.peer_id}")
 
-            await trio.sleep_forever()
+                        # Give some time for the connection to establish and protocols to negotiate
+                        # logger.info("Waiting for connection to stabilize...")
+                        # await trio.sleep(3)
+                        
+                        logger.debug(f"After connection, pubsub.peers: {pubsub.peers}")
+                        logger.debug(f"Peer protocols: {[gossipsub.peer_protocol.get(p) for p in pubsub.peers.keys()]}")
+                        
+                        # Start the loops
+                        nursery.start_soon(receive_loop, subscription)
+                        nursery.start_soon(publish_loop, pubsub, topic)
+                    except Exception as e:
+                        logger.exception(f"Failed to connect to peer: {info.peer_id}")
+                        return
+
+                await trio.sleep_forever()
 
 def main() -> None:
     description = """
