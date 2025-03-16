@@ -1,4 +1,3 @@
-
 import argparse
 import logging
 import trio
@@ -13,7 +12,7 @@ from libp2p.tools.async_service.trio_service import background_trio_service
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("pubsub-chat")
 
@@ -37,11 +36,40 @@ async def publish_loop(pubsub, topic):
                 print("Exiting publish loop.")
                 break
             if message:
+                logger.debug(f"Publishing message: {message}")
                 await pubsub.publish(topic, message.encode())
                 print(f"Published: {message}")
         except Exception as e:
-            print(f"Error in publish loop: {e}")
+            # Log the complete exception traceback
+            logger.exception("Error in publish loop")
             await trio.sleep(1)  # Avoid tight loop on error
+
+
+async def connection_monitor(host, pubsub, interval=5):
+    """Monitor and log connected peers periodically."""
+    while True:
+        try:
+            peers = host.get_connected_peers()
+            if peers:
+                print(f"Currently connected to {len(peers)} peers: {[p.pretty() for p in peers]}")
+                # Check if these peers are in the pubsub peers list
+                pubsub_peers = list(pubsub.peers.keys())
+                print(f"PubSub peers: {len(pubsub_peers)}")
+                if pubsub_peers:
+                    print(f"PubSub peer IDs: {[p.pretty() for p in pubsub_peers]}")
+                
+                # Check peer topics
+                if hasattr(pubsub, "peer_topics") and pubsub.peer_topics:
+                    for topic, peers_in_topic in pubsub.peer_topics.items():
+                        print(f"Peers subscribed to topic '{topic}': {len(peers_in_topic)}")
+                        if peers_in_topic:
+                            print(f"Topic '{topic}' peer IDs: {[p.pretty() for p in peers_in_topic]}")
+            else:
+                print("Not connected to any peers")
+        except Exception as e:
+            print(f"Error in connection monitor: {e}")
+        
+        await trio.sleep(interval)
 
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
@@ -66,11 +94,12 @@ async def run(topic: str, destination: str | None, port: int) -> None:
         logger.debug(f"Destination is: {destination}")
         logger.info("Initializing pubsub...")
         async with background_trio_service(pubsub) as manager:
-            
             logger.info("Pubsub initialized.")
             await pubsub.wait_until_ready()
             logger.info("Pubsub ready.")
             subscription = await pubsub.subscribe(topic)
+            logger.info(f"Subscribed to topic: {topic}")
+            nursery.start_soon(connection_monitor, host, pubsub)
             if not destination:
                 logger.info(
                     "Run this script in another console with:\n"
@@ -78,25 +107,29 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                 )
                 logger.info("Waiting for peers...")
-
                 # Start message publish and receive loops
                 nursery.start_soon(receive_loop, subscription)
                 nursery.start_soon(publish_loop, pubsub, topic)
-
             else:
                 # Client mode
                 maddr = multiaddr.Multiaddr(destination)
+                protocols_in_maddr = maddr.protocols()
                 info = info_from_p2p_addr(maddr)
-                logger.info(f"Connecting to peer: {info.peer_id}")
-                await host.connect(info)
-                logger.info(f"Connected to peer: {info.peer_id}")
-                
+                logger.debug(f"Multiaddr protocols: {protocols_in_maddr}")
+                logger.info(f"Connecting to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
+                try:
+                    await host.connect(info)
+                    logger.info(f"Connected to peer: {info.peer_id}")   
+                except Exception as e:
+                    logger.exception(f"Failed to connect to peer: {info.peer_id} using protocols: {protocols_in_maddr}")
+                    return
+                # Debug: log the contents and types for pubsub.peers
+                logger.debug(f"After connection, pubsub.peers: {pubsub.peers} (keys types: {[type(p) for p in pubsub.peers.keys()]})")
                 # Start message publish and receive loops
                 nursery.start_soon(publish_loop, pubsub, topic)
                 nursery.start_soon(receive_loop, subscription)
 
             await trio.sleep_forever()
-        
 
 def main() -> None:
     description = """
@@ -151,7 +184,6 @@ def main() -> None:
         trio.run(run, *(args.topic, args.destination, args.port))
     except KeyboardInterrupt:
         logger.info("Application terminated by user")
-
 
 if __name__ == "__main__":
     main()
