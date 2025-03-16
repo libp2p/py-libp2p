@@ -8,6 +8,19 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.async_service.trio_service import background_trio_service
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.transport.tcp.tcp import TCP
+from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.crypto.keys import KeyPair
+from libp2p.crypto.rsa import (
+    create_new_key_pair,
+)
+from libp2p.security.secio.transport import ID as SECIO, Transport as SecioTransport
+from libp2p.transport.typing import (
+    TMuxerOptions,
+    TSecurityOptions,
+)
+from libp2p.tools.factories import security_options_factory_factory
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +30,14 @@ logging.basicConfig(
 logger = logging.getLogger("pubsub-chat")
 
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/gossipsub/1.0.0")
+
+# Generate a key pair for the node
+key_pair = create_new_key_pair()
+logger.info(f"Node {key_pair.public_key}: Created key pair")
+
+NOISE_PROTOCOL_ID = TProtocol("/noise")
+security_options_factory = security_options_factory_factory()
+security_options = security_options_factory(key_pair)
 
 async def receive_loop(subscription):
     while True:
@@ -76,8 +97,14 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
+    
+
     # Create a new libp2p host
-    host = new_host()
+    host = new_host(
+    key_pair=key_pair,
+    muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
+    sec_opt=security_options
+    )   
     # Create and start gossipsub
     gossipsub = GossipSub(
         protocols=[GOSSIPSUB_PROTOCOL_ID],
