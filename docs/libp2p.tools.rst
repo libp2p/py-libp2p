@@ -21,14 +21,6 @@ libp2p.tools.constants module
    :undoc-members:
    :show-inheritance:
 
-libp2p.tools.factories module
------------------------------
-
-.. automodule:: libp2p.tools.factories
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.tools.utils module
 -------------------------
 

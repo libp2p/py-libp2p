@@ -8,7 +8,7 @@ from libp2p.host.ping import (
     PING_LENGTH,
     PingService,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     host_pair_factory,
 )
 

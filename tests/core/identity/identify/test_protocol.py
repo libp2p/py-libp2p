@@ -7,7 +7,7 @@ from libp2p.identity.identify.protocol import (
     ID,
     _mk_identify_protobuf,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     host_pair_factory,
 )
 
