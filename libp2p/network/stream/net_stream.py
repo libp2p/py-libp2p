@@ -31,7 +31,6 @@ class NetStream(INetStream):
 
     def __init__(self, muxed_stream: IMuxedStream) -> None:
         self.muxed_stream = muxed_stream
-        self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
 
     def get_protocol(self) -> TProtocol:
