@@ -14,7 +14,7 @@ from typing import (
     Callable,
     NamedTuple,
     cast,
-) 
+)
 
 import base58
 import trio
@@ -23,9 +23,9 @@ from libp2p.abc import (
     IHost,
     INetStream,
     IPubsub,
+    IPubsubRouter,
     ISubscriptionAPI,
 )
-from libp2p.abc import IPubsubRouter
 from libp2p.crypto.keys import (
     PrivateKey,
 )
