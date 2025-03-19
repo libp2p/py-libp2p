@@ -110,6 +110,9 @@ setup(
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: Implementation :: PyPy",
+        "Programming Language :: Python :: Implementation :: PyPy :: 3.9",
+        "Programming Language :: Python :: Implementation :: PyPy :: 3.10",
     ],
     platforms=["unix", "linux", "osx"],
     entry_points={
