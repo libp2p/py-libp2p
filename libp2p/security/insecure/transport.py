@@ -1,3 +1,7 @@
+from typing import (
+    Optional,
+)
+
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
@@ -73,6 +77,12 @@ class InsecureSession(BaseSession):
             is_initiator=is_initiator,
         )
         self.conn = conn
+        # Cache the remote address to avoid repeated lookups
+        # through the delegation chain
+        try:
+            self.remote_peer_addr = conn.get_remote_address()
+        except AttributeError:
+            self.remote_peer_addr = None
 
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
@@ -82,6 +92,12 @@ class InsecureSession(BaseSession):
 
     async def close(self) -> None:
         await self.conn.close()
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """
+        Delegate to the underlying connection's get_remote_address method.
+        """
+        return self.conn.get_remote_address()
 
 
 async def run_handshake(

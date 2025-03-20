@@ -1,4 +1,7 @@
 import io
+from typing import (
+    Optional,
+)
 
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -40,6 +43,10 @@ class SecureSession(BaseSession):
         self.conn = conn
 
         self._reset_internal_buffer()
+
+    def get_remote_address(self) -> Optional[tuple[str, int]]:
+        """Delegate to the underlying connection's get_remote_address method."""
+        return self.conn.get_remote_address()
 
     def _reset_internal_buffer(self) -> None:
         self.buf = io.BytesIO()
