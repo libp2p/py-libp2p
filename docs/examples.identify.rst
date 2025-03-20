@@ -1,5 +1,5 @@
 Identify Protocol Demo
-====================
+======================
 
 This example demonstrates how to use the libp2p ``identify`` protocol.
 
