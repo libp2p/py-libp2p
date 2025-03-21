@@ -11,22 +11,19 @@ import hashlib
 import logging
 import time
 from typing import (
-    TYPE_CHECKING,
     Callable,
     NamedTuple,
     cast,
 )
 
 import base58
-from lru import (
-    LRU,
-)
 import trio
 
 from libp2p.abc import (
     IHost,
     INetStream,
     IPubsub,
+    IPubsubRouter,
     ISubscriptionAPI,
 )
 from libp2p.crypto.keys import (
@@ -59,6 +56,9 @@ from libp2p.peer.id import (
 from libp2p.tools.async_service import (
     Service,
 )
+from libp2p.tools.timed_cache.last_seen_cache import (
+    LastSeenCache,
+)
 from libp2p.utils import (
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
@@ -77,12 +77,6 @@ from .validators import (
     PUBSUB_SIGNING_PREFIX,
     signature_validator,
 )
-
-if TYPE_CHECKING:
-    from typing import Any  # noqa: F401
-
-    from .abc import IPubsubRouter  # noqa: F401
-
 
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
@@ -112,7 +106,7 @@ class Pubsub(Service, IPubsub):
     peer_receive_channel: trio.MemoryReceiveChannel[ID]
     dead_peer_receive_channel: trio.MemoryReceiveChannel[ID]
 
-    seen_messages: LRU[bytes, int]
+    seen_messages: LastSeenCache
 
     subscribed_topics_send: dict[str, trio.MemorySendChannel[rpc_pb2.Message]]
     subscribed_topics_receive: dict[str, TrioSubscriptionAPI]
@@ -136,6 +130,8 @@ class Pubsub(Service, IPubsub):
         host: IHost,
         router: IPubsubRouter,
         cache_size: int = None,
+        seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = True,
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
@@ -187,7 +183,7 @@ class Pubsub(Service, IPubsub):
         else:
             self.sign_key = None
 
-        self.seen_messages = LRU(self.cache_size)
+        self.seen_messages = LastSeenCache(seen_ttl, sweep_interval)
 
         # Map of topics we are subscribed to blocking queues
         # for when the given topic receives a message
@@ -662,13 +658,11 @@ class Pubsub(Service, IPubsub):
 
     def _is_msg_seen(self, msg: rpc_pb2.Message) -> bool:
         msg_id = self._msg_id_constructor(msg)
-        return msg_id in self.seen_messages
+        return self.seen_messages.has(msg_id)
 
     def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
         msg_id = self._msg_id_constructor(msg)
-        # FIXME: Mapping `msg_id` to `1` is quite awkward. Should investigate if there
-        # is a more appropriate way.
-        self.seen_messages[msg_id] = 1
+        self.seen_messages.add(msg_id)
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)

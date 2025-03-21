@@ -1,0 +1,1 @@
+Adds detailed Sphinx-style docstrings to ``abc.py``.
