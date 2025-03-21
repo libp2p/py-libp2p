@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.9', '3.10', '3.11', '3.12', '3.13']
-        toxenv: [core, lint, wheel]
+        toxenv: [core, lint, wheel, interop, demos]
         include:
           - python: '3.10'
             toxenv: docs
@@ -41,18 +41,3 @@ jobs:
           python -m pip install tox
       - run: |
           python -m tox run -r
-
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        python-version: [3.7, 3.8, 3.9]
-        os: [ubuntu-latest]
-        env: [core, interop, docs, demos]
-
-    steps:
-      - env:
-          python: ${{ matrix.python-version }}
-          toxenv: ${{ matrix.env }}
-        run: |
-          python -m tox -e py${{ matrix.python-version }}-${{ matrix.env }}
