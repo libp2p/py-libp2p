@@ -60,4 +60,6 @@ jobs:
           python -m pip install tox
       - name: Run tests
         run: |
-          python -m tox -e py${{ matrix.python-version }}-${{ matrix.env }}
+          # Convert 3.9 to 39, 3.10 to 310, etc
+          PY_VERSION=$(echo "${{ matrix.python-version }}" | tr -d '.')
+          python -m tox -e py${PY_VERSION}-${{ matrix.env }}
