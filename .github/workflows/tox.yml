@@ -17,10 +17,15 @@ jobs:
     strategy:
       matrix:
         python: ['3.9', '3.10', '3.11', '3.12', '3.13']
-        toxenv: [core, lint, wheel]
+        toxenv: [core, lint, wheel, demos]
         include:
           - python: '3.10'
             toxenv: docs
+        exclude:
+          - python: '3.12'
+            toxenv: demos
+          - python: '3.13'
+            toxenv: demos
       fail-fast: false
     steps:
       - env:
@@ -41,25 +46,3 @@ jobs:
           python -m pip install tox
       - run: |
           python -m tox run -r
-
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        python-version: ['3.9', '3.10', '3.11']
-        os: [ubuntu-latest]
-        env: [core, interop, docs, demos]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install tox
-      - name: Run tests
-        run: |
-          # Convert 3.9 to 39, 3.10 to 310, etc
-          PY_VERSION=$(echo "${{ matrix.python-version }}" | tr -d '.')
-          python -m tox -e py${PY_VERSION}-${{ matrix.env }}
