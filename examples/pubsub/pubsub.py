@@ -93,6 +93,28 @@ def find_free_port():
         return s.getsockname()[1]
 
 
+async def monitor_peer_topics(pubsub, nursery):
+    """
+    Monitor for new topics that peers are subscribed to and
+    automatically subscribe the server to those topics.
+    """
+    # Keep track of topics we've already subscribed to
+    subscribed_topics = set()
+
+    while True:
+        # Check for new topics in peer_topics
+        for topic in pubsub.peer_topics.keys():
+            if topic not in subscribed_topics:
+                logger.info(f"Auto-subscribing to new topic: {topic}")
+                subscription = await pubsub.subscribe(topic)
+                subscribed_topics.add(topic)
+                # Start a receive loop for this topic
+                nursery.start_soon(receive_loop, subscription)
+
+        # Check every 2 seconds for new topics
+        await trio.sleep(2)
+
+
 async def run(topic: str, destination: str | None, port: int) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
@@ -151,6 +173,10 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                         f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     logger.info("Waiting for peers...")
+
+                    # Start topic monitoring to auto-subscribe to client topics
+                    nursery.start_soon(monitor_peer_topics, pubsub, nursery)
+
                     # Start message publish and receive loops
                     nursery.start_soon(receive_loop, subscription)
                     nursery.start_soon(publish_loop, pubsub, topic)
@@ -167,12 +193,16 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     try:
                         await host.connect(info)
                         logger.info(f"Connected to peer: {info.peer_id}")
-
-                        logger.debug(f"After connection, pubsub.peers: {pubsub.peers}")
-                        peer_protocols = [
-                            gossipsub.peer_protocol.get(p) for p in pubsub.peers.keys()
-                        ]
-                        logger.debug(f"Peer protocols: {peer_protocols}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            await trio.sleep(1)
+                            logger.debug(
+                                f"After connection, pubsub.peers: {pubsub.peers}"
+                            )
+                            peer_protocols = [
+                                gossipsub.peer_protocol.get(p)
+                                for p in pubsub.peers.keys()
+                            ]
+                            logger.debug(f"Peer protocols: {peer_protocols}")
 
                         # Start the loops
                         nursery.start_soon(receive_loop, subscription)
@@ -186,7 +216,8 @@ async def run(topic: str, destination: str | None, port: int) -> None:
 
 def main() -> None:
     description = """
-    This program demonstrates a pubsub p2p chat application using libp2p.
+    This program demonstrates a pubsub p2p chat application using libp2p with
+    the gossipsub protocol as the pubsub router.
     """
 
     ChatTopic = "pubsub-chat"
