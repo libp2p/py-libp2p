@@ -50,7 +50,7 @@ logger.info(f"Node {key_pair.public_key}: Created key pair")
 
 # Security options
 NOISE_PROTOCOL_ID = TProtocol("/noise")
-security_options_factory = security_options_factory_factory()
+security_options_factory = security_options_factory_factory(NOISE_PROTOCOL_ID)
 security_options = security_options_factory(key_pair)
 
 
