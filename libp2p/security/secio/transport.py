@@ -8,6 +8,10 @@ from typing import (
 
 import multihash
 
+from libp2p.abc import (
+    IRawConnection,
+    ISecureConn,
+)
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
 )
@@ -47,15 +51,9 @@ from libp2p.io.exceptions import (
 from libp2p.io.msgio import (
     FixedSizeLenMsgReadWriter,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.peer.id import ID as PeerID
 from libp2p.security.base_transport import (
     BaseSecureTransport,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
 )
 from libp2p.security.secure_session import (
     SecureSession,

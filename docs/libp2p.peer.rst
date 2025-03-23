@@ -4,14 +4,6 @@ libp2p.peer package
 Submodules
 ----------
 
-libp2p.peer.addrbook\_interface module
---------------------------------------
-
-.. automodule:: libp2p.peer.addrbook_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.peer.id module
 ---------------------
 
@@ -28,14 +20,6 @@ libp2p.peer.peerdata module
    :undoc-members:
    :show-inheritance:
 
-libp2p.peer.peerdata\_interface module
---------------------------------------
-
-.. automodule:: libp2p.peer.peerdata_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.peer.peerinfo module
 ---------------------------
 
@@ -44,26 +28,10 @@ libp2p.peer.peerinfo module
    :undoc-members:
    :show-inheritance:
 
-libp2p.peer.peermetadata\_interface module
-------------------------------------------
-
-.. automodule:: libp2p.peer.peermetadata_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.peer.peerstore module
 ----------------------------
 
 .. automodule:: libp2p.peer.peerstore
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.peer.peerstore\_interface module
----------------------------------------
-
-.. automodule:: libp2p.peer.peerstore_interface
    :members:
    :undoc-members:
    :show-inheritance:

@@ -17,6 +17,9 @@ from typing import (
 
 import trio
 
+from libp2p.abc import (
+    IPubsubRouter,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -36,9 +39,6 @@ from libp2p.utils import (
     encode_varint_prefixed,
 )
 
-from .abc import (
-    IPubsubRouter,
-)
 from .exceptions import (
     NoPubsubAttached,
 )
@@ -53,6 +53,7 @@ from .pubsub import (
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
+PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
@@ -87,7 +88,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        time_to_live: int,
+        time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
@@ -579,7 +580,7 @@ class GossipSub(IPubsubRouter, Service):
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
-            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.keys()
+            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.cache.keys()
         ]
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in

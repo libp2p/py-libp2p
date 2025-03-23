@@ -9,13 +9,12 @@ from multiaddr import (
     Multiaddr,
 )
 
+from libp2p.abc import (
+    IPeerData,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
-)
-
-from .peerdata_interface import (
-    IPeerData,
 )
 
 

@@ -5,7 +5,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
-from libp2p.host.host_interface import (
+from libp2p.abc import (
     IHost,
 )
 from libp2p.host.ping import (

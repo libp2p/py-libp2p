@@ -12,6 +12,9 @@ from multiaddr import (
     Multiaddr,
 )
 
+from libp2p.abc import (
+    IPeerStore,
+)
 from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
@@ -27,9 +30,6 @@ from .peerdata import (
 )
 from .peerinfo import (
     PeerInfo,
-)
-from .peerstore_interface import (
-    IPeerStore,
 )
 
 

@@ -4,15 +4,13 @@ from typing import (
 
 import trio
 
-from libp2p.network.connection.net_connection_interface import (
+from libp2p.abc import (
+    IMuxedConn,
+    IMuxedStream,
     INetConn,
 )
 from libp2p.network.stream.net_stream import (
     NetStream,
-)
-from libp2p.stream_muxer.abc import (
-    IMuxedConn,
-    IMuxedStream,
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,

@@ -22,6 +22,15 @@ from libp2p import (
     generate_new_rsa_identity,
     generate_peer_id_from,
 )
+from libp2p.abc import (
+    IHost,
+    INetStream,
+    IPeerRouting,
+    IPubsubRouter,
+    IRawConnection,
+    ISecureConn,
+    ISecureTransport,
+)
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.keys import (
     KeyPair,
@@ -29,13 +38,12 @@ from libp2p.crypto.keys import (
 )
 from libp2p.crypto.secp256k1 import create_new_key_pair as create_secp256k1_key_pair
 from libp2p.custom_types import (
+    TMuxerOptions,
     TProtocol,
+    TSecurityOptions,
 )
 from libp2p.host.basic_host import (
     BasicHost,
-)
-from libp2p.host.host_interface import (
-    IHost,
 )
 from libp2p.host.routed_host import (
     RoutedHost,
@@ -46,14 +54,8 @@ from libp2p.io.abc import (
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.network.connection.swarm_connection import (
     SwarmConn,
-)
-from libp2p.network.stream.net_stream_interface import (
-    INetStream,
 )
 from libp2p.network.swarm import (
     Swarm,
@@ -67,9 +69,6 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore import (
     PeerStore,
 )
-from libp2p.pubsub.abc import (
-    IPubsubRouter,
-)
 from libp2p.pubsub.floodsub import (
     FloodSub,
 )
@@ -80,9 +79,6 @@ import libp2p.pubsub.pb.rpc_pb2 as rpc_pb2
 from libp2p.pubsub.pubsub import (
     Pubsub,
     get_peer_and_seqno_msg_id,
-)
-from libp2p.routing.interfaces import (
-    IPeerRouting,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -95,12 +91,6 @@ from libp2p.security.noise.messages import (
 from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.noise.transport import Transport as NoiseTransport
 import libp2p.security.secio.transport as secio
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
-)
-from libp2p.security.secure_transport_interface import (
-    ISecureTransport,
-)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
@@ -116,10 +106,6 @@ from libp2p.tools.constants import (
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
-)
-from libp2p.transport.typing import (
-    TMuxerOptions,
-    TSecurityOptions,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
@@ -438,7 +424,6 @@ class GossipsubFactory(factory.Factory):
     degree = GOSSIPSUB_PARAMS.degree
     degree_low = GOSSIPSUB_PARAMS.degree_low
     degree_high = GOSSIPSUB_PARAMS.degree_high
-    time_to_live = GOSSIPSUB_PARAMS.time_to_live
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
@@ -461,6 +446,8 @@ class PubsubFactory(factory.Factory):
         host: IHost,
         router: IPubsubRouter,
         cache_size: int,
+        seen_ttl: int,
+        sweep_interval: int,
         strict_signing: bool,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Pubsub]:
@@ -468,6 +455,8 @@ class PubsubFactory(factory.Factory):
             host=host,
             router=router,
             cache_size=cache_size,
+            seen_ttl=seen_ttl,
+            sweep_interval=sweep_interval,
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
         )
@@ -482,6 +471,8 @@ class PubsubFactory(factory.Factory):
         number: int,
         routers: Sequence[IPubsubRouter],
         cache_size: int = None,
+        seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = False,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
@@ -495,7 +486,13 @@ class PubsubFactory(factory.Factory):
                 pubsubs = [
                     await stack.enter_async_context(
                         cls.create_and_start(
-                            host, router, cache_size, strict_signing, msg_id_constructor
+                            host,
+                            router,
+                            cache_size,
+                            seen_ttl,
+                            sweep_interval,
+                            strict_signing,
+                            msg_id_constructor,
                         )
                     )
                     for host, router in zip(hosts, routers)
@@ -508,6 +505,8 @@ class PubsubFactory(factory.Factory):
         cls,
         number: int,
         cache_size: int = None,
+        seen_ttl: int = 120,
+        sweep_interval: int = 60,
         strict_signing: bool = False,
         protocols: Sequence[TProtocol] = None,
         security_protocol: TProtocol = None,
@@ -524,6 +523,8 @@ class PubsubFactory(factory.Factory):
             number,
             floodsubs,
             cache_size,
+            seen_ttl,
+            sweep_interval,
             strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
@@ -571,7 +572,6 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
-                time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
             )

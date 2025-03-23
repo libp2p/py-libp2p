@@ -12,14 +12,6 @@ Subpackages
 Submodules
 ----------
 
-libp2p.stream\_muxer.abc module
--------------------------------
-
-.. automodule:: libp2p.stream_muxer.abc
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.stream\_muxer.exceptions module
 --------------------------------------
 

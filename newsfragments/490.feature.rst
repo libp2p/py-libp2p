@@ -1,1 +1,0 @@
-Create entry points for demos to be run directly from installed package

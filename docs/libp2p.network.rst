@@ -21,22 +21,6 @@ libp2p.network.exceptions module
    :undoc-members:
    :show-inheritance:
 
-libp2p.network.network\_interface module
-----------------------------------------
-
-.. automodule:: libp2p.network.network_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.network.notifee\_interface module
-----------------------------------------
-
-.. automodule:: libp2p.network.notifee_interface
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 libp2p.network.swarm module
 ---------------------------
 

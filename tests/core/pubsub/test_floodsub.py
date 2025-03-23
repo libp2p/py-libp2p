@@ -43,21 +43,16 @@ async def test_simple_two_nodes():
 
 
 @pytest.mark.trio
-async def test_lru_cache_two_nodes():
-    # two nodes with cache_size of 4
-
-    # Mock `get_msg_id` to make us easier to manipulate `msg_id` by `data`.
+async def test_timed_cache_two_nodes():
+    # Two nodes using LastSeenCache with a TTL of 120 seconds
     def get_msg_id(msg):
-        # Originally it is `(msg.seqno, msg.from_id)`
         return (msg.data, msg.from_id)
 
     async with PubsubFactory.create_batch_with_floodsub(
-        2, cache_size=4, msg_id_constructor=get_msg_id
+        2, seen_ttl=120, msg_id_constructor=get_msg_id
     ) as pubsubs_fsub:
-        # `node_a` send the following messages to node_b
         message_indices = [1, 1, 2, 1, 3, 1, 4, 1, 5, 1]
-        # `node_b` should only receive the following
-        expected_received_indices = [1, 2, 3, 4, 5, 1]
+        expected_received_indices = [1, 2, 3, 4, 5]
 
         topic = "my_topic"
 

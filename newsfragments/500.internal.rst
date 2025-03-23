@@ -1,1 +1,0 @@
-Rename ``typing.py`` to ``custom_types.py`` for clarity.

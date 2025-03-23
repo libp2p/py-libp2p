@@ -10,6 +10,10 @@ from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
 from noise.connection import Keypair as NoiseKeypairEnum
 from noise.connection import NoiseConnection as NoiseState
 
+from libp2p.abc import (
+    IRawConnection,
+    ISecureConn,
+)
 from libp2p.crypto.ed25519 import (
     Ed25519PublicKey,
 )
@@ -17,14 +21,8 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
-from libp2p.network.connection.raw_connection_interface import (
-    IRawConnection,
-)
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.security.secure_conn_interface import (
-    ISecureConn,
 )
 from libp2p.security.secure_session import (
     SecureSession,
