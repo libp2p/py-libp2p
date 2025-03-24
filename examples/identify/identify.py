@@ -61,7 +61,7 @@ async def run(port: int, destination: str) -> None:
         async with host_a.run(listen_addrs=[listen_addr]):
             print(
                 "First host listening. Run this from another console:\n\n"
-                f"python identify.py -p {int(port) + 1} "
+                f"identify-demo -p {int(port) + 1} "
                 f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host_a.get_id().pretty()}\n"
             )
             print("Waiting for incoming identify request...")
@@ -98,8 +98,8 @@ async def run(port: int, destination: str) -> None:
 def main() -> None:
     description = """
     This program demonstrates the libp2p identify protocol.
-    First run 'python identify.py -p <PORT>' to start a listener.
-    Then run 'python identify.py -p <ANOTHER_PORT> -d <DESTINATION>'
+    First run identify-demo -p <PORT>' to start a listener.
+    Then run 'identify-demo <ANOTHER_PORT> -d <DESTINATION>'
     where <DESTINATION> is the multiaddress shown by the listener.
     """
 
