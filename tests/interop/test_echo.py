@@ -16,7 +16,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
     info_from_p2p_addr,
 )
-from libp2p.tools.factories import (
+from tests.factories import (
     HostFactory,
 )
 from tests.utils.interop.envs import (
