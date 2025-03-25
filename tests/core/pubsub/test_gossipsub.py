@@ -13,7 +13,7 @@ from libp2p.tools.pubsub.utils import (
 from libp2p.tools.utils import (
     connect,
 )
-from tests.factories import (
+from tests.utils.factories import (
     IDFactory,
     PubsubFactory,
 )

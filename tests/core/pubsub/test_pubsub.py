@@ -30,7 +30,7 @@ from libp2p.tools.utils import (
 from libp2p.utils import (
     encode_varint_prefixed,
 )
-from tests.factories import (
+from tests.utils.factories import (
     IDFactory,
     PubsubFactory,
     net_stream_pair_factory,

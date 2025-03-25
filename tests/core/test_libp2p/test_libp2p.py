@@ -14,7 +14,7 @@ from libp2p.tools.utils import (
     connect,
     create_echo_stream_handler,
 )
-from tests.factories import (
+from tests.utils.factories import (
     HostFactory,
 )
 

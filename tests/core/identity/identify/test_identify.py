@@ -15,7 +15,7 @@ from libp2p.identity.identify.identify import (
 from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
-from tests.factories import (
+from tests.utils.factories import (
     host_pair_factory,
 )
 

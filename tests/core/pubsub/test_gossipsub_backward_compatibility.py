@@ -9,7 +9,7 @@ from libp2p.tools.pubsub.floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,
 )
-from tests.factories import (
+from tests.utils.factories import (
     PubsubFactory,
 )
 

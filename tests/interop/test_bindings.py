@@ -1,7 +1,7 @@
 import pytest
 import trio
 
-from tests.factories import (
+from tests.utils.factories import (
     HostFactory,
 )
 from tests.utils.interop.utils import (
