@@ -22,7 +22,7 @@ from libp2p.pubsub.subscription import (
 from libp2p.utils import (
     read_varint_prefixed_bytes,
 )
-from tests.factories import (
+from tests.utils.factories import (
     PubsubFactory,
 )
 from tests.utils.interop.utils import (
