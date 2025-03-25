@@ -53,8 +53,8 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
-from libp2p.tools.async_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service import (
+    background_anyio_service,
 )
 
 if TYPE_CHECKING:
@@ -157,7 +157,7 @@ class BasicHost(IHost):
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
         network = self.get_network()
-        async with background_trio_service(network):
+        async with background_anyio_service(network):
             await network.listen(*listen_addrs)
             yield
 

@@ -1,7 +1,7 @@
 from collections.abc import (
-    AsyncIterator,
     Sequence,
 )
+from collections.abc import AsyncIterator as AsyncIteratorABC
 from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
@@ -12,11 +12,11 @@ from typing import (
     cast,
 )
 
+import anyio
 import factory
 from multiaddr import (
     Multiaddr,
 )
-import trio
 
 from libp2p import (
     generate_new_rsa_identity,
@@ -98,8 +98,12 @@ from libp2p.stream_muxer.mplex.mplex import (
 from libp2p.stream_muxer.mplex.mplex_stream import (
     MplexStream,
 )
-from libp2p.tools.async_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service import (
+    AnyIOManager,
+    background_anyio_service,
+)
+from libp2p.tools.anyio_service.abc import (
+    ServiceAPI,
 )
 from libp2p.tools.constants import (
     FLOODSUB_PROTOCOL_ID,
@@ -125,13 +129,13 @@ def default_key_pair_factory() -> KeyPair:
     return generate_new_rsa_identity()
 
 
-class IDFactory(factory.Factory):
+class IDFactory(factory.Factory[ID]):
     class Meta:
         model = ID
 
     peer_id_bytes = factory.LazyFunction(
         lambda: generate_peer_id_from(default_key_pair_factory())
-    )
+    )  # type: ignore
 
 
 def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> PeerStore:
@@ -173,7 +177,7 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 
 
 def security_options_factory_factory(
-    protocol_id: TProtocol = None,
+    protocol_id: TProtocol | None = None,
 ) -> Callable[[KeyPair], TSecurityOptions]:
     if protocol_id is None:
         protocol_id = DEFAULT_SECURITY_PROTOCOL_ID
@@ -202,32 +206,31 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 
 
 @asynccontextmanager
-async def raw_conn_factory(
-    nursery: trio.Nursery,
-) -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
-    conn_0 = None
-    conn_1 = None
-    event = trio.Event()
+async def raw_conn_factory() -> AsyncIteratorABC[tuple[IRawConnection, IRawConnection]]:
+    conn_0: IRawConnection | None = None
+    conn_1: IRawConnection | None = None
+    event = anyio.Event()
 
     async def tcp_stream_handler(stream: ReadWriteCloser) -> None:
         nonlocal conn_1
         conn_1 = RawConnection(stream, initiator=False)
         event.set()
-        await trio.sleep_forever()
+        await anyio.sleep_forever()
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    # AnyIO doesn’t require nursery
+    await listener.listen(LISTEN_MADDR)  # type: ignore[call-arg]
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
+    if conn_0 is None or conn_1 is None:
+        raise ValueError("Connections not established")
     yield conn_0, conn_1
 
 
 @asynccontextmanager
-async def noise_conn_factory(
-    nursery: trio.Nursery,
-) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+async def noise_conn_factory() -> AsyncIteratorABC[tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
     )
@@ -235,8 +238,8 @@ async def noise_conn_factory(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
     )
 
-    local_secure_conn: ISecureConn = None
-    remote_secure_conn: ISecureConn = None
+    local_secure_conn: ISecureConn | None = None
+    remote_secure_conn: ISecureConn | None = None
 
     async def upgrade_local_conn() -> None:
         nonlocal local_secure_conn
@@ -248,112 +251,78 @@ async def noise_conn_factory(
         nonlocal remote_secure_conn
         remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
 
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         local_conn, remote_conn = conns
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(upgrade_local_conn)
-            nursery.start_soon(upgrade_remote_conn)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(upgrade_local_conn)
+            tg.start_soon(upgrade_remote_conn)
+            await anyio.sleep(0.1)
         if local_secure_conn is None or remote_secure_conn is None:
             raise Exception(
-                "local or remote secure conn has not been successfully upgraded"
-                f"local_secure_conn={local_secure_conn}, "
-                f"remote_secure_conn={remote_secure_conn}"
+                f"Failed to upgrade:"
+                f"local={local_secure_conn}, remote={remote_secure_conn}"
             )
         yield local_secure_conn, remote_secure_conn
 
 
-class SwarmFactory(factory.Factory):
+class SwarmService(ServiceAPI):
+    def __init__(
+        self,
+        key_pair: KeyPair,
+        security_protocol: TProtocol,
+        muxer_opt: TMuxerOptions,
+    ) -> None:
+        self.peer_id = generate_peer_id_from(key_pair)
+        self.peerstore = initialize_peerstore_with_our_keypair(self.peer_id, key_pair)
+        self.upgrader = TransportUpgrader(
+            security_options_factory_factory(security_protocol)(key_pair),
+            muxer_opt,
+        )
+        self.transport = TCP()
+        self.swarm = Swarm(self.peer_id, self.peerstore, self.upgrader, self.transport)
+        self.manager: AnyIOManager | None = None
+
+    async def run(self) -> None:
+        while self.manager and self.manager.is_running:
+            await anyio.sleep(0.1)
+
+    def get_manager(self) -> AnyIOManager | None:
+        return self.manager
+
+
+class SwarmFactory(factory.Factory[Swarm]):
     class Meta:
         model = Swarm
 
-    class Params:
-        key_pair = factory.LazyFunction(default_key_pair_factory)
-        security_protocol = DEFAULT_SECURITY_PROTOCOL_ID
-        muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
-
-    peer_id = factory.LazyAttribute(lambda o: generate_peer_id_from(o.key_pair))
-    peerstore = factory.LazyAttribute(
-        lambda o: initialize_peerstore_with_our_keypair(o.peer_id, o.key_pair)
-    )
-    upgrader = factory.LazyAttribute(
-        lambda o: TransportUpgrader(
-            (security_options_factory_factory(o.security_protocol))(o.key_pair),
-            o.muxer_opt,
+    @classmethod
+    def _create(cls, model_class: type[Swarm], **kwargs: Any) -> Swarm:
+        key_pair = kwargs.get("key_pair", default_key_pair_factory())
+        security_protocol = kwargs.get(
+            "security_protocol", DEFAULT_SECURITY_PROTOCOL_ID
         )
-    )
-    transport = factory.LazyFunction(TCP)
-
-    @classmethod
-    @asynccontextmanager
-    async def create_and_listen(
-        cls,
-        key_pair: KeyPair = None,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[Swarm]:
-        # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
-        # an argument explicitly with `None`. If an argument is `None`, we don't pass it
-        # to `factory.Factory.__init__`, in order to let the function initialize it.
-        optional_kwargs: dict[str, Any] = {}
-        if key_pair is not None:
-            optional_kwargs["key_pair"] = key_pair
-        if security_protocol is not None:
-            optional_kwargs["security_protocol"] = security_protocol
-        if muxer_opt is not None:
-            optional_kwargs["muxer_opt"] = muxer_opt
-        swarm = cls(**optional_kwargs)
-        async with background_trio_service(swarm):
-            await swarm.listen(LISTEN_MADDR)
-            yield swarm
-
-    @classmethod
-    @asynccontextmanager
-    async def create_batch_and_listen(
-        cls,
-        number: int,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[tuple[Swarm, ...]]:
-        async with AsyncExitStack() as stack:
-            ctx_mgrs = [
-                await stack.enter_async_context(
-                    cls.create_and_listen(
-                        security_protocol=security_protocol, muxer_opt=muxer_opt
-                    )
-                )
-                for _ in range(number)
-            ]
-            yield tuple(ctx_mgrs)
+        muxer_opt = kwargs.get("muxer_opt", default_muxer_transport_factory())
+        service = SwarmService(key_pair, security_protocol, muxer_opt)
+        return service.swarm
 
 
-class HostFactory(factory.Factory):
+class HostFactory(factory.Factory[BasicHost]):
     class Meta:
         model = BasicHost
 
-    class Params:
-        key_pair = factory.LazyFunction(default_key_pair_factory)
-        security_protocol: TProtocol = None
-        muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
-
-    network = factory.LazyAttribute(
-        lambda o: SwarmFactory(
-            security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
-        )
-    )
-
     @classmethod
-    @asynccontextmanager
-    async def create_batch_and_listen(
-        cls,
-        number: int,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[tuple[BasicHost, ...]]:
-        async with SwarmFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
-        ) as swarms:
-            hosts = tuple(BasicHost(swarm) for swarm in swarms)
-            yield hosts
+    def _create(cls, model_class: type[BasicHost], **kwargs: Any) -> BasicHost:
+        key_pair = kwargs.get("key_pair", default_key_pair_factory())
+        security_protocol = kwargs.get(
+            "security_protocol", DEFAULT_SECURITY_PROTOCOL_ID
+        )
+        muxer_opt = kwargs.get("muxer_opt", default_muxer_transport_factory())
+        swarm = SwarmFactory._create(
+            Swarm,
+            key_pair=key_pair,
+            security_protocol=security_protocol,
+            muxer_opt=muxer_opt,
+        )
+        return BasicHost(swarm)
 
 
 class DummyRouter(IPeerRouting):
@@ -365,55 +334,40 @@ class DummyRouter(IPeerRouting):
     def _add_peer(self, peer_id: ID, addrs: list[Multiaddr]) -> None:
         self._routing_table[peer_id] = PeerInfo(peer_id, addrs)
 
-    async def find_peer(self, peer_id: ID) -> PeerInfo:
-        await trio.lowlevel.checkpoint()
-        return self._routing_table.get(peer_id, None)
+    async def find_peer(self, peer_id: ID) -> PeerInfo | None:
+        await anyio.sleep(0)
+        return self._routing_table.get(peer_id)
 
 
-class RoutedHostFactory(factory.Factory):
+class RoutedHostFactory(factory.Factory[RoutedHost]):
     class Meta:
         model = RoutedHost
 
-    class Params:
-        key_pair = factory.LazyFunction(default_key_pair_factory)
-        security_protocol: TProtocol = None
-        muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
-
-    network = factory.LazyAttribute(
-        lambda o: HostFactory(
-            security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
-        ).get_network()
-    )
-    router = factory.LazyFunction(DummyRouter)
-
     @classmethod
-    @asynccontextmanager
-    async def create_batch_and_listen(
-        cls,
-        number: int,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-    ) -> AsyncIterator[tuple[RoutedHost, ...]]:
-        routing_table = DummyRouter()
-        async with HostFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
-        ) as hosts:
-            for host in hosts:
-                routing_table._add_peer(host.get_id(), host.get_addrs())
-            routed_hosts = tuple(
-                RoutedHost(host.get_network(), routing_table) for host in hosts
-            )
-            yield routed_hosts
+    def _create(cls, model_class: type[RoutedHost], **kwargs: Any) -> RoutedHost:
+        key_pair = kwargs.get("key_pair", default_key_pair_factory())
+        security_protocol = kwargs.get(
+            "security_protocol", DEFAULT_SECURITY_PROTOCOL_ID
+        )
+        muxer_opt = kwargs.get("muxer_opt", default_muxer_transport_factory())
+        host = HostFactory._create(
+            BasicHost,
+            key_pair=key_pair,
+            security_protocol=security_protocol,
+            muxer_opt=muxer_opt,
+        )
+        router = DummyRouter()
+        return RoutedHost(host.get_network(), router)
 
 
-class FloodsubFactory(factory.Factory):
+class FloodsubFactory(factory.Factory[FloodSub]):
     class Meta:
         model = FloodSub
 
     protocols = (FLOODSUB_PROTOCOL_ID,)
 
 
-class GossipsubFactory(factory.Factory):
+class GossipsubFactory(factory.Factory[GossipSub]):
     class Meta:
         model = GossipSub
 
@@ -427,196 +381,262 @@ class GossipsubFactory(factory.Factory):
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
 
 
-class PubsubFactory(factory.Factory):
+class PubsubService(ServiceAPI):
+    def __init__(
+        self,
+        host: IHost,
+        router: IPubsubRouter | None = None,
+        cache_size: int | None = None,
+        strict_signing: bool = False,
+    ) -> None:
+        self.pubsub = Pubsub(host, router, cache_size, strict_signing)
+        self.manager: AnyIOManager | None = None
+
+    async def run(self) -> None:
+        while (
+            self.manager and self.manager.is_running
+        ):  # Fixed nested manager reference
+            await anyio.sleep(0.1)
+
+    def get_manager(self) -> AnyIOManager | None:
+        return self.manager
+
+    async def wait_until_ready(self) -> None:
+        await anyio.sleep(0.1)
+
+
+class PubsubFactory(factory.Factory[Pubsub]):
     class Meta:
         model = Pubsub
 
-    host = factory.SubFactory(HostFactory)
-    router = None
-    cache_size = None
-    strict_signing = False
-
     @classmethod
-    @asynccontextmanager
-    async def create_and_start(
-        cls,
-        host: IHost,
-        router: IPubsubRouter,
-        cache_size: int,
-        seen_ttl: int,
-        sweep_interval: int,
-        strict_signing: bool,
-        msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
-    ) -> AsyncIterator[Pubsub]:
-        pubsub = cls(
-            host=host,
-            router=router,
-            cache_size=cache_size,
-            seen_ttl=seen_ttl,
-            sweep_interval=sweep_interval,
-            strict_signing=strict_signing,
-            msg_id_constructor=msg_id_constructor,
+    def _create(cls, model_class: type[Pubsub], **kwargs: Any) -> Pubsub:
+        host = kwargs["host"]
+        router = kwargs.get("router")
+        cache_size = kwargs.get("cache_size")
+        strict_signing = kwargs.get("strict_signing", False)
+        service = PubsubService(host, router, cache_size, strict_signing)
+        return service.pubsub
+
+
+@asynccontextmanager
+async def swarm_create_and_listen(
+    key_pair: KeyPair | None = None,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+) -> AsyncIteratorABC[Swarm]:
+    key_pair = key_pair or default_key_pair_factory()
+    security_protocol = security_protocol or DEFAULT_SECURITY_PROTOCOL_ID
+    muxer_opt = muxer_opt or default_muxer_transport_factory()
+    service = SwarmService(key_pair, security_protocol, muxer_opt)
+    swarm = service.swarm
+    async with background_anyio_service(service):
+        await swarm.listen(LISTEN_MADDR)
+        yield swarm
+
+
+@asynccontextmanager
+async def swarm_batch_and_listen(
+    number: int,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+) -> AsyncIteratorABC[tuple[Swarm, ...]]:
+    async with AsyncExitStack() as stack:
+        ctx_mgrs = [
+            await stack.enter_async_context(
+                swarm_create_and_listen(
+                    security_protocol=security_protocol, muxer_opt=muxer_opt
+                )
+            )
+            for _ in range(number)
+        ]
+        yield tuple(ctx_mgrs)
+
+
+@asynccontextmanager
+async def host_batch_and_listen(
+    number: int,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+) -> AsyncIteratorABC[tuple[BasicHost, ...]]:
+    async with swarm_batch_and_listen(number, security_protocol, muxer_opt) as swarms:
+        hosts = tuple(BasicHost(swarm) for swarm in swarms)
+        yield hosts
+
+
+@asynccontextmanager
+async def routed_host_batch_and_listen(
+    number: int,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+) -> AsyncIteratorABC[tuple[RoutedHost, ...]]:
+    routing_table = DummyRouter()
+    async with host_batch_and_listen(number, security_protocol, muxer_opt) as hosts:
+        for host in hosts:
+            routing_table._add_peer(host.get_id(), host.get_addrs())
+        routed_hosts = tuple(
+            RoutedHost(host.get_network(), routing_table) for host in hosts
         )
-        async with background_trio_service(pubsub):
-            await pubsub.wait_until_ready()
-            yield pubsub
+        yield routed_hosts
 
-    @classmethod
-    @asynccontextmanager
-    async def _create_batch_with_router(
-        cls,
-        number: int,
-        routers: Sequence[IPubsubRouter],
-        cache_size: int = None,
-        seen_ttl: int = 120,
-        sweep_interval: int = 60,
-        strict_signing: bool = False,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-        msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
-    ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        async with HostFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
-        ) as hosts:
-            # Pubsubs should exit before hosts
-            async with AsyncExitStack() as stack:
-                pubsubs = [
-                    await stack.enter_async_context(
-                        cls.create_and_start(
-                            host,
-                            router,
-                            cache_size,
-                            seen_ttl,
-                            sweep_interval,
-                            strict_signing,
-                            msg_id_constructor,
-                        )
+
+@asynccontextmanager
+async def pubsub_create_and_start(
+    host: IHost,
+    router: IPubsubRouter,
+    cache_size: int | None,
+    seen_ttl: int,
+    sweep_interval: int,
+    strict_signing: bool,
+    msg_id_constructor: Callable[[rpc_pb2.Message], bytes] | None = None,
+) -> AsyncIteratorABC[Pubsub]:
+    service = PubsubService(host, router, cache_size, strict_signing)
+    pubsub = service.pubsub
+    async with background_anyio_service(service):
+        await service.wait_until_ready()
+        yield pubsub
+
+
+@asynccontextmanager
+async def pubsub_batch_with_router(
+    number: int,
+    routers: Sequence[IPubsubRouter],
+    cache_size: int | None = None,
+    seen_ttl: int = 120,
+    sweep_interval: int = 60,
+    strict_signing: bool = False,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+    msg_id_constructor: Callable[[rpc_pb2.Message], bytes] | None = None,
+) -> AsyncIteratorABC[tuple[Pubsub, ...]]:
+    async with host_batch_and_listen(number, security_protocol, muxer_opt) as hosts:
+        async with AsyncExitStack() as stack:
+            pubsubs = [
+                await stack.enter_async_context(
+                    pubsub_create_and_start(
+                        host,
+                        router,
+                        cache_size,
+                        seen_ttl,
+                        sweep_interval,
+                        strict_signing,
+                        msg_id_constructor,
                     )
-                    for host, router in zip(hosts, routers)
-                ]
-                yield tuple(pubsubs)
+                )
+                for host, router in zip(hosts, routers)
+            ]
+            yield tuple(pubsubs)
 
-    @classmethod
-    @asynccontextmanager
-    async def create_batch_with_floodsub(
-        cls,
-        number: int,
-        cache_size: int = None,
-        seen_ttl: int = 120,
-        sweep_interval: int = 60,
-        strict_signing: bool = False,
-        protocols: Sequence[TProtocol] = None,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-        msg_id_constructor: Callable[
-            [rpc_pb2.Message], bytes
-        ] = get_peer_and_seqno_msg_id,
-    ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        if protocols is not None:
-            floodsubs = FloodsubFactory.create_batch(number, protocols=list(protocols))
-        else:
-            floodsubs = FloodsubFactory.create_batch(number)
-        async with cls._create_batch_with_router(
+
+@asynccontextmanager
+async def pubsub_batch_with_floodsub(
+    number: int,
+    cache_size: int | None = None,
+    seen_ttl: int = 120,
+    sweep_interval: int = 60,
+    strict_signing: bool = False,
+    protocols: Sequence[TProtocol] | None = None,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+    msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = get_peer_and_seqno_msg_id,
+) -> AsyncIteratorABC[tuple[Pubsub, ...]]:
+    if protocols is not None:
+        floodsubs = FloodsubFactory.create_batch(number, protocols=list(protocols))
+    else:
+        floodsubs = FloodsubFactory.create_batch(number)
+    async with pubsub_batch_with_router(
+        number,
+        floodsubs,
+        cache_size,
+        seen_ttl,
+        sweep_interval,
+        strict_signing,
+        security_protocol,
+        muxer_opt,
+        msg_id_constructor,
+    ) as pubsubs:
+        yield pubsubs
+
+
+@asynccontextmanager
+async def pubsub_batch_with_gossipsub(
+    number: int,
+    *,
+    cache_size: int | None = None,
+    strict_signing: bool = False,
+    protocols: Sequence[TProtocol] | None = None,
+    degree: int = GOSSIPSUB_PARAMS.degree,
+    degree_low: int = GOSSIPSUB_PARAMS.degree_low,
+    degree_high: int = GOSSIPSUB_PARAMS.degree_high,
+    time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
+    gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
+    gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
+    heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
+    heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
+    security_protocol: TProtocol | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+    msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = get_peer_and_seqno_msg_id,
+) -> AsyncIteratorABC[tuple[Pubsub, ...]]:
+    if protocols is not None:
+        gossipsubs = GossipsubFactory.create_batch(
             number,
-            floodsubs,
-            cache_size,
-            seen_ttl,
-            sweep_interval,
-            strict_signing,
-            security_protocol=security_protocol,
-            muxer_opt=muxer_opt,
-            msg_id_constructor=msg_id_constructor,
-        ) as pubsubs:
+            protocols=protocols,
+            degree=degree,
+            degree_low=degree_low,
+            degree_high=degree_high,
+            time_to_live=time_to_live,
+            gossip_window=gossip_window,
+            heartbeat_interval=heartbeat_interval,
+        )
+    else:
+        gossipsubs = GossipsubFactory.create_batch(
+            number,
+            degree=degree,
+            degree_low=degree_low,
+            degree_high=degree_high,
+            gossip_window=gossip_window,
+            heartbeat_interval=heartbeat_interval,
+        )
+    async with pubsub_batch_with_router(
+        number,
+        gossipsubs,
+        cache_size,
+        seen_ttl=120,
+        sweep_interval=60,
+        strict_signing=strict_signing,
+        security_protocol=security_protocol,
+        muxer_opt=muxer_opt,
+        msg_id_constructor=msg_id_constructor,
+    ) as pubsubs:
+        async with AsyncExitStack() as stack:
+            for router in gossipsubs:
+                await stack.enter_async_context(background_anyio_service(router))
             yield pubsubs
-
-    @classmethod
-    @asynccontextmanager
-    async def create_batch_with_gossipsub(
-        cls,
-        number: int,
-        *,
-        cache_size: int = None,
-        strict_signing: bool = False,
-        protocols: Sequence[TProtocol] = None,
-        degree: int = GOSSIPSUB_PARAMS.degree,
-        degree_low: int = GOSSIPSUB_PARAMS.degree_low,
-        degree_high: int = GOSSIPSUB_PARAMS.degree_high,
-        time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
-        gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
-        gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
-        heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
-        heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
-        security_protocol: TProtocol = None,
-        muxer_opt: TMuxerOptions = None,
-        msg_id_constructor: Callable[
-            [rpc_pb2.Message], bytes
-        ] = get_peer_and_seqno_msg_id,
-    ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        if protocols is not None:
-            gossipsubs = GossipsubFactory.create_batch(
-                number,
-                protocols=protocols,
-                degree=degree,
-                degree_low=degree_low,
-                degree_high=degree_high,
-                time_to_live=time_to_live,
-                gossip_window=gossip_window,
-                heartbeat_interval=heartbeat_interval,
-            )
-        else:
-            gossipsubs = GossipsubFactory.create_batch(
-                number,
-                degree=degree,
-                degree_low=degree_low,
-                degree_high=degree_high,
-                gossip_window=gossip_window,
-                heartbeat_interval=heartbeat_interval,
-            )
-
-        async with cls._create_batch_with_router(
-            number,
-            gossipsubs,
-            cache_size,
-            strict_signing,
-            security_protocol=security_protocol,
-            muxer_opt=muxer_opt,
-            msg_id_constructor=msg_id_constructor,
-        ) as pubsubs:
-            async with AsyncExitStack() as stack:
-                for router in gossipsubs:
-                    await stack.enter_async_context(background_trio_service(router))
-                yield pubsubs
 
 
 @asynccontextmanager
 async def swarm_pair_factory(
-    security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[tuple[Swarm, Swarm]]:
-    async with SwarmFactory.create_batch_and_listen(
-        2, security_protocol=security_protocol, muxer_opt=muxer_opt
-    ) as swarms:
+    security_protocol: TProtocol | None = None, muxer_opt: TMuxerOptions | None = None
+) -> AsyncIteratorABC[tuple[Swarm, Swarm]]:
+    async with swarm_batch_and_listen(2, security_protocol, muxer_opt) as swarms:
         await connect_swarm(swarms[0], swarms[1])
         yield swarms[0], swarms[1]
 
 
 @asynccontextmanager
 async def host_pair_factory(
-    security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[tuple[BasicHost, BasicHost]]:
-    async with HostFactory.create_batch_and_listen(
-        2, security_protocol=security_protocol, muxer_opt=muxer_opt
-    ) as hosts:
+    security_protocol: TProtocol | None = None, muxer_opt: TMuxerOptions | None = None
+) -> AsyncIteratorABC[tuple[BasicHost, BasicHost]]:
+    async with host_batch_and_listen(2, security_protocol, muxer_opt) as hosts:
         await connect(hosts[0], hosts[1])
         yield hosts[0], hosts[1]
 
 
 @asynccontextmanager
 async def swarm_conn_pair_factory(
-    security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[tuple[SwarmConn, SwarmConn]]:
-    async with swarm_pair_factory(
-        security_protocol=security_protocol, muxer_opt=muxer_opt
-    ) as swarms:
+    security_protocol: TProtocol | None = None, muxer_opt: TMuxerOptions | None = None
+) -> AsyncIteratorABC[tuple[SwarmConn, SwarmConn]]:
+    async with swarm_pair_factory(security_protocol, muxer_opt) as swarms:
         conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
         conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
         yield cast(SwarmConn, conn_0), cast(SwarmConn, conn_1)
@@ -624,28 +644,24 @@ async def swarm_conn_pair_factory(
 
 @asynccontextmanager
 async def mplex_conn_pair_factory(
-    security_protocol: TProtocol = None,
-) -> AsyncIterator[tuple[Mplex, Mplex]]:
+    security_protocol: TProtocol | None = None,
+) -> AsyncIteratorABC[tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
-        security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
+        security_protocol, default_muxer_transport_factory()
     ) as swarm_pair:
-        yield (
-            cast(Mplex, swarm_pair[0].muxed_conn),
-            cast(Mplex, swarm_pair[1].muxed_conn),
+        yield cast(Mplex, swarm_pair[0].muxed_conn), cast(
+            Mplex, swarm_pair[1].muxed_conn
         )
 
 
 @asynccontextmanager
 async def mplex_stream_pair_factory(
-    security_protocol: TProtocol = None,
-) -> AsyncIterator[tuple[MplexStream, MplexStream]]:
-    async with mplex_conn_pair_factory(
-        security_protocol=security_protocol
-    ) as mplex_conn_pair_info:
+    security_protocol: TProtocol | None = None,
+) -> AsyncIteratorABC[tuple[MplexStream, MplexStream]]:
+    async with mplex_conn_pair_factory(security_protocol) as mplex_conn_pair_info:
         mplex_conn_0, mplex_conn_1 = mplex_conn_pair_info
         stream_0 = cast(MplexStream, await mplex_conn_0.open_stream())
-        await trio.sleep(0.01)
-        stream_1: MplexStream
+        await anyio.sleep(0.01)
         async with mplex_conn_1.streams_lock:
             if len(mplex_conn_1.streams) != 1:
                 raise Exception("Mplex should not have any other stream")
@@ -655,26 +671,21 @@ async def mplex_stream_pair_factory(
 
 @asynccontextmanager
 async def net_stream_pair_factory(
-    security_protocol: TProtocol = None, muxer_opt: TMuxerOptions = None
-) -> AsyncIterator[tuple[INetStream, INetStream]]:
+    security_protocol: TProtocol | None = None, muxer_opt: TMuxerOptions | None = None
+) -> AsyncIteratorABC[tuple[INetStream, INetStream]]:
     protocol_id = TProtocol("/example/id/1")
-
-    stream_1: INetStream
-
-    # Just a proxy, we only care about the stream.
-    # Add a barrier to avoid stream being removed.
-    event_handler_finished = trio.Event()
+    stream_1: INetStream | None = None
+    event_handler_finished = anyio.Event()
 
     async def handler(stream: INetStream) -> None:
         nonlocal stream_1
         stream_1 = stream
         await event_handler_finished.wait()
 
-    async with host_pair_factory(
-        security_protocol=security_protocol, muxer_opt=muxer_opt
-    ) as hosts:
+    async with host_pair_factory(security_protocol, muxer_opt) as hosts:
         hosts[1].set_stream_handler(protocol_id, handler)
-
         stream_0 = await hosts[0].new_stream(hosts[1].get_id(), [protocol_id])
+        if stream_1 is None:
+            raise ValueError("Stream 1 not established")
         yield stream_0, stream_1
         event_handler_finished.set()
