@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     ServiceAPI,
 )
 

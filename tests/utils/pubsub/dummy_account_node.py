@@ -12,13 +12,14 @@ from libp2p.abc import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
-    background_trio_service,
+    background_anyio_service,
 )
 from tests.utils.factories import (
     PubsubFactory,
 )
+from tests.factories import pubsub_batch_with_floodsub  # Updated import
 
 CRYPTO_TOPIC = "ethereum"
 
@@ -64,12 +65,12 @@ class DummyAccountNode(Service):
         We use create as this serves as a factory function and allows us
         to use async await, unlike the init function
         """
-        async with PubsubFactory.create_batch_with_floodsub(number) as pubsubs:
+        async with pubsub_batch_with_floodsub(number) as pubsubs:  # Updated call
             async with AsyncExitStack() as stack:
-                dummy_acount_nodes = tuple(cls(pubsub) for pubsub in pubsubs)
-                for node in dummy_acount_nodes:
-                    await stack.enter_async_context(background_trio_service(node))
-                yield dummy_acount_nodes
+                dummy_account_nodes = tuple(cls(pubsub) for pubsub in pubsubs)
+                for node in dummy_account_nodes:
+                    await stack.enter_async_context(background_anyio_service(node))
+                yield dummy_account_nodes
 
     async def handle_incoming_msgs(self) -> None:
         """Handle all incoming messages on the CRYPTO_TOPIC from peers."""

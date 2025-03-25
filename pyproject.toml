@@ -71,6 +71,8 @@ log_date_format = "%m-%d %H:%M:%S"
 log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
 markers = ["slow: mark test as slow"]
 xfail_strict = true
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.towncrier]
 # Read https://github.com/ethereum/py-libp2p/blob/main/newsfragments/README.md for instructions
