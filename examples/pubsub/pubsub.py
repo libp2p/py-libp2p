@@ -54,9 +54,9 @@ security_options_factory = security_options_factory_factory(NOISE_PROTOCOL_ID)
 security_options = security_options_factory(key_pair)
 
 
-async def receive_loop(subscription):
+async def receive_loop(subscription, termination_event):
     logger.debug("Starting receive loop")
-    while True:
+    while not termination_event.is_set():
         try:
             message = await subscription.get()
             logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
@@ -66,16 +66,16 @@ async def receive_loop(subscription):
             await trio.sleep(1)
 
 
-async def publish_loop(pubsub, topic):
+async def publish_loop(pubsub, topic, termination_event):
     """Continuously read input from user and publish to the topic."""
     logger.debug("Starting publish loop...")
     print("Type messages to send (press Enter to send):")
-    while True:
+    while not termination_event.is_set():
         try:
             # Use trio's run_sync_in_worker_thread to avoid blocking the event loop
             message = await trio.to_thread.run_sync(input)
             if message.lower() == "quit":
-                print("Exiting publish loop.")
+                termination_event.set()  # Signal termination
                 break
             if message:
                 logger.debug(f"Publishing message: {message}")
@@ -93,7 +93,7 @@ def find_free_port():
         return s.getsockname()[1]
 
 
-async def monitor_peer_topics(pubsub, nursery):
+async def monitor_peer_topics(pubsub, nursery, termination_event):
     """
     Monitor for new topics that peers are subscribed to and
     automatically subscribe the server to those topics.
@@ -101,7 +101,7 @@ async def monitor_peer_topics(pubsub, nursery):
     # Keep track of topics we've already subscribed to
     subscribed_topics = set()
 
-    while True:
+    while not termination_event.is_set():
         # Check for new topics in peer_topics
         for topic in pubsub.peer_topics.keys():
             if topic not in subscribed_topics:
@@ -109,7 +109,7 @@ async def monitor_peer_topics(pubsub, nursery):
                 subscription = await pubsub.subscribe(topic)
                 subscribed_topics.add(topic)
                 # Start a receive loop for this topic
-                nursery.start_soon(receive_loop, subscription)
+                nursery.start_soon(receive_loop, subscription, termination_event)
 
         # Check every 2 seconds for new topics
         await trio.sleep(2)
@@ -151,6 +151,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     )
 
     pubsub = Pubsub(host, gossipsub)
+    termination_event = trio.Event()  # Event to signal termination
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         logger.info(f"Node started with peer ID: {host.get_id()}")
         logger.info(f"Listening on: {listen_addr}")
@@ -175,11 +176,13 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     logger.info("Waiting for peers...")
 
                     # Start topic monitoring to auto-subscribe to client topics
-                    nursery.start_soon(monitor_peer_topics, pubsub, nursery)
+                    nursery.start_soon(
+                        monitor_peer_topics, pubsub, nursery, termination_event
+                    )
 
                     # Start message publish and receive loops
-                    nursery.start_soon(receive_loop, subscription)
-                    nursery.start_soon(publish_loop, pubsub, topic)
+                    nursery.start_soon(receive_loop, subscription, termination_event)
+                    nursery.start_soon(publish_loop, pubsub, topic, termination_event)
                 else:
                     # Client mode
                     maddr = multiaddr.Multiaddr(destination)
@@ -210,13 +213,22 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                             logger.debug(f"Peer protocols: {peer_protocols}")
 
                         # Start the loops
-                        nursery.start_soon(receive_loop, subscription)
-                        nursery.start_soon(publish_loop, pubsub, topic)
+                        nursery.start_soon(
+                            receive_loop, subscription, termination_event
+                        )
+                        nursery.start_soon(
+                            publish_loop, pubsub, topic, termination_event
+                        )
                     except Exception:
                         logger.exception(f"Failed to connect to peer: {info.peer_id}")
                         return
 
-                await trio.sleep_forever()
+                await termination_event.wait()  # Wait for termination signal
+
+        # Ensure all tasks are completed before exiting
+        nursery.cancel_scope.cancel()
+
+    print("Application shutdown complete")  # Print shutdown message
 
 
 def main() -> None:
