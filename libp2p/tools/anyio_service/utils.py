@@ -13,11 +13,9 @@ from typing import (
 
 import anyio
 
-from .abc import (
+from .abc import (  # Add ManagerAPI for type hint
+    ManagerAPI,
     ServiceAPI,
-)
-from .manager import (
-    AnyIOManager,
 )
 
 TFunc = TypeVar("TFunc", bound=Callable[..., Any])
@@ -35,13 +33,21 @@ class SimpleService(ServiceAPI):
         self._service_fn = service_fn
         self._args = args
         self._kwargs = kwargs
-        self.manager: AnyIOManager | None = None
+        self._manager: ManagerAPI | None = None  # Use ManagerAPI for type safety
 
     async def run(self) -> None:
         await self._service_fn(*self._args, **self._kwargs)
 
-    def get_manager(self) -> AnyIOManager | None:
-        return self.manager
+    def get_manager(self) -> ManagerAPI | None:
+        return self._manager
+
+    @property
+    def manager(self) -> ManagerAPI | None:
+        return self._manager
+
+    @manager.setter
+    def manager(self, value: ManagerAPI | None) -> None:
+        self._manager = value
 
 
 def as_service(service_fn: TFunc) -> Callable[..., SimpleService]:
@@ -71,15 +77,17 @@ def get_task_name(value: Any, explicit_name: str | None = None) -> str:
         return value_cls.__name__
 
     try:
-        return value.__name__  # No need for type: ignore since we catch AttributeError
+        return value.__name__
     except AttributeError:
         return repr(value)
 
 
 async def background_anyio_service(
     service: TService,
-) -> AsyncGenerator[AnyIOManager, None]:
+) -> AsyncGenerator[ManagerAPI, None]:  # Use ManagerAPI for consistency
     """Context manager to run an AnyIO-based service in the background."""
+    from .manager import AnyIOManager  # Lazy import
+
     manager = AnyIOManager(service)
     async with anyio.create_task_group() as task_group:
         task_group.start_soon(manager.run)

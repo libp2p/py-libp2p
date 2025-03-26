@@ -1,9 +1,8 @@
 """
-Abstract base classes for the anyio_service implementation.
+Abstract base classes for the async_service implementation.
 """
 
 from abc import (
-    ABC,
     abstractmethod,
 )
 from collections.abc import (
@@ -12,6 +11,8 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Protocol,
+    runtime_checkable,
 )
 
 from .stats import (
@@ -19,27 +20,8 @@ from .stats import (
 )
 
 
-class ServiceAPI(ABC):
-    """
-    Service API defining the interface for all services.
-    """
-
-    @abstractmethod
-    def get_manager(self) -> "ManagerAPI":
-        """
-        Get the manager for this service.
-        """
-        ...
-
-    @abstractmethod
-    async def run(self) -> None:
-        """
-        Primary entry point for service logic.
-        """
-        ...
-
-
-class ManagerAPI(ABC):
+@runtime_checkable
+class ManagerAPI(Protocol):
     """
     Manager API defining the interface for service managers.
     """
@@ -112,7 +94,41 @@ class ManagerAPI(ABC):
         ...
 
 
-class InternalManagerAPI(ManagerAPI):
+@runtime_checkable
+class ServiceAPI(Protocol):
+    """
+    Service API defining the interface for all services.
+    """
+
+    @abstractmethod
+    def get_manager(self) -> ManagerAPI | None:  # No string literal needed now
+        """
+        Get the manager for this service.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def manager(self) -> ManagerAPI | None:  # Add manager property
+        """Return the manager overseeing this service."""
+        ...
+
+    @manager.setter
+    @abstractmethod
+    def manager(self, value: ManagerAPI | None) -> None:  # Add manager setter
+        """Set the manager overseeing this service."""
+        ...
+
+    @abstractmethod
+    async def run(self) -> None:
+        """
+        Primary entry point for service logic.
+        """
+        ...
+
+
+@runtime_checkable
+class InternalManagerAPI(ManagerAPI, Protocol):
     """
     Internal manager API with task scheduling capabilities.
     """
@@ -123,28 +139,34 @@ class InternalManagerAPI(ManagerAPI):
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
         daemon: bool = False,
-        name: str = None
+        name: str | None = None  # Fix: Optional str
     ) -> None:
         """Run a task in the background."""
         ...
 
     @abstractmethod
     def run_daemon_task(
-        self, async_fn: Callable[..., Awaitable[Any]], *args: Any, name: str = None
+        self,
+        async_fn: Callable[..., Awaitable[Any]],
+        *args: Any,
+        name: str | None = None  # Fix: Optional str
     ) -> None:
         """Run a daemon task in the background."""
         ...
 
     @abstractmethod
     def run_child_service(
-        self, service: "ServiceAPI", daemon: bool = False, name: str = None
+        self,
+        service: ServiceAPI,
+        daemon: bool = False,
+        name: str | None = None,  # Fix: Optional str
     ) -> ManagerAPI:
         """Run a child service in the background."""
         ...
 
     @abstractmethod
     def run_daemon_child_service(
-        self, service: "ServiceAPI", name: str = None
+        self, service: ServiceAPI, name: str | None = None  # Fix: Optional str
     ) -> ManagerAPI:
         """Run a daemon child service in the background."""
         ...

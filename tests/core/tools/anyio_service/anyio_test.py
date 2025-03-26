@@ -22,6 +22,7 @@ class CountingService(Service):
     """A simple service that counts up on a timer."""
 
     def __init__(self, count_interval: float = 0.01):
+        super().__init__()
         self.count_interval = count_interval
         self.count = 0
         self.paused = False
@@ -97,6 +98,7 @@ async def test_service_error_propagation():
 async def test_nested_service_error_propagation():
     class ParentService(Service):
         def __init__(self):
+            super().__init__()
             self.child = CountingService()
             self.child.error_at = 5
 
@@ -236,6 +238,7 @@ async def test_resource_cleanup_under_load():
 
     class ResourceService(Service):
         def __init__(self):
+            super().__init__()
             self.resources: set[int] = set()
             self.max_resources = 0
             self.all_allocated: set[int] = set()
@@ -291,6 +294,7 @@ async def test_rapid_start_stop():
 async def test_stress_nested_services():
     class NestedService(Service):
         def __init__(self, depth: int, max_depth: int):
+            super().__init__()
             self.depth = depth
             self.max_depth = max_depth
             self.child = None
@@ -324,6 +328,7 @@ async def test_stress_nested_services():
 async def test_concurrent_task_cancellation():
     class ManyTasksService(Service):
         def __init__(self):
+            super().__init__()
             self.tasks_started = 0
             self.tasks_cleaned = 0
 
@@ -375,6 +380,7 @@ async def test_graceful_shutdown_with_pending_tasks():
 
     class ShutdownTestService(Service):
         def __init__(self, name):
+            super().__init__()
             self.name = name
 
         async def run(self):

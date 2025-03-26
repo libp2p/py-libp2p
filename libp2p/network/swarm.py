@@ -1,3 +1,4 @@
+# libp2p/network/swarm.py
 import logging
 from typing import (
     Optional,
@@ -70,14 +71,11 @@ class Swarm(Service, INetworkService):
     peerstore: IPeerStore
     upgrader: TransportUpgrader
     transport: ITransport
-    # TODO: Connection and `peer_id` are 1-1 mapping in our implementation,
-    #   whereas in Go one `peer_id` may point to multiple connections.
     connections: dict[ID, INetConn]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
     listener_nursery: Optional[trio.Nursery]
     event_listener_nursery_created: trio.Event
-
     notifees: list[INotifee]
 
     def __init__(
@@ -87,6 +85,7 @@ class Swarm(Service, INetworkService):
         upgrader: TransportUpgrader,
         transport: ITransport,
     ):
+        super().__init__()  # Initialize Service to set _manager
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
@@ -122,22 +121,12 @@ class Swarm(Service, INetworkService):
         self.common_stream_handler = stream_handler
 
     async def dial_peer(self, peer_id: ID) -> INetConn:
-        """
-        Try to create a connection to peer_id.
-
-        :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when an error occurs
-        :return: muxed connection
-        """
         if peer_id in self.connections:
-            # If muxed connection already exists for peer_id,
-            # set muxed connection equal to existing muxed connection
             return self.connections[peer_id]
 
         logger.debug("attempting to dial peer %s", peer_id)
 
         try:
-            # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
         except PeerStoreError as error:
             raise SwarmException(f"No known addresses to peer {peer_id}") from error
@@ -147,7 +136,6 @@ class Swarm(Service, INetworkService):
 
         exceptions: list[SwarmException] = []
 
-        # Try all known addresses
         for multiaddr in addrs:
             try:
                 return await self.dial_addr(multiaddr, peer_id)
@@ -160,23 +148,12 @@ class Swarm(Service, INetworkService):
                     exc_info=e,
                 )
 
-        # Tried all addresses, raising exception.
         raise SwarmException(
             f"unable to connect to {peer_id}, no addresses established a successful "
             "connection (with exceptions)"
         ) from MultiError(exceptions)
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
-        """
-        Try to create a connection to peer_id with addr.
-
-        :param addr: the address we want to connect with
-        :param peer_id: the peer we want to connect to
-        :raises SwarmException: raised when an error occurs
-        :return: network connection
-        """
-        # Dial peer (connection to peer does not yet exist)
-        # Transport dials peer (gets back a raw conn)
         try:
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
@@ -187,8 +164,6 @@ class Swarm(Service, INetworkService):
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
-        # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
-        # the conn and then mux the conn
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
         except SecurityUpgradeFailure as error:
@@ -216,11 +191,6 @@ class Swarm(Service, INetworkService):
         return swarm_conn
 
     async def new_stream(self, peer_id: ID) -> INetStream:
-        """
-        :param peer_id: peer_id of destination
-        :raises SwarmException: raised when an error occurs
-        :return: net stream instance
-        """
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
@@ -230,22 +200,6 @@ class Swarm(Service, INetworkService):
         return net_stream
 
     async def listen(self, *multiaddrs: Multiaddr) -> bool:
-        """
-        :param multiaddrs: one or many multiaddrs to start listening on
-        :return: true if at least one success
-
-        For each multiaddr
-
-          - Check if a listener for multiaddr exists already
-          - If listener already exists, continue
-          - Otherwise:
-
-              - Capture multiaddr in conn handler
-              - Have conn handler delegate to stream handler
-              - Call listener listen with the multiaddr
-              - Map multiaddr to listener
-        """
-        # We need to wait until `self.listener_nursery` is created.
         await self.event_listener_nursery_created.wait()
 
         for maddr in multiaddrs:
@@ -257,10 +211,7 @@ class Swarm(Service, INetworkService):
             ) -> None:
                 raw_conn = RawConnection(read_write_closer, False)
 
-                # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
-                # secure the conn and then mux the conn
                 try:
-                    # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                     secured_conn = await self.upgrader.upgrade_security(
                         raw_conn, ID(b""), False
                     )
@@ -287,29 +238,21 @@ class Swarm(Service, INetworkService):
                 await self.add_conn(muxed_conn)
                 logger.debug("successfully opened connection to peer %s", peer_id)
 
-                # NOTE: This is a intentional barrier to prevent from the handler
-                # exiting and closing the connection.
                 await self.manager.wait_finished()
 
             try:
-                # Success
                 listener = self.transport.create_listener(conn_handler)
                 self.listeners[str(maddr)] = listener
-                # TODO: `listener.listen` is not bounded with nursery. If we want to be
-                #   I/O agnostic, we should change the API.
                 if self.listener_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
                 await listener.listen(maddr, self.listener_nursery)
 
-                # Call notifiers since event occurred
                 await self.notify_listen(maddr)
 
                 return True
             except OSError:
-                # Failed. Continue looping.
                 logger.debug("fail to listen on: %s", maddr)
 
-        # No maddr succeeded
         return False
 
     async def close(self) -> None:
@@ -320,46 +263,28 @@ class Swarm(Service, INetworkService):
         if peer_id not in self.connections:
             return
         connection = self.connections[peer_id]
-        # NOTE: `connection.close` will delete `peer_id` from `self.connections`
-        # and `notify_disconnected` for us.
         await connection.close()
 
         logger.debug("successfully close the connection to peer %s", peer_id)
 
     async def add_conn(self, muxed_conn: IMuxedConn) -> SwarmConn:
-        """
-        Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
-        and start to monitor the connection for its new streams and
-        disconnection.
-        """
         swarm_conn = SwarmConn(muxed_conn, self)
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()
-        # Store muxed_conn with peer id
         self.connections[muxed_conn.peer_id] = swarm_conn
-        # Call notifiers since event occurred
         await self.notify_connected(swarm_conn)
         return swarm_conn
 
     def remove_conn(self, swarm_conn: SwarmConn) -> None:
-        """
-        Simply remove the connection from Swarm's records, without closing
-        the connection.
-        """
         peer_id = swarm_conn.muxed_conn.peer_id
         if peer_id not in self.connections:
             return
         del self.connections[peer_id]
 
-    # Notifee
-
+    # Notifee methods
     def register_notifee(self, notifee: INotifee) -> None:
-        """
-        :param notifee: object implementing Notifee interface
-        :return: true if notifee registered successfully, false otherwise
-        """
         self.notifees.append(notifee)
 
     async def notify_opened_stream(self, stream: INetStream) -> None:
