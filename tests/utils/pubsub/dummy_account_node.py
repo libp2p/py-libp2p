@@ -17,9 +17,8 @@ from libp2p.tools.anyio_service import (
     background_anyio_service,
 )
 from tests.utils.factories import (
-    PubsubFactory,
+    pubsub_batch_with_floodsub,
 )
-from tests.factories import pubsub_batch_with_floodsub  # Updated import
 
 CRYPTO_TOPIC = "ethereum"
 

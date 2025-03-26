@@ -1,4 +1,3 @@
-# libp2p/network/swarm.py
 import logging
 from typing import (
     Optional,
@@ -85,7 +84,7 @@ class Swarm(Service, INetworkService):
         upgrader: TransportUpgrader,
         transport: ITransport,
     ):
-        super().__init__()  # Initialize Service to set _manager
+        super().__init__()
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader

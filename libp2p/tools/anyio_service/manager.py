@@ -1,4 +1,3 @@
-# libp2p/tools/anyio_service/manager.py
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -23,7 +22,7 @@ from anyio.abc import (
     TaskGroup,
 )
 
-from .abc import (  # Use ServiceAPI
+from .abc import (
     InternalManagerAPI,
     ManagerAPI,
     ServiceAPI,
@@ -145,7 +144,7 @@ class AnyIOManager(InternalManagerAPI):
                     self._cancel_scope = None
 
     @classmethod
-    async def run_service(cls, service: ServiceAPI) -> None:  # Match ManagerAPI
+    async def run_service(cls, service: ServiceAPI) -> None:
         """Run a service (satisfies ManagerAPI)."""
         manager = cls(service)
         await manager.run()
@@ -205,7 +204,7 @@ class AnyIOManager(InternalManagerAPI):
 
     def run_child_service(
         self, service: ServiceAPI, daemon: bool = False, name: str | None = None
-    ) -> ManagerAPI:  # Match InternalManagerAPI
+    ) -> ManagerAPI:
         if service.get_manager() is not None:
             raise LifecycleError("Child service already has a manager")
 
@@ -234,7 +233,7 @@ class AnyIOManager(InternalManagerAPI):
 
     def run_daemon_child_service(
         self, service: ServiceAPI, name: str | None = None
-    ) -> ManagerAPI:  # Match InternalManagerAPI
+    ) -> ManagerAPI:
         return self.run_child_service(service, daemon=True, name=name)
 
     @property
@@ -248,8 +247,8 @@ class AnyIOManager(InternalManagerAPI):
 
 @asynccontextmanager
 async def background_anyio_service(
-    service: ServiceAPI,  # Use ServiceAPI
-) -> AsyncIterator[ManagerAPI]:  # Use ManagerAPI
+    service: ServiceAPI,
+) -> AsyncIterator[ManagerAPI]:
     """Context manager to run an AnyIO-based service in the background."""
     manager = AnyIOManager(service)
     async with anyio.create_task_group() as task_group:

@@ -8,12 +8,13 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
     TypeVar,
 )
 
 import anyio
 
-from .abc import (  # Add ManagerAPI for type hint
+from .abc import (
     ManagerAPI,
     ServiceAPI,
 )
@@ -33,20 +34,20 @@ class SimpleService(ServiceAPI):
         self._service_fn = service_fn
         self._args = args
         self._kwargs = kwargs
-        self._manager: ManagerAPI | None = None  # Use ManagerAPI for type safety
+        self._manager: Optional[ManagerAPI] = None
 
     async def run(self) -> None:
         await self._service_fn(*self._args, **self._kwargs)
 
-    def get_manager(self) -> ManagerAPI | None:
+    def get_manager(self) -> Optional[ManagerAPI]:
         return self._manager
 
     @property
-    def manager(self) -> ManagerAPI | None:
+    def manager(self) -> Optional[ManagerAPI]:
         return self._manager
 
     @manager.setter
-    def manager(self, value: ManagerAPI | None) -> None:
+    def manager(self, value: Optional[ManagerAPI]) -> None:
         self._manager = value
 
 
@@ -84,9 +85,11 @@ def get_task_name(value: Any, explicit_name: str | None = None) -> str:
 
 async def background_anyio_service(
     service: TService,
-) -> AsyncGenerator[ManagerAPI, None]:  # Use ManagerAPI for consistency
+) -> AsyncGenerator[ManagerAPI, None]:
     """Context manager to run an AnyIO-based service in the background."""
-    from .manager import AnyIOManager  # Lazy import
+    from .manager import (
+        AnyIOManager,
+    )
 
     manager = AnyIOManager(service)
     async with anyio.create_task_group() as task_group:

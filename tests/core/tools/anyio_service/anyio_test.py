@@ -49,11 +49,11 @@ async def test_service_cancellation():
     service = CountingService()
 
     async with background_anyio_service(service) as manager:
-        await asyncio.sleep(0.1)  # Let it run
+        await asyncio.sleep(0.1)
         initial_count = service.count
         assert initial_count > 0
 
-        manager.cancel()  # Cancel the service
+        manager.cancel()
         await manager.wait_finished()
         assert not manager.is_running
         assert manager.is_cancelled

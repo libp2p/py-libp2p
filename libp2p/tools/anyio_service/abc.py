@@ -1,5 +1,5 @@
 """
-Abstract base classes for the async_service implementation.
+Abstract base classes for the anyio_service implementation.
 """
 
 from abc import (
@@ -11,6 +11,7 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
     Protocol,
     runtime_checkable,
 )
@@ -101,7 +102,7 @@ class ServiceAPI(Protocol):
     """
 
     @abstractmethod
-    def get_manager(self) -> ManagerAPI | None:  # No string literal needed now
+    def get_manager(self) -> Optional[ManagerAPI]:
         """
         Get the manager for this service.
         """
@@ -109,13 +110,13 @@ class ServiceAPI(Protocol):
 
     @property
     @abstractmethod
-    def manager(self) -> ManagerAPI | None:  # Add manager property
+    def manager(self) -> Optional[ManagerAPI]:
         """Return the manager overseeing this service."""
         ...
 
     @manager.setter
     @abstractmethod
-    def manager(self, value: ManagerAPI | None) -> None:  # Add manager setter
+    def manager(self, value: Optional[ManagerAPI]) -> None:
         """Set the manager overseeing this service."""
         ...
 
@@ -139,7 +140,7 @@ class InternalManagerAPI(ManagerAPI, Protocol):
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
         daemon: bool = False,
-        name: str | None = None  # Fix: Optional str
+        name: str | None = None
     ) -> None:
         """Run a task in the background."""
         ...
@@ -149,7 +150,7 @@ class InternalManagerAPI(ManagerAPI, Protocol):
         self,
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
-        name: str | None = None  # Fix: Optional str
+        name: str | None = None
     ) -> None:
         """Run a daemon task in the background."""
         ...
@@ -159,14 +160,14 @@ class InternalManagerAPI(ManagerAPI, Protocol):
         self,
         service: ServiceAPI,
         daemon: bool = False,
-        name: str | None = None,  # Fix: Optional str
+        name: str | None = None,
     ) -> ManagerAPI:
         """Run a child service in the background."""
         ...
 
     @abstractmethod
     def run_daemon_child_service(
-        self, service: ServiceAPI, name: str | None = None  # Fix: Optional str
+        self, service: ServiceAPI, name: str | None = None
     ) -> ManagerAPI:
         """Run a daemon child service in the background."""
         ...

@@ -8,6 +8,7 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
 )
 
 from .abc import (
@@ -23,7 +24,7 @@ class Service(ServiceAPI):
     """
 
     def __init__(self) -> None:
-        self._manager: InternalManagerAPI | None = None  # Define the attribute
+        self._manager: InternalManagerAPI | None = None
 
     def __str__(self) -> str:
         return self.__class__.__name__
@@ -31,7 +32,7 @@ class Service(ServiceAPI):
     @property
     def manager(
         self,
-    ) -> InternalManagerAPI | None:  # Allow None for uninitialized state
+    ) -> Optional[InternalManagerAPI]:
         """
         Return the internal manager.
         """
@@ -44,7 +45,7 @@ class Service(ServiceAPI):
         """
         self._manager = value
 
-    def get_manager(self) -> ManagerAPI | None:  # Match abc.py's ManagerAPI
+    def get_manager(self) -> Optional[ManagerAPI]:
         """
         Return the manager, ensuring it exists.
         """
@@ -65,7 +66,7 @@ def as_service(service_fn: Callable[..., Awaitable[Any]]) -> type[ServiceAPI]:
 
     class _Service(Service):
         def __init__(self, *args: Any, **kwargs: Any):
-            super().__init__()  # Initialize base class
+            super().__init__()
             self._args = args
             self._kwargs = kwargs
 
