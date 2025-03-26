@@ -41,14 +41,14 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("pubsub-debug")
-
+CHAT_TOPIC = "pubsub-chat"
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 # Generate a key pair for the node
 key_pair = create_new_key_pair()
 logger.info(f"Node {key_pair.public_key}: Created key pair")
 
-# Security options
+# Use Noise protocol for secure communication
 NOISE_PROTOCOL_ID = TProtocol("/noise")
 security_options_factory = security_options_factory_factory(NOISE_PROTOCOL_ID)
 security_options = security_options_factory(key_pair)
@@ -59,8 +59,8 @@ async def receive_loop(subscription):
     while True:
         try:
             message = await subscription.get()
-            print(f"Received message: {message.data.decode('utf-8')}")
             logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
+            print(f"Received message: {message.data.decode('utf-8')}")
         except Exception:
             logger.exception("Error in receive loop")
             await trio.sleep(1)
@@ -169,7 +169,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     # Server mode
                     logger.info(
                         "Run this script in another console with:\n"
-                        f"python3 pubsub.py "
+                        f"python pubsub.py "
                         f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     logger.info("Waiting for peers...")
@@ -189,6 +189,11 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     logger.info(
                         f"Connecting to peer: {info.peer_id} "
                         f"using protocols: {protocols_in_maddr}"
+                    )
+                    logger.info(
+                        "Run this script in another console with:\n"
+                        f"python pubsub.py "
+                        f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     try:
                         await host.connect(info)
@@ -220,15 +225,13 @@ def main() -> None:
     the gossipsub protocol as the pubsub router.
     """
 
-    ChatTopic = "pubsub-chat"
-
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "-t",
         "--topic",
         type=str,
         help="topic name to subscribe",
-        default=ChatTopic,
+        default=CHAT_TOPIC,
     )
 
     parser.add_argument(
@@ -244,7 +247,7 @@ def main() -> None:
         "--port",
         type=int,
         help="Port to listen on",
-        default=8080,
+        default=None,
     )
 
     parser.add_argument(
