@@ -3,6 +3,15 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.4 (2025-03-27)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Added Windows compatibility by using coincurve instead of fastecdsa on Windows platforms (`#507 <https://github.com/ethereum/py-libp2p/issues/507>`__)
+
+
 py-libp2p v0.2.3 (2025-03-27)
 -----------------------------
 

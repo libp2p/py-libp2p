@@ -1,1 +1,0 @@
-Updates ``Feature Breakdown`` in ``README`` to more closely match the list of standard modules.
