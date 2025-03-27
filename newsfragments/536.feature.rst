@@ -1,1 +1,0 @@
-Added an example implementation of the identify protocol to demonstrate its usage and help users understand how to properly integrate it into their libp2p applications.

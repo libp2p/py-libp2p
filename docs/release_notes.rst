@@ -3,6 +3,44 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.3 (2025-03-27)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed import path in the examples to use updated `net_stream` module path, resolving ModuleNotFoundError when running the examples. (`#513 <https://github.com/ethereum/py-libp2p/issues/513>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Updates ``Feature Breakdown`` in ``README`` to more closely match the list of standard modules. (`#498 <https://github.com/ethereum/py-libp2p/issues/498>`__)
+- Adds detailed Sphinx-style docstrings to ``abc.py``. (`#535 <https://github.com/ethereum/py-libp2p/issues/535>`__)
+
+
+Features
+~~~~~~~~
+
+- Improved the implementation of the identify protocol and enhanced test coverage to ensure proper functionality and network layer address delegation. (`#358 <https://github.com/ethereum/py-libp2p/issues/358>`__)
+- Adds the ability to check connection status of a peer in the peerstore. (`#420 <https://github.com/ethereum/py-libp2p/issues/420>`__)
+- implemented ``timed_cache`` module which will allow to implement ``seen_ttl`` configurable param for pubsub and protocols extending it. (`#518 <https://github.com/ethereum/py-libp2p/issues/518>`__)
+- Added a maximum RSA key size limit of 4096 bits to prevent resource exhaustion attacks.Consolidated validation logic to use a single error message source and
+  added tests to catch invalid key sizes (including negative values). (`#523 <https://github.com/ethereum/py-libp2p/issues/523>`__)
+- Added automated testing of ``demo`` applications as part of CI to prevent demos from breaking silently. Tests are located in `tests/core/examples/test_examples.py`. (`#524 <https://github.com/ethereum/py-libp2p/issues/524>`__)
+- Added an example implementation of the identify protocol to demonstrate its usage and help users understand how to properly integrate it into their libp2p applications. (`#536 <https://github.com/ethereum/py-libp2p/issues/536>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- moved all interfaces to ``libp2p.abc`` along with all libp2p custom types to ``libp2p.custom_types``. (`#228 <https://github.com/ethereum/py-libp2p/issues/228>`__)
+- moved ``libp2p/tools/factories`` to ``tests``. (`#503 <https://github.com/ethereum/py-libp2p/issues/503>`__)
+- Fixes broken CI lint run, bumps ``pre-commit-hooks`` version to ``5.0.0`` and ``mdformat`` to ``0.7.22``. (`#522 <https://github.com/ethereum/py-libp2p/issues/522>`__)
+- Rebuilds protobufs with ``protoc v30.1``. (`#542 <https://github.com/ethereum/py-libp2p/issues/542>`__)
+- Moves ``pubsub`` testing tools from ``libp2p.tools`` and ``factories`` from ``tests`` to ``tests.utils``. (`#543 <https://github.com/ethereum/py-libp2p/issues/543>`__)
+
+
 py-libp2p v0.2.2 (2025-02-20)
 -----------------------------
 

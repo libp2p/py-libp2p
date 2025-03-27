@@ -1,1 +1,0 @@
-Improved the implementation of the identify protocol and enhanced test coverage to ensure proper functionality and network layer address delegation.
