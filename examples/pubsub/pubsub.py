@@ -31,7 +31,9 @@ from libp2p.stream_muxer.mplex.mplex import (
 from libp2p.tools.async_service.trio_service import (
     background_trio_service,
 )
-from libp2p.tools.factories import (
+
+# Modified import to align import statement with changes from PR 543
+from tests.utils.factories import (
     security_options_factory_factory,
 )
 
