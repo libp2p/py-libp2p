@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.tools.anyio_service
+   libp2p.tools.pubsub
    libp2p.tools.timed_cache
 
 Submodules
