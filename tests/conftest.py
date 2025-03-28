@@ -1,6 +1,6 @@
 import pytest
 
-from tests.utils.factories import (
+from tests.factories import (
     HostFactory,
 )
 
