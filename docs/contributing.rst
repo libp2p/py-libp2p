@@ -110,6 +110,47 @@ Good documentation will lead to quicker adoption and happier users. Please check
 guide on
 `how to create documentation for the Python Ethereum ecosystem <https://github.com/ethereum/snake-charmers-tactical-manual/blob/main/documentation.md>`_.
 
+Adding Examples
+~~~~~~~~~~~~~~~
+
+To add a new example (e.g., identify):
+
+1. Create a directory in ``examples/identify``
+2. Create a file ``examples/identify/identify.py`` with the example code
+3. Add ``__init__.py`` to make it a proper Python package (automatically discovered by find_packages() in ``setup.py``)
+4. Add the example in the example list ``docs/examples.rst``
+5. Add example tests in ``tests/core/examples/test_examples.py``
+6. Add the example documentation in ``docs/examples.identify.rst``
+7. Add a news fragment for the new release in file ``newsfragments/536.feature.rst`` (fix-id.type.rst)
+8. Generate doc files with ``make docs`` or ``make linux-docs`` in linux (generates files ``libp2p.identity.identify.rst libp2p.identity.rst libp2p.identity.identify.pb.rst``)
+9. Add the example to ``setup.py``:
+
+   .. code:: python
+
+       entry_points={
+           "console_scripts": [
+               "chat-demo=examples.chat.chat:main",
+               "echo-demo=examples.echo.echo:main",
+               "ping-demo=examples.ping.ping:main",
+               "identify-demo=examples.identify.identify:main",
+           ],
+       }
+
+10. Run ``make package-test`` to test the release:
+
+    .. code:: sh
+
+        .....
+        Activate with `source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate`
+        Press enter when the test has completed. The directory will be deleted.
+
+    Then test the example:
+
+    .. code:: sh
+
+        source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate
+        (package-smoke-test) $ identify-demo
+
 Pull Requests
 ~~~~~~~~~~~~~
 
