@@ -6,14 +6,11 @@
 
 <h3 align="center">The Python implementation of the libp2p networking stack.</h3>
 
-[![Join the chat at https://gitter.im/py-libp2p/Lobby](https://badges.gitter.im/py-libp2p/Lobby.png)](https://gitter.im/py-libp2p/Lobby)
-[![Build Status](https://circleci.com/gh/libp2p/py-libp2p.svg?style=shield)](https://circleci.com/gh/libp2p/py-libp2p)
+[![Discord](https://img.shields.io/discord/1204447718093750272?color=blueviolet&label=discord)](https://discord.gg/hQJnbd85N6)
 [![PyPI version](https://badge.fury.io/py/libp2p.svg)](https://badge.fury.io/py/libp2p)
 [![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/libp2p/py-libp2p/tox.yml?branch=main&label=build%20status)](https://github.com/libp2p/py-libp2p/actions/workflows/tox.yml)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
-[![Freenode](https://img.shields.io/badge/freenode-%23libp2p-yellow.svg)](https://webchat.freenode.net/?channels=%23libp2p)
-[![Matrix](https://img.shields.io/badge/matrix-%23libp2p%3Apermaweb.io-blue.svg)](https://riot.permaweb.io/#/room/#libp2p:permaweb.io)
-[![Discord](https://img.shields.io/discord/475789330380488707?color=blueviolet&label=discord)](https://discord.gg/66KBrm2)
 
 > ⚠️ **Warning:** py-libp2p is an experimental and work-in-progress repo under development. We do not yet recommend using py-libp2p in production environments.
 
