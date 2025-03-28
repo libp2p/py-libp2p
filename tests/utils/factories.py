@@ -215,7 +215,7 @@ async def raw_conn_factory() -> AsyncIteratorABC[tuple[IRawConnection, IRawConne
         nonlocal conn_1
         conn_1 = RawConnection(stream, initiator=False)
         event.set()
-        await anyio.sleep_forever()
+        await anyio.sleep(0.1)
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
