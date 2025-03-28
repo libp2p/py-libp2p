@@ -8,6 +8,7 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
 )
 
 from .abc import (
@@ -31,7 +32,7 @@ class Service(ServiceAPI):
     @property
     def manager(
         self,
-    ) -> InternalManagerAPI | None:
+    ) -> Optional[InternalManagerAPI]:
         """
         Return the internal manager.
         """
@@ -44,7 +45,7 @@ class Service(ServiceAPI):
         """
         self._manager = value
 
-    def get_manager(self) -> ManagerAPI | None:
+    def get_manager(self) -> Optional[ManagerAPI]:
         """
         Return the manager, ensuring it exists.
         """

@@ -8,6 +8,7 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
     TypeVar,
 )
 
@@ -33,20 +34,20 @@ class SimpleService(ServiceAPI):
         self._service_fn = service_fn
         self._args = args
         self._kwargs = kwargs
-        self._manager: ManagerAPI | None = None
+        self._manager: Optional[ManagerAPI] = None
 
     async def run(self) -> None:
         await self._service_fn(*self._args, **self._kwargs)
 
-    def get_manager(self) -> ManagerAPI | None:
+    def get_manager(self) -> Optional[ManagerAPI]:
         return self._manager
 
     @property
-    def manager(self) -> ManagerAPI | None:
+    def manager(self) -> Optional[ManagerAPI]:
         return self._manager
 
     @manager.setter
-    def manager(self, value: ManagerAPI | None) -> None:
+    def manager(self, value: Optional[ManagerAPI]) -> None:
         self._manager = value
 
 

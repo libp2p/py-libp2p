@@ -11,6 +11,7 @@ from collections.abc import (
 from typing import (
     Any,
     Callable,
+    Optional,
     Protocol,
     runtime_checkable,
 )
@@ -101,7 +102,7 @@ class ServiceAPI(Protocol):
     """
 
     @abstractmethod
-    def get_manager(self) -> ManagerAPI | None:
+    def get_manager(self) -> Optional[ManagerAPI]:
         """
         Get the manager for this service.
         """
@@ -109,13 +110,13 @@ class ServiceAPI(Protocol):
 
     @property
     @abstractmethod
-    def manager(self) -> ManagerAPI | None:
+    def manager(self) -> Optional[ManagerAPI]:
         """Return the manager overseeing this service."""
         ...
 
     @manager.setter
     @abstractmethod
-    def manager(self, value: ManagerAPI | None) -> None:
+    def manager(self, value: Optional[ManagerAPI]) -> None:
         """Set the manager overseeing this service."""
         ...
 
