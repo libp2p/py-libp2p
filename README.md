@@ -106,10 +106,11 @@ ______________________________________________________________________
 
 ### General Purpose Utilities & Datatypes
 
-| **Utility/Datatype** | **Status** |                                 **Source**                                  |
-| -------------------- | :--------: | :-------------------------------------------------------------------------: |
-| **`libp2p-ping`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/host/ping.py) |
-| **`libp2p-peer`**    |     ✅     |     [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/peer)     |
+| **Utility/Datatype**  | **Status** |                                          **Source**                                          |
+| --------------------- | :--------: | :------------------------------------------------------------------------------------------: |
+| **`libp2p-ping`**     |     ✅     |         [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/host/ping.py)          |
+| **`libp2p-peer`**     |     ✅     |             [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/peer)              |
+| **`libp2p-identify`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/identity/identify/identify.py) |
 
 ______________________________________________________________________
 
