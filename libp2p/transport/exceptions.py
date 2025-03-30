@@ -3,6 +3,10 @@ from libp2p.exceptions import (
 )
 
 
+class TransportError(BaseLibp2pError):
+    """Raised when there is an error in the transport layer."""
+
+
 class OpenConnectionError(BaseLibp2pError):
     pass
 
