@@ -25,7 +25,7 @@ from libp2p.tools.constants import (
 from libp2p.tools.utils import (
     connect_swarm,
 )
-from tests.factories import (
+from tests.utils.factories import (
     SwarmFactory,
 )
 

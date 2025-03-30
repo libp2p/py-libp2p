@@ -12,10 +12,10 @@ from libp2p.host.ping import (
     handle_ping,
 )
 from libp2p.host.ping import ID as PingID
-from libp2p.identity.identify.protocol import (
+from libp2p.identity.identify.identify import (
     identify_handler_for,
 )
-from libp2p.identity.identify.protocol import ID as IdentifyID
+from libp2p.identity.identify.identify import ID as IdentifyID
 
 if TYPE_CHECKING:
     from libp2p.custom_types import (

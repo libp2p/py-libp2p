@@ -1,11 +1,11 @@
 import pytest
 import trio
 
-from libp2p.tools.pubsub.dummy_account_node import (
-    DummyAccountNode,
-)
 from libp2p.tools.utils import (
     connect,
+)
+from tests.utils.pubsub.dummy_account_node import (
+    DummyAccountNode,
 )
 
 

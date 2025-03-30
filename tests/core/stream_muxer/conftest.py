@@ -1,6 +1,6 @@
 import pytest
 
-from tests.factories import (
+from tests.utils.factories import (
     mplex_conn_pair_factory,
     mplex_stream_pair_factory,
 )

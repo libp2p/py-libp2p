@@ -21,19 +21,19 @@ from libp2p.pubsub.pubsub import (
 from libp2p.tools.constants import (
     MAX_READ_LEN,
 )
-from libp2p.tools.pubsub.utils import (
-    make_pubsub_msg,
-)
 from libp2p.tools.utils import (
     connect,
 )
 from libp2p.utils import (
     encode_varint_prefixed,
 )
-from tests.factories import (
+from tests.utils.factories import (
     IDFactory,
     PubsubFactory,
     net_stream_pair_factory,
+)
+from tests.utils.pubsub.utils import (
+    make_pubsub_msg,
 )
 
 TESTING_TOPIC = "TEST_SUBSCRIBE"

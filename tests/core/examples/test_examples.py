@@ -10,7 +10,7 @@ from libp2p.peer.peerinfo import (
 from libp2p.tools.utils import (
     MAX_READ_LEN,
 )
-from tests.factories import (
+from tests.utils.factories import (
     HostFactory,
 )
 

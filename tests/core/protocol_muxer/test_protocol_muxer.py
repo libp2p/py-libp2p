@@ -9,7 +9,7 @@ from libp2p.host.exceptions import (
 from libp2p.tools.utils import (
     create_echo_stream_handler,
 )
-from tests.factories import (
+from tests.utils.factories import (
     HostFactory,
 )
 

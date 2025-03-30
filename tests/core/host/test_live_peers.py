@@ -4,7 +4,7 @@ import trio
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
-from tests.factories import (
+from tests.utils.factories import (
     HostFactory,
 )
 
