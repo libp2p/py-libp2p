@@ -110,7 +110,6 @@ setup(
             "ping-demo=examples.ping.ping:main",
             "pubsub-demo=examples.pubsub.pubsub:main",
             "identify-demo=examples.identify.identify:main",
-
         ],
     },
 )
