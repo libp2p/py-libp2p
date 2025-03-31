@@ -5,10 +5,10 @@ import pytest
 from libp2p.tools.constants import (
     FLOODSUB_PROTOCOL_ID,
 )
-from libp2p.tools.factories import (
+from tests.utils.factories import (
     PubsubFactory,
 )
-from libp2p.tools.pubsub.floodsub_integration_test_settings import (
+from tests.utils.pubsub.floodsub_integration_test_settings import (
     floodsub_protocol_pytest_params,
     perform_test_from_obj,
 )

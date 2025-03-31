@@ -1,2 +1,0 @@
-Added a maximum RSA key size limit of 4096 bits to prevent resource exhaustion attacks.Consolidated validation logic to use a single error message source and
-added tests to catch invalid key sizes (including negative values).
