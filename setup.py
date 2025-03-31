@@ -109,6 +109,7 @@ setup(
             "echo-demo=examples.echo.echo:main",
             "ping-demo=examples.ping.ping:main",
             "identify-demo=examples.identify.identify:main",
+            "pubsub-demo=examples.pubsub.pubsub:main",
         ],
     },
 )
