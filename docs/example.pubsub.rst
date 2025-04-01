@@ -1,6 +1,6 @@
 
 PubSub Chat Demo
-===============
+================
 
 This example demonstrates how to create a chat application using libp2p's PubSub implementation with the GossipSub protocol.
 
@@ -44,7 +44,7 @@ Copy the line that starts with ``pubsub-demo -d``, open a new terminal and paste
 You can then start typing messages in either terminal and see them relayed to the other terminal. The messages will be distributed using the GossipSub protocol to all peers subscribed to the same topic. To exit the demo, type "quit" or send a keyboard interrupt (``Ctrl+C``) in either terminal.
 
 Command Line Options
--------------------
+--------------------
 
 - ``-t, --topic``: Specify the topic name to subscribe to (default: "pubsub-chat")
 - ``-d, --destination``: Address of peer to connect to
@@ -53,6 +53,6 @@ Command Line Options
 
 The full source code for this example is below:
 
-.. literalinclude:: examples/pubsub/pubsub.py
+.. literalinclude:: ../examples/pubsub/pubsub.py
     :language: python
     :linenos:
