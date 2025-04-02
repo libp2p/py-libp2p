@@ -4,6 +4,7 @@ from __future__ import (
 
 import base64
 from collections.abc import (
+    Awaitable,
     KeysView,
 )
 import functools
@@ -33,7 +34,6 @@ from libp2p.custom_types import (
     AsyncValidatorFn,
     SyncValidatorFn,
     TProtocol,
-    ValidatorFn,
 )
 from libp2p.exceptions import (
     ParseError,
@@ -94,8 +94,29 @@ def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
 
 
 class TopicValidator(NamedTuple):
-    validator: ValidatorFn
-    is_async: bool
+    """Topic validator with sync and async validators."""
+
+    sync_validator: Callable[[ID, rpc_pb2.Message], bool] | None
+    async_validator: Callable[[ID, rpc_pb2.Message], Awaitable[bool]] | None
+
+    @property
+    def is_async(self) -> bool:
+        """Return whether this validator is async."""
+        return self.async_validator is not None
+
+    @property
+    def validator(
+        self,
+    ) -> (
+        Callable[[ID, rpc_pb2.Message], bool]
+        | Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
+    ):
+        """Return the validator function."""
+        if self.async_validator is not None:
+            return self.async_validator
+        if self.sync_validator is not None:
+            return self.sync_validator
+        raise ValueError("No validator set")
 
 
 class Pubsub(Service, IPubsub):
@@ -283,23 +304,39 @@ class Pubsub(Service, IPubsub):
                 await self.router.handle_rpc(rpc_incoming, peer_id)
 
     def set_topic_validator(
-        self, topic: str, validator: ValidatorFn, is_async_validator: bool
+        self,
+        topic: str,
+        validator: (
+            Callable[[ID, rpc_pb2.Message], bool]
+            | Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
+        ),
+        is_async: bool = False,
     ) -> None:
         """
-        Register a validator under the given topic. One topic can only have one
-        validtor.
+        Set a validator for a topic.
 
-        :param topic: the topic to register validator under
-        :param validator: the validator used to validate messages published to the topic
-        :param is_async_validator: indicate if the validator is an asynchronous validator
-        """  # noqa: E501
-        self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
+        :param topic: topic to set validator for
+        :param validator: validator function
+        :param is_async: whether validator is async
+        """
+        if is_async:
+            self.topic_validators[topic] = TopicValidator(
+                sync_validator=None,
+                async_validator=cast(
+                    Callable[[ID, rpc_pb2.Message], Awaitable[bool]], validator
+                ),
+            )
+        else:
+            self.topic_validators[topic] = TopicValidator(
+                sync_validator=cast(Callable[[ID, rpc_pb2.Message], bool], validator),
+                async_validator=None,
+            )
 
     def remove_topic_validator(self, topic: str) -> None:
         """
-        Remove the validator from the given topic.
+        Remove a validator for a topic.
 
-        :param topic: the topic to remove validator from
+        :param topic: topic to remove validator for
         """
         self.topic_validators.pop(topic, None)
 
@@ -363,43 +400,54 @@ class Pubsub(Service, IPubsub):
 
         self.peers[peer_id] = stream
 
+        # Add peer to scoring system if enabled
+        if hasattr(self.router, "peer_score"):
+            self.router.peer_score.add_peer(peer_id)
+
         logger.debug("added new peer %s", peer_id)
 
     def _handle_dead_peer(self, peer_id: ID) -> None:
-        if peer_id not in self.peers:
-            return
-        del self.peers[peer_id]
+        """
+        Handle a dead peer by removing it from all relevant data structures.
 
-        for topic in self.peer_topics:
+        :param peer_id: id of the dead peer
+        """
+        logger.debug("handling dead peer %s", peer_id)
+
+        # Remove peer from all topics
+        for topic in list(self.peer_topics.keys()):
             if peer_id in self.peer_topics[topic]:
                 self.peer_topics[topic].discard(peer_id)
+                if not self.peer_topics[topic]:
+                    del self.peer_topics[topic]
 
+        # Remove peer from peers map
+        self.peers.pop(peer_id, None)
+
+        # Notify router that peer is dead
         self.router.remove_peer(peer_id)
 
-        logger.debug("removed dead peer %s", peer_id)
+        # Remove peer from scoring system if enabled
+        if hasattr(self.router, "peer_score"):
+            self.router.peer_score.remove_peer(peer_id)
 
     async def handle_peer_queue(self) -> None:
         """
-        Continuously read from peer queue and each time a new peer is found,
-        open a stream to the peer using a supported pubsub protocol pubsub
-        protocols we support.
+        Handle peer queue by processing peer events.
         """
-        async with self.peer_receive_channel:
-            self.event_handle_peer_queue_started.set()
-            async for peer_id in self.peer_receive_channel:
-                # Add Peer
-                self.manager.run_task(self._handle_new_peer, peer_id)
+        self.event_handle_peer_queue_started.set()
+        async for peer_id in self.peer_receive_channel:
+            logger.debug("handling peer %s", peer_id)
+            await self._handle_new_peer(peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
         """
-        Continuously read from dead peer channel and close the stream
-        between that peer and remove peer info from pubsub and pubsub router.
+        Handle dead peer queue by processing dead peer events.
         """
-        async with self.dead_peer_receive_channel:
-            self.event_handle_dead_peer_queue_started.set()
-            async for peer_id in self.dead_peer_receive_channel:
-                # Remove Peer
-                self._handle_dead_peer(peer_id)
+        self.event_handle_dead_peer_queue_started.set()
+        async for peer_id in self.dead_peer_receive_channel:
+            logger.debug("handling dead peer %s", peer_id)
+            self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -575,6 +623,11 @@ class Pubsub(Service, IPubsub):
 
         for validator in sync_topic_validators:
             if not validator(msg_forwarder, msg):
+                # Record invalid message for peer scoring
+                if hasattr(self.router, "peer_score"):
+                    self.router.peer_score.deliver_invalid_message(
+                        msg_forwarder, msg.topicIDs[0]
+                    )
                 raise ValidationError(f"Validation failed for msg={msg}")
 
         # TODO: Implement throttle on async validators
@@ -593,6 +646,11 @@ class Pubsub(Service, IPubsub):
                     nursery.start_soon(run_async_validator, async_validator)
 
             if not final_result:
+                # Record invalid message for peer scoring
+                if hasattr(self.router, "peer_score"):
+                    self.router.peer_score.deliver_invalid_message(
+                        msg_forwarder, msg.topicIDs[0]
+                    )
                 raise ValidationError(f"Validation failed for msg={msg}")
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
@@ -650,6 +708,10 @@ class Pubsub(Service, IPubsub):
 
         self.notify_subscriptions(msg)
         await self.router.publish(msg_forwarder, msg)
+
+        # Record message delivery for peer scoring
+        if hasattr(self.router, "peer_score"):
+            self.router.peer_score.deliver_message(msg_forwarder, msg.topicIDs[0])
 
     def _next_seqno(self) -> bytes:
         """Make the next message sequence id."""

@@ -13,6 +13,7 @@ import random
 from typing import (
     Any,
     DefaultDict,
+    Optional,
 )
 
 import trio
@@ -48,6 +49,10 @@ from .mcache import (
 from .pb import (
     rpc_pb2,
 )
+from .peer_scoring import (
+    PeerScore,
+    PeerScoreParams,
+)
 from .pubsub import (
     Pubsub,
 )
@@ -82,6 +87,9 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_initial_delay: float
     heartbeat_interval: int
 
+    # Peer scoring
+    peer_score: Optional[PeerScore] = None
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -92,10 +100,33 @@ class GossipSub(IPubsubRouter, Service):
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
-        heartbeat_interval: int = 120,
+        heartbeat_interval: int = 1,
+        peer_score_params: Optional[PeerScoreParams] = None,
     ) -> None:
-        self.protocols = list(protocols)
-        self.pubsub = None
+        """
+        Initialize a GossipSub router.
+
+        :param protocols: protocols supported by the router
+        :param degree: target degree for mesh
+        :param degree_low: lower bound for mesh degree
+        :param degree_high: upper bound for mesh degree
+        :param time_to_live: time-to-live for messages
+        :param gossip_window: gossip history window
+        :param gossip_history: gossip history length
+        :param heartbeat_initial_delay: initial delay before heartbeat starts
+        :param heartbeat_interval: interval between heartbeats
+        :param peer_score_params: parameters for peer scoring
+        """
+        super().__init__()
+
+        # Use v1.1 protocol by default
+        self.protocols = [PROTOCOL_ID_V11] if not protocols else list(protocols)
+
+        # Initialize peer scoring if params provided
+        if peer_score_params is not None:
+            self.peer_score = PeerScore(peer_score_params)
+        else:
+            self.peer_score = None
 
         # Store target degree, upper degree bound, and lower degree bound
         self.degree = degree
@@ -153,13 +184,17 @@ class GossipSub(IPubsubRouter, Service):
         """
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
 
-        if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
+        if protocol_id not in (PROTOCOL_ID, PROTOCOL_ID_V11, floodsub.PROTOCOL_ID):
             # We should never enter here. Becuase the `protocol_id` is registered by
             #   your pubsub instance in multistream-select, but it is not the protocol
             #   that gossipsub supports. In this case, probably we registered gossipsub
             #   to a wrong `protocol_id` in multistream-select, or wrong versions.
             raise ValueError(f"Protocol={protocol_id} is not supported.")
         self.peer_protocol[peer_id] = protocol_id
+
+        # Add peer to scoring system if enabled
+        if self.peer_score is not None:
+            self.peer_score.add_peer(peer_id)
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -175,6 +210,10 @@ class GossipSub(IPubsubRouter, Service):
             self.fanout[topic].discard(peer_id)
 
         self.peer_protocol.pop(peer_id, None)
+
+        # Remove peer from scoring system if enabled
+        if self.peer_score is not None:
+            self.peer_score.remove_peer(peer_id)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -307,6 +346,9 @@ class GossipSub(IPubsubRouter, Service):
         # Add fanout peers to mesh and notifies them with a GRAFT(topic) control message
         for peer in fanout_peers:
             self.mesh[topic].add(peer)
+            # Add peer to mesh in scoring system if enabled
+            if self.peer_score is not None:
+                self.peer_score.add_to_mesh(peer, topic)
             await self.emit_graft(topic, peer)
 
         self.fanout.pop(topic, None)
@@ -325,6 +367,9 @@ class GossipSub(IPubsubRouter, Service):
             return
         # Notify the peers in mesh[topic] with a PRUNE(topic) message
         for peer in self.mesh[topic]:
+            # Remove peer from mesh in scoring system if enabled
+            if self.peer_score is not None:
+                self.peer_score.remove_from_mesh(peer, topic)
             await self.emit_prune(topic, peer)
 
         # Forget mesh[topic]
@@ -409,8 +454,12 @@ class GossipSub(IPubsubRouter, Service):
         # Start after a delay. Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L410  # noqa: E501
         await trio.sleep(self.heartbeat_initial_delay)
         while True:
+            # Update peer scores if enabled
+            if self.peer_score is not None:
+                self.peer_score.update_scores()
+
             # Maintain mesh and keep track of which peers to send GRAFT or PRUNE to
-            peers_to_graft, peers_to_prune = self.mesh_heartbeat()
+            peers_to_graft, peers_to_prune = await self.mesh_heartbeat()
             # Maintain fanout
             self.fanout_heartbeat()
             # Get the peers to send IHAVE to
@@ -425,42 +474,78 @@ class GossipSub(IPubsubRouter, Service):
 
             await trio.sleep(self.heartbeat_interval)
 
-    def mesh_heartbeat(
+    async def mesh_heartbeat(
         self,
     ) -> tuple[DefaultDict[ID, list[str]], DefaultDict[ID, list[str]]]:
         peers_to_graft: DefaultDict[ID, list[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, list[str]] = defaultdict(list)
+
+        # Update peer scores first if enabled
+        if self.peer_score is not None:
+            self.peer_score.update_scores()
+
         for topic in self.mesh:
             # Skip if no peers have subscribed to the topic
             if topic not in self.pubsub.peer_topics:
                 continue
 
-            num_mesh_peers_in_topic = len(self.mesh[topic])
-            if num_mesh_peers_in_topic < self.degree_low:
-                # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]  # noqa: E501
-                selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
-                    topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic]
-                )
+            # Get current mesh peers for topic
+            mesh_peers = self.mesh[topic]
+            num_mesh_peers = len(mesh_peers)
 
-                for peer in selected_peers:
-                    # Add peer to mesh[topic]
+            # Check for undersubscribed mesh
+            if num_mesh_peers < self.degree_low:
+                # Get eligible peers that have good scores
+                eligible_peers = self._get_eligible_peers(topic)
+                needed_peers = self.degree - num_mesh_peers
+
+                for peer in eligible_peers[:needed_peers]:
                     self.mesh[topic].add(peer)
-
-                    # Emit GRAFT(topic) control message to peer
                     peers_to_graft[peer].append(topic)
+                    if self.peer_score is not None:
+                        self.peer_score.add_to_mesh(peer, topic)
 
-            if num_mesh_peers_in_topic > self.degree_high:
-                # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = self.select_from_minus(
-                    num_mesh_peers_in_topic - self.degree, self.mesh[topic], set()
+            # Check for oversubscribed mesh
+            if num_mesh_peers > self.degree_high:
+                # Prefer pruning peers with lower scores
+                peers_to_remove = self._get_peers_to_prune(
+                    topic, num_mesh_peers - self.degree
                 )
-                for peer in selected_peers:
-                    # Remove peer from mesh[topic]
-                    self.mesh[topic].discard(peer)
 
-                    # Emit PRUNE(topic) control message to peer
+                for peer in peers_to_remove:
+                    self.mesh[topic].discard(peer)
                     peers_to_prune[peer].append(topic)
+                    if self.peer_score is not None:
+                        self.peer_score.remove_from_mesh(peer, topic)
+
+            # Check for mesh failures if peer scoring is enabled
+            if self.peer_score is not None:
+                for peer in self.mesh[topic]:
+                    if self.peer_score.get_topic_score(peer, topic) < -1.0:
+                        self.mesh[topic].discard(peer)
+                        peers_to_prune[peer].append(topic)
+                        await self.handle_mesh_failure(peer, topic)
+
         return peers_to_graft, peers_to_prune
+
+    def _get_eligible_peers(self, topic: str) -> list[ID]:
+        """Get peers eligible to be added to mesh, sorted by score."""
+        peers = []
+        for peer in self.pubsub.peer_topics.get(topic, []):
+            if peer not in self.mesh[topic]:
+                if self.peer_score is None or self.peer_score.get_score(peer) >= 0:
+                    peers.append(peer)
+
+        if self.peer_score is not None:
+            peers.sort(key=lambda p: self.peer_score.get_score(p), reverse=True)
+        return peers
+
+    def _get_peers_to_prune(self, topic: str, num_peers: int) -> list[ID]:
+        """Get peers to remove from mesh, preferring lower scored peers."""
+        peers = list(self.mesh[topic])
+        if self.peer_score is not None:
+            peers.sort(key=lambda p: self.peer_score.get_score(p))
+        return peers[:num_peers]
 
     def fanout_heartbeat(self) -> None:
         # Note: the comments here are the exact pseudocode from the spec
@@ -567,7 +652,7 @@ class GossipSub(IPubsubRouter, Service):
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
-            if self.peer_protocol[peer_id] == PROTOCOL_ID
+            if self.peer_protocol[peer_id] in (PROTOCOL_ID, PROTOCOL_ID_V11)
         }
         return self.select_from_minus(num_to_select, gossipsub_peers_in_topic, minus)
 
@@ -656,6 +741,9 @@ class GossipSub(IPubsubRouter, Service):
         if topic in self.mesh:
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
+                # Add peer to mesh in scoring system if enabled
+                if self.peer_score is not None:
+                    self.peer_score.add_to_mesh(sender_peer_id, topic)
         else:
             # Respond with PRUNE if not subscribed to the topic
             await self.emit_prune(topic, sender_peer_id)
@@ -668,6 +756,26 @@ class GossipSub(IPubsubRouter, Service):
         # Remove peer from mesh for topic
         if topic in self.mesh:
             self.mesh[topic].discard(sender_peer_id)
+            # Remove peer from mesh in scoring system if enabled
+            if self.peer_score is not None:
+                self.peer_score.remove_from_mesh(sender_peer_id, topic)
+
+    async def handle_invalid_message(self, peer_id: ID, topic: str) -> None:
+        """Handle an invalid message from a peer."""
+        if self.peer_score is not None:
+            self.peer_score.deliver_invalid_message(peer_id, topic)
+
+    async def handle_mesh_failure(self, peer_id: ID, topic: str) -> None:
+        """Handle a mesh failure for a peer."""
+        if self.peer_score is not None:
+            self.peer_score.record_mesh_failure(peer_id, topic)
+
+    async def handle_message_delivery(
+        self, peer_id: ID, topic: str, is_first: bool = False
+    ) -> None:
+        """Handle a message delivery from a peer."""
+        if self.peer_score is not None:
+            self.peer_score.deliver_message(peer_id, topic, is_first)
 
     # RPC emitters
 
