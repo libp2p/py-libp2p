@@ -85,6 +85,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: |
+          sudo apt-get install libffi-dev
           python -m pip install --upgrade pip
           python -m pip install tox
           python -m pip install --no-binary :all: cffi
