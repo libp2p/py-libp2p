@@ -32,11 +32,6 @@ from libp2p.tools.async_service.trio_service import (
     background_trio_service,
 )
 
-# Modified import to align import statement with changes from PR 543
-from tests.utils.factories import (
-    security_options_factory_factory,
-)
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,  # Set default to DEBUG for more verbose output
@@ -49,11 +44,6 @@ GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 # Generate a key pair for the node
 key_pair = create_new_key_pair()
 logger.info(f"Node {key_pair.public_key}: Created key pair")
-
-# Use Noise protocol for secure communication
-NOISE_PROTOCOL_ID = TProtocol("/noise")
-security_options_factory = security_options_factory_factory(NOISE_PROTOCOL_ID)
-security_options = security_options_factory(key_pair)
 
 
 async def receive_loop(subscription, termination_event):
@@ -131,7 +121,6 @@ async def run(topic: str, destination: str | None, port: int) -> None:
     host = new_host(
         key_pair=key_pair,
         muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
-        sec_opt=security_options,
     )
     # Log available protocols
     logger.debug(f"Host ID: {host.get_id()}")
