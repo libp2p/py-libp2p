@@ -108,6 +108,7 @@ setup(
             "chat-demo=examples.chat.chat:main",
             "echo-demo=examples.echo.echo:main",
             "ping-demo=examples.ping.ping:main",
+            "pubsub-demo=examples.pubsub.pubsub:main",
             "identify-demo=examples.identify.identify:main",
         ],
     },
