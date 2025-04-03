@@ -161,7 +161,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     # Server mode
                     logger.info(
                         "Run this script in another console with:\n"
-                        f"python pubsub.py "
+                        f"pubsub-demo "
                         f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     logger.info("Waiting for peers...")
@@ -186,7 +186,7 @@ async def run(topic: str, destination: str | None, port: int) -> None:
                     )
                     logger.info(
                         "Run this script in another console with:\n"
-                        f"python pubsub.py "
+                        f"pubsub-demo "
                         f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     try:
