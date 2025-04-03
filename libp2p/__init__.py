@@ -41,6 +41,9 @@ from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
+from libp2p.transport.quic.transport import (
+    QuicTransport,
+)
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
