@@ -19,3 +19,6 @@ Module contents
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. toctree::
+   :maxdepth: 4
