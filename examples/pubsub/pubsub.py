@@ -237,6 +237,13 @@ def main() -> None:
     description = """
     This program demonstrates a pubsub p2p chat application using libp2p with
     the gossipsub protocol as the pubsub router.
+    To use it, first run 'python pubsub.py -p <PORT> -t <TOPIC>',
+    where <PORT> is the port number,
+    and <TOPIC> is the name of the topic you want to subscribe to.
+    Then, run another instance with 'python pubsub.py -p <ANOTHER_PORT> -t <TOPIC>
+    -d <DESTINATION>', where <DESTINATION> is the multiaddress of the previous
+    listener host. Messages typed in either terminal will be received by all peers
+    subscribed to the same topic.
     """
 
     parser = argparse.ArgumentParser(description=description)
