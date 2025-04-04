@@ -29,7 +29,7 @@ On MacOS, you can install them using the following command:
 Setting the stage
 ~~~~~~~~~~~~~~~~~
 
-To get started, fork the repository to your own github account, then clone it
+To get started, fork the repository to your own GitHub account, then clone it
 to your development machine:
 
 .. code:: sh
@@ -37,7 +37,26 @@ to your development machine:
     git clone git@github.com:your-github-username/py-libp2p.git
 
 Next, install the development dependencies. We recommend using a virtual
-environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
+environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
+Python's built-in ``venv`` module. Instructions vary by platform:
+
+**Linux and macOS**
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+On macOS, you must help the build command find and link against the ``gmp`` library:
+
+.. code:: sh
+
+   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+
+An alternative using ``virtualenv``:
 
 .. code:: sh
 
@@ -47,22 +66,84 @@ environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
     python -m pip install -e ".[dev]"
     pre-commit install
 
-An alternative to virtualenv is to use the built-in Python3 venv module:
+**Windows Development Setup**
 
-.. code:: sh
+To set up ``py-libp2p`` on Windows, follow these steps:
 
-   cd py-libp2p
-   python3 -m venv ./venv
-   . venv/bin/activate
-   python3 -m pip install -e ".[dev]"
-   pre-commit install
+*Prerequisites*
 
-Currently, on MacOS you must help the build command find and link against the
-gmp library. On MacOS run the following to build py-libp2p:
+1. **Python 3.11+**
+   - Download and install Python from `python.org <https://www.python.org/downloads/>`_ or the Microsoft Store.
+   - Verify installation:
+     .. code-block:: powershell
 
-.. code:: sh
+        python --version
 
-   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+2. **Git**
+   - Install Git using Windows Package Manager (``winget``):
+     .. code-block:: powershell
+
+        winget install --id Git.Git -e
+   - Or download from `git-scm.com <https://git-scm.com/download/win>`_.
+   - Verify:
+     .. code-block:: powershell
+
+        git --version
+
+3. **CMake**
+   - Install CMake with ``winget``:
+     .. code-block:: powershell
+
+        winget install --id Kitware.CMake -e
+   - Or download from `cmake.org <https://cmake.org/download/>`_.
+   - Add CMake to your PATH during installation, then verify:
+     .. code-block:: powershell
+
+        cmake --version
+
+4. **Make (Optional)**
+    - Option 1: Use Git Bash (included with Git) as a shell.
+    - Option 2: Install ``make`` via Chocolatey:
+    .. code-block:: powershell
+
+        choco install make
+    - Install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_.
+    - Verify:
+    .. code-block:: powershell
+
+        make --version
+
+*Setup Steps*
+
+1. **Clone the Repository**
+   - Open PowerShell or Git Bash and run:
+     .. code-block:: powershell
+
+        git clone https://github.com/libp2p/py-libp2p.git
+        cd py-libp2p
+
+2. **Create a Virtual Environment**
+   - In PowerShell:
+     .. code-block:: powershell
+
+        python -m venv venv
+        .\venv\Scripts\activate
+
+3. **Install Dependencies**
+   - Install the project and dev dependencies:
+     .. code-block:: powershell
+
+        pip install -e ".[dev]"
+
+4. **Verify Setup**
+   - Run the tests to ensure everything works:
+     .. code-block:: powershell
+
+        pytest -v
+
+*Notes*
+- Use PowerShell, Command Prompt, or Git Bash as your shell. Git Bash is recommended if ``make`` is required.
+- Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
 ^^^^^^^^^^^^
@@ -83,7 +164,6 @@ We can run all tests with:
 
 At this time, the interop tests are not passing. You can run just the internal tests
 with ``pytest tests/core``.
-
 
 Code Style
 ~~~~~~~~~~
