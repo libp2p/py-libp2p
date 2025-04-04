@@ -5,27 +5,6 @@ Thank you for your interest in contributing! We welcome all contributions no mat
 their size. Please read along to learn how to get started. If you get stuck, feel free
 to ask for help in `Ethereum Python Discord server <https://discord.gg/GHryRvPB84>`_.
 
-Dependencies
-^^^^^^^^^^^^
-
-The following dependencies are needed to build py-libp2p:
-
-* `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-* `CMake <https://cmake.org>`
-* `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`
-
-On Debian Linux you can install them using the following command:
-
-.. code:: sh
-
-    sudo apt-get install cmake pkg-config libgmp-dev
-
-On MacOS, you can install them using the following command:
-
-.. code:: sh
-
-   brew install cmake pkgconfig gmp
-
 Setting the stage
 ~~~~~~~~~~~~~~~~~
 
@@ -36,11 +15,32 @@ to your development machine:
 
     git clone git@github.com:your-github-username/py-libp2p.git
 
-Next, install the development dependencies. We recommend using a virtual
-environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
+Next, install the development dependencies and set up the project. We recommend using a
+virtual environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
 Python's built-in ``venv`` module. Instructions vary by platform:
 
-**Linux and macOS**
+Linux Setup
+^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+On Debian Linux, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
+
+.. code:: sh
+
+    sudo apt-get install cmake pkg-config libgmp-dev
+
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
 
 .. code:: sh
 
@@ -49,12 +49,6 @@ Python's built-in ``venv`` module. Instructions vary by platform:
     . venv/bin/activate
     python3 -m pip install -e ".[dev]"
     pre-commit install
-
-On macOS, you must help the build command find and link against the ``gmp`` library:
-
-.. code:: sh
-
-   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
 
 An alternative using ``virtualenv``:
 
@@ -66,83 +60,139 @@ An alternative using ``virtualenv``:
     python -m pip install -e ".[dev]"
     pre-commit install
 
-**Windows Development Setup**
+macOS Setup
+^^^^^^^^^^^
 
-To set up ``py-libp2p`` on Windows, follow these steps:
+Prerequisites
+"""""""""""""
 
-*Prerequisites*
+On macOS, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
+
+.. code:: sh
+
+    brew install cmake pkgconfig gmp
+
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+On macOS, help the build command find and link against the ``gmp`` library:
+
+.. code:: sh
+
+    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+
+An alternative using ``virtualenv``:
+
+.. code:: sh
+
+    cd py-libp2p
+    virtualenv -p python venv
+    . venv/bin/activate
+    python -m pip install -e ".[dev]"
+    pre-commit install
+
+Windows Development Setup
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
 
 1. **Python 3.11+**
    - Download and install Python from `python.org <https://www.python.org/downloads/>`_ or the Microsoft Store.
    - Verify installation:
-     .. code-block:: powershell
+
+   .. code:: powershell
 
         python --version
 
 2. **Git**
-   - Install Git using Windows Package Manager (``winget``):
-     .. code-block:: powershell
+   - Install Git using Windows Package Manager (``winget``) or download from `git-scm.com <https://git-scm.com/download/win>`_.
+   - Verify:
+
+   .. code:: powershell
 
         winget install --id Git.Git -e
-   - Or download from `git-scm.com <https://git-scm.com/download/win>`_.
-   - Verify:
-     .. code-block:: powershell
-
         git --version
 
 3. **CMake**
-   - Install CMake with ``winget``:
-     .. code-block:: powershell
+   - Install CMake with ``winget`` or download from `cmake.org <https://cmake.org/download/>`_.
+   - Add CMake to your PATH during installation, then verify:
+
+   .. code:: powershell
 
         winget install --id Kitware.CMake -e
-   - Or download from `cmake.org <https://cmake.org/download/>`_.
-   - Add CMake to your PATH during installation, then verify:
-     .. code-block:: powershell
-
         cmake --version
 
-4. **Make (Optional)**
+4. **Make**
     - Option 1: Use Git Bash (included with Git) as a shell.
-    - Option 2: Install ``make`` via Chocolatey:
-    .. code-block:: powershell
+    - Option 2: Install ``make`` via Chocolatey (install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_).
+    - Verify installation:
+
+   .. code:: powershell
 
         choco install make
-    - Install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_.
-    - Verify:
-    .. code-block:: powershell
-
         make --version
 
-*Setup Steps*
+
+Setup Steps
+"""""""""""
 
 1. **Clone the Repository**
    - Open PowerShell or Git Bash and run:
-     .. code-block:: powershell
 
-        git clone https://github.com/libp2p/py-libp2p.git
+   .. code:: powershell
+
+        git clone git@github.com:your-github-username/py-libp2p.git
         cd py-libp2p
 
 2. **Create a Virtual Environment**
    - In PowerShell:
-     .. code-block:: powershell
+
+   .. code:: powershell
 
         python -m venv venv
         .\venv\Scripts\activate
 
 3. **Install Dependencies**
    - Install the project and dev dependencies:
-     .. code-block:: powershell
+
+   .. code:: powershell
 
         pip install -e ".[dev]"
 
 4. **Verify Setup**
    - Run the tests to ensure everything works:
-     .. code-block:: powershell
+
+   .. code:: powershell
 
         pytest -v
 
-*Notes*
-- Use PowerShell, Command Prompt, or Git Bash as your shell. Git Bash is recommended if ``make`` is required.
+   - If using ``make test`` with Git Bash:
+
+   .. code:: bash
+
+        make test
+
+Notes
+"""""
+
+- Use PowerShell, Command Prompt, or Git Bash as your shell.
 - Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
@@ -164,6 +214,7 @@ We can run all tests with:
 
 At this time, the interop tests are not passing. You can run just the internal tests
 with ``pytest tests/core``.
+
 
 Code Style
 ~~~~~~~~~~
