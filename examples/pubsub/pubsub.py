@@ -1,6 +1,9 @@
 import argparse
 import logging
 import socket
+from typing import (
+    Optional,
+)
 
 import base58
 import multiaddr
@@ -107,7 +110,7 @@ async def monitor_peer_topics(pubsub, nursery, termination_event):
         await trio.sleep(2)
 
 
-async def run(topic: str, destination: str | None, port: int) -> None:
+async def run(topic: str, destination: Optional[str], port: Optional[int]) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
 
