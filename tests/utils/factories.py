@@ -639,7 +639,8 @@ async def mplex_conn_pair_factory(
     security_protocol: TProtocol = None,
 ) -> AsyncIterator[tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
-        security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
+        security_protocol=security_protocol,
+        muxer_opt=default_mplex_muxer_transport_factory(),
     ) as swarm_pair:
         yield (
             cast(Mplex, swarm_pair[0].muxed_conn),

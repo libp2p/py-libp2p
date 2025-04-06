@@ -1,3 +1,8 @@
+"""
+Yamux stream multiplexer implementation for py-libp2p.
+This is the preferred multiplexing protocol due to its performance and feature set.
+Mplex is also available for legacy compatibility but may be deprecated in the future.
+"""
 import logging
 import struct
 from typing import (
