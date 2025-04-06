@@ -11,34 +11,40 @@ This example demonstrates how to create a chat application using libp2p's PubSub
     ...
     Successfully installed libp2p-x.x.x
     $ pubsub-demo
-    Node started with peer ID: QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N
-    Listening on: /ip4/127.0.0.1/tcp/12345
-    Initializing PubSub and GossipSub...
-    Pubsub and GossipSub services started.
-    Pubsub ready.
-    Subscribed to topic: pubsub-chat
-    Run this script in another console with:
-    pubsub-demo -d /ip4/127.0.0.1/tcp/12345/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N
+    2025-04-06 23:59:17,471 - pubsub-demo - INFO - Running pubsub chat example...
+    2025-04-06 23:59:17,471 - pubsub-demo - INFO - Your selected topic is: pubsub-chat
+    2025-04-06 23:59:17,472 - pubsub-demo - INFO - Using random available port: 33269
+    2025-04-06 23:59:17,490 - pubsub-demo - INFO - Node started with peer ID: QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7
+    2025-04-06 23:59:17,490 - pubsub-demo - INFO - Listening on: /ip4/0.0.0.0/tcp/33269
+    2025-04-06 23:59:17,490 - pubsub-demo - INFO - Initializing PubSub and GossipSub...
+    2025-04-06 23:59:17,491 - pubsub-demo - INFO - Pubsub and GossipSub services started.
+    2025-04-06 23:59:17,491 - pubsub-demo - INFO - Pubsub ready.
+    2025-04-06 23:59:17,491 - pubsub-demo - INFO - Subscribed to topic: pubsub-chat
+    2025-04-06 23:59:17,491 - pubsub-demo - INFO - Run this script in another console with:
+    pubsub-demo -d /ip4/127.0.0.1/tcp/33269/p2p/QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7
 
-    Waiting for peers...
+    2025-04-06 23:59:17,491 - pubsub-demo - INFO - Waiting for peers...
     Type messages to send (press Enter to send):
 
 Copy the line that starts with ``pubsub-demo -d``, open a new terminal and paste it in:
 
 .. code-block:: console
 
-    $ pubsub-demo -d /ip4/127.0.0.1/tcp/12345/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N
-    Node started with peer ID: QmXZLbpYC9vRmMDcMVmzey7wGnZBWWPv4UYh3G5UzLnTMf
-    Listening on: /ip4/127.0.0.1/tcp/54321
-    Initializing PubSub and GossipSub...
-    Pubsub and GossipSub services started.
-    Pubsub ready.
-    Subscribed to topic: pubsub-chat
-    Connecting to peer: QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N using protocols: [Protocol(code=4, name='ip4', path=False, size=32), Protocol(code=6, name='tcp', path=False, size=16), Protocol(code=421, name='p2p', path=False, size=-1)]
-    Run this script in another console with:
-    pubsub-demo -d /ip4/127.0.0.1/tcp/54321/p2p/QmXZLbpYC9vRmMDcMVmzey7wGnZBWWPv4UYh3G5UzLnTMf
+    $ pubsub-demo -d /ip4/127.0.0.1/tcp/33269/p2p/QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7
+    2025-04-07 00:00:59,845 - pubsub-demo - INFO - Running pubsub chat example...
+    2025-04-07 00:00:59,846 - pubsub-demo - INFO - Your selected topic is: pubsub-chat
+    2025-04-07 00:00:59,846 - pubsub-demo - INFO - Using random available port: 51977
+    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Node started with peer ID: QmYQKCm95Ut1aXsjHmWVYqdaVbno1eKTYC8KbEVjqUaKaQ
+    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Listening on: /ip4/0.0.0.0/tcp/51977
+    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Initializing PubSub and GossipSub...
+    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Pubsub and GossipSub services started.
+    2025-04-07 00:00:59,865 - pubsub-demo - INFO - Pubsub ready.
+    2025-04-07 00:00:59,865 - pubsub-demo - INFO - Subscribed to topic: pubsub-chat
+    2025-04-07 00:00:59,866 - pubsub-demo - INFO - Connecting to peer: QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7 using protocols: MultiAddrKeys(<Multiaddr /ip4/127.0.0.1/tcp/33269/p2p/QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7>)
+    2025-04-07 00:00:59,866 - pubsub-demo - INFO - Run this script in another console with:
+    pubsub-demo -d /ip4/127.0.0.1/tcp/51977/p2p/QmYQKCm95Ut1aXsjHmWVYqdaVbno1eKTYC8KbEVjqUaKaQ
 
-    Connected to peer: QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N
+    2025-04-07 00:00:59,881 - pubsub-demo - INFO - Connected to peer: QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7
     Type messages to send (press Enter to send):
 
 You can then start typing messages in either terminal and see them relayed to the other terminal. The messages will be distributed using the GossipSub protocol to all peers subscribed to the same topic. To exit the demo, type "quit" or send a keyboard interrupt (``Ctrl+C``) in either terminal.

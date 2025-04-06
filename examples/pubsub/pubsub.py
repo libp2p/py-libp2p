@@ -40,13 +40,12 @@ logging.basicConfig(
     level=logging.INFO,  # Set default to DEBUG for more verbose output
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("pubsub-debug")
+logger = logging.getLogger("pubsub-demo")
 CHAT_TOPIC = "pubsub-chat"
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 # Generate a key pair for the node
 key_pair = create_new_key_pair()
-logger.info(f"Node {key_pair.public_key}: Created key pair")
 
 
 async def receive_loop(subscription, termination_event):
