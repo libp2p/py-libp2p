@@ -9,3 +9,4 @@ Examples
    examples.chat
    examples.echo
    examples.ping
+   examples.pubsub
