@@ -5,7 +5,7 @@ Submodules
 ----------
 
 libp2p.transport.quic.transport module
--------------------------------------
+--------------------------------------
 
 .. automodule:: libp2p.transport.quic.transport
    :members:
