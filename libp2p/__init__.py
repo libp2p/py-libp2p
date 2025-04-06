@@ -1,10 +1,19 @@
+from collections.abc import (
+    Mapping,
+)
 from importlib.metadata import version as __version
+from typing import (
+    Type,
+    cast,
+)
 
 from libp2p.abc import (
     IHost,
+    IMuxedConn,
     INetworkService,
     IPeerRouting,
     IPeerStore,
+    ISecureTransport,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -36,10 +45,13 @@ from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
 )
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID,
+    Transport,
+)
 import libp2p.security.secio.transport as secio
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_PROTOCOL_ID,
-    Mplex,
+from libp2p.stream_muxer.yamux.yamux import (
+    Yamux,
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
@@ -81,13 +93,17 @@ def new_swarm(
     # TODO: Parse `listen_addrs` to determine transport
     transport = TCP()
 
-    muxer_transports_by_protocol = muxer_opt or {MPLEX_PROTOCOL_ID: Mplex}
-    security_transports_by_protocol = sec_opt or {
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
-        TProtocol(secio.ID): secio.Transport(key_pair),
+    secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
+        PROTOCOL_ID: Transport(key_pair, noise_privkey=key_pair.private_key)
     }
+
+    muxer_transports_by_protocol: Mapping[TProtocol, type[IMuxedConn]] = muxer_opt or {
+        cast(TProtocol, "/yamux/1.0.0"): Yamux
+    }
+
     upgrader = TransportUpgrader(
-        security_transports_by_protocol, muxer_transports_by_protocol
+        secure_transports_by_protocol=secure_transports_by_protocol,
+        muxer_transports_by_protocol=muxer_transports_by_protocol,
     )
 
     peerstore = peerstore_opt or PeerStore()
