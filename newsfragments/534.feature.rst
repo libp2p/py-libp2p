@@ -1,1 +1,1 @@
-Replace mplex with yamux as default multiplexer in py-libp2p
+Added support for the Yamux stream multiplexer (/yamux/1.0.0) as the preferred option, retaining Mplex (/mplex/6.7.0) for backward compatibility.
