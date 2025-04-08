@@ -38,6 +38,8 @@ FLAG_ACK = 0x2
 FLAG_FIN = 0x4
 FLAG_RST = 0x8
 HEADER_SIZE = 12
+# Network byte order: version (B), type (B), flags (H), stream_id (I), length (I)
+YAMUX_HEADER_FORMAT = "!BBHII"
 
 
 class YamuxStream(IMuxedStream):
@@ -50,7 +52,9 @@ class YamuxStream(IMuxedStream):
     async def write(self, data: bytes) -> None:
         if self.closed:
             raise MuxedStreamError("Stream is closed")
-        header = struct.pack("!BBHII", 0, TYPE_DATA, 0, self.stream_id, len(data))
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(data)
+        )
         await self.conn.secured_conn.write(header + data)
 
     async def read(self, n: int = -1) -> bytes:
@@ -59,14 +63,18 @@ class YamuxStream(IMuxedStream):
     async def close(self) -> None:
         if not self.closed:
             logging.debug(f"Closing stream {self.stream_id}")
-            header = struct.pack("!BBHII", 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0)
+            header = struct.pack(
+                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
+            )
             await self.conn.secured_conn.write(header)
             self.closed = True
 
     async def reset(self) -> None:
         if not self.closed:
             logging.debug(f"Resetting stream {self.stream_id}")
-            header = struct.pack("!BBHII", 0, TYPE_DATA, FLAG_RST, self.stream_id, 0)
+            header = struct.pack(
+                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
+            )
             await self.conn.secured_conn.write(header)
             self.closed = True
 
@@ -141,7 +149,7 @@ class Yamux(IMuxedConn):
         logging.debug("Closing Yamux connection")
         async with self.streams_lock:
             if not self.event_shutting_down.is_set():
-                header = struct.pack("!BBHII", 0, TYPE_GO_AWAY, 0, 0, 0)
+                header = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_GO_AWAY, 0, 0, 0)
                 await self.secured_conn.write(header)
                 self.event_shutting_down.set()
                 for stream in self.streams.values():
@@ -165,7 +173,7 @@ class Yamux(IMuxedConn):
             self.stream_buffers[stream_id] = bytearray()
             self.stream_events[stream_id] = trio.Event()
 
-        header = struct.pack("!BBHII", 0, TYPE_DATA, FLAG_SYN, stream_id, 0)
+        header = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_SYN, stream_id, 0)
         logging.debug(f"Sending SYN header for stream {stream_id}")
         await self.secured_conn.write(header)
         return stream
@@ -231,7 +239,9 @@ class Yamux(IMuxedConn):
                     logging.debug("Connection closed or incomplete header")
                     self.event_shutting_down.set()
                     break
-                version, typ, flags, stream_id, length = struct.unpack("!BBHII", header)
+                version, typ, flags, stream_id, length = struct.unpack(
+                    YAMUX_HEADER_FORMAT, header
+                )
                 logging.debug(
                     f"Received header: type={typ}, flags={flags}, "
                     f"stream_id={stream_id}, length={length}"
