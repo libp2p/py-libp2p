@@ -189,7 +189,3 @@ async def test_yamux_connection_close(yamux_pair):
     assert client_yamux.is_closed
     assert server_yamux.event_shutting_down.is_set()
     print("test_yamux_connection_close complete")
-
-
-if __name__ == "__main__":
-    trio.run(pytest.main, ["-v"])
