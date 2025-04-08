@@ -16,8 +16,8 @@ import trio
 from libp2p.abc import (
     INotifee,
 )
-from libp2p.tools.async_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service import (
+    background_anyio_service,
 )
 from libp2p.tools.constants import (
     LISTEN_MADDR,
@@ -72,7 +72,7 @@ async def test_notify(security_protocol):
     events_1_0 = []
     events_0_without_listen = []
     # Run swarms.
-    async with background_trio_service(swarms[0]), background_trio_service(swarms[1]):
+    async with background_anyio_service(swarms[0]), background_anyio_service(swarms[1]):
         # Register events before listening, to allow `MyNotifee` is notified with the
         # event `listen`.
         swarms[0].register_notifee(MyNotifee(events_0_0))

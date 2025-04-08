@@ -1,4 +1,6 @@
-# Copied from https://github.com/ethereum/async-service
+"""
+Statistics tracking for services and tasks.
+"""
 
 from typing import (
     NamedTuple,
