@@ -50,6 +50,7 @@ except FileNotFoundError:
     long_description = description
 
 install_requires = [
+    "aioquic>=0.9.20",
     "base58>=1.0.3",
     "coincurve>=10.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
