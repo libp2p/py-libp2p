@@ -63,7 +63,9 @@ install_requires = [
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
+    "aioquic>=0.9.20",
     "trio>=0.26.0",
+    "structlog>=24.1.0",
 ]
 
 # Add platform-specific dependencies
