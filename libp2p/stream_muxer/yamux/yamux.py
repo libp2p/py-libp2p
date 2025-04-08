@@ -120,6 +120,10 @@ class Yamux(IMuxedConn):
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
+        # Per Yamux spec
+        # (https://github.com/hashicorp/yamux/blob/master/spec.md#streamid-field):
+        # Initiators assign odd stream IDs (starting at 1),
+        # responders use even IDs (starting at 2).
         self.is_initiator_value = (
             is_initiator if is_initiator is not None else secured_conn.is_initiator
         )
