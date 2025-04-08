@@ -79,6 +79,13 @@ class YamuxStream(IMuxedStream):
             self.closed = True
 
     def set_deadline(self, ttl: int) -> bool:
+        """
+        Set a deadline for the stream. Yamux does not support deadlines natively,
+        so this method always returns False to indicate the operation is unsupported.
+
+        :param ttl: Time-to-live in seconds (ignored).
+        :return: False, as deadlines are not supported.
+        """
         return False
 
     def get_remote_address(self) -> Optional[tuple[str, int]]:
