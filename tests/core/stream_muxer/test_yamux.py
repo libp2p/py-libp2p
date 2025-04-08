@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import trio
 from trio.testing import (
@@ -26,21 +28,21 @@ class TrioStreamAdapter:
         self.receive_stream = receive_stream
 
     async def write(self, data):
-        print(f"Writing {len(data)} bytes")
+        logging.debug(f"Writing {len(data)} bytes")
         with trio.move_on_after(2):
             await self.send_stream.send_all(data)
 
     async def read(self, n=-1):
         if n == -1:
             raise ValueError("Reading unbounded not supported")
-        print(f"Attempting to read {n} bytes")
+        logging.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
             data = await self.receive_stream.receive_some(n)
-            print(f"Read {len(data)} bytes")
+            logging.debug(f"Read {len(data)} bytes")
             return data
 
     async def close(self):
-        print("Closing stream")
+        logging.debug("Closing stream")
 
 
 @pytest.fixture
@@ -55,7 +57,7 @@ def peer_id(key_pair):
 
 @pytest.fixture
 async def secure_conn_pair(key_pair, peer_id):
-    print("Setting up secure_conn_pair")
+    logging.debug("Setting up secure_conn_pair")
     client_send, server_receive = memory_stream_pair()
     server_send, client_receive = memory_stream_pair()
 
@@ -67,13 +69,13 @@ async def secure_conn_pair(key_pair, peer_id):
     async def run_outbound(nursery_results):
         with trio.move_on_after(5):
             client_conn = await insecure_transport.secure_outbound(client_rw, peer_id)
-            print("Outbound handshake complete")
+            logging.debug("Outbound handshake complete")
             nursery_results["client"] = client_conn
 
     async def run_inbound(nursery_results):
         with trio.move_on_after(5):
             server_conn = await insecure_transport.secure_inbound(server_rw)
-            print("Inbound handshake complete")
+            logging.debug("Inbound handshake complete")
             nursery_results["server"] = server_conn
 
     nursery_results = {}
@@ -88,13 +90,13 @@ async def secure_conn_pair(key_pair, peer_id):
     if client_conn is None or server_conn is None:
         raise RuntimeError("Handshake failed: client_conn or server_conn is None")
 
-    print("secure_conn_pair setup complete")
+    logging.debug("secure_conn_pair setup complete")
     return client_conn, server_conn
 
 
 @pytest.fixture
 async def yamux_pair(secure_conn_pair, peer_id):
-    print("Setting up yamux_pair")
+    logging.debug("Setting up yamux_pair")
     client_conn, server_conn = secure_conn_pair
     client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
     server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
@@ -103,39 +105,39 @@ async def yamux_pair(secure_conn_pair, peer_id):
             nursery.start_soon(client_yamux.start)
             nursery.start_soon(server_yamux.start)
             await trio.sleep(0.1)
-            print("yamux_pair started")
+            logging.debug("yamux_pair started")
         yield client_yamux, server_yamux
-    print("yamux_pair cleanup")
+    logging.debug("yamux_pair cleanup")
 
 
 @pytest.mark.trio
 async def test_yamux_stream_creation(yamux_pair):
-    print("Starting test_yamux_stream_creation")
+    logging.debug("Starting test_yamux_stream_creation")
     client_yamux, server_yamux = yamux_pair
     assert client_yamux.is_initiator
     assert not server_yamux.is_initiator
     with trio.move_on_after(5):
         stream = await client_yamux.open_stream()
-        print("Stream opened")
+        logging.debug("Stream opened")
         assert isinstance(stream, YamuxStream)
         assert stream.stream_id % 2 == 1
-    print("test_yamux_stream_creation complete")
+    logging.debug("test_yamux_stream_creation complete")
 
 
 @pytest.mark.trio
 async def test_yamux_accept_stream(yamux_pair):
-    print("Starting test_yamux_accept_stream")
+    logging.debug("Starting test_yamux_accept_stream")
     client_yamux, server_yamux = yamux_pair
     client_stream = await client_yamux.open_stream()
     server_stream = await server_yamux.accept_stream()
     assert server_stream.stream_id == client_stream.stream_id
     assert isinstance(server_stream, YamuxStream)
-    print("test_yamux_accept_stream complete")
+    logging.debug("test_yamux_accept_stream complete")
 
 
 @pytest.mark.trio
 async def test_yamux_data_transfer(yamux_pair):
-    print("Starting test_yamux_data_transfer")
+    logging.debug("Starting test_yamux_data_transfer")
     client_yamux, server_yamux = yamux_pair
     client_stream = await client_yamux.open_stream()
     server_stream = await server_yamux.accept_stream()
@@ -147,12 +149,12 @@ async def test_yamux_data_transfer(yamux_pair):
     await server_stream.write(reply_data)
     received = await client_stream.read(len(reply_data))
     assert received == reply_data
-    print("test_yamux_data_transfer complete")
+    logging.debug("test_yamux_data_transfer complete")
 
 
 @pytest.mark.trio
 async def test_yamux_stream_close(yamux_pair):
-    print("Starting test_yamux_stream_close")
+    logging.debug("Starting test_yamux_stream_close")
     client_yamux, server_yamux = yamux_pair
     client_stream = await client_yamux.open_stream()
     server_stream = await server_yamux.accept_stream()
@@ -162,30 +164,30 @@ async def test_yamux_stream_close(yamux_pair):
     assert client_stream.closed
     with pytest.raises(MuxedStreamError):
         await client_stream.write(b"test")
-    print("test_yamux_stream_close complete")
+    logging.debug("test_yamux_stream_close complete")
 
 
 @pytest.mark.trio
 async def test_yamux_stream_reset(yamux_pair):
-    print("Starting test_yamux_stream_reset")
+    logging.debug("Starting test_yamux_stream_reset")
     client_yamux, server_yamux = yamux_pair
     client_stream = await client_yamux.open_stream()
     server_stream = await server_yamux.accept_stream()
     await client_stream.reset()
     data = await server_stream.read()
     assert data == b"", "Expected empty read after reset"
-    print("test_yamux_stream_reset complete")
+    logging.debug("test_yamux_stream_reset complete")
 
 
 @pytest.mark.trio
 async def test_yamux_connection_close(yamux_pair):
-    print("Starting test_yamux_connection_close")
+    logging.debug("Starting test_yamux_connection_close")
     client_yamux, server_yamux = yamux_pair
     await client_yamux.open_stream()
     await server_yamux.accept_stream()
     await client_yamux.close()
-    print("Closing stream")
+    logging.debug("Closing stream")
     await trio.sleep(0.2)
     assert client_yamux.is_closed
     assert server_yamux.event_shutting_down.is_set()
-    print("test_yamux_connection_close complete")
+    logging.debug("test_yamux_connection_close complete")
