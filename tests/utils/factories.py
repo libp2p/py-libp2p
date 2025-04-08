@@ -102,7 +102,6 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
-    FLOODSUB_PROTOCOL_ID,
     GOSSIPSUB_PARAMS,
     GOSSIPSUB_PROTOCOL_ID,
     LISTEN_MADDR,
@@ -406,11 +405,13 @@ class RoutedHostFactory(factory.Factory):
             yield routed_hosts
 
 
-class FloodsubFactory(factory.Factory):
+class FloodSubFactory(factory.Factory):
+    """Factory for creating FloodSub instances."""
+
     class Meta:
         model = FloodSub
 
-    protocols = (FLOODSUB_PROTOCOL_ID,)
+    protocols = None
 
 
 class GossipsubFactory(factory.Factory):
@@ -432,9 +433,10 @@ class PubsubFactory(factory.Factory):
         model = Pubsub
 
     host = factory.SubFactory(HostFactory)
-    router = None
+    router = factory.SubFactory(GossipsubFactory)
     cache_size = None
     strict_signing = False
+    msg_id_constructor = get_peer_and_seqno_msg_id
 
     @classmethod
     @asynccontextmanager
@@ -448,6 +450,17 @@ class PubsubFactory(factory.Factory):
         strict_signing: bool,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[Pubsub]:
+        """
+        Create and start a pubsub instance.
+
+        :param host: host to use
+        :param router: router to use
+        :param cache_size: size of the cache
+        :param seen_ttl: time to live for seen messages
+        :param sweep_interval: interval to sweep seen messages
+        :param strict_signing: whether to enforce strict signing
+        :param msg_id_constructor: constructor for message IDs
+        """
         pubsub = cls(
             host=host,
             router=router,
@@ -457,9 +470,9 @@ class PubsubFactory(factory.Factory):
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
         )
-        async with background_trio_service(pubsub):
+        async with background_trio_service(pubsub) as service:
             await pubsub.wait_until_ready()
-            yield pubsub
+            yield service
 
     @classmethod
     @asynccontextmanager
@@ -475,26 +488,40 @@ class PubsubFactory(factory.Factory):
         muxer_opt: TMuxerOptions = None,
         msg_id_constructor: Callable[[rpc_pb2.Message], bytes] = None,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        async with HostFactory.create_batch_and_listen(
-            number, security_protocol=security_protocol, muxer_opt=muxer_opt
-        ) as hosts:
-            # Pubsubs should exit before hosts
-            async with AsyncExitStack() as stack:
-                pubsubs = [
-                    await stack.enter_async_context(
-                        cls.create_and_start(
-                            host,
-                            router,
-                            cache_size,
-                            seen_ttl,
-                            sweep_interval,
-                            strict_signing,
-                            msg_id_constructor,
-                        )
+        """
+        Create a batch of pubsub instances with the given routers.
+
+        :param number: number of instances to create
+        :param routers: routers to use
+        :param cache_size: size of the cache
+        :param seen_ttl: time to live for seen messages
+        :param sweep_interval: interval to sweep seen messages
+        :param strict_signing: whether to enforce strict signing
+        :param security_protocol: security protocol to use
+        :param muxer_opt: muxer options to use
+        :param msg_id_constructor: constructor for message IDs
+        """
+        async with AsyncExitStack() as stack:
+            hosts = await stack.enter_async_context(
+                HostFactory.create_batch_and_listen(
+                    number, security_protocol, muxer_opt
+                )
+            )
+            pubsubs = []
+            for host, router in zip(hosts, routers):
+                pubsub = await stack.enter_async_context(
+                    cls.create_and_start(
+                        host=host,
+                        router=router,
+                        cache_size=cache_size,
+                        seen_ttl=seen_ttl,
+                        sweep_interval=sweep_interval,
+                        strict_signing=strict_signing,
+                        msg_id_constructor=msg_id_constructor,
                     )
-                    for host, router in zip(hosts, routers)
-                ]
-                yield tuple(pubsubs)
+                )
+                pubsubs.append(pubsub)
+            yield tuple(pubsubs)
 
     @classmethod
     @asynccontextmanager
@@ -512,17 +539,27 @@ class PubsubFactory(factory.Factory):
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        if protocols is not None:
-            floodsubs = FloodsubFactory.create_batch(number, protocols=list(protocols))
-        else:
-            floodsubs = FloodsubFactory.create_batch(number)
+        """
+        Create a batch of pubsub instances with floodsub routers.
+
+        :param number: number of instances to create
+        :param cache_size: size of the cache
+        :param seen_ttl: time to live for seen messages
+        :param sweep_interval: interval to sweep seen messages
+        :param strict_signing: whether to enforce strict signing
+        :param protocols: protocols to use
+        :param security_protocol: security protocol to use
+        :param muxer_opt: muxer options to use
+        :param msg_id_constructor: constructor for message IDs
+        """
+        routers = [FloodSubFactory(protocols=protocols) for _ in range(number)]
         async with cls._create_batch_with_router(
-            number,
-            floodsubs,
-            cache_size,
-            seen_ttl,
-            sweep_interval,
-            strict_signing,
+            number=number,
+            routers=routers,
+            cache_size=cache_size,
+            seen_ttl=seen_ttl,
+            sweep_interval=sweep_interval,
+            strict_signing=strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
             msg_id_constructor=msg_id_constructor,
@@ -552,40 +589,51 @@ class PubsubFactory(factory.Factory):
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        if protocols is not None:
-            gossipsubs = GossipsubFactory.create_batch(
-                number,
+        """
+        Create a batch of pubsub instances with gossipsub routers.
+
+        :param number: number of instances to create
+        :param cache_size: size of the cache
+        :param strict_signing: whether to enforce strict signing
+        :param protocols: protocols to use
+        :param degree: degree of the mesh
+        :param degree_low: low degree of the mesh
+        :param degree_high: high degree of the mesh
+        :param time_to_live: time to live for messages
+        :param gossip_window: window for gossip
+        :param gossip_history: history for gossip
+        :param heartbeat_interval: interval for heartbeat
+        :param heartbeat_initial_delay: initial delay for heartbeat
+        :param security_protocol: security protocol to use
+        :param muxer_opt: muxer options to use
+        :param msg_id_constructor: constructor for message IDs
+        """
+        routers = [
+            GossipsubFactory(
                 protocols=protocols,
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
                 time_to_live=time_to_live,
                 gossip_window=gossip_window,
+                gossip_history=gossip_history,
                 heartbeat_interval=heartbeat_interval,
+                heartbeat_initial_delay=heartbeat_initial_delay,
             )
-        else:
-            gossipsubs = GossipsubFactory.create_batch(
-                number,
-                degree=degree,
-                degree_low=degree_low,
-                degree_high=degree_high,
-                gossip_window=gossip_window,
-                heartbeat_interval=heartbeat_interval,
-            )
-
+            for _ in range(number)
+        ]
         async with cls._create_batch_with_router(
-            number,
-            gossipsubs,
-            cache_size,
-            strict_signing,
+            number=number,
+            routers=routers,
+            cache_size=cache_size,
+            seen_ttl=120,
+            sweep_interval=60,
+            strict_signing=strict_signing,
             security_protocol=security_protocol,
             muxer_opt=muxer_opt,
             msg_id_constructor=msg_id_constructor,
         ) as pubsubs:
-            async with AsyncExitStack() as stack:
-                for router in gossipsubs:
-                    await stack.enter_async_context(background_trio_service(router))
-                yield pubsubs
+            yield pubsubs
 
 
 @asynccontextmanager
