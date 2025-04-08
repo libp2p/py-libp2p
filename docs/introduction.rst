@@ -2,12 +2,12 @@ Introduction
 ============
 
 What is Py-libp2p?
------------------
+------------------
 
 Py-libp2p is the Python implementation of the libp2p networking stack, a modular peer-to-peer networking framework. It provides a robust foundation for building decentralized applications and protocols in Python, enabling developers to create resilient, secure, and efficient peer-to-peer networks.
 
 The Libp2p Ecosystem
--------------------
+--------------------
 
 Libp2p is a collection of networking protocols and specifications that form the foundation of many decentralized systems. Py-libp2p is part of this broader ecosystem, which includes implementations in various languages:
 
@@ -18,7 +18,7 @@ Libp2p is a collection of networking protocols and specifications that form the 
 While each implementation has its strengths, Py-libp2p offers unique advantages for Python developers and researchers.
 
 Why Choose Py-libp2p?
---------------------
+---------------------
 
 Py-libp2p is particularly well-suited for:
 
@@ -28,7 +28,7 @@ Py-libp2p is particularly well-suited for:
 * **Integration with Python Projects**: Seamlessly integrate libp2p functionality into existing Python applications.
 
 Current Capabilities
-------------------
+--------------------
 
 Py-libp2p supports several key libp2p features:
 
@@ -51,12 +51,12 @@ Py-libp2p can be used to build various decentralized applications:
 * Private peer-to-peer messaging systems
 
 Getting Started
---------------
+---------------
 
 Ready to start building with Py-libp2p? Check out our :doc:`quickstart` guide to begin your journey. For more detailed information about specific features and APIs, explore our :doc:`examples` and :doc:`API documentation <libp2p>`.
 
 Contributing
------------
+------------
 
 We welcome contributions from developers of all experience levels! Whether you're fixing bugs, adding features, or improving documentation, your help is valuable. See our :doc:`contributing` guide for details on how to get involved.
 
