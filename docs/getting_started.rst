@@ -57,7 +57,9 @@ For development or testing purposes only, you can use the insecure transport:
 Multiplexing
 ^^^^^^^^^^^^
 
-While multiplexers are not strictly required, they are highly recommended as they improve the effectiveness and efficiency of connections. Adding a multiplexer to your configuration will allow libp2p to run several of its internal protocols, like Identify, as well as allow your application to easily run any number of protocols over a single connection.
+Multiplexers are a required component of libp2p connections. They enable multiple logical streams to be carried over a single connection, which is essential for efficient peer-to-peer communication. The multiplexer layer is a mandatory part of the connection upgrade process, alongside the transport and security layers.
+
+Adding a multiplexer to your configuration allows libp2p to run several of its internal protocols, like Identify, as well as enables your application to run any number of protocols over a single connection.
 
 For Python, we can use mplex as our multiplexer:
 
