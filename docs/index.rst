@@ -3,13 +3,20 @@ py-libp2p
 
 The Python implementation of the libp2p networking stack
 
+Installation
+------------
+
+.. code-block:: bash
+
+    python -m pip install py-libp2p
+
+
 .. toctree::
     :maxdepth: 1
     :caption: General
 
     introduction
-    install
-    getting_started
+    quickstart
     release_notes
 
 .. toctree::
