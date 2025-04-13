@@ -5,39 +5,52 @@ Thank you for your interest in contributing! We welcome all contributions no mat
 their size. Please read along to learn how to get started. If you get stuck, feel free
 to ask for help in `Ethereum Python Discord server <https://discord.gg/GHryRvPB84>`_.
 
-Dependencies
-^^^^^^^^^^^^
-
-The following dependencies are needed to build py-libp2p:
-
-* `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-* `CMake <https://cmake.org>`
-* `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`
-
-On Debian Linux you can install them using the following command:
-
-.. code:: sh
-
-    sudo apt-get install cmake pkg-config libgmp-dev
-
-On MacOS, you can install them using the following command:
-
-.. code:: sh
-
-   brew install cmake pkgconfig gmp
-
 Setting the stage
 ~~~~~~~~~~~~~~~~~
 
-To get started, fork the repository to your own github account, then clone it
+To get started, fork the repository to your own GitHub account, then clone it
 to your development machine:
 
 .. code:: sh
 
     git clone git@github.com:your-github-username/py-libp2p.git
 
-Next, install the development dependencies. We recommend using a virtual
-environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
+Next, install the development dependencies and set up the project. We recommend using a
+virtual environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
+Python's built-in ``venv`` module. Instructions vary by platform:
+
+Linux Setup
+^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+On Debian Linux, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
+
+.. code:: sh
+
+    sudo apt-get install cmake pkg-config libgmp-dev
+
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+An alternative using ``virtualenv``:
 
 .. code:: sh
 
@@ -47,22 +60,140 @@ environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
     python -m pip install -e ".[dev]"
     pre-commit install
 
-An alternative to virtualenv is to use the built-in Python3 venv module:
+macOS Setup
+^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+On macOS, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
 
 .. code:: sh
 
-   cd py-libp2p
-   python3 -m venv ./venv
-   . venv/bin/activate
-   python3 -m pip install -e ".[dev]"
-   pre-commit install
+    brew install cmake pkgconfig gmp
 
-Currently, on MacOS you must help the build command find and link against the
-gmp library. On MacOS run the following to build py-libp2p:
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
 
 .. code:: sh
 
-   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+On macOS, help the build command find and link against the ``gmp`` library:
+
+.. code:: sh
+
+    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+
+An alternative using ``virtualenv``:
+
+.. code:: sh
+
+    cd py-libp2p
+    virtualenv -p python venv
+    . venv/bin/activate
+    python -m pip install -e ".[dev]"
+    pre-commit install
+
+Windows Development Setup
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+1. **Python 3.11+**
+   - Download and install Python from `python.org <https://www.python.org/downloads/>`_ or the Microsoft Store.
+   - Verify installation:
+
+   .. code:: powershell
+
+        python --version
+
+2. **Git**
+   - Install Git using Windows Package Manager (``winget``) or download from `git-scm.com <https://git-scm.com/download/win>`_.
+   - Verify:
+
+   .. code:: powershell
+
+        winget install --id Git.Git -e
+        git --version
+
+3. **CMake**
+   - Install CMake with ``winget`` or download from `cmake.org <https://cmake.org/download/>`_.
+   - Add CMake to your PATH during installation, then verify:
+
+   .. code:: powershell
+
+        winget install --id Kitware.CMake -e
+        cmake --version
+
+4. **Make**
+    - Option 1: Use Git Bash (included with Git) as a shell.
+    - Option 2: Install ``make`` via Chocolatey (install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_).
+    - Verify installation:
+
+   .. code:: powershell
+
+        choco install make
+        make --version
+
+
+Setup Steps
+"""""""""""
+
+1. **Clone the Repository**
+   - Open PowerShell or Git Bash and run:
+
+   .. code:: powershell
+
+        git clone git@github.com:your-github-username/py-libp2p.git
+        cd py-libp2p
+
+2. **Create a Virtual Environment**
+   - In PowerShell:
+
+   .. code:: powershell
+
+        python -m venv venv
+        .\venv\Scripts\activate
+
+3. **Install Dependencies**
+   - Install the project and dev dependencies:
+
+   .. code:: powershell
+
+        pip install -e ".[dev]"
+
+4. **Verify Setup**
+   - Run the tests to ensure everything works:
+
+   .. code:: powershell
+
+        pytest -v
+
+   - If using ``make test`` with Git Bash:
+
+   .. code:: bash
+
+        make test
+
+Notes
+"""""
+
+- Use PowerShell, Command Prompt, or Git Bash as your shell.
+- Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
 ^^^^^^^^^^^^
@@ -109,6 +240,47 @@ Documentation
 Good documentation will lead to quicker adoption and happier users. Please check out our
 guide on
 `how to create documentation for the Python Ethereum ecosystem <https://github.com/ethereum/snake-charmers-tactical-manual/blob/main/documentation.md>`_.
+
+Adding Examples
+~~~~~~~~~~~~~~~
+
+To add a new example (e.g., identify):
+
+1. Create a directory in ``examples/identify``
+2. Create a file ``examples/identify/identify.py`` with the example code
+3. Add ``__init__.py`` to make it a proper Python package (automatically discovered by find_packages() in ``setup.py``)
+4. Add the example in the example list ``docs/examples.rst``
+5. Add example tests in ``tests/core/examples/test_examples.py``
+6. Add the example documentation in ``docs/examples.identify.rst``
+7. Add a news fragment for the new release in file ``newsfragments/536.feature.rst`` (fix-id.type.rst)
+8. Generate doc files with ``make docs`` or ``make linux-docs`` in linux (generates files ``libp2p.identity.identify.rst libp2p.identity.rst libp2p.identity.identify.pb.rst``)
+9. Add the example to ``setup.py``:
+
+   .. code:: python
+
+       entry_points={
+           "console_scripts": [
+               "chat-demo=examples.chat.chat:main",
+               "echo-demo=examples.echo.echo:main",
+               "ping-demo=examples.ping.ping:main",
+               "identify-demo=examples.identify.identify:main",
+           ],
+       }
+
+10. Run ``make package-test`` to test the release:
+
+    .. code:: sh
+
+        .....
+        Activate with `source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate`
+        Press enter when the test has completed. The directory will be deleted.
+
+    Then test the example:
+
+    .. code:: sh
+
+        source /tmp/tmpb9ybjgtg/package-smoke-test/bin/activate
+        (package-smoke-test) $ identify-demo
 
 Pull Requests
 ~~~~~~~~~~~~~

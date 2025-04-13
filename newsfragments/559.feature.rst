@@ -1,0 +1,1 @@
+Added Windows-specific development setup instructions to `docs/contributing.rst`.
