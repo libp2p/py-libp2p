@@ -1,17 +1,18 @@
-# webrtc_signal_protocol.py
-# libp2p stream handler that dispatches incoming messages to the WebRTCTransport.
-
 import json
 import logging
+from typing import (
+    Any,
+)
 
 logger = logging.getLogger("signal-protocol")
 PROTOCOL_ID = "/libp2p/webrtc/signal/1.0.0"
 
-class WebRTCSignalingProtocol:
-    def __init__(self, transport):
-        self.transport = transport  # Reference to WebRTCTransport
 
-    async def handle_stream(self, stream):
+class WebRTCSignalingProtocol:
+    def __init__(self, transport: Any):
+        self.transport = transport
+
+    async def handle_stream(self, stream: Any) -> None:
         """Handle incoming signaling messages on a libp2p stream"""
         try:
             while True:
@@ -30,4 +31,3 @@ class WebRTCSignalingProtocol:
                     await self.transport.handle_ice_candidate(message)
         except Exception as e:
             logger.error(f"Error handling signaling stream: {e}")
-
