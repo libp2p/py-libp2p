@@ -86,7 +86,7 @@ class YamuxStream(IMuxedStream):
         :param ttl: Time-to-live in seconds (ignored).
         :return: False, as deadlines are not supported.
         """
-        return False
+        raise NotImplementedError("Yamux does not support setting read deadlines")
 
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         """
