@@ -46,6 +46,7 @@ class YamuxStream(IMuxedStream):
     def __init__(self, stream_id: int, conn: "Yamux", is_initiator: bool) -> None:
         self.stream_id = stream_id
         self.conn = conn
+        self.muxed_conn = conn
         self.is_initiator = is_initiator
         self.closed = False
 

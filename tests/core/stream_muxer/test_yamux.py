@@ -191,3 +191,16 @@ async def test_yamux_connection_close(yamux_pair):
     assert client_yamux.is_closed
     assert server_yamux.event_shutting_down.is_set()
     logging.debug("test_yamux_connection_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_deadlines_raise_not_implemented(yamux_pair):
+    logging.debug("Starting test_yamux_deadlines_raise_not_implemented")
+    client_yamux, _ = yamux_pair
+    stream = await client_yamux.open_stream()
+    with trio.move_on_after(2):
+        with pytest.raises(
+            NotImplementedError, match="Yamux does not support setting read deadlines"
+        ):
+            stream.set_deadline(60)
+    logging.debug("test_yamux_deadlines_raise_not_implemented complete")
