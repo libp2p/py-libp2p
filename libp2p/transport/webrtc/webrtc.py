@@ -1,69 +1,89 @@
-import asyncio
+import trio
 import json
-import websockets
 import logging
 from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription, RTCDataChannel
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
+from libp2p.abc import ITransport, IRawConnection, IListener
+from typing import Callable
+from libp2p.peer.id import ID
 from libp2p.host.basic_host import BasicHost
 from multiaddr import Multiaddr
 
-SIGNALING_SERVER_URL = "ws://localhost:8765"
-
-# Initialize logger
-logger = logging.getLogger("webrtc-transport")
+logger = logging.getLogger("webrtc")
 logging.basicConfig(level=logging.INFO)
+SIGNAL_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
 
-class WebRTCTransport:
-    def __init__(self, peer_id, host: BasicHost):
+class WebRTCRawConnection(IRawConnection):
+    def __init__(self, channel: RTCDataChannel):
+        self.channel = channel
+        self.receive_channel, self.send_channel = trio.open_memory_channel(0)
+
+        @channel.on("message")
+        def on_message(message):
+            self.send_channel.send_nowait(message)
+
+    async def read(self, n: int = -1) -> bytes:
+        return await self.receive_channel.receive()
+
+    async def write(self, data: bytes) -> None:
+        self.channel.send(data)
+
+    async def close(self) -> None:
+        self.channel.close()
+
+class WebRTCListener(IListener):
+    def __init__(self, host, peer_id: ID):
+        self.host = host
+        self.peer_id = peer_id
+        self.conn_send_channel, self.conn_recv_channel = trio.open_memory_channel(0)
+
+    async def listen(self, maddr: Multiaddr) -> None:
+        await self.host.set_stream_handler(SIGNAL_PROTOCOL, self._handle_stream)
+
+    async def accept(self) -> IRawConnection:
+        return await self.conn_recv_channel.receive()
+
+    async def close(self) -> None:
+        pass 
+
+    async def _handle_stream(self, stream) -> None:
+        pc = RTCPeerConnection()
+        channel_ready = trio.Event()
+
+        @pc.on("datachannel")
+        def on_datachannel(channel):
+            @channel.on("open")
+            def opened():
+                channel_ready.set()
+
+            self.conn_send_channel.send_nowait(WebRTCRawConnection(channel))
+
+        offer_data = await stream.read()
+        offer_msg = json.loads(offer_data.decode())
+        offer = RTCSessionDescription(**offer_msg)
+        await pc.setRemoteDescription(offer)
+
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+
+        await stream.write(json.dumps({
+            "sdp": answer.sdp,
+            "type": answer.type
+        }).encode())
+
+        await channel_ready.wait()
+
+
+class WebRTCTransport(ITransport):
+    def __init__(self, peer_id, host: BasicHost, config=None):
         self.peer_id = peer_id
         self.host = host
+        self.config = config or {} 
         self.peer_connection = RTCPeerConnection()
         self.data_channel = None
         self.pubsub = None
-        self.websocket = None
-
-    async def connect_signaling_server(self):
-        """Connects to the WebSocket-based signaling server"""
-        try:
-            self.websocket = await websockets.connect(SIGNALING_SERVER_URL)
-            await self.websocket.send(json.dumps({"type": "register", "peer_id": self.peer_id}))
-            asyncio.create_task(self.listen_signaling())
-        except Exception as e:
-            logger.error(f"Failed to connect to signaling server: {e}")
-
-    async def listen_signaling(self):
-        """Listens for incoming SDP offers and answers"""
-        try:
-            async for message in self.websocket:
-                data = json.loads(message)
-                if data["type"] == "offer":
-                    await self.handle_offer(data)
-                elif data["type"] == "answer":
-                    await self.handle_answer(data)
-        except Exception as e:
-            logger.error(f"Error in signaling listener: {e}")
-
-    async def handle_offer(self, data):
-        """Handles incoming SDP offers"""
-        offer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
-        await self.peer_connection.setRemoteDescription(offer)
-
-        # Create an answer
-        answer = await self.peer_connection.createAnswer()
-        await self.peer_connection.setLocalDescription(answer)
-
-        await self.websocket.send(json.dumps({
-            "type": "answer",
-            "target": data["peer_id"],
-            "sdp": answer.sdp
-        }))
-
-    async def handle_answer(self, data):
-        """Handles incoming SDP answers"""
-        answer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
-        await self.peer_connection.setRemoteDescription(answer)
-
+        
     async def create_data_channel(self):
         """Creates and opens a WebRTC data channel"""
         self.data_channel = self.peer_connection.createDataChannel("libp2p-webrtc")
@@ -76,19 +96,40 @@ class WebRTCTransport:
         def on_message(message):
             logger.info(f"Received message from peer {self.peer_id}: {message}")
 
-    async def initiate_connection(self, target_peer_id):
-        """Initiates connection with a peer"""
-        self.data_channel = self.peer_connection.createDataChannel("libp2p-webrtc")
+    async def handle_offer_from_peer(self, stream, data):
+      """Handle offer and send back answer on same stream"""
+      offer = RTCSessionDescription(sdp=data["sdp"], type=data["sdpType"])
+      await self.peer_connection.setRemoteDescription(offer)
 
-        offer = await self.peer_connection.createOffer()
-        await self.peer_connection.setLocalDescription(offer)
+      answer = await self.peer_connection.createAnswer()
+      await self.peer_connection.setLocalDescription(answer)
 
-        await self.websocket.send(json.dumps({
-            "type": "offer",
-            "peer_id": self.peer_id,
-            "target": target_peer_id,
-            "sdp": offer.sdp
-        }))
+      response = {
+        "type": "answer",
+        "sdp": answer.sdp,
+        "sdpType": answer.type,
+        "peer_id": self.peer_id
+      }
+
+      await stream.write(json.dumps(response).encode())
+
+    async def handle_answer_from_peer(self, data):
+        """Handle SDP answer from peer"""
+        answer = RTCSessionDescription(sdp=data["sdp"], type=data["sdpType"])
+        await self.peer_connection.setRemoteDescription(answer)
+
+    async def handle_ice_candidate(self, data):
+        """Optional: ICE candidate support"""
+        candidate = RTCIceCandidate(
+            component=data["component"],
+            foundation=data["foundation"],
+            priority=data["priority"],
+            ip=data["ip"],
+            protocol=data["protocol"],
+            port=data["port"],
+            type=data["candidateType"]
+        )
+        await self.peer_connection.addIceCandidate(candidate)
 
     async def start_peer_discovery(self):
         """Starts peer discovery using GossipSub"""
@@ -101,12 +142,48 @@ class WebRTCTransport:
             async for msg in topic:
                 logger.info(f"Discovered Peer: {msg.data.decode()}")
 
-        asyncio.create_task(handle_message())
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(handle_message)
 
-        # Advertise this peer
         await self.pubsub.publish("webrtc-peer-discovery", self.peer_id.encode())
 
-# Multiaddr Parsing & Validation
+    async def create_listener(self, handler: Callable[[IRawConnection], None]) -> IListener:
+        listener = WebRTCListener(self.host, self.peer_id)
+        await listener.listen(Multiaddr(f"/ip4/147.28.186.157/tcp/9095/p2p/12D3KooWFhXabKDwALpzqMbto94sB7rvmZ6M28hs9Y9xSopDKwQr/p2p-circuit/webrtc"))
+        self.host.set_stream_handler(SIGNAL_PROTOCOL, listener._handle_stream)
+        return listener
+
+    async def dial(self, maddr: Multiaddr) -> IRawConnection:
+        peer_id = parse_webrtc_multiaddr(maddr)
+        stream = await self.host.new_stream(peer_id, [SIGNAL_PROTOCOL])
+
+        pc = RTCPeerConnection()
+        channel = pc.createDataChannel("libp2p")
+
+        channel_ready = trio.Event()
+
+        @channel.on("open")
+        def on_open():
+            channel_ready.set()
+
+        offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+
+        await stream.write(json.dumps({
+            "type": "offer",
+            "peer_id": self.peer_id,
+            "sdp": offer.sdp,
+            "sdpType": offer.type,
+        }).encode())
+
+        answer_data = await stream.read()
+        answer_msg = json.loads(answer_data.decode())
+        answer = RTCSessionDescription(**answer_msg)
+        await pc.setRemoteDescription(answer)
+
+        await channel_ready.wait()
+
+        return WebRTCRawConnection(channel)
 def parse_webrtc_multiaddr(multiaddr_str):
     """Parse and validate a WebRTC multiaddr."""
     try:
@@ -117,3 +194,5 @@ def parse_webrtc_multiaddr(multiaddr_str):
     except Exception as e:
         logger.error(f"Failed to parse multiaddr: {e}")
         return None
+    
+    
