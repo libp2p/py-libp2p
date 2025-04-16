@@ -40,6 +40,11 @@ FLAG_RST = 0x8
 HEADER_SIZE = 12
 # Network byte order: version (B), type (B), flags (H), stream_id (I), length (I)
 YAMUX_HEADER_FORMAT = "!BBHII"
+DEFAULT_WINDOW_SIZE = 256 * 1024
+
+GO_AWAY_NORMAL = 0x0
+GO_AWAY_PROTOCOL_ERROR = 0x1
+GO_AWAY_INTERNAL_ERROR = 0x2
 
 
 class YamuxStream(IMuxedStream):
@@ -49,26 +54,83 @@ class YamuxStream(IMuxedStream):
         self.muxed_conn = conn
         self.is_initiator = is_initiator
         self.closed = False
+        self.send_closed = False
+        self.recv_closed = False
+        self.send_window = DEFAULT_WINDOW_SIZE
+        self.recv_window = DEFAULT_WINDOW_SIZE
+        self.window_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
-        if self.closed:
-            raise MuxedStreamError("Stream is closed")
-        header = struct.pack(
-            YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(data)
-        )
-        await self.conn.secured_conn.write(header + data)
+        if self.send_closed:
+            raise MuxedStreamError("Stream is closed for sending")
+
+        # Flow control: Check if we have enough send window
+        total_len = len(data)
+        sent = 0
+
+        while sent < total_len:
+            async with self.window_lock:
+                # Wait for available window
+                while self.send_window == 0 and not self.closed:
+                    # Release lock while waiting
+                    self.window_lock.release()
+                    await trio.sleep(0.01)  # Small delay to prevent CPU spinning
+                    await self.window_lock.acquire()
+
+                if self.closed:
+                    raise MuxedStreamError("Stream is closed")
+
+                # Calculate how much we can send now
+                to_send = min(self.send_window, total_len - sent)
+                chunk = data[sent : sent + to_send]
+                self.send_window -= to_send
+
+                # Send the data
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(chunk)
+                )
+                await self.conn.secured_conn.write(header + chunk)
+                sent += to_send
+
+        # If window is getting low, consider updating
+        if self.send_window < DEFAULT_WINDOW_SIZE // 2:
+            await self.send_window_update()
+
+    async def send_window_update(self, increment: Optional[int] = None) -> None:
+        """Send a window update to peer."""
+        if increment is None:
+            increment = DEFAULT_WINDOW_SIZE - self.recv_window
+
+        if increment <= 0:
+            return
+
+        async with self.window_lock:
+            self.recv_window += increment
+            header = struct.pack(
+                YAMUX_HEADER_FORMAT, 0, TYPE_WINDOW_UPDATE, 0, self.stream_id, increment
+            )
+            await self.conn.secured_conn.write(header)
 
     async def read(self, n: int = -1) -> bytes:
+        if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
+            return b""
         return await self.conn.read_stream(self.stream_id, n)
 
     async def close(self) -> None:
-        if not self.closed:
-            logging.debug(f"Closing stream {self.stream_id}")
+        if not self.send_closed:
+            logging.debug(f"Half-closing stream {self.stream_id} (local end)")
             header = struct.pack(
                 YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
             )
             await self.conn.secured_conn.write(header)
+            self.send_closed = True
+
+        # Only set fully closed if both directions are closed
+        if self.send_closed and self.recv_closed:
             self.closed = True
+        else:
+            # Stream is half-closed but not fully closed
+            self.closed = False
 
     async def reset(self) -> None:
         if not self.closed:
@@ -121,6 +183,8 @@ class Yamux(IMuxedConn):
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
+        self.stream_backlog_limit = 256
+        self.stream_backlog_semaphore = trio.Semaphore(256)
         # Per Yamux spec
         # (https://github.com/hashicorp/yamux/blob/master/spec.md#streamid-field):
         # Initiators assign odd stream IDs (starting at 1),
@@ -157,11 +221,13 @@ class Yamux(IMuxedConn):
     def is_initiator(self) -> bool:
         return self.is_initiator_value
 
-    async def close(self) -> None:
-        logging.debug("Closing Yamux connection")
+    async def close(self, error_code: int = GO_AWAY_NORMAL) -> None:
+        logging.debug(f"Closing Yamux connection with code {error_code}")
         async with self.streams_lock:
             if not self.event_shutting_down.is_set():
-                header = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_GO_AWAY, 0, 0, 0)
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_GO_AWAY, 0, 0, error_code
+                )
                 await self.secured_conn.write(header)
                 self.event_shutting_down.set()
                 for stream in self.streams.values():
@@ -177,6 +243,8 @@ class Yamux(IMuxedConn):
         return self.event_closed.is_set()
 
     async def open_stream(self) -> YamuxStream:
+        # Wait for backlog slot
+        await self.stream_backlog_semaphore.acquire()
         async with self.streams_lock:
             stream_id = self.next_stream_id
             self.next_stream_id += 2
@@ -185,10 +253,17 @@ class Yamux(IMuxedConn):
             self.stream_buffers[stream_id] = bytearray()
             self.stream_events[stream_id] = trio.Event()
 
-        header = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_SYN, stream_id, 0)
-        logging.debug(f"Sending SYN header for stream {stream_id}")
-        await self.secured_conn.write(header)
-        return stream
+        # If stream is rejected or errors, release the semaphore
+        try:
+            header = struct.pack(
+                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_SYN, stream_id, 0
+            )
+            logging.debug(f"Sending SYN header for stream {stream_id}")
+            await self.secured_conn.write(header)
+            return stream
+        except Exception as e:
+            self.stream_backlog_semaphore.release()
+            raise e
 
     async def accept_stream(self) -> IMuxedStream:
         logging.debug("Waiting for new stream")
@@ -273,6 +348,68 @@ class Yamux(IMuxedConn):
                             logging.debug(f"Resetting stream {stream_id}")
                             self.streams[stream_id].closed = True
                             self.stream_events[stream_id].set()
+                elif typ == TYPE_DATA and flags & FLAG_SYN:
+                    async with self.streams_lock:
+                        if stream_id not in self.streams:
+                            stream = YamuxStream(stream_id, self, False)
+                            self.streams[stream_id] = stream
+                            self.stream_buffers[stream_id] = bytearray()
+                            self.stream_events[stream_id] = trio.Event()
+
+                            # Send ACK for the stream
+                            ack_header = struct.pack(
+                                YAMUX_HEADER_FORMAT,
+                                0,
+                                TYPE_DATA,
+                                FLAG_ACK,
+                                stream_id,
+                                0,
+                            )
+                            await self.secured_conn.write(ack_header)
+
+                            logging.debug(f"Sending stream {stream_id} to channel")
+                            await self.new_stream_send_channel.send(stream)
+                        else:
+                            # Stream ID already exists, send RST
+                            rst_header = struct.pack(
+                                YAMUX_HEADER_FORMAT,
+                                0,
+                                TYPE_DATA,
+                                FLAG_RST,
+                                stream_id,
+                                0,
+                            )
+                            await self.secured_conn.write(rst_header)
+                elif typ == TYPE_DATA and flags & FLAG_ACK:
+                    async with self.streams_lock:
+                        if stream_id in self.streams:
+                            logging.debug(f"Received ACK for stream {stream_id}")
+                elif typ == TYPE_GO_AWAY:
+                    # In Yamux, the length field carries the error code for GO_AWAY
+                    error_code = length
+                    if error_code == GO_AWAY_NORMAL:
+                        logging.debug("Received GO_AWAY: Normal termination")
+                    elif error_code == GO_AWAY_PROTOCOL_ERROR:
+                        logging.error("Received GO_AWAY: Protocol error")
+                    elif error_code == GO_AWAY_INTERNAL_ERROR:
+                        logging.error("Received GO_AWAY: Internal error")
+                    else:
+                        logging.error(
+                            f"Received GO_AWAY with unknown error code: {error_code}"
+                        )
+                    self.event_shutting_down.set()
+                    break
+                elif typ == TYPE_PING:
+                    # If flag is set, it's a ping request, otherwise it's a response
+                    if flags & FLAG_SYN:
+                        logging.debug(f"Received ping request with value {length}")
+                        # Send ping response with same value
+                        ping_header = struct.pack(
+                            YAMUX_HEADER_FORMAT, 0, TYPE_PING, FLAG_ACK, 0, length
+                        )
+                        await self.secured_conn.write(ping_header)
+                    elif flags & FLAG_ACK:
+                        logging.debug(f"Received ping response with value {length}")
                 elif typ == TYPE_DATA:
                     data = await self.secured_conn.read(length) if length > 0 else b""
                     async with self.streams_lock:
@@ -280,8 +417,28 @@ class Yamux(IMuxedConn):
                             self.stream_buffers[stream_id].extend(data)
                             self.stream_events[stream_id].set()
                             if flags & FLAG_FIN:
-                                logging.debug(f"Closing stream {stream_id} due to FIN")
-                                self.streams[stream_id].closed = True
+                                logging.debug(
+                                    f"Received FIN for"
+                                    f"stream {stream_id}, marking recv_closed"
+                                )
+                                self.streams[stream_id].recv_closed = True
+                                # Check if both sides are closed
+                                if self.streams[stream_id].send_closed:
+                                    self.streams[stream_id].closed = True
+                elif typ == TYPE_WINDOW_UPDATE:
+                    # In Yamux, the length field carries the window increment
+                    increment = length
+
+                    async with self.streams_lock:
+                        if stream_id in self.streams:
+                            stream = self.streams[stream_id]
+                            async with stream.window_lock:
+                                logging.debug(
+                                    f"Received window update"
+                                    f"for stream {stream_id},"
+                                    f" increment: {increment}"
+                                )
+                                stream.send_window += increment
                 elif typ == TYPE_GO_AWAY:
                     logging.debug("Received GO_AWAY, shutting down")
                     self.event_shutting_down.set()
