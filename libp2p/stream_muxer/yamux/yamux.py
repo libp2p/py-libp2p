@@ -114,6 +114,9 @@ class YamuxStream(IMuxedStream):
     async def read(self, n: int = -1) -> bytes:
         if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
             return b""
+        # Handle None value for n by converting it to -1
+        if n is None:
+            n = -1
         return await self.conn.read_stream(self.stream_id, n)
 
     async def close(self) -> None:
@@ -170,7 +173,7 @@ class YamuxStream(IMuxedStream):
                     "Underlying connection returned an unexpected address format"
                 )
         else:
-            # Return None if the underlying connection doesn’t provide this info
+            # Return None if the underlying connection doesn't provide this info
             return None
 
 
@@ -276,6 +279,9 @@ class Yamux(IMuxedConn):
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logging.debug(f"Reading from stream {stream_id}, n={n}")
+        # Handle None value for n by converting it to -1
+        if n is None:
+            n = -1
         async with self.streams_lock:
             if stream_id not in self.streams or self.event_shutting_down.is_set():
                 logging.debug(f"Stream {stream_id} unknown or connection shutting down")
