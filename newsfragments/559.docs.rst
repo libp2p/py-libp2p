@@ -1,1 +1,0 @@
-Added install and getting started documentation.
