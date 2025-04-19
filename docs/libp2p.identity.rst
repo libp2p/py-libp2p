@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.identity.identify
+   libp2p.identity.identify_push
 
 Module contents
 ---------------

@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    print("\n==== Starting Identify-Push Example ====\n")
+
     # Create key pairs for the two hosts
     key_pair_1 = create_new_key_pair()
     key_pair_2 = create_new_key_pair()
@@ -70,27 +72,49 @@ async def main() -> None:
     async with host_1.run([listen_addr_1]), host_2.run([listen_addr_2]):
         # Get the addresses of both hosts
         addr_1 = host_1.get_addrs()[0]
-        logger.info("Host 1 listening on %s", addr_1)
+        logger.info(f"Host 1 listening on {addr_1}")
+        print(f"Host 1 listening on {addr_1}")
+        print(f"Peer ID: {host_1.get_id().pretty()}")
 
         addr_2 = host_2.get_addrs()[0]
-        logger.info("Host 2 listening on %s", addr_2)
+        logger.info(f"Host 2 listening on {addr_2}")
+        print(f"Host 2 listening on {addr_2}")
+        print(f"Peer ID: {host_2.get_id().pretty()}")
+
+        print("\nConnecting Host 2 to Host 1...")
 
         # Connect host_2 to host_1
         peer_info = info_from_p2p_addr(addr_1)
         await host_2.connect(peer_info)
         logger.info("Host 2 connected to Host 1")
-
-        # Wait a bit for the connection to establish
-        await trio.sleep(1)
+        print("Host 2 successfully connected to Host 1")
 
         # Push identify information from host_1 to host_2
         logger.info("Host 1 pushing identify information to Host 2")
-        await push_identify_to_peer(host_1, host_2.get_id())
+        print("\nHost 1 pushing identify information to Host 2...")
 
-        # Wait a bit for the push to complete
-        await trio.sleep(1)
+        try:
+            # Call push_identify_to_peer which now returns a boolean
+            success = await push_identify_to_peer(host_1, host_2.get_id())
 
-        logger.info("Example completed successfully")
+            if success:
+                logger.info("Identify push completed successfully")
+                print("Identify push completed successfully!")
+
+                logger.info("Example completed successfully")
+                print("\nExample completed successfully!")
+            else:
+                logger.warning("Identify push didn't complete successfully")
+                print("\nWarning: Identify push didn't complete successfully")
+
+                logger.warning("Example completed with warnings")
+                print("Example completed with warnings")
+        except Exception as e:
+            logger.error(f"Error during identify push: {str(e)}")
+            print(f"\nError during identify push: {str(e)}")
+
+            logger.error("Example completed with errors")
+            print("Example completed with errors")
 
 
 if __name__ == "__main__":
