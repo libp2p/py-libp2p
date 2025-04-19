@@ -135,12 +135,18 @@ async def _update_peerstore_from_identify(
 
 async def push_identify_to_peer(
     host: IHost, peer_id: ID, observed_multiaddr: Optional[Multiaddr] = None
-) -> None:
+) -> bool:
     """
     Push an identify message to a specific peer.
 
     This function opens a stream to the peer using the identify/push protocol,
     sends the identify message, and closes the stream.
+
+    Returns
+    -------
+    bool
+        True if the push was successful, False otherwise.
+
     """
     try:
         # Create a new stream to the peer using the identify/push protocol
@@ -157,8 +163,10 @@ async def push_identify_to_peer(
         await stream.close()
 
         logger.debug("Successfully pushed identify to peer %s", peer_id)
+        return True
     except Exception as e:
         logger.error("Error pushing identify to peer %s: %s", peer_id, e)
+        return False
 
 
 async def push_identify_to_peers(
