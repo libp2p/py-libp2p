@@ -46,7 +46,7 @@ Several important features are currently being actively developed:
 * **WebSocket Transport**: Design and scoping discussions underway
 * **Peer Discovery**:
 
-  * **mDNS**: Implementation planned for upcoming sprints  
+  * **mDNS**: Implementation planned for upcoming sprints
   * **Bootstrap**: Modular bootstrap system planned after mDNS implementation
 
 Use Cases
@@ -64,7 +64,7 @@ Py-libp2p can be used to build various decentralized applications:
 Getting Started
 ---------------
 
-Ready to start building with Py-libp2p? Check out our :doc:`quickstart` guide to begin your journey. For more detailed information about specific features and APIs, explore our :doc:`examples` and :doc:`API documentation <libp2p>`.
+Ready to start building with Py-libp2p? Check out our :doc:`getting_started` guide to begin your journey. For more detailed information about specific features and APIs, explore our :doc:`examples` and :doc:`API documentation <libp2p>`.
 
 Contributing
 ------------
