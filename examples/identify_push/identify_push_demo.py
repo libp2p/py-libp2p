@@ -35,10 +35,10 @@ from libp2p.peer.peerinfo import (
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# logging.basicConfig(
+#    level=logging.DEBUG,
+#    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# )
 logger = logging.getLogger(__name__)
 
 
@@ -118,4 +118,10 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    trio.run(main)
+
+
+# Non-async entry point for console script
+def run_main():
+    """Non-async entry point for the console script."""
     trio.run(main)
