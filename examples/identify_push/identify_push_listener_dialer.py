@@ -23,10 +23,16 @@ import logging
 import sys
 
 import multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 import trio
 
 from libp2p import (
     new_host,
+)
+from libp2p.abc import (
+    INetStream,
 )
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
@@ -35,6 +41,9 @@ from libp2p.identity.identify import (
     identify_handler_for,
 )
 from libp2p.identity.identify import ID as ID_IDENTIFY
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify,
+)
 from libp2p.identity.identify_push import (
     identify_push_handler_for,
     push_identify_to_peer,
@@ -45,14 +54,86 @@ from libp2p.peer.peerinfo import (
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# logging.basicConfig(
+#    level=logging.DEBUG,
+#    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+# )
 logger = logging.getLogger("libp2p.identity.identify-push-example")
 
 # Default port configuration
 DEFAULT_PORT = 8888
+
+
+def custom_identify_push_handler_for(host):
+    """
+    Create a custom handler for the identify/push protocol that logs and prints
+    the identity information received from the dialer.
+    """
+
+    async def handle_identify_push(stream: INetStream) -> None:
+        peer_id = stream.muxed_conn.peer_id
+
+        try:
+            # Read the identify message from the stream
+            data = await stream.read()
+            identify_msg = Identify()
+            identify_msg.ParseFromString(data)
+
+            # Log and print the identify information
+            logger.info("Received identify/push from peer %s", peer_id)
+            print(f"\n==== Received identify/push from peer {peer_id} ====")
+
+            if identify_msg.HasField("protocol_version"):
+                logger.info("  Protocol Version: %s", identify_msg.protocol_version)
+                print(f"  Protocol Version: {identify_msg.protocol_version}")
+
+            if identify_msg.HasField("agent_version"):
+                logger.info("  Agent Version: %s", identify_msg.agent_version)
+                print(f"  Agent Version: {identify_msg.agent_version}")
+
+            if identify_msg.HasField("public_key"):
+                logger.info(
+                    "  Public Key: %s", identify_msg.public_key.hex()[:16] + "..."
+                )
+                print(f"  Public Key: {identify_msg.public_key.hex()[:16]}...")
+
+            if identify_msg.listen_addrs:
+                addrs = [Multiaddr(addr) for addr in identify_msg.listen_addrs]
+                logger.info("  Listen Addresses: %s", addrs)
+                print("  Listen Addresses:")
+                for addr in addrs:
+                    print(f"    - {addr}")
+
+            if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
+                observed_addr = Multiaddr(identify_msg.observed_addr)
+                logger.info("  Observed Address: %s", observed_addr)
+                print(f"  Observed Address: {observed_addr}")
+
+            if identify_msg.protocols:
+                logger.info("  Protocols: %s", identify_msg.protocols)
+                print("  Protocols:")
+                for protocol in identify_msg.protocols:
+                    print(f"    - {protocol}")
+
+            # Update the peerstore with the new information as usual
+            peerstore = host.get_peerstore()
+            from libp2p.identity.identify_push.identify_push import (
+                _update_peerstore_from_identify,
+            )
+
+            await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+
+            logger.info("Successfully processed identify/push from peer %s", peer_id)
+            print(f"\nSuccessfully processed identify/push from peer {peer_id}")
+
+        except Exception as e:
+            logger.error("Error processing identify/push from %s: %s", peer_id, e)
+            print(f"\nError processing identify/push from {peer_id}: {e}")
+        finally:
+            # Close the stream after processing
+            await stream.close()
+
+    return handle_identify_push
 
 
 async def run_listener(port: int) -> None:
@@ -67,7 +148,7 @@ async def run_listener(port: int) -> None:
 
     # Set up the identify and identify/push handlers
     host.set_stream_handler(ID_IDENTIFY, identify_handler_for(host))
-    host.set_stream_handler(ID_IDENTIFY_PUSH, identify_push_handler_for(host))
+    host.set_stream_handler(ID_IDENTIFY_PUSH, custom_identify_push_handler_for(host))
 
     # Start listening
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
@@ -84,7 +165,7 @@ async def run_listener(port: int) -> None:
         print(f"Peer ID: {host.get_id().pretty()}")
 
         print("\nRun dialer with command:")
-        print(f"python identify_push_listener_dialer.py -d {addr}")
+        print(f"identify-push-listener-dialer-demo -d {addr}")
         print("\nWaiting for incoming connections... (Ctrl+C to exit)")
 
         # Keep running until interrupted

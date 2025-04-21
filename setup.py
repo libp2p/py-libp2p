@@ -108,6 +108,8 @@ setup(
             "echo-demo=examples.echo.echo:main",
             "ping-demo=examples.ping.ping:main",
             "identify-demo=examples.identify.identify:main",
+            "identify-push-demo=examples.identify_push.identify_push_demo:run_main",
+            "identify-push-listener-dialer-demo=examples.identify_push.identify_push_listener_dialer:main",
             "pubsub-demo=examples.pubsub.pubsub:main",
         ],
     },
