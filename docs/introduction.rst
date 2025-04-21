@@ -30,13 +30,25 @@ Py-libp2p is particularly well-suited for:
 Current Capabilities
 --------------------
 
-Py-libp2p supports several key libp2p features:
+Py-libp2p currently supports these core libp2p features:
 
-* **Transports**: QUIC, TCP, WebSocket
+* **Transports**: TCP, QUIC (near completion, in final testing phase)
 * **Protocols**: Gossipsub v1.1, Identify, Ping
 * **Security**: Noise protocol framework
-* **Peer Discovery**: MDNS, Bootstrap
-* **Connection Management**: Connection multiplexing, NAT traversal
+* **Connection Management**: Connection multiplexing
+
+Features in Development
+-----------------------
+
+Several important features are currently being actively developed:
+
+* **NAT Traversal**: AutoNAT and relay-based hole punching under development
+* **WebSocket Transport**: Design and scoping discussions underway
+* **Peer Discovery**:
+
+  * **mDNS**: Implementation planned for upcoming sprints  
+  * **Bootstrap**: Modular bootstrap system planned after mDNS implementation
+
 
 Use Cases
 ---------
