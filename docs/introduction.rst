@@ -49,7 +49,6 @@ Several important features are currently being actively developed:
   * **mDNS**: Implementation planned for upcoming sprints  
   * **Bootstrap**: Modular bootstrap system planned after mDNS implementation
 
-
 Use Cases
 ---------
 
