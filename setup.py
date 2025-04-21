@@ -74,7 +74,7 @@ install_requires.extend(crypto_requires)
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. See Contributing docs for the release process.
-    version="0.2.4",
+    version="0.2.5",
     description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -86,7 +86,8 @@ setup(
     python_requires=">=3.9, <4",
     extras_require=extras_require,
     py_modules=["libp2p"],
-    license="MIT/APACHE2.0",
+    license="MIT AND Apache-2.0",
+    license_files=("LICENSE-MIT", "LICENSE-APACHE"),
     zip_safe=False,
     keywords="libp2p p2p",
     packages=find_packages(exclude=["scripts", "scripts.*", "tests", "tests.*"]),
@@ -94,8 +95,6 @@ setup(
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "License :: OSI Approved :: Apache Software License",
         "Natural Language :: English",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.9",
@@ -111,6 +110,7 @@ setup(
             "echo-demo=examples.echo.echo:main",
             "ping-demo=examples.ping.ping:main",
             "identify-demo=examples.identify.identify:main",
+            "pubsub-demo=examples.pubsub.pubsub:main",
         ],
     },
 )

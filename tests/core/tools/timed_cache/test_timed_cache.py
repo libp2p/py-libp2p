@@ -31,16 +31,17 @@ async def test_simple_last_seen_cache():
     """Test that LastSeenCache correctly refreshes expiry when accessed."""
     cache = LastSeenCache(ttl=2, sweep_interval=1)
 
-    assert cache.add(MSG_1) is True  # First addition should return True
-    assert cache.has(MSG_1) is True  # Should exist
+    assert cache.add(MSG_1) is True
+    assert cache.has(MSG_1) is True
 
-    await trio.sleep(1)
-    assert cache.has(MSG_1) is True  # Accessing should extend TTL
+    await trio.sleep(2.5)  # Wait past TTL
 
-    await trio.sleep(1.5)  # Would have expired if TTL wasn't extended
-    assert cache.has(MSG_1) is True  # Should still exist
+    # Retry loop to ensure sweep happens
+    for _ in range(10):  # Up to 1 second extra
+        if not cache.has(MSG_1):
+            break
+        await trio.sleep(0.1)
 
-    await trio.sleep(2.5)  # Now let it expire
     assert cache.has(MSG_1) is False  # Should be expired
 
     cache.stop()

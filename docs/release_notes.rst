@@ -3,6 +3,29 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.5 (2025-04-14)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed flaky test_simple_last_seen_cache by adding a retry loop for reliable expiry detection across platforms. (`#558 <https://github.com/ethereum/py-libp2p/issues/558>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Added install and getting started documentation. (`#559 <https://github.com/ethereum/py-libp2p/issues/559>`__)
+
+
+Features
+~~~~~~~~
+
+- Added a ``pub-sub`` example having ``gossipsub`` as the router to demonstrate how to use the pub-sub module in py-libp2p. (`#515 <https://github.com/ethereum/py-libp2p/issues/515>`__)
+- Added documentation on how to add examples to the libp2p package. (`#550 <https://github.com/ethereum/py-libp2p/issues/550>`__)
+- Added Windows-specific development setup instructions to `docs/contributing.rst`. (`#559 <https://github.com/ethereum/py-libp2p/issues/559>`__)
+
+
 py-libp2p v0.2.4 (2025-03-27)
 -----------------------------
 
