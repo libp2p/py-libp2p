@@ -89,23 +89,23 @@ jobs:
           python -m pip install tox
           python -m pip install --no-binary :all: cffi
 
-      # - run: |
-      #     python -m tox run -r
       - run: |
-          # Write sitecustomize.py that patches _cffi_backend
-          mkdir -p .ci-pypy-patch
-          cat <<EOF > .ci-pypy-patch/sitecustomize.py
-          import sys
-          try:
-              import _cffi_backend
-              if not hasattr(_cffi_backend, '__file__'):
-                  _cffi_backend.__file__ = "/usr/lib/libcffi.so"  # dummy fallback path
-          except (ImportError, AttributeError):
-              pass
-          EOF
-
-          # Set PYTHONPATH to load the patch
-          export PYTHONPATH="$PWD/.ci-pypy-patch"
-
-          # Run tox
           python -m tox run -r
+      # - run: |
+      #     # Write sitecustomize.py that patches _cffi_backend
+      #     mkdir -p .ci-pypy-patch
+      #     cat <<EOF > .ci-pypy-patch/sitecustomize.py
+      #     import sys
+      #     try:
+      #         import _cffi_backend
+      #         if not hasattr(_cffi_backend, '__file__'):
+      #             _cffi_backend.__file__ = "/usr/lib/libcffi.so"  # dummy fallback path
+      #     except (ImportError, AttributeError):
+      #         pass
+      #     EOF
+
+      #     # Set PYTHONPATH to load the patch
+      #     export PYTHONPATH="$PWD/.ci-pypy-patch"
+
+      #     # Run tox
+      #     python -m tox run -r
