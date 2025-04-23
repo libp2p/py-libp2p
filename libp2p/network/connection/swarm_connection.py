@@ -1,3 +1,4 @@
+import logging
 from typing import (
     TYPE_CHECKING,
 )
@@ -37,16 +38,31 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        if hasattr(muxed_conn, "on_close"):
+            logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
+            muxed_conn.on_close = self._on_muxed_conn_closed
+        else:
+            logging.error(
+                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute"
+            )
 
     @property
     def is_closed(self) -> bool:
         return self.event_closed.is_set()
 
+    async def _on_muxed_conn_closed(self) -> None:
+        """Handle closure of the underlying muxed connection."""
+        logging.debug(f"SwarmConn closing for peer {self.muxed_conn.peer_id}")
+        await self.close()
+
     async def close(self) -> None:
         if self.event_closed.is_set():
             return
+        logging.debug(f"Closing SwarmConn for peer {self.muxed_conn.peer_id}")
         self.event_closed.set()
-        await self._cleanup()
+        await self.muxed_conn.close()
+        logging.debug(f"Removing connection for peer {self.muxed_conn.peer_id}")
+        self.swarm.remove_conn(self)
 
     async def _cleanup(self) -> None:
         self.swarm.remove_conn(self)
