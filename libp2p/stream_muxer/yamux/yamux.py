@@ -119,11 +119,52 @@ class YamuxStream(IMuxedStream):
             await self.conn.secured_conn.write(header)
 
     async def read(self, n: int = -1) -> bytes:
-        if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
-            return b""
-        # Handle None value for n by converting it to -1
         if n is None:
             n = -1
+
+        # If reading until EOF (n == -1), block until stream is closed
+        if n == -1:
+            while not self.recv_closed and not self.conn.event_shutting_down.is_set():
+                # Check if there's data in the buffer
+                buffer = self.conn.stream_buffers.get(self.stream_id)
+                if buffer and len(buffer) > 0:
+                    # Wait for closure even if data is available
+                    logging.debug(
+                        f"Stream {self.stream_id}:"
+                        f"Waiting for FIN before returning data"
+                    )
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+                else:
+                    # No data, wait for data or closure
+                    logging.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+
+            # After loop, check if stream is closed or shutting down
+            async with self.conn.streams_lock:
+                if self.conn.event_shutting_down.is_set():
+                    logging.debug(f"Stream {self.stream_id}: Connection shutting down")
+                    raise MuxedStreamEOF("Connection shut down")
+                if self.closed:
+                    logging.debug(f"Stream {self.stream_id}: Stream is closed")
+                    raise MuxedStreamReset("Stream is reset or closed")
+                buffer = self.conn.stream_buffers.get(self.stream_id)
+                if buffer is None:
+                    logging.debug(
+                        f"Stream {self.stream_id}: Buffer gone, assuming closed"
+                    )
+                    raise MuxedStreamEOF("Stream buffer closed")
+                if self.recv_closed and len(buffer) == 0:
+                    logging.debug(f"Stream {self.stream_id}: EOF reached")
+                    raise MuxedStreamEOF("Stream is closed for receiving")
+                # Return all buffered data
+                data = bytes(buffer)
+                buffer.clear()
+                logging.debug(f"Stream {self.stream_id}: Returning {len(data)} bytes")
+                return data
+
+        # For specific size read (n > 0), return available data immediately
         return await self.conn.read_stream(self.stream_id, n)
 
     async def close(self) -> None:
