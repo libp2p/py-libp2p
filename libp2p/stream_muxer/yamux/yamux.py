@@ -30,7 +30,9 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.stream_muxer.exceptions import (
+    MuxedStreamEOF,
     MuxedStreamError,
+    MuxedStreamReset,
 )
 
 PROTOCOL_ID = "/yamux/1.0.0"
@@ -304,27 +306,39 @@ class Yamux(IMuxedConn):
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logging.debug(f"Reading from stream {stream_id}, n={n}")
-        # Handle None value for n by converting it to -1
         if n is None:
             n = -1
         async with self.streams_lock:
             if stream_id not in self.streams or self.event_shutting_down.is_set():
                 logging.debug(f"Stream {stream_id} unknown or connection shutting down")
-                return b""
-            if self.streams[stream_id].closed and not self.stream_buffers.get(
-                stream_id
-            ):
-                logging.debug(f"Stream {stream_id} closed, returning empty")
-                return b""
+                raise MuxedStreamEOF("Stream or connection closed")
+            stream = self.streams[stream_id]
+            buffer = self.stream_buffers.get(stream_id)
+            logging.debug(
+                f"Stream {stream_id}:"
+                f"closed={stream.closed},"
+                f"recv_closed={stream.recv_closed},"
+                f"buffer_len={len(buffer) if buffer else 0}"
+            )
+            if stream.closed:
+                logging.debug(f"Stream {stream_id} is closed, raising MuxedStreamReset")
+                raise MuxedStreamReset("Stream is reset or closed")
+            if buffer is None or (stream.recv_closed and len(buffer) == 0):
+                logging.debug(
+                    f"Stream {stream_id}:"
+                    f"recv_closed={stream.recv_closed},"
+                    f"buffer_len={len(buffer) if buffer else 0}, raising EOF"
+                )
+                raise MuxedStreamEOF("Stream is closed for receiving")
 
         while not self.event_shutting_down.is_set():
             async with self.streams_lock:
                 buffer = self.stream_buffers.get(stream_id)
                 if buffer is None:
                     logging.debug(
-                        f"Buffer for stream {stream_id} gone, assuming closed"
+                        f"Buffer for stream" f"{stream_id} gone, assuming closed"
                     )
-                    return b""
+                    raise MuxedStreamEOF("Stream buffer closed")
                 if buffer:
                     if n == -1 or n >= len(buffer):
                         data = bytes(buffer)
@@ -333,21 +347,30 @@ class Yamux(IMuxedConn):
                         data = bytes(buffer[:n])
                         del buffer[:n]
                     logging.debug(
-                        f"Returning {len(data)} bytes from stream {stream_id}"
+                        f"Returning {len(data)}"
+                        f"bytes from stream {stream_id},"
+                        f"buffer_len={len(buffer)}"
                     )
                     return data
                 if self.streams[stream_id].closed:
                     logging.debug(
-                        f"Stream {stream_id} closed while waiting, returning empty"
+                        f"Stream {stream_id} closed"
+                        f"while waiting, raising MuxedStreamReset"
                     )
-                    return b""
+                    raise MuxedStreamReset("Stream is reset or closed")
+                if self.streams[stream_id].recv_closed:
+                    logging.debug(
+                        f"Stream {stream_id} closed"
+                        f"for receiving while waiting, raising EOF"
+                    )
+                    raise MuxedStreamEOF("Stream is closed for receiving")
 
             logging.debug(f"Waiting for data on stream {stream_id}")
             await self.stream_events[stream_id].wait()
             self.stream_events[stream_id] = trio.Event()
 
         logging.debug(f"Connection shut down while reading stream {stream_id}")
-        return b""
+        raise MuxedStreamEOF("Connection shut down")
 
     async def handle_incoming(self) -> None:
         while not self.event_shutting_down.is_set():
