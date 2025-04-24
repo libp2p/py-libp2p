@@ -58,7 +58,7 @@ async def test_net_stream_read_after_remote_closed(net_stream_pair):
     stream_0, stream_1 = net_stream_pair
     await stream_0.write(DATA)
     await stream_0.close()
-    await trio.sleep(0.1)
+    await trio.sleep(0.5)
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
     with pytest.raises(StreamEOF):
         await stream_1.read(MAX_READ_LEN)

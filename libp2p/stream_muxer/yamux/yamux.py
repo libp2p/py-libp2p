@@ -26,6 +26,9 @@ from libp2p.abc import (
     IMuxedStream,
     ISecureConn,
 )
+from libp2p.network.connection.exceptions import (
+    RawConnError,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -119,11 +122,56 @@ class YamuxStream(IMuxedStream):
             await self.conn.secured_conn.write(header)
 
     async def read(self, n: int = -1) -> bytes:
-        if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
-            return b""
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
+
+        if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
+            return b""
+
+        # If reading until EOF (n == -1), block until stream is closed
+        if n == -1:
+            while not self.recv_closed and not self.conn.event_shutting_down.is_set():
+                # Check if there's data in the buffer
+                buffer = self.conn.stream_buffers.get(self.stream_id)
+                if buffer and len(buffer) > 0:
+                    # Wait for closure even if data is available
+                    logging.debug(
+                        f"Stream {self.stream_id}:"
+                        f"Waiting for FIN before returning data"
+                    )
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+                else:
+                    # No data, wait for data or closure
+                    logging.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+
+            # After loop, check if stream is closed or shutting down
+            async with self.conn.streams_lock:
+                if self.conn.event_shutting_down.is_set():
+                    logging.debug(f"Stream {self.stream_id}: Connection shutting down")
+                    raise MuxedStreamEOF("Connection shut down")
+                if self.closed:
+                    logging.debug(f"Stream {self.stream_id}: Stream is closed")
+                    raise MuxedStreamReset("Stream is reset or closed")
+                buffer = self.conn.stream_buffers.get(self.stream_id)
+                if buffer is None:
+                    logging.debug(
+                        f"Stream {self.stream_id}: Buffer gone, assuming closed"
+                    )
+                    raise MuxedStreamEOF("Stream buffer closed")
+                if self.recv_closed and len(buffer) == 0:
+                    logging.debug(f"Stream {self.stream_id}: EOF reached")
+                    raise MuxedStreamEOF("Stream is closed for receiving")
+                # Return all buffered data
+                data = bytes(buffer)
+                buffer.clear()
+                logging.debug(f"Stream {self.stream_id}: Returning {len(data)} bytes")
+                return data
+
+        # For specific size read (n > 0), return available data immediately
         return await self.conn.read_stream(self.stream_id, n)
 
     async def close(self) -> None:
@@ -180,7 +228,7 @@ class YamuxStream(IMuxedStream):
                     "Underlying connection returned an unexpected address format"
                 )
         else:
-            # Return None if the underlying connection doesn’t provide this info
+            # Return None if the underlying connection doesn't provide this info
             return None
 
 
@@ -306,6 +354,7 @@ class Yamux(IMuxedConn):
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logging.debug(f"Reading from stream {stream_id}, n={n}")
+        # Handle None value for n by converting it to -1
         if n is None:
             n = -1
         async with self.streams_lock:
@@ -478,19 +527,31 @@ class Yamux(IMuxedConn):
                             f"{length} for peer {self.peer_id}"
                         )
                 elif typ == TYPE_DATA:
-                    data = await self.secured_conn.read(length) if length > 0 else b""
-                    async with self.streams_lock:
-                        if stream_id in self.streams:
-                            self.stream_buffers[stream_id].extend(data)
-                            self.stream_events[stream_id].set()
-                            if flags & FLAG_FIN:
-                                logging.debug(
-                                    f"Received FIN for stream {self.peer_id}:"
-                                    f"{stream_id}, marking recv_closed"
-                                )
+                    try:
+                        data = (
+                            await self.secured_conn.read(length) if length > 0 else b""
+                        )
+                        async with self.streams_lock:
+                            if stream_id in self.streams:
+                                self.stream_buffers[stream_id].extend(data)
+                                self.stream_events[stream_id].set()
+                                if flags & FLAG_FIN:
+                                    logging.debug(
+                                        f"Received FIN for stream {self.peer_id}:"
+                                        f"{stream_id}, marking recv_closed"
+                                    )
+                                    self.streams[stream_id].recv_closed = True
+                                    if self.streams[stream_id].send_closed:
+                                        self.streams[stream_id].closed = True
+                    except Exception as e:
+                        logging.error(f"Error reading data for stream {stream_id}: {e}")
+                        # Mark stream as closed on read error
+                        async with self.streams_lock:
+                            if stream_id in self.streams:
                                 self.streams[stream_id].recv_closed = True
                                 if self.streams[stream_id].send_closed:
                                     self.streams[stream_id].closed = True
+                                self.stream_events[stream_id].set()
                 elif typ == TYPE_WINDOW_UPDATE:
                     increment = length
                     async with self.streams_lock:
@@ -508,18 +569,31 @@ class Yamux(IMuxedConn):
                     f"Error in handle_incoming for peer"
                     f"{self.peer_id}: {type(e).__name__}: {str(e)}"
                 )
-                await self._cleanup_on_error()
-                break
+                # Don't crash the whole connection for temporary errors
+                if self.event_shutting_down.is_set() or isinstance(
+                    e, (RawConnError, OSError)
+                ):
+                    await self._cleanup_on_error()
+                    break
+                # For other errors, log and continue
+                await trio.sleep(0.01)
 
     async def _cleanup_on_error(self) -> None:
+        # Set shutdown flag first to prevent other operations
+        self.event_shutting_down.set()
+
+        # Clean up streams
         async with self.streams_lock:
-            self.event_shutting_down.set()
             for stream in self.streams.values():
                 stream.closed = True
                 stream.send_closed = True
                 stream.recv_closed = True
+
+            # Clear buffers and events
             self.stream_buffers.clear()
             self.stream_events.clear()
+
+        # Close the secured connection
         try:
             await self.secured_conn.close()
             logging.debug(f"Successfully closed secured_conn for peer {self.peer_id}")
@@ -527,12 +601,21 @@ class Yamux(IMuxedConn):
             logging.error(
                 f"Error closing secured_conn for peer {self.peer_id}: {close_error}"
             )
+
+        # Set closed flag
         self.event_closed.set()
+
+        # Call on_close callback if provided
         if self.on_close:
             logging.debug(f"Calling on_close for peer {self.peer_id}")
-            if inspect.iscoroutinefunction(self.on_close):
-                await self.on_close()
-            else:
-                self.on_close()
+            try:
+                if inspect.iscoroutinefunction(self.on_close):
+                    await self.on_close()
+                else:
+                    self.on_close()
+            except Exception as callback_error:
+                logging.error(f"Error in on_close callback: {callback_error}")
+
+        # Cancel nursery tasks
         if self._nursery:
             self._nursery.cancel_scope.cancel()

@@ -52,31 +52,55 @@ class SwarmConn(INetConn):
 
     async def _on_muxed_conn_closed(self) -> None:
         """Handle closure of the underlying muxed connection."""
-        logging.debug(f"SwarmConn closing for peer {self.muxed_conn.peer_id}")
-        await self.close()
+        peer_id = self.muxed_conn.peer_id
+        logging.debug(f"SwarmConn closing for peer {peer_id} due to muxed_conn closure")
+        # Only call close if we're not already closing
+        if not self.event_closed.is_set():
+            await self.close()
 
     async def close(self) -> None:
         if self.event_closed.is_set():
             return
         logging.debug(f"Closing SwarmConn for peer {self.muxed_conn.peer_id}")
         self.event_closed.set()
-        await self.muxed_conn.close()
+
+        # Close the muxed connection
+        try:
+            await self.muxed_conn.close()
+        except Exception as e:
+            logging.warning(f"Error while closing muxed connection: {e}")
+
+        # Perform proper cleanup of resources
+        await self._cleanup()
+
+    async def _cleanup(self) -> None:
+        # Remove the connection from swarm
         logging.debug(f"Removing connection for peer {self.muxed_conn.peer_id}")
         self.swarm.remove_conn(self)
 
-    async def _cleanup(self) -> None:
-        self.swarm.remove_conn(self)
-
-        await self.muxed_conn.close()
+        # Only close the connection if it's not already closed
+        # Be defensive here to avoid exceptions during cleanup
+        try:
+            if not self.muxed_conn.is_closed:
+                await self.muxed_conn.close()
+        except Exception as e:
+            logging.warning(f"Error closing muxed connection: {e}")
 
         # This is just for cleaning up state. The connection has already been closed.
         # We *could* optimize this but it really isn't worth it.
+        logging.debug(f"Resetting streams for peer {self.muxed_conn.peer_id}")
         for stream in self.streams.copy():
-            await stream.reset()
+            try:
+                await stream.reset()
+            except Exception as e:
+                logging.warning(f"Error resetting stream: {e}")
+
         # Force context switch for stream handlers to process the stream reset event we
         # just emit before we cancel the stream handler tasks.
         await trio.sleep(0.1)
 
+        # Notify all listeners about the disconnection
+        logging.debug(f"Notifying disconnection for peer {self.muxed_conn.peer_id}")
         await self._notify_disconnected()
 
     async def _handle_new_streams(self) -> None:
