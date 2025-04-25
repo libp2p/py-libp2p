@@ -57,9 +57,11 @@ class AutoNATService:
         Initialize the AutoNAT service.
 
         Args:
-            host (BasicHost): The libp2p host instance that provides networking
-                capabilities for the AutoNAT service, including peer discovery
-                and connection management.
+        ----
+        host (BasicHost): The libp2p host instance that provides networking
+            capabilities for the AutoNAT service, including peer discovery
+            and connection management.
+
         """
         self.host = host
         self.peerstore: IPeerStore = host.get_peerstore()
@@ -91,12 +93,15 @@ class AutoNATService:
         appropriate handlers based on the message type.
 
         Args:
-            request (bytes | Message): The request bytes that need to be parsed
-                and handled by the AutoNAT service, or a Message object directly.
+        ----
+        request (bytes | Message): The request bytes that need to be parsed
+            and handled by the AutoNAT service, or a Message object directly.
 
-        Returns:
-            Message: The response message containing the result of the request.
-                Returns an error response if the request type is not recognized.
+        Returns
+        -------
+        Message: The response message containing the result of the request.
+            Returns an error response if the request type is not recognized.
+
         """
         if isinstance(request, bytes):
             message = Message()
@@ -124,12 +129,15 @@ class AutoNATService:
         and recording the results of these connection attempts.
 
         Args:
-            message (Message): The request message containing the dial request
-                parameters and peer information.
+        ----
+        message (Message): The request message containing the dial request
+            parameters and peer information.
 
-        Returns:
-            Message: The response message containing the dial results, including
-                success/failure status for each attempted peer connection.
+        Returns
+        -------
+        Message: The response message containing the dial results, including
+            success/failure status for each attempted peer connection.
+
         """
         response = Message()
         response.type = Type.Value("DIAL_RESPONSE")
@@ -164,12 +172,15 @@ class AutoNATService:
         NAT traversal capabilities.
 
         Args:
-            peer_id (ID): The identifier of the peer to attempt to dial for
-                NAT traversal testing.
+        ----
+        peer_id (ID): The identifier of the peer to attempt to dial for
+            NAT traversal testing.
 
-        Returns:
-            bool: True if the dial was successful and a connection could be
-                established, False if the connection attempt failed.
+        Returns
+        -------
+        bool: True if the dial was successful and a connection could be
+            established, False if the connection attempt failed.
+
         """
         try:
             stream = await self.host.new_stream(peer_id, [AUTONAT_PROTOCOL_ID])
@@ -185,11 +196,13 @@ class AutoNATService:
         Retrieves the current NAT status of the node based on previous
         dial attempts and their results.
 
-        Returns:
-            int: The current status as an integer:
-                - AutoNATStatus.UNKNOWN (0): Status not yet determined
-                - AutoNATStatus.PUBLIC (1): Node is publicly reachable
-                - AutoNATStatus.PRIVATE (2): Node is behind NAT
+        Returns
+        -------
+        int: The current status as an integer:
+            - AutoNATStatus.UNKNOWN (0): Status not yet determined
+            - AutoNATStatus.PUBLIC (1): Node is publicly reachable
+            - AutoNATStatus.PRIVATE (2): Node is behind NAT
+
         """
         return self.status
 

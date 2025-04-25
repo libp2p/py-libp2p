@@ -32,13 +32,14 @@ class AutoNATStub:
     """AutoNAT service definition"""
 
     def __init__(self, channel: grpc.Channel) -> None:
-        """Initialize the AutoNAT stub.
+        """
+        Initialize the AutoNAT stub.
 
         Args:
         ----
-            channel (grpc.Channel): The gRPC channel instance that facilitates
-                communication for the AutoNAT service, providing the underlying
-                transport mechanism for RPC calls.
+        channel (grpc.Channel): The gRPC channel instance that facilitates
+            communication for the AutoNAT service, providing the underlying
+            transport mechanism for RPC calls.
 
         """
         self.Dial = channel.unary_unary(
