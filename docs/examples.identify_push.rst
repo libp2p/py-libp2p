@@ -38,7 +38,7 @@ There is also a more interactive version of the example which runs as separate l
     Peer ID: QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     Run dialer with command:
-    identify-push-listener-dialer -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
+    identify-push-listener-dialer-demo -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     Waiting for incoming connections... (Ctrl+C to exit)
 
