@@ -29,7 +29,7 @@ There is also a more interactive version of the example which runs as separate l
 
 .. code-block:: console
 
-    $ identify-push-listener-dialer
+    $ identify-push-listener-dialer-demo
 
     ==== Starting Identify-Push Listener on port 8888 ====
 
