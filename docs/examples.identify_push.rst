@@ -42,7 +42,7 @@ There is also a more interactive version of the example which runs as separate l
 
     Waiting for incoming connections... (Ctrl+C to exit)
 
-Copy the line that starts with ``identify-push-listener-dialer -d ...``, open a new terminal in the same
+Copy the line that starts with ``identify-push-listener-dialer-demo -d ...``, open a new terminal in the same
 folder and paste it in:
 
 .. code-block:: console
