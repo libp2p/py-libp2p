@@ -29,7 +29,7 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     Returns:
         bytes: The resulting key.
     """
-    return multihash.digest(binary_data, 'sha2-256').digest()
+    return multihash.digest(binary_data, 'sha2-256').digest
 
 
 def distance(key_one: bytes, key_two: bytes) -> int:
