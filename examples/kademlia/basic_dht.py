@@ -39,7 +39,7 @@ logger = logging.getLogger("kademlia-example")
 
 # File to store node information
 NODE_INFO_FILE = "dht_node_info.json"
-
+PROTOCOL_ID = "/ipfs/kad/1.0.0"
 
 def save_node_info(port: int, peer_id: str) -> None:
     """Save node information to a file for later use."""
@@ -132,6 +132,7 @@ async def run_provider_node(port: int, bootstrap_addr: Optional[str] = None) -> 
                 # Keep the node running
                 while True:
                     logger.info(f"Provider running with {dht.get_routing_table_size()} peers")
+                    logger.info("Peer store size" + str(dht.host.get_peerstore().peer_ids()))
                     await trio.sleep(30)
 
     except Exception as e:
@@ -180,6 +181,9 @@ async def run_consumer_node(port: int, bootstrap_addr: str) -> None:
                 # Connect to the bootstrap node
                 try:
                     await dht.host.connect(bootstrap_info)
+                    stream = await dht.host.new_stream(bootstrap_info.peer_id, [PROTOCOL_ID])
+                    await stream.write("PING") # Send a ping message
+                    await stream.close()
                     logger.info(f"Connected to bootstrap node")
                 except Exception as e:
                     logger.error(f"Failed to connect to bootstrap node: {e}")
@@ -221,6 +225,7 @@ async def run_consumer_node(port: int, bootstrap_addr: str) -> None:
                 # Keep the node running
                 while True:
                     logger.info(f"Consumer running with {dht.get_routing_table_size()} peers")
+                    logger.info("Peer store size" + str(dht.host.get_peerstore().peer_ids()))
                     await trio.sleep(30)
 
     except Exception as e:
