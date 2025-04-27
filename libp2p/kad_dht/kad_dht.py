@@ -23,6 +23,9 @@ from .peer_routing import PeerRouting
 from .routing_table import RoutingTable
 from .value_store import ValueStore
 from .utils import create_key_from_binary
+from libp2p.network.stream.net_stream import (
+    INetStream,
+)
 
 logger = logging.getLogger("libp2p.kademlia.kad_dht")
 
@@ -92,7 +95,7 @@ class KadDHT(Service):
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
             
-    async def handle_stream(self, stream) -> None:
+    async def handle_stream(self, stream: INetStream) -> None:
         """
         Handle an incoming stream.
         
@@ -101,9 +104,10 @@ class KadDHT(Service):
         """
         # In a complete implementation, this would handle DHT protocol messages
         # For now, just log the incoming connection
-        peer_id = stream.conn_id.peer_id
+        peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
-        
+        self.add_peer(peer_id)
+        logger.info(f"Added peer {peer_id} to routing table")
         try:
             # This would normally read and process DHT messages
             # For now, just close the stream
