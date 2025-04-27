@@ -47,7 +47,7 @@ folder and paste it in:
 
 .. code-block:: console
 
-    $ identify-push-listener-dialer -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
+    $ identify-push-listener-dialer-demo -d /ip4/0.0.0.0/tcp/8888/p2p/QmUiN4R3fNrCoQugGgmmb3v35neMEjKFNrsbNGVDsRHWpM
 
     ==== Starting Identify-Push Dialer on port 8889 ====
 
