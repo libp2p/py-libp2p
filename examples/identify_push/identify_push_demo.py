@@ -35,10 +35,6 @@ from libp2p.peer.peerinfo import (
 )
 
 # Configure logging
-# logging.basicConfig(
-#    level=logging.DEBUG,
-#    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-# )
 logger = logging.getLogger(__name__)
 
 
@@ -100,28 +96,17 @@ async def main() -> None:
             if success:
                 logger.info("Identify push completed successfully")
                 print("Identify push completed successfully!")
-
-                logger.info("Example completed successfully")
-                print("\nExample completed successfully!")
             else:
                 logger.warning("Identify push didn't complete successfully")
                 print("\nWarning: Identify push didn't complete successfully")
 
-                logger.warning("Example completed with warnings")
-                print("Example completed with warnings")
         except Exception as e:
             logger.error(f"Error during identify push: {str(e)}")
             print(f"\nError during identify push: {str(e)}")
 
-            logger.error("Example completed with errors")
-            print("Example completed with errors")
-
-
 if __name__ == "__main__":
     trio.run(main)
 
-
-# Non-async entry point for console script
 def run_main():
     """Non-async entry point for the console script."""
     trio.run(main)
