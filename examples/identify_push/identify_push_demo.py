@@ -104,8 +104,10 @@ async def main() -> None:
             logger.error(f"Error during identify push: {str(e)}")
             print(f"\nError during identify push: {str(e)}")
 
+
 if __name__ == "__main__":
     trio.run(main)
+
 
 def run_main():
     """Non-async entry point for the console script."""
