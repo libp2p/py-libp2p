@@ -1,8 +1,15 @@
 import logging
 
 import pytest
+import multiaddr
 import trio
 
+from libp2p import (
+    new_host,
+)
+from libp2p.crypto.secp256k1 import (
+    create_new_key_pair,
+)
 from libp2p.identity.identify.identify import (
     _mk_identify_protobuf,
 )
@@ -16,20 +23,11 @@ from libp2p.identity.identify_push.identify_push import (
     push_identify_to_peer,
     push_identify_to_peers,
 )
-from tests.utils.factories import (
-    host_pair_factory,
-)
-
-import multiaddr
-
-from libp2p import (
-    new_host,
-)
-from libp2p.crypto.secp256k1 import (
-    create_new_key_pair,
-)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
+)
+from tests.utils.factories import (
+    host_pair_factory,
 )
 
 logger = logging.getLogger("libp2p.identity.identify-push-test")
@@ -171,7 +169,6 @@ async def test_identify_push_to_peers(security_protocol):
     ):
         # Create a third host
         # Instead of using key_pair, create a new host directly
-        
 
         # Create a new key pair for host_c
         key_pair_c = create_new_key_pair()
@@ -221,7 +218,7 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
 
     This test ensures all parameters of push_identify_to_peers are properly tested.
     """
-    
+
     # Create four hosts to thoroughly test selective pushing
     async with host_pair_factory(security_protocol=security_protocol) as (
         host_a,
