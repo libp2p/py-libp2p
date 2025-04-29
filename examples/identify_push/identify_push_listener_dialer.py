@@ -54,10 +54,6 @@ from libp2p.peer.peerinfo import (
 )
 
 # Configure logging
-# logging.basicConfig(
-#    level=logging.DEBUG,
-#    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-# )
 logger = logging.getLogger("libp2p.identity.identify-push-example")
 
 # Default port configuration
