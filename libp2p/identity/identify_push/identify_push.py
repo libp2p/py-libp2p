@@ -6,6 +6,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
 from libp2p.abc import (
     IHost,
@@ -175,7 +176,7 @@ async def push_identify_to_peers(
     observed_multiaddr: Optional[Multiaddr] = None,
 ) -> None:
     """
-    Push an identify message to multiple peers.
+    Push an identify message to multiple peers in parallel.
 
     If peer_ids is None, push to all connected peers.
     """
@@ -183,6 +184,7 @@ async def push_identify_to_peers(
         # Get all connected peers
         peer_ids = set(host.get_peerstore().peer_ids())
 
-    # Push to each peer
-    for peer_id in peer_ids:
-        await push_identify_to_peer(host, peer_id, observed_multiaddr)
+    # Push to each peer in parallel using a trio.Nursery
+    async with trio.open_nursery() as nursery:
+        for peer_id in peer_ids:
+            nursery.start_soon(push_identify_to_peer, host, peer_id, observed_multiaddr)
