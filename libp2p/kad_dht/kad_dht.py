@@ -7,18 +7,17 @@ implementation based on the Kademlia algorithm and protocol.
 
 import logging
 import time
+import json
 from typing import Dict, List, Optional, Set, Union
 
 import trio
 from multiaddr import Multiaddr
 
-from libp2p.abc import IPeerRouting, IContentRouting
 from libp2p.abc import IHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.tools.async_service import Service
 
-from .content_routing import ContentRouting
 from .peer_routing import PeerRouting
 from .routing_table import RoutingTable
 from .value_store import ValueStore
@@ -31,7 +30,7 @@ logger = logging.getLogger("libp2p.kademlia.kad_dht")
 
 # Default parameters
 PROTOCOL_ID = "/ipfs/kad/1.0.0"
-ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60 * 60  # 1 hour in seconds
+ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60 # 1 min in seconds for testing
 
 
 class KadDHT(Service):
@@ -61,9 +60,6 @@ class KadDHT(Service):
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)
         
-        # Initialize content routing
-        self.content_routing = ContentRouting(host, self.routing_table)
-        
         # Initialize value store
         self.value_store = ValueStore()
         
@@ -85,9 +81,17 @@ class KadDHT(Service):
         while self.manager.is_running:
             # Periodically refresh the routing table
             await self.refresh_routing_table()
-            
-            # Republish provider records
-            await self.content_routing.republish_providers()
+
+            # Connect to all known peers
+            logger.info("Connecting to all known peers...")
+            await self.connect_to_all_known_peers()
+
+            # Actively trigger peer discovery by querying for our own ID
+            try:
+                logger.info("Triggering peer discovery with find_peer(self.local_peer_id)")
+                await self.find_peer(self.local_peer_id)
+            except Exception as e:
+                logger.warning(f"Peer discovery query failed: {e}")
             
             # Clean up expired values
             self.value_store.cleanup_expired()
@@ -98,25 +102,112 @@ class KadDHT(Service):
     async def handle_stream(self, stream: INetStream) -> None:
         """
         Handle an incoming stream.
-        
+
         Args:
             stream: The incoming stream
         """
-        # In a complete implementation, this would handle DHT protocol messages
-        # For now, just log the incoming connection
+
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
         self.add_peer(peer_id)
         logger.info(f"Added peer {peer_id} to routing table")
         try:
-            # This would normally read and process DHT messages
-            # For now, just close the stream
+            # Read 4 bytes for the length prefix
+            length_prefix = await stream.read(4)
+            if len(length_prefix) < 4:
+                logger.error("Failed to read length prefix from stream")
+                await stream.close()
+                return
+            msg_length = int.from_bytes(length_prefix, "big")
+            # Read the message bytes
+            msg_bytes = await stream.read(msg_length)
+            if len(msg_bytes) < msg_length:
+                logger.error("Failed to read full message from stream")
+                await stream.close()
+                return
+            # Decode the message (assuming JSON)
+            try:
+                message = json.loads(msg_bytes.decode())
+                logger.info(f"Received DHT message from {peer_id}: {message}")
+                # Here you could add further processing of the message
+            except Exception as decode_err:
+                logger.error(f"Failed to decode DHT message: {decode_err}")
+            
+            if message.get("type") == "FIND_NODE":
+                # Handle FIND_NODE message
+                target = message.get("target")
+                if target:
+                    # Convert hex target to bytes
+                    target_key = bytes.fromhex(target)
+                    # Find closest peers to the target key
+                    closest_peers = self.routing_table.find_closest_peers(target_key, 20)
+                    
+                    # Format response with peer information
+                    peer_data = []
+                    for peer in closest_peers:
+                        # Skip if the peer is the requester
+                        if peer == peer_id:
+                            continue
+                            
+                        peer_info = {
+                            "id": peer.to_bytes().hex()
+                        }
+                        
+                        # Add addresses if available
+                        try:
+                            addrs = self.host.get_peerstore().addrs(peer)
+                            if addrs:
+                                peer_info["addrs"] = [str(addr) for addr in addrs]
+                        except Exception:
+                            pass
+                            
+                        peer_data.append(peer_info)
+                    
+                    # Create and send response
+                    response = {
+                        "type": "FIND_NODE_RESPONSE",
+                        "peers": peer_data
+                    }
+                    response_bytes = json.dumps(response).encode()
+                    await stream.write(len(response_bytes).to_bytes(4, "big"))
+                    await stream.write(response_bytes)
+                    logger.info(f"Sent {len(peer_data)} closest peers to {peer_id}")
+                    
+            elif message.get("type") == "GET_VALUE":
+                # Handle GET_VALUE message
+                key = message.get("key")
+                if key:
+                    value = self.value_store.get(key)
+                    if value:
+                        response = {
+                            "type": "VALUE",
+                            "key": key,
+                            "value": value.decode(),
+                        }
+                        response_bytes = json.dumps(response).encode()
+                        await stream.write(len(response_bytes).to_bytes(4, "big") + response_bytes)
+                    else:
+                        logger.info(f"Value for key {key} not found")
+
+            elif message.get("type") == "PUT_VALUE":
+                # Handle PUT_VALUE message
+                key = message.get("key")
+                value = message.get("value")
+                if key and value:
+                    self.value_store.put(key.encode(), value.encode())
+                    logger.info(f"Stored value for key {key}")
+                else:
+                    logger.error("Invalid PUT_VALUE message format")
+
             await stream.close()
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
-            
+            await stream.close()
+            logger.info(f"Closed stream with peer {peer_id}")
+
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
+        logger.info("Refreshing routing table1...")
         await self.peer_routing.refresh_routing_table()
         
     # Peer routing methods
@@ -132,61 +223,30 @@ class KadDHT(Service):
             Optional[PeerInfo]: The peer information if found, None otherwise
         """
         return await self.peer_routing.find_peer(peer_id)
-        
-    # Content routing methods
     
-    def provide(self, cid: bytes, announce: bool = True) -> None:
+    async def connect_to_all_known_peers(self):
         """
-        Advertise that this node can provide content with the given CID.
-        
-        Args:
-            cid: The content identifier
-            announce: Whether to announce to the network
+        Attempt to connect to all peers currently in the routing table.
         """
-        self.content_routing.provide(cid, announce)
-        
-    def find_providers(self, cid: bytes, count: int = 20) -> List[PeerInfo]:
-        """
-        Find providers for a given content ID.
-        
-        Args:
-            cid: The content identifier
-            count: Maximum number of providers to return
+        logger.info("Connecting to all known peers method...")
+        peer_ids = self.routing_table.get_peer_ids()
+        for peer_id in peer_ids:
+            if peer_id == self.local_peer_id:
+                continue
+            try:
+                # Try to get PeerInfo from the peerstore
+                peerstore = getattr(self.host, "get_peerstore", None)
+                if peerstore:
+                    addrs = self.host.get_peerstore().addrs(peer_id)
+                    if addrs:
+                        peer_info = PeerInfo(peer_id, addrs)
+                        await self.host.connect(peer_info)
+                        logger.info(f"Connected to discovered peer: {peer_id.pretty()}")
+            except Exception as e:
+                logger.debug(f"Failed to connect to peer {peer_id}: {e}")
             
-        Returns:
-            List[PeerInfo]: List of provider information
-        """
-        return list(self.content_routing.find_provider_iter(cid, count))
         
-    # Value store methods
-    
-    def put_value(self, key: bytes, value: bytes, ttl: Optional[int] = None) -> None:
-        """
-        Store a value in the DHT.
-        
-        Args:
-            key: The key to store the value under
-            value: The value to store
-            ttl: Time to live in seconds, or None for no expiration
-        """
-        self.value_store.put(key, value, ttl)
-        
-    def get_value(self, key: bytes) -> Optional[bytes]:
-        """
-        Retrieve a value from the DHT.
-        
-        Args:
-            key: The key to look up
-            
-        Returns:
-            Optional[bytes]: The stored value, or None if not found or expired
-        """
-        local_value = self.value_store.get(key)
-        if local_value:
-            return local_value
-            
-        # In a complete implementation, we would query the network here
-        return None
+
         
     # Utility methods
     
