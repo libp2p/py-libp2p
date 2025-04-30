@@ -137,7 +137,7 @@ class RoutingTable:
             bool: True if peer was added or updated, False otherwise
         """
         if peer_id == self.local_peer_id:
-            return False  # Don't add yourself
+            return False
             
         peer_key = peer_id.to_bytes()
         prefix_length = shared_prefix_len(self.local_key, peer_key)
@@ -152,7 +152,7 @@ class RoutingTable:
         prefix_length = shared_prefix_len(self.local_key, peer_key)
         return self.buckets[prefix_length].remove_peer(peer_id)
     
-    def find_closest_peers(self, target_key: bytes, count: int) -> List[ID]:
+    def find_closest_peers(self, target_key: bytes, count: int = 20) -> List[ID]:
         """
         Find the closest peers to a target key.
         
