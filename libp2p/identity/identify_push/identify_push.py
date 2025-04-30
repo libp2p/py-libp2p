@@ -185,6 +185,10 @@ async def push_identify_to_peers(
         peer_ids = set(host.get_peerstore().peer_ids())
 
     # Push to each peer in parallel using a trio.Nursery
+    # TODO: Consider using a bounded nursery to limit concurrency
+    # and avoid overwhelming the network. This can be done by using
+    # trio.open_nursery(max_concurrent=10) or similar.
+    # For now, we will use an unbounded nursery for simplicity.
     async with trio.open_nursery() as nursery:
         for peer_id in peer_ids:
             nursery.start_soon(push_identify_to_peer, host, peer_id, observed_multiaddr)
