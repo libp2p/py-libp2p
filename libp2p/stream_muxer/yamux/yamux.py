@@ -373,6 +373,24 @@ class Yamux(IMuxedConn):
                 f"recv_closed={stream.recv_closed},"
                 f"buffer_len={len(buffer) if buffer else 0}"
             )
+
+            # First check if we have data in the buffer - we should return
+            # this data even if the stream has been reset afterwards
+            if buffer and len(buffer) > 0:
+                if n == -1 or n >= len(buffer):
+                    data = bytes(buffer)
+                    buffer.clear()
+                else:
+                    data = bytes(buffer[:n])
+                    del buffer[:n]
+                logging.debug(
+                    f"Returning {len(data)}"
+                    f"bytes from stream {stream_id},"
+                    f"buffer_len={len(buffer)}"
+                )
+                return data
+
+            # After checking for data, now we can check if the stream is closed
             if stream.closed:
                 logging.debug(f"Stream {stream_id} is closed, raising MuxedStreamReset")
                 raise MuxedStreamReset("Stream is reset or closed")
@@ -405,6 +423,8 @@ class Yamux(IMuxedConn):
                         f"buffer_len={len(buffer)}"
                     )
                     return data
+
+                # Check stream state after checking for data
                 if self.streams[stream_id].closed:
                     logging.debug(
                         f"Stream {stream_id} closed"
