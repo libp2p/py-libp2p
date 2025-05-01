@@ -114,7 +114,7 @@ class KadDHT(Service):
         try:
             # Read 4 bytes for the length prefix
             length_prefix = await stream.read(4)
-            logger.info(f"Read length prefix: {length_prefix}")
+            logger.info(f"Read length prefix1: {length_prefix}")
             if len(length_prefix) < 4:
                 logger.error("Failed to read length prefix from stream")
                 await stream.close()
@@ -179,7 +179,8 @@ class KadDHT(Service):
                 key = message.get("key")
                 logger.info(f"Received GET_VALUE request for key {key}")
                 if key:
-                    value = self.value_store.get(key)
+                    value = self.value_store.get(key.encode())
+                    logger.info(f"Retrieved value for key {key}: {value}")
                     if value:
                         response = {
                             "type": "VALUE",
@@ -285,10 +286,11 @@ class KadDHT(Service):
             
         # 2. Not found locally, search the network
         closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
-        
+        logger.info("Closest peers for key for retrieving %s: %s", key, closest_peers)
         # 3. Query those peers
         for peer in closest_peers:
             value = await self._get_from_peer(peer, key_bytes)
+            logger.info("Found value at peer %s: %s", peer, value)
             if value:
                 # Store for future use
                 self.value_store.put(key_bytes, value)
@@ -362,13 +364,19 @@ class KadDHT(Service):
             
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-            
+            logger.info(f"Opened stream to peer2 {peer_id} for GET_VALUE")
+
             # Create the GET_VALUE message
             message = {
                 "type": "GET_VALUE",
-                "key": key
+                "key": key.hex() if isinstance(key, bytes) else key,  # Convert bytes key to hex string
             }
-            message_bytes = json.dumps(message).encode()
+            logger.info("message is %s", message)
+            try: 
+                message_bytes = json.dumps(message).encode()
+            except Exception as e:
+                logger.warning(f"Failed to encode message: {e}")
+            logger.info("message bytes is %s", repr(message_bytes))
             
             # Send the message
             await stream.write(len(message_bytes).to_bytes(4, "big"))
