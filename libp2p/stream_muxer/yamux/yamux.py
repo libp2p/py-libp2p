@@ -126,8 +126,12 @@ class YamuxStream(IMuxedStream):
         if n is None:
             n = -1
 
+        # If the stream is closed for receiving and the buffer is empty, raise EOF
         if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
-            return b""
+            logging.debug(
+                f"Stream {self.stream_id}: Stream closed for receiving and buffer empty"
+            )
+            raise MuxedStreamEOF("Stream is closed for receiving")
 
         # If reading until EOF (n == -1), block until stream is closed
         if n == -1:
