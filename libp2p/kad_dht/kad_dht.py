@@ -114,6 +114,7 @@ class KadDHT(Service):
         try:
             # Read 4 bytes for the length prefix
             length_prefix = await stream.read(4)
+            logger.info(f"Read length prefix: {length_prefix}")
             if len(length_prefix) < 4:
                 logger.error("Failed to read length prefix from stream")
                 await stream.close()
@@ -176,6 +177,7 @@ class KadDHT(Service):
             elif message.get("type") == "GET_VALUE":
                 # Handle GET_VALUE message
                 key = message.get("key")
+                logger.info(f"Received GET_VALUE request for key {key}")
                 if key:
                     value = self.value_store.get(key)
                     if value:
@@ -185,9 +187,10 @@ class KadDHT(Service):
                             "value": value.decode(),
                         }
                         response_bytes = json.dumps(response).encode()
-                        await stream.write(len(response_bytes).to_bytes(4, "big") + response_bytes)
-                    else:
-                        logger.info(f"Value for key {key} not found")
+                        # Send length prefix SEPARATELY from data
+                        await stream.write(len(response_bytes).to_bytes(4, "big"))
+                        await stream.write(response_bytes)
+                        logger.info(f"Sent value response for key {key}")
 
             elif message.get("type") == "PUT_VALUE":
                 # Handle PUT_VALUE message
@@ -246,7 +249,76 @@ class KadDHT(Service):
                 logger.debug(f"Failed to connect to peer {peer_id}: {e}")
             
         
+    async def put_value(self, key: Union[str, bytes], value: bytes) -> None:
+        """
+        Store a value in the DHT.
+        
+        Args:
+            key: The key to store (string or bytes)
+            value: The value to store
+        """
+        # Check key type and convert if needed
+        key_bytes = key if isinstance(key, bytes) else key.encode()
+        
+        # 1. Find peers closest to the key
+        closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
+        logger.info(f"Closest peers for key for storing {key}: {closest_peers}")
 
+        # 2. Store locally and at those peers
+        self.value_store.put(key, value)
+        logger.info(f"Stored value for key {key} locally1")
+        
+        # 3. Store at remote peers
+        for peer in closest_peers:
+            await self._store_at_peer(peer, key, value)
+                
+    # Add these methods in the Utility methods section
+
+    async def _store_at_peer(self, peer_id: ID, key: str, value: bytes) -> bool:
+        """
+        Store a value at a specific peer.
+        
+        Args:
+            peer_id: The ID of the peer to store the value at
+            key: The key to store
+            value: The value to store
+            
+        Returns:
+            bool: True if the value was successfully stored, False otherwise
+        """
+        try:
+            # Don't try to store at ourselves
+            if peer_id == self.local_peer_id:
+                return True
+                
+            logger.info(f"Storing value for key {key} at peer {peer_id}")
+            
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            logger.info(f"Opened stream to peer1 {peer_id}")
+
+            # Create the PUT_VALUE message
+            message = {
+            "type": "PUT_VALUE",
+            "key": key.hex() if isinstance(key, bytes) else key,  # Convert bytes key to hex string
+            "value": value.decode() if isinstance(value, bytes) else value
+            }
+            message_bytes = json.dumps(message).encode()
+            
+            # Send the message
+            await stream.write(len(message_bytes).to_bytes(4, "big"))
+            await stream.write(message_bytes)
+            logger.info("Sent PUT_VALUE message")
+
+            # Close the stream
+            await stream.close()
+            logger.debug(f"Successfully stored value at peer {peer_id}")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Failed to store value at peer {peer_id}: {e}")
+            return False
+            
         
     # Utility methods
     
