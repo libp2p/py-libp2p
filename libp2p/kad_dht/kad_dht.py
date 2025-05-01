@@ -271,6 +271,28 @@ class KadDHT(Service):
         # 3. Store at remote peers
         for peer in closest_peers:
             await self._store_at_peer(peer, key, value)
+            
+    async def get_value(self, key: str) -> Optional[bytes]:
+        """Retrieve a value from the DHT."""
+
+        # Check key type and convert if needed
+        key_bytes = key if isinstance(key, bytes) else key.encode()
+
+        # 1. Check local store first
+        local_value = self.value_store.get(key_bytes)
+        if local_value:
+            return local_value
+            
+        # 2. Not found locally, search the network
+        closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
+        
+        # 3. Query those peers
+        for peer in closest_peers:
+            value = await self._get_from_peer(peer, key_bytes)
+            if value:
+                # Store for future use
+                self.value_store.put(key_bytes, value)
+                return value
                 
     # Add these methods in the Utility methods section
 
@@ -319,6 +341,86 @@ class KadDHT(Service):
             logger.warning(f"Failed to store value at peer {peer_id}: {e}")
             return False
             
+    async def _get_from_peer(self, peer_id: ID, key: str) -> Optional[bytes]:
+        """
+        Retrieve a value from a specific peer.
+        
+        Args:
+            peer_id: The ID of the peer to retrieve the value from
+            key: The key to retrieve
+            
+        Returns:
+            Optional[bytes]: The value if found, None otherwise
+        """
+        stream = None
+        try:
+            # Don't try to get from ourselves
+            if peer_id == self.local_peer_id:
+                return None
+                
+            logger.info(f"Getting value for key {key} from peer {peer_id}")
+            
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            
+            # Create the GET_VALUE message
+            message = {
+                "type": "GET_VALUE",
+                "key": key
+            }
+            message_bytes = json.dumps(message).encode()
+            
+            # Send the message
+            await stream.write(len(message_bytes).to_bytes(4, "big"))
+            await stream.write(message_bytes)
+            
+            # Read response length (4 bytes)
+            length_bytes = b""
+            remaining = 4
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.debug(f"Connection closed by peer {peer_id} while reading length")
+                    return None
+                    
+                length_bytes += chunk
+                remaining -= len(chunk)
+                
+            response_length = int.from_bytes(length_bytes, byteorder='big')
+            
+            # Read response data
+            response_bytes = b""
+            remaining = response_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.debug(f"Connection closed by peer {peer_id} while reading data")
+                    return None
+                    
+                response_bytes += chunk
+                remaining -= len(chunk)
+                
+            # Parse response
+            response = json.loads(response_bytes.decode())
+            logger.info(f"Received response from peer {peer_id}: {response}")
+
+            # Process response
+            if response.get("type") == "VALUE" and "value" in response:
+                value = response["value"]
+                if isinstance(value, str):
+                    value = value.encode()
+                logger.debug(f"Received value for key {key} from peer {peer_id}")
+                return value
+                
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to get value from peer {peer_id}: {e}")
+            return None
+            
+        finally:
+            if stream:
+                await stream.close()
         
     # Utility methods
     
