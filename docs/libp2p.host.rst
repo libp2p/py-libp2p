@@ -4,6 +4,14 @@ libp2p.host package
 Submodules
 ----------
 
+libp2p.host.autonat module
+--------------------------
+
+.. automodule:: libp2p.host.autonat
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.host.basic\_host module
 ------------------------------
 
