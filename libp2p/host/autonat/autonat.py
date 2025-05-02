@@ -66,6 +66,7 @@ class AutoNATService:
             The libp2p host instance that provides networking capabilities
             for the AutoNAT service, including peer discovery and connection
             management.
+
         """
         self.host = host
         self.peerstore: IPeerStore = host.get_peerstore()
@@ -80,6 +81,7 @@ class AutoNATService:
         ----------
         stream : NetStream
             The network stream to handle for AutoNAT protocol communication.
+
         """
         try:
             request_bytes = await stream.read()
@@ -108,6 +110,7 @@ class AutoNATService:
             The response message containing the result of processing the
             request. Returns an error response if the request type is not
             recognized.
+
         """
         if isinstance(request, bytes):
             message = Message()
@@ -142,6 +145,7 @@ class AutoNATService:
         Message
             The response message containing the results of the dial
             attempts, including success/failure status for each peer.
+
         """
         response = Message()
         response.type = Type.Value("DIAL_RESPONSE")
@@ -162,9 +166,6 @@ class AutoNATService:
             peer_info.success = success
             dial_response.peers.append(peer_info)
 
-        # Initialize the dial_response field if it doesn't exist
-        if not hasattr(response, "dial_response"):
-            response.dial_response = DialResponse()
         response.dial_response.CopyFrom(dial_response)
         return response
 
@@ -182,6 +183,7 @@ class AutoNATService:
         bool
             True if the connection was successfully established,
             False if the connection attempt failed.
+
         """
         try:
             stream = await self.host.new_stream(peer_id, [AUTONAT_PROTOCOL_ID])
@@ -201,6 +203,7 @@ class AutoNATService:
             - AutoNATStatus.UNKNOWN (0): Status not yet determined
             - AutoNATStatus.PUBLIC (1): Node is publicly reachable
             - AutoNATStatus.PRIVATE (2): Node is behind NAT
+
         """
         return self.status
 
