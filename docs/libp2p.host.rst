@@ -1,16 +1,16 @@
 libp2p.host package
 ===================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.host.autonat
+
 Submodules
 ----------
-
-libp2p.host.autonat module
---------------------------
-
-.. automodule:: libp2p.host.autonat
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 libp2p.host.basic\_host module
 ------------------------------
