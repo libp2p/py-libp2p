@@ -29,6 +29,7 @@ extras_require = {
         "sphinx>=6.0.0",
         "sphinx_rtd_theme>=1.0.0",
         "towncrier>=24,<25",
+        "grpcio>=1.41.0",
     ],
     "test": [
         "p2pclient==0.2.0",
@@ -53,6 +54,7 @@ install_requires = [
     "base58>=1.0.3",
     "coincurve>=10.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "multiaddr>=0.0.9",
     "mypy-protobuf>=3.0.0",
