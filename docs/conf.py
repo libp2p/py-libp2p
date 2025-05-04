@@ -339,4 +339,3 @@ todo_include_todos = True
 # Allow duplicate object descriptions
 nitpicky = False
 nitpick_ignore = [("py:class", "type")]
-suppress_warnings = ["app.add_directive"]
