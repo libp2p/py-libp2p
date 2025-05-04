@@ -32,17 +32,17 @@ message Message {
 
 // Dial request
 message DialRequest {
-  repeated PeerInfo peers = 1;
+  repeated Peer_Info peers = 1;
 }
 
 // Dial response
 message DialResponse {
   Status status = 1;
-  repeated PeerInfo peers = 2;
+  repeated Peer_Info peers = 2;
 }
 
 // Peer information
-message PeerInfo {
+message Peer_Info {
   bytes id = 1;
   repeated bytes addrs = 2;
   bool success = 3;
