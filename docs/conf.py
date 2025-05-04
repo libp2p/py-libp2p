@@ -13,10 +13,9 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-import os
-import sys
+# sys.path.insert(0, os.path.abspath('.'))
 
-sys.path.insert(0, os.path.abspath(".."))
+import os
 
 DIR = os.path.dirname(__file__)
 with open(os.path.join(DIR, "../setup.py"), "r") as f:
@@ -37,13 +36,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
-    "sphinx.ext.todo",
-    "sphinx.ext.coverage",
-    "sphinx.ext.mathjax",
-    "sphinx.ext.ifconfig",
-    "sphinx.ext.viewcode",
-    "sphinx.ext.githubpages",
-    "sphinx.ext.napoleon",
+    "sphinx_rtd_theme",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -324,6 +317,7 @@ doctest_default_flags = (
 # Mock out dependencies that are unbuildable on readthedocs, as recommended here:
 # https://docs.readthedocs.io/en/rel/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
 
+import sys
 from unittest.mock import MagicMock
 
 # Add new modules to mock here (it should be the same list as those excluded in setup.py)
@@ -333,7 +327,6 @@ MOCK_MODULES = [
     "fastecdsa.encoding.sec1",
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
-
 # -- Extension configuration -------------------------------------------------
 
 # -- Options for todo extension ----------------------------------------------
