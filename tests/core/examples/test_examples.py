@@ -1,11 +1,30 @@
+import logging
+
 import pytest
 import trio
 
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.identity.identify_push import (
+    ID_PUSH,
+    identify_push_handler_for,
+    push_identify_to_peer,
+)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
+)
+from libp2p.pubsub.gossipsub import (
+    GossipSub,
+)
+from libp2p.pubsub.pubsub import (
+    Pubsub,
+)
+from libp2p.tools.async_service.trio_service import (
+    background_trio_service,
 )
 from libp2p.tools.utils import (
     MAX_READ_LEN,
@@ -14,9 +33,13 @@ from tests.utils.factories import (
     HostFactory,
 )
 
+logger = logging.getLogger(__name__)
+
 CHAT_PROTOCOL_ID = "/chat/1.0.0"
 ECHO_PROTOCOL_ID = "/echo/1.0.0"
 PING_PROTOCOL_ID = "/ipfs/ping/1.0.0"
+GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
+PUBSUB_TEST_TOPIC = "test-pubsub-topic"
 
 
 async def hello_world(host_a, host_b):
@@ -185,6 +208,102 @@ async def ping_demo(host_a, host_b):
     assert response == ping_data
 
 
+async def pubsub_demo(host_a, host_b):
+    gossipsub_a = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, 0.1, 1)
+    gossipsub_b = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, 0.1, 1)
+    pubsub_a = Pubsub(host_a, gossipsub_a)
+    pubsub_b = Pubsub(host_b, gossipsub_b)
+    message_a_to_b = "Hello from A to B"
+    b_received = trio.Event()
+    received_by_b = None
+
+    async def handle_subscription_b(subscription):
+        nonlocal received_by_b
+        message = await subscription.get()
+        received_by_b = message.data.decode("utf-8")
+        print(f"Host B received: {received_by_b}")
+        b_received.set()
+
+    async with background_trio_service(pubsub_a):
+        async with background_trio_service(pubsub_b):
+            async with background_trio_service(gossipsub_a):
+                async with background_trio_service(gossipsub_b):
+                    await pubsub_a.wait_until_ready()
+                    await pubsub_b.wait_until_ready()
+
+                    listen_addrs_b = host_b.get_addrs()
+                    peer_info_b = info_from_p2p_addr(listen_addrs_b[0])
+                    try:
+                        await pubsub_a.host.connect(peer_info_b)
+                        print("Connection attempt completed")
+                    except Exception as e:
+                        print(f"Connection error: {e}")
+                        raise
+
+                    subscription_b = await pubsub_b.subscribe(PUBSUB_TEST_TOPIC)
+                    async with trio.open_nursery() as nursery:
+                        nursery.start_soon(handle_subscription_b, subscription_b)
+                        await trio.sleep(0.1)
+                        await pubsub_a.publish(
+                            PUBSUB_TEST_TOPIC, message_a_to_b.encode()
+                        )
+                        with trio.move_on_after(3):
+                            await b_received.wait()
+                        nursery.cancel_scope.cancel()
+
+    assert received_by_b == message_a_to_b
+    assert b_received.is_set()
+
+
+async def identify_push_demo(host_a, host_b):
+    # Set up the identify/push handlers on both hosts
+    host_a.set_stream_handler(ID_PUSH, identify_push_handler_for(host_a))
+    host_b.set_stream_handler(ID_PUSH, identify_push_handler_for(host_b))
+
+    # Ensure both hosts have the required protocols
+    # This is needed because the test hosts
+    # might not have all protocols loaded by default
+    host_a_protocols = set(host_a.get_mux().get_protocols())
+
+    # Log protocols before push
+    logger.debug("Host A protocols before push: %s", host_a_protocols)
+
+    # Push identify information from host_a to host_b
+    success = await push_identify_to_peer(host_a, host_b.get_id())
+    assert success is True
+
+    # Add a small delay to allow processing
+    await trio.sleep(0.1)
+
+    # Check that host_b's peerstore has been updated with host_a's information
+    peer_id = host_a.get_id()
+    peerstore = host_b.get_peerstore()
+
+    # Check that the peer is in the peerstore
+    assert peer_id in peerstore.peer_ids()
+
+    # If peerstore has no protocols for this peer, manually update them for the test
+    peerstore_protocols = set(peerstore.get_protocols(peer_id))
+
+    # Log protocols after push
+    logger.debug("Host A protocols after push: %s", host_a_protocols)
+    logger.debug("Peerstore protocols after push: %s", peerstore_protocols)
+
+    # Check that the protocols were updated
+    assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
+
+    # Check that the addresses were updated
+    host_a_addrs = set(host_a.get_addrs())
+    peerstore_addrs = set(peerstore.addrs(peer_id))
+
+    # Log addresses after push
+    logger.debug("Host A addresses: %s", host_a_addrs)
+    logger.debug("Peerstore addresses: %s", peerstore_addrs)
+
+    # Check that the addresses were updated
+    assert all(addr in peerstore_addrs for addr in host_a_addrs)
+
+
 @pytest.mark.parametrize(
     "test",
     [
@@ -195,6 +314,8 @@ async def ping_demo(host_a, host_b):
         chat_demo,
         echo_demo,
         ping_demo,
+        pubsub_demo,
+        identify_push_demo,
     ],
 )
 @pytest.mark.trio
@@ -203,8 +324,9 @@ async def test_protocols(test, security_protocol):
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol
     ) as hosts:
-        addr = hosts[0].get_addrs()[0]
-        info = info_from_p2p_addr(addr)
-        await hosts[1].connect(info)
+        if test != pubsub_demo:
+            addr = hosts[0].get_addrs()[0]
+            info = info_from_p2p_addr(addr)
+            await hosts[1].connect(info)
 
         await test(hosts[0], hosts[1])
