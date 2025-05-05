@@ -186,10 +186,7 @@ async def test_yamux_stream_close(yamux_pair):
     # Now try to read again, expecting EOF exception
     try:
         await server_stream.read(1)
-        # If we get here without exception, force the test to fail
-        # assert False, "Expected MuxedStreamEOF exception after reading all data"
     except MuxedStreamEOF:
-        # This is expected behavior with the new implementation
         pass
 
     # Close server stream too to fully close the connection
@@ -347,10 +344,7 @@ async def test_yamux_half_close(yamux_pair):
     # When trying to read more, it should get EOF
     try:
         await server_stream.read(1)
-        # If we get here without exception, force the test to fail
-        # assert False, "Expected MuxedStreamEOF exception after reading all data"
     except MuxedStreamEOF:
-        # This is expected behavior with the new implementation
         pass
 
     # Server can still write to client
