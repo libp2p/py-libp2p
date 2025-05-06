@@ -48,7 +48,9 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/security/insecure/pb/plaintext.proto \
 	libp2p/security/secio/pb/spipe.proto \
 	libp2p/security/noise/pb/noise.proto \
-	libp2p/identity/identify/pb/identify.proto
+	libp2p/identity/identify/pb/identify.proto \
+	libp2p/kad_dht/pb/kademlia.proto \
+
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)
 
