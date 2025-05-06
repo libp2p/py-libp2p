@@ -22,6 +22,7 @@ from .peer_routing import PeerRouting
 from .routing_table import RoutingTable
 from .value_store import ValueStore
 from .utils import create_key_from_binary
+from .pb.kademlia_pb2 import Message, Record
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -88,7 +89,7 @@ class KadDHT(Service):
 
             # Actively trigger peer discovery by querying for our own ID
             try:
-                logger.info("Triggering peer discovery with find_peer(self.local_peer_id)")
+                logger.info("Triggering peer discovery with find_peer %s",self.local_peer_id)
                 await self.find_peer(self.local_peer_id)
             except Exception as e:
                 logger.warning(f"Peer discovery query failed: {e}")
@@ -126,82 +127,179 @@ class KadDHT(Service):
                 logger.error("Failed to read full message from stream")
                 await stream.close()
                 return
-            # Decode the message (assuming JSON)
+                
+            # Try to parse as protobuf first, fall back to JSON if needed
             try:
-                message = json.loads(msg_bytes.decode())
-                logger.info(f"Received DHT message from {peer_id}: {message}")
-                # Here you could add further processing of the message
-            except Exception as decode_err:
-                logger.error(f"Failed to decode DHT message: {decode_err}")
-            
-            if message.get("type") == "FIND_NODE":
+                # Parse as protobuf
+                message = Message()
+                message.ParseFromString(msg_bytes)
+                logger.info(f"Received DHT protobuf message from {peer_id}, type: {message.type}")
+                
                 # Handle FIND_NODE message
-                target = message.get("target")
-                if target:
-                    # Convert hex target to bytes
-                    target_key = bytes.fromhex(target)
+                if message.type == Message.MessageType.FIND_NODE:
+                    # Get target key directly from protobuf
+                    target_key = message.key
+                    
                     # Find closest peers to the target key
                     closest_peers = self.routing_table.find_closest_peers(target_key, 20)
+                    logger.info(f"Found {len(closest_peers)} peers close to target")
                     
-                    # Format response with peer information
-                    peer_data = []
+                    # Build response message with protobuf
+                    response = Message()
+                    response.type = Message.MessageType.FIND_NODE
+                    
+                    # Add closest peers to response
                     for peer in closest_peers:
                         # Skip if the peer is the requester
                         if peer == peer_id:
                             continue
-                            
-                        peer_info = {
-                            "id": peer.to_bytes().hex()
-                        }
+                        
+                        # Add peer to closerPeers field
+                        peer_proto = response.closerPeers.add()
+                        peer_proto.id = peer.to_bytes()
+                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
                         
                         # Add addresses if available
                         try:
                             addrs = self.host.get_peerstore().addrs(peer)
                             if addrs:
-                                peer_info["addrs"] = [str(addr) for addr in addrs]
+                                for addr in addrs:
+                                    peer_proto.addrs.append(addr.to_bytes())
                         except Exception:
                             pass
-                            
-                        peer_data.append(peer_info)
                     
-                    # Create and send response
-                    response = {
-                        "type": "FIND_NODE_RESPONSE",
-                        "peers": peer_data
-                    }
-                    response_bytes = json.dumps(response).encode()
+                    # Serialize and send response
+                    response_bytes = response.SerializeToString()
                     await stream.write(len(response_bytes).to_bytes(4, "big"))
                     await stream.write(response_bytes)
-                    logger.info(f"Sent {len(peer_data)} closest peers to {peer_id}")
+                    logger.info(f"Sent protobuf response with {len(response.closerPeers)} peers to {peer_id}")
                     
-            elif message.get("type") == "GET_VALUE":
                 # Handle GET_VALUE message
-                key = message.get("key")
-                logger.info(f"Received GET_VALUE request for key {key}")
-                if key:
-                    value = self.value_store.get(key.encode())
-                    logger.info(f"Retrieved value for key {key}: {value}")
+                elif message.type == Message.MessageType.GET_VALUE:
+                    # Process GET_VALUE
+                    key = message.key
+                    logger.info(f"Received GET_VALUE request for key {key.hex()}")
+                    
+                    value = self.value_store.get(key)
+                    logger.info(f"Retrieved value for key {key.hex()}: {value}")
+                    
                     if value:
-                        response = {
-                            "type": "VALUE",
-                            "key": key,
-                            "value": value.decode(),
-                        }
-                        response_bytes = json.dumps(response).encode()
-                        # Send length prefix SEPARATELY from data
+                        # Create response using protobuf
+                        response = Message()
+                        response.type = Message.MessageType.GET_VALUE
+                        
+                        # Create record
+                        response.key = key
+                        response.record.key = key
+                        response.record.value = value
+                        response.record.timeReceived = str(time.time())
+                        
+                        # Serialize and send response
+                        response_bytes = response.SerializeToString()
                         await stream.write(len(response_bytes).to_bytes(4, "big"))
                         await stream.write(response_bytes)
-                        logger.info(f"Sent value response for key {key}")
-
-            elif message.get("type") == "PUT_VALUE":
+                        logger.info(f"Sent value response for key {key.hex()}")
+                        
                 # Handle PUT_VALUE message
-                key = message.get("key")
-                value = message.get("value")
-                if key and value:
-                    self.value_store.put(key.encode(), value.encode())
-                    logger.info(f"Stored value for key {key}")
-                else:
-                    logger.error("Invalid PUT_VALUE message format")
+                elif message.type == Message.MessageType.PUT_VALUE and message.HasField('record'):
+                    # Process PUT_VALUE
+                    key = message.record.key
+                    value = message.record.value
+                    
+                    if key and value:
+                        self.value_store.put(key, value)
+                        logger.info(f"Stored value for key {key.hex()}")
+                        
+                        # Send acknowledgement
+                        response = Message()
+                        response.type = Message.MessageType.PUT_VALUE
+                        response.key = key
+                        
+                        response_bytes = response.SerializeToString()
+                        await stream.write(len(response_bytes).to_bytes(4, "big"))
+                        await stream.write(response_bytes)
+                    else:
+                        logger.error("Invalid PUT_VALUE message format")
+                        
+            except Exception as proto_err:
+                logger.warning(f"Failed to parse as protobuf, trying legacy JSON: {proto_err}")
+                
+                # Fall back to JSON parsing for backward compatibility
+                try:
+                    message = json.loads(msg_bytes.decode())
+                    logger.info(f"Received legacy JSON DHT message from {peer_id}: {message}")
+                    
+                    # Handle JSON messages (legacy code)
+                    if message.get("type") == "FIND_NODE":
+                        # Handle FIND_NODE message
+                        target = message.get("target")
+                        if target:
+                            # Convert hex target to bytes
+                            target_key = bytes.fromhex(target)
+                            # Find closest peers to the target key
+                            closest_peers = self.routing_table.find_closest_peers(target_key, 20)
+                            
+                            # Format response with peer information
+                            peer_data = []
+                            for peer in closest_peers:
+                                # Skip if the peer is the requester
+                                if peer == peer_id:
+                                    continue
+                                    
+                                peer_info = {
+                                    "id": peer.to_bytes().hex()
+                                }
+                                
+                                # Add addresses if available
+                                try:
+                                    addrs = self.host.get_peerstore().addrs(peer)
+                                    if addrs:
+                                        peer_info["addrs"] = [str(addr) for addr in addrs]
+                                except Exception:
+                                    pass
+                                    
+                                peer_data.append(peer_info)
+                            
+                            # Create and send response
+                            response = {
+                                "type": "FIND_NODE_RESPONSE",
+                                "peers": peer_data
+                            }
+                            response_bytes = json.dumps(response).encode()
+                            await stream.write(len(response_bytes).to_bytes(4, "big"))
+                            await stream.write(response_bytes)
+                            logger.info(f"Sent JSON response with {len(peer_data)} peers to {peer_id}")
+                            
+                    elif message.get("type") == "GET_VALUE":
+                        # Handle GET_VALUE message (legacy)
+                        key = message.get("key")
+                        logger.info(f"Received legacy GET_VALUE request for key {key}")
+                        if key:
+                            value = self.value_store.get(key.encode())
+                            logger.info(f"Retrieved value for key {key}: {value}")
+                            if value:
+                                response = {
+                                    "type": "VALUE",
+                                    "key": key,
+                                    "value": value.decode(),
+                                }
+                                response_bytes = json.dumps(response).encode()
+                                # Send length prefix SEPARATELY from data
+                                await stream.write(len(response_bytes).to_bytes(4, "big"))
+                                await stream.write(response_bytes)
+                                logger.info(f"Sent legacy value response for key {key}")
+
+                    elif message.get("type") == "PUT_VALUE":
+                        # Handle PUT_VALUE message (legacy)
+                        key = message.get("key")
+                        value = message.get("value")
+                        if key and value:
+                            self.value_store.put(key.encode(), value.encode())
+                            logger.info(f"Stored legacy value for key {key}")
+                        else:
+                            logger.error("Invalid PUT_VALUE message format")
+                except Exception as json_err:
+                    logger.error(f"Failed to parse message as protobuf or JSON: {json_err}")
 
             await stream.close()
         except Exception as e:
@@ -226,7 +324,22 @@ class KadDHT(Service):
         Returns:
             Optional[PeerInfo]: The peer information if found, None otherwise
         """
-        return await self.peer_routing.find_peer(peer_id)
+        try:
+            # First check if the peer is in our peerstore
+            # try:
+            #     addrs = self.host.get_peerstore().addrs(peer_id)
+            #     logger.info(f"address of self peer: {addrs}")
+            #     if addrs:
+            #         logger.debug(f"Found peer {peer_id} in local peerstore")
+            #         return PeerInfo(peer_id, addrs)
+            # except Exception:
+            #     pass
+                
+            # If not, forward to peer_routing with proper error handling
+            return await self.peer_routing.find_peer(peer_id)
+        except Exception as e:
+            logger.warning(f"Error finding peer: {e}")
+            return None
     
     async def connect_to_all_known_peers(self):
         """
@@ -319,29 +432,59 @@ class KadDHT(Service):
             
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-            logger.info(f"Opened stream to peer1 {peer_id}")
+            logger.info(f"Opened stream to peer {peer_id}")
 
-            # Create the PUT_VALUE message
-            message = {
-            "type": "PUT_VALUE",
-            "key": key.hex() if isinstance(key, bytes) else key,  # Convert bytes key to hex string
-            "value": value.decode() if isinstance(value, bytes) else value
-            }
-            message_bytes = json.dumps(message).encode()
+            # Create the PUT_VALUE message with protobuf
+            message = Message()
+            message.type = Message.MessageType.PUT_VALUE
             
-            # Send the message
-            await stream.write(len(message_bytes).to_bytes(4, "big"))
-            await stream.write(message_bytes)
-            logger.info("Sent PUT_VALUE message")
+            # Convert key to bytes if it's a string
+            key_bytes = key if isinstance(key, bytes) else key.encode()
+            
+            # Set message fields
+            message.key = key_bytes
+            message.record.key = key_bytes
+            message.record.value = value
+            message.record.timeReceived = str(time.time())
+            
+            # Serialize and send the protobuf message with length prefix
+            proto_bytes = message.SerializeToString()
+            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(proto_bytes)
+            logger.info("Sent PUT_VALUE protobuf message")
 
-            # Close the stream
-            await stream.close()
-            logger.debug(f"Successfully stored value at peer {peer_id}")
-            return True
+            # Read response length (4 bytes)
+            length_bytes = await stream.read(4)
+            if len(length_bytes) < 4:
+                logger.warning("Failed to read response length")
+                return False
+                
+            response_length = int.from_bytes(length_bytes, byteorder='big')
+            
+            # Read response
+            response_bytes = await stream.read(response_length)
+            if len(response_bytes) < response_length:
+                logger.warning("Failed to read complete response")
+                return False
+                
+            # Parse protobuf response
+            response = Message()
+            response.ParseFromString(response_bytes)
+            
+            # Check if response is valid
+            if response.type == Message.MessageType.PUT_VALUE:
+                logger.debug(f"Successfully stored value at peer {peer_id}")
+                return True
+                
+            return False
             
         except Exception as e:
             logger.warning(f"Failed to store value at peer {peer_id}: {e}")
             return False
+            
+        finally:
+            if stream:
+                await stream.close()
             
     async def _get_from_peer(self, peer_id: ID, key: str) -> Optional[bytes]:
         """
@@ -364,23 +507,20 @@ class KadDHT(Service):
             
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-            logger.info(f"Opened stream to peer2 {peer_id} for GET_VALUE")
+            logger.info(f"Opened stream to peer {peer_id} for GET_VALUE")
 
-            # Create the GET_VALUE message
-            message = {
-                "type": "GET_VALUE",
-                "key": key.hex() if isinstance(key, bytes) else key,  # Convert bytes key to hex string
-            }
-            logger.info("message is %s", message)
-            try: 
-                message_bytes = json.dumps(message).encode()
-            except Exception as e:
-                logger.warning(f"Failed to encode message: {e}")
-            logger.info("message bytes is %s", repr(message_bytes))
+            # Create the GET_VALUE message using protobuf
+            message = Message()
+            message.type = Message.MessageType.GET_VALUE
             
-            # Send the message
-            await stream.write(len(message_bytes).to_bytes(4, "big"))
-            await stream.write(message_bytes)
+            # Convert key to bytes if it's a string
+            key_bytes = key if isinstance(key, bytes) else key.encode()
+            message.key = key_bytes
+            
+            # Serialize and send the protobuf message
+            proto_bytes = message.SerializeToString()
+            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(proto_bytes)
             
             # Read response length (4 bytes)
             length_bytes = b""
@@ -408,17 +548,32 @@ class KadDHT(Service):
                 response_bytes += chunk
                 remaining -= len(chunk)
                 
-            # Parse response
-            response = json.loads(response_bytes.decode())
-            logger.info(f"Received response from peer {peer_id}: {response}")
-
-            # Process response
-            if response.get("type") == "VALUE" and "value" in response:
-                value = response["value"]
-                if isinstance(value, str):
-                    value = value.encode()
-                logger.debug(f"Received value for key {key} from peer {peer_id}")
-                return value
+            # Parse protobuf response
+            try:
+                response = Message()
+                response.ParseFromString(response_bytes)
+                logger.info(f"Received protobuf response from peer {peer_id}, type: {response.type}")
+                
+                # Process protobuf response
+                if (response.type == Message.MessageType.GET_VALUE and
+                    response.HasField('record') and 
+                    response.record.value):
+                    logger.debug(f"Received value for key {key_bytes.hex()} from peer {peer_id}")
+                    return response.record.value
+                    
+            except Exception as proto_err:
+                # Fall back to JSON for backward compatibility
+                logger.warning(f"Failed to parse as protobuf, trying JSON: {proto_err}")
+                try:
+                    json_response = json.loads(response_bytes.decode())
+                    if json_response.get("type") == "VALUE" and "value" in json_response:
+                        value = json_response["value"]
+                        if isinstance(value, str):
+                            value = value.encode()
+                        logger.debug(f"Received JSON value for key {key} from peer {peer_id}")
+                        return value
+                except Exception as json_err:
+                    logger.error(f"Failed to parse as JSON too: {json_err}")
                 
             return None
             

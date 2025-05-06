@@ -10,13 +10,14 @@ import logging
 from typing import Dict, List, Optional, Set
 
 import trio
-import json
 
+# Remove json import and add protobuf imports
 from libp2p.abc import IPeerRouting, IHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStoreError
 
+from .pb.kademlia_pb2 import Message
 from .routing_table import RoutingTable
 from .utils import sort_peer_ids_by_distance
 
@@ -60,18 +61,21 @@ class PeerRouting(IPeerRouting):
             Optional[PeerInfo]: The peer information if found, None otherwise
         """
         # Check if we already know about this peer
+        logger.info(f"Looking for peer {peer_id}")
         try:
             addrs = self.host.get_peerstore().addrs(peer_id)
             if addrs:
+                logger.info("Found peer in local peerstore")
                 logger.debug(f"Found peer {peer_id} in local peerstore")
                 return PeerInfo(peer_id, addrs)
         except PeerStoreError:
             pass
-            
+        
+        logger.info("Peer not found in local peerstore, querying DHT")
         # If not, we need to query the DHT
         logger.debug(f"Looking for peer {peer_id} in the DHT")
         closest_peers = await self.routing_table.find_closest_peers(peer_id)
-        
+        logger.info(f"Closest peers found: {closest_peers}")
         # Check if we found the peer we're looking for
         for found_peer in closest_peers:
             if found_peer == peer_id:
@@ -151,14 +155,15 @@ class PeerRouting(IPeerRouting):
                 logger.error(f"Failed to open stream to {peer}: {e}")
                 return []
                 
-            # Create and send FIND_NODE request
-            request = {
-                "type": "FIND_NODE",
-                "target": target_key.hex()
-            }
-            request_bytes = json.dumps(request).encode()
-            await stream.write(len(request_bytes).to_bytes(4, "big"))
-            await stream.write(request_bytes)
+            # Create and send FIND_NODE request using protobuf
+            find_node_msg = Message()
+            find_node_msg.type = Message.MessageType.FIND_NODE
+            find_node_msg.key = target_key  # Set target key directly as bytes
+            
+            # Serialize and send the protobuf message with length prefix
+            proto_bytes = find_node_msg.SerializeToString()
+            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(proto_bytes)
             
             # Read response length (4 bytes)
             length_bytes = b""
@@ -190,24 +195,26 @@ class PeerRouting(IPeerRouting):
                     
                 response_bytes += chunk
                 remaining -= len(chunk)
-                
-            response = json.loads(response_bytes.decode())
-            logger.info(f"Received response from {peer} with {len(response.get('peers', []))} peers")
+            
+            # Parse the protobuf response
+            response_msg = Message()
+            response_msg.ParseFromString(response_bytes)
+            logger.info(f"Received response from {peer} with {len(response_msg.closerPeers)} peers")
             
             # Process closest peers from response
-            if response.get("type") == "FIND_NODE_RESPONSE" and "peers" in response:
-                for peer_data in response["peers"]:
+            if response_msg.type == Message.MessageType.FIND_NODE:
+                for peer_data in response_msg.closerPeers:
                     # Create peer ID from returned data
-                    new_peer_id = ID(bytes.fromhex(peer_data["id"]))
+                    new_peer_id = ID(peer_data.id)
                     
                     # Add to results if not already present
                     if new_peer_id not in results:
                         results.append(new_peer_id)
                     
                     # Store peer addresses in peerstore if provided
-                    if "addrs" in peer_data and peer_data["addrs"]:
+                    if peer_data.addrs:
                         from multiaddr import Multiaddr
-                        addrs = [Multiaddr(addr) for addr in peer_data["addrs"]]
+                        addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
                         
             return results
@@ -282,8 +289,6 @@ class PeerRouting(IPeerRouting):
         Args:
             stream: The incoming stream
         """
-        import json
-        
         try:
             # Read message length
             length_bytes = await stream.read_exactly(4)
@@ -296,43 +301,46 @@ class PeerRouting(IPeerRouting):
             message_bytes = await stream.read_exactly(message_length)
             if not message_bytes:
                 return
-                
-            message = json.loads(message_bytes.decode())
             
-            if message.get("type") == "FIND_NODE" and "target" in message:
-                # Convert target from hex to bytes
-                target_key = bytes.fromhex(message["target"])
+            # Parse protobuf message
+            kad_message = Message()
+            try:
+                kad_message.ParseFromString(message_bytes)
                 
-                # Find closest peers to target
-                closest_peers = self.routing_table.find_closest_peers(target_key, 20)
-                
-                # Prepare response
-                response = {
-                    "type": "FIND_NODE_RESPONSE",
-                    "peers": []
-                }
-                
-                # Add peer information to response
-                for peer_id in closest_peers:
-                    peer_info = {
-                        "id": peer_id.to_bytes().hex()
-                    }
+                if kad_message.type == Message.MessageType.FIND_NODE:
+                    # Get target key directly from protobuf message
+                    target_key = kad_message.key
                     
-                    # Add addresses if available
-                    try:
-                        addrs = self.host.get_peerstore().addrs(peer_id)
-                        if addrs:
-                            peer_info["addrs"] = [str(addr) for addr in addrs]
-                    except Exception:
-                        pass
+                    # Find closest peers to target
+                    closest_peers = self.routing_table.find_closest_peers(target_key, 20)
+                    
+                    # Create protobuf response
+                    response = Message()
+                    response.type = Message.MessageType.FIND_NODE
+                    
+                    # Add peer information to response
+                    for peer_id in closest_peers:
+                        peer_proto = response.closerPeers.add()
+                        peer_proto.id = peer_id.to_bytes()
+                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
                         
-                    response["peers"].append(peer_info)
+                        # Add addresses if available
+                        try:
+                            addrs = self.host.get_peerstore().addrs(peer_id)
+                            if addrs:
+                                for addr in addrs:
+                                    peer_proto.addrs.append(addr.to_bytes())
+                        except Exception:
+                            pass
+                    
+                    # Send response
+                    response_bytes = response.SerializeToString()
+                    await stream.write(len(response_bytes).to_bytes(4, byteorder='big'))
+                    await stream.write(response_bytes)
+                    await stream.flush()
                 
-                # Send response
-                response_bytes = json.dumps(response).encode()
-                await stream.write(len(response_bytes).to_bytes(4, byteorder='big'))
-                await stream.write(response_bytes)
-                await stream.flush()
+            except Exception as parse_err:
+                logger.error(f"Failed to parse protocol buffer message: {parse_err}")
                 
         except Exception as e:
             logger.debug(f"Error handling Kademlia stream: {e}")
