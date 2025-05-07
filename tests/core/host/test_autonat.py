@@ -14,7 +14,7 @@ from libp2p.host.autonat.pb.autonat_pb2 import (
     DialRequest,
     DialResponse,
     Message,
-    Peer_Info,
+    PeerInfo,
     Status,
     Type,
 )
@@ -137,7 +137,7 @@ async def test_handle_dial():
         # Create a mock message with a peer to dial
         message = Message()
         message.type = Type.Value("DIAL")
-        peer_info = Peer_Info()
+        peer_info = PeerInfo()
         peer_info.id = peer_id.to_bytes()
         peer_info.addrs.extend([b"/ip4/127.0.0.1/tcp/4001"])
         message.dial.peers.append(peer_info)
@@ -169,7 +169,7 @@ async def test_handle_request():
         message = Message()
         message.type = Type.DIAL
         dial_request = DialRequest()
-        peer_info = Peer_Info()
+        peer_info = PeerInfo()
         dial_request.peers.append(peer_info)
         message.dial.CopyFrom(dial_request)
 
@@ -208,7 +208,7 @@ async def test_handle_stream():
         request = Message()
         request.type = Type.DIAL
         dial_request = DialRequest()
-        peer_info = Peer_Info()
+        peer_info = PeerInfo()
         peer_info.id = b"peer_id"
         peer_info.addrs.append(b"addr1")
         dial_request.peers.append(peer_info)
