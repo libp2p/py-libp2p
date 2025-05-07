@@ -144,7 +144,14 @@ class PeerRouting(IPeerRouting):
         results = []
         try:
             # Add the peer to our routing table regardless of query outcome
-            self.routing_table.add_peer(peer)
+            try:
+                # Create PeerInfo from ID to add to routing table
+                addrs = self.host.get_peerstore().addrs(peer)
+                if addrs:
+                    peer_info = PeerInfo(peer, addrs)
+                    self.routing_table.add_peer(peer_info)
+            except Exception as e:
+                logger.debug(f"Failed to add peer {peer} to routing table: {e}")
             
             # Open a stream to the peer using the Kademlia protocol
             logger.info(f"Opening stream to {peer} for closest peers query")
@@ -361,7 +368,8 @@ class PeerRouting(IPeerRouting):
             self.host.get_peerstore().add_addrs(
                 peer_info.peer_id, peer_info.addrs, 3600
             )
-            self.routing_table.add_peer(peer_info.peer_id)
+            # Pass the PeerInfo object rather than just the ID
+            self.routing_table.add_peer(peer_info)
             
         # If we have bootstrap peers, refresh the routing table
         if bootstrap_peers:
