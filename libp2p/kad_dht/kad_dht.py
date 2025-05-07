@@ -90,7 +90,14 @@ class KadDHT(Service):
             # Actively trigger peer discovery by querying for our own ID
             try:
                 logger.info("Triggering peer discovery with find_peer %s",self.local_peer_id)
-                await self.find_peer(self.local_peer_id)
+                peers = await self.find_peer(self.local_peer_id)
+                logger.info("Peer discovery query completed")
+                if peers:
+                    logger.info("found peers: %s", peers)
+                    for peer in peers:
+                        if peer != self.local_peer_id:
+                            logger.info("peer id: %s", peer.peer_id)
+                            logger.info("peer multiaddress: %s", peer.addrs)
             except Exception as e:
                 logger.warning(f"Peer discovery query failed: {e}")
             
@@ -336,6 +343,7 @@ class KadDHT(Service):
             #     pass
                 
             # If not, forward to peer_routing with proper error handling
+            
             return await self.peer_routing.find_peer(peer_id)
         except Exception as e:
             logger.warning(f"Error finding peer: {e}")

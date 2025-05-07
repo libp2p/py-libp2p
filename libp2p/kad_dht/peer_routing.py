@@ -74,20 +74,20 @@ class PeerRouting(IPeerRouting):
         logger.info("Peer not found in local peerstore, querying DHT")
         # If not, we need to query the DHT
         logger.debug(f"Looking for peer {peer_id} in the DHT")
-        closest_peers = await self.routing_table.find_closest_peers(peer_id)
+        closest_peers = self.routing_table.find_closest_peers(peer_id.to_bytes())
         logger.info(f"Closest peers found: {closest_peers}")
         # Check if we found the peer we're looking for
+        peer_infos = []
         for found_peer in closest_peers:
-            if found_peer == peer_id:
-                try:
-                    addrs = self.host.get_peerstore().addrs(peer_id)
-                    return PeerInfo(peer_id, addrs)
-                except PeerStoreError:
-                    logger.warning(f"Found peer {peer_id} but no addresses available")
-                    return None
-                    
-        logger.debug(f"Could not find peer {peer_id}")
-        return None
+            try:
+                addrs = self.host.get_peerstore().addrs(found_peer)
+                if addrs:
+                    peer_infos.append(PeerInfo(found_peer, addrs))
+                else:
+                    logger.warning(f"Found peer {found_peer} but no addresses available")
+            except PeerStoreError:
+                logger.warning(f"Error retrieving addresses for peer {found_peer}")
+        return peer_infos
     
     async def find_closest_peers_network(self, target_key: bytes, count: int = 20) -> List[ID]:
         """

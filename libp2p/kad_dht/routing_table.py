@@ -17,6 +17,7 @@ logger = logging.getLogger("libp2p.kademlia.routing_table")
 # Default parameters
 BUCKET_SIZE = 20  # k in the Kademlia paper
 REPLACEMENT_CACHE_SIZE = 5
+MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
 
 
 class KBucket:
@@ -163,13 +164,62 @@ class RoutingTable:
         Returns:
             List[ID]: The closest peers, sorted by distance to the target key
         """
-        # Collect all peers from the routing table
-        all_peers = []
-        for bucket in self.buckets.values():
-            all_peers.extend(bucket.peer_ids())
+        # Special case: if the target key is the same as our local key
+        if target_key == self.local_key:
+            # When searching for our own ID, start with the highest bucket (255)
+            # and work downward until we find enough peers
+            collected_peers = []
+            max_bucket_idx = MAXIMUM_BUCKETS - 1  # Typically 255 for 32-byte keys
             
-        # Sort by distance to the target key and return the closest ones
-        return sort_peer_ids_by_distance(target_key, all_peers)[:count]
+            logger.info("max bucket index: %d", max_bucket_idx)
+            # Start from max bucket index and move downward
+            for bucket_idx in range(max_bucket_idx, -1, -1):
+                if bucket_idx in self.buckets:
+                    collected_peers.extend(self.buckets[bucket_idx].peer_ids())
+                    
+                # Stop if we've collected enough peers
+                if len(collected_peers) >= count:
+                    break
+                    
+            logger.info("collected peers: %s", collected_peers)
+            # Return the closest peers, up to the requested count
+            return sort_peer_ids_by_distance(target_key, collected_peers)[:count]
+        
+        # First determine which bucket the target would belong to
+        target_bucket_idx = shared_prefix_len(self.local_key, target_key)
+        
+        # Start with peers from the target bucket
+        collected_peers = []
+        if target_bucket_idx in self.buckets:
+            collected_peers.extend(self.buckets[target_bucket_idx].peer_ids())
+        
+        # If we need more peers, expand outward (+1/-1) from the target bucket
+        if len(collected_peers) < count:
+            # Maximum bucket index is the bit length of the key (typically 256 bits for Kademlia)
+            max_bucket_idx = len(self.local_key) * 8 - 1  # Typically 255 for 32-byte keys
+            
+            # Expand outward one step at a time
+            distance = 1
+            while len(collected_peers) < count and distance <= max_bucket_idx:
+                # Try bucket with index (target_bucket_idx + distance)
+                higher_bucket_idx = target_bucket_idx + distance
+                if higher_bucket_idx <= max_bucket_idx and higher_bucket_idx in self.buckets:
+                    collected_peers.extend(self.buckets[higher_bucket_idx].peer_ids())
+                
+                # Try bucket with index (target_bucket_idx - distance)
+                lower_bucket_idx = target_bucket_idx - distance
+                if lower_bucket_idx >= 0 and lower_bucket_idx in self.buckets:
+                    collected_peers.extend(self.buckets[lower_bucket_idx].peer_ids())
+                
+                # Increase distance for next iteration
+                distance += 1
+                
+                # If we've collected enough peers, stop expanding
+                if len(collected_peers) >= count:
+                    break
+        
+        # Sort all collected peers by XOR distance to the target key and return up to count
+        return sort_peer_ids_by_distance(target_key, collected_peers)[:count]
     
     def size(self) -> int:
         """Get the total number of peers in the routing table."""
