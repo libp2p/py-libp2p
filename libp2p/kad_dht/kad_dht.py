@@ -605,7 +605,19 @@ class KadDHT(Service):
         Returns:
             bool: True if peer was added or updated, False otherwise
         """
-        return self.routing_table.add_peer(peer_id)
+        try:
+            # Get addresses from the peerstore if available
+            addrs = self.host.get_peerstore().addrs(peer_id)
+            if addrs:
+                # Create PeerInfo object and add to routing table
+                peer_info = PeerInfo(peer_id, addrs)
+                return self.routing_table.add_peer(peer_info)
+            else:
+                logger.warning(f"No addresses found for peer {peer_id}, cannot add to routing table")
+                return False
+        except Exception as e:
+            logger.warning(f"Error adding peer {peer_id} to routing table: {e}")
+            return False
         
     def get_routing_table_size(self) -> int:
         """
