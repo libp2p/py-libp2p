@@ -29,7 +29,6 @@ extras_require = {
         "sphinx>=6.0.0",
         "sphinx_rtd_theme>=1.0.0",
         "towncrier>=24,<25",
-        "grpcio>=1.41.0",
     ],
     "test": [
         "p2pclient==0.2.0",
