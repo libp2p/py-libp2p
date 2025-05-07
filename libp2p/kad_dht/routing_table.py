@@ -5,7 +5,7 @@ Kademlia DHT routing table implementation.
 from collections import defaultdict, OrderedDict
 import logging
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Mapping
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
@@ -16,7 +16,6 @@ logger = logging.getLogger("libp2p.kademlia.routing_table")
 
 # Default parameters
 BUCKET_SIZE = 20  # k in the Kademlia paper
-REPLACEMENT_CACHE_SIZE = 5
 MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
 
 
@@ -35,36 +34,36 @@ class KBucket:
             bucket_size: Maximum number of peers to store in the bucket
         """
         self.bucket_size = bucket_size
-        self.peers: OrderedDict[ID, float] = OrderedDict()
-        self.replacement_cache: OrderedDict[ID, float] = OrderedDict()
+        # Store PeerInfo objects along with last-seen timestamp
+        self.peers: OrderedDict[ID, Tuple[PeerInfo, float]] = OrderedDict()
         
     def peer_ids(self) -> List[ID]:
         """Get all peer IDs in the bucket."""
         return list(self.peers.keys())
     
-    def add_peer(self, peer_id: ID) -> bool:
+    def peer_infos(self) -> List[PeerInfo]:
+        """Get all PeerInfo objects in the bucket."""
+        return [info for info, _ in self.peers.values()]
+    
+    def add_peer(self, peer_info: PeerInfo) -> bool:
         """
         Add a peer to the bucket. Returns True if the peer was added or updated,
-        False if the bucket is full and the peer was added to the replacement cache.
+        False if the bucket is full.
         """
         current_time = time.time()
+        peer_id = peer_info.peer_id
         
         # If peer is already in the bucket, move it to the end (most recently seen)
         if peer_id in self.peers:
             self.peers.move_to_end(peer_id)
-            self.peers[peer_id] = current_time
+            self.peers[peer_id] = (peer_info, current_time)
             return True
             
         # If bucket has space, add the peer
         if len(self.peers) < self.bucket_size:
-            self.peers[peer_id] = current_time
+            self.peers[peer_id] = (peer_info, current_time)
             return True
             
-        # Bucket is full, add to replacement cache
-        self.replacement_cache[peer_id] = current_time
-        if len(self.replacement_cache) > REPLACEMENT_CACHE_SIZE:
-            # Remove oldest from replacement cache if it's full
-            self.replacement_cache.popitem(last=False)
         return False
     
     def remove_peer(self, peer_id: ID) -> bool:
@@ -74,20 +73,18 @@ class KBucket:
         """
         if peer_id in self.peers:
             del self.peers[peer_id]
-            
-            # Try to promote a peer from the replacement cache
-            if self.replacement_cache and len(self.peers) < self.bucket_size:
-                # Get oldest peer in the replacement cache (first item)
-                replacement_id, timestamp = next(iter(self.replacement_cache.items()))
-                self.peers[replacement_id] = timestamp
-                del self.replacement_cache[replacement_id]
-            
             return True
         return False
         
     def has_peer(self, peer_id: ID) -> bool:
         """Check if the peer is in the bucket."""
         return peer_id in self.peers
+    
+    def get_peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+        """Get the PeerInfo for a given peer ID if it exists in the bucket."""
+        if peer_id in self.peers:
+            return self.peers[peer_id][0]
+        return None
     
     def get_oldest_peer(self) -> Optional[ID]:
         """Get the least-recently seen peer."""
@@ -111,8 +108,7 @@ class RoutingTable:
     def __init__(
         self, 
         local_peer_id: ID, 
-        bucket_size: int = BUCKET_SIZE,
-        max_replacement_size: int = REPLACEMENT_CACHE_SIZE
+        bucket_size: int = BUCKET_SIZE
     ):
         """
         Initialize a new routing table.
@@ -120,29 +116,29 @@ class RoutingTable:
         Args:
             local_peer_id: The ID of the local peer
             bucket_size: Maximum size for each k-bucket
-            max_replacement_size: Maximum size for each replacement cache
         """
         self.local_peer_id = local_peer_id
         self.local_key = local_peer_id.to_bytes()
         self.bucket_size = bucket_size
         self.buckets: Dict[int, KBucket] = defaultdict(lambda: KBucket(bucket_size))
     
-    def add_peer(self, peer_id: ID) -> bool:
+    def add_peer(self, peer_info: PeerInfo) -> bool:
         """
         Add a peer to the routing table.
         
         Args:
-            peer_id: The peer ID to add
+            peer_info: The PeerInfo object to add
             
         Returns:
             bool: True if peer was added or updated, False otherwise
         """
+        peer_id = peer_info.peer_id
         if peer_id == self.local_peer_id:
             return False
             
         peer_key = peer_id.to_bytes()
         prefix_length = shared_prefix_len(self.local_key, peer_key)
-        return self.buckets[prefix_length].add_peer(peer_id)
+        return self.buckets[prefix_length].add_peer(peer_info)
     
     def remove_peer(self, peer_id: ID) -> bool:
         """Remove a peer from the routing table."""
@@ -221,6 +217,49 @@ class RoutingTable:
         # Sort all collected peers by XOR distance to the target key and return up to count
         return sort_peer_ids_by_distance(target_key, collected_peers)[:count]
     
+    def find_closest_peer_infos(self, target_key: bytes, count: int = 20) -> List[PeerInfo]:
+        """
+        Find the closest peers to a target key and return their PeerInfo objects.
+        
+        Args:
+            target_key: The target key to find neighbors for
+            count: The maximum number of peers to return
+            
+        Returns:
+            List[PeerInfo]: The closest peers' PeerInfo objects, sorted by distance to the target key
+        """
+        closest_peer_ids = self.find_closest_peers(target_key, count)
+        result = []
+        
+        for peer_id in closest_peer_ids:
+            # Find which bucket this peer belongs to
+            peer_key = peer_id.to_bytes()
+            prefix_length = shared_prefix_len(self.local_key, peer_key)
+            
+            # Get the PeerInfo
+            peer_info = self.buckets[prefix_length].get_peer_info(peer_id)
+            if peer_info:
+                result.append(peer_info)
+                
+        return result
+    
+    def get_peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+        """
+        Get the PeerInfo for a specific peer ID if it exists in the routing table.
+        
+        Args:
+            peer_id: The ID of the peer to look for
+            
+        Returns:
+            Optional[PeerInfo]: The PeerInfo if found, None otherwise
+        """
+        peer_key = peer_id.to_bytes()
+        prefix_length = shared_prefix_len(self.local_key, peer_key)
+        
+        if prefix_length in self.buckets:
+            return self.buckets[prefix_length].get_peer_info(peer_id)
+        return None
+    
     def size(self) -> int:
         """Get the total number of peers in the routing table."""
         return sum(bucket.size() for bucket in self.buckets.values())
@@ -235,3 +274,10 @@ class RoutingTable:
         for bucket in self.buckets.values():
             all_peers.extend(bucket.peer_ids())
         return all_peers
+        
+    def get_peer_infos(self) -> List[PeerInfo]:
+        """Get all PeerInfo objects in the routing table."""
+        all_peer_infos = []
+        for bucket in self.buckets.values():
+            all_peer_infos.extend(bucket.peer_infos())
+        return all_peer_infos
