@@ -1,4 +1,3 @@
-import asyncio
 import time
 from typing import (
     Optional,
@@ -23,8 +22,12 @@ from aioquic.tls import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
 from trio import (
     Nursery,
+)
+from trio.socket import (
+    SocketType,
 )
 
 from libp2p.abc import (
@@ -47,6 +50,7 @@ class QuicListener(IListener):
     def __init__(self, transport: "QuicTransport", handler_function: THandler):
         self.transport = transport
         self.handler_function = handler_function
+        self._nursery: Optional[Nursery] = None
 
     async def listen(self, maddr: Multiaddr, nursery: Nursery) -> bool:
         """Start listening on the given multiaddr."""
@@ -59,22 +63,45 @@ class QuicListener(IListener):
             self.transport.host = host
             self.transport.port = port
 
+            # Store nursery for connection handling
+            self._nursery = nursery
+
             # Start listening
             await self.transport.listen()
+
+            # Start connection handler in nursery
+            self._nursery.start_soon(self._handle_connections)
+
             return True
         except Exception as e:
             raise TransportError(f"Failed to start listening: {e}") from e
+
+    async def _handle_connections(self) -> None:
+        """Handle incoming QUIC connections."""
+        if not self._nursery:
+            return
+
+        while True:
+            try:
+                # Wait for incoming connection
+                # TODO: Implement proper connection acceptance
+                # This will need to be implemented once we have the QUIC connection
+                # handling logic in place
+                await trio.sleep(0.1)
+            except Exception as e:
+                print(f"Error handling connection: {e}")
+                continue
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """Get the listening addresses."""
         if not self.transport._server:
             return ()
-        socket = self.transport._server.get_extra_info("socket")
-        addr = socket.getsockname()
+        addr = self.transport._server.getsockname()
         return (Multiaddr(f"/ip4/{addr[0]}/udp/{addr[1]}/quic"),)
 
     async def close(self) -> None:
         """Close the listener."""
+        self._nursery = None
         await self.transport.close()
 
 
@@ -83,7 +110,7 @@ class QuicTransport(ITransport):
         self.host = host
         self.port = port
         self.connections: dict[ID, QuicConnection] = {}
-        self._server: Optional[asyncio.DatagramTransport] = None
+        self._server: Optional[SocketType] = None
 
         # QUIC configuration
         self.config = QuicConfiguration(
@@ -99,15 +126,12 @@ class QuicTransport(ITransport):
     async def listen(self) -> None:
         """Start listening for QUIC connections."""
         try:
-            # Create a UDP endpoint
-            loop = asyncio.get_event_loop()
-            transport, protocol = await loop.create_datagram_endpoint(
-                lambda: self._create_protocol(), local_addr=(self.host, self.port)
+            # Create a UDP endpoint using trio
+            self._server = trio.socket.socket(
+                trio.socket.AF_INET, trio.socket.SOCK_DGRAM
             )
-
-            # Store the transport and protocol
-            self._server = transport
-            self.port = transport.get_extra_info("socket").getsockname()[1]
+            await self._server.bind((self.host, self.port))
+            self.port = self._server.getsockname()[1]
 
         except Exception as e:
             raise TransportError(f"Failed to start QUIC server: {e}") from e
