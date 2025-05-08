@@ -129,3 +129,15 @@ check-git:
 		echo "Error: You must have a remote named 'upstream' that points to 'py-libp2p'"; \
 		exit 1; \
 	fi
+
+# autonat specific protobuf targets
+format-autonat-proto:
+	black libp2p/host/autonat/pb/autonat_pb2*.py*
+	isort libp2p/host/autonat/pb/autonat_pb2*.py*
+
+autonat-proto: clean-autonat
+	protoc --python_out=. --mypy_out=. libp2p/host/autonat/pb/autonat.proto
+	$(MAKE) format-autonat-proto
+
+clean-autonat:
+	rm -f libp2p/host/autonat/pb/autonat_pb2*.py*
