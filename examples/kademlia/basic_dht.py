@@ -1,8 +1,8 @@
-
 #!/usr/bin/env python
 
 """
 A basic example of using the Kademlia DHT implementation, with all setup logic inlined.
+This example demonstrates both value storage/retrieval and content provider advertisement/discovery.
 """
 
 import argparse
@@ -13,6 +13,7 @@ import os
 import random
 import secrets
 import sys
+import hashlib
 from typing import List, Optional, Dict, Any
 
 import base58
@@ -67,15 +68,30 @@ def load_node_info() -> Optional[Dict[str, Any]]:
         return None
 
 
+def calculate_content_id(content: bytes) -> bytes:
+    """
+    Calculate a multihash-style content ID for a piece of content.
+    This emulates the IPFS CID but much simplified for the example.
+    
+    Args:
+        content: The content bytes
+        
+    Returns:
+        bytes: A SHA-256 multihash of the content
+    """
+    # Get the SHA-256 hash
+    content_hash = hashlib.sha256(content).digest()
+    # For simplicity, we use the raw hash as the key
+    return content_hash
+
+
 async def run_provider_node(port: int, bootstrap_addrs: Optional[List[str]] = None) -> None:
     """Run a node that provides content in the DHT with setup inlined."""
     try:
-        # === Inlined setup_dht_node logic ===
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
         listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-        # Start the host
         async with host.run(listen_addrs=[listen_addr]):
         
             peer_id = host.get_id().pretty()
@@ -95,14 +111,14 @@ async def run_provider_node(port: int, bootstrap_addrs: Optional[List[str]] = No
                         raise
             print("Bootstrap peers:", bootstrap_peers)
             dht = KadDHT(host, bootstrap_peers)
-            print("Starting DHT service1...")
+            print("Starting DHT service...")
             logger.info("Starting DHT service...")
-        # ====================================
-
-        # Start the DHT service
+            
+            # Start the DHT service
             async with background_trio_service(dht):
                 await trio.sleep(0.1)
                 logger.info("DHT service started")
+                
                 # If we have bootstrap nodes, connect to them
                 if bootstrap_peers:
                     for bootstrap_info in bootstrap_peers:
@@ -119,35 +135,63 @@ async def run_provider_node(port: int, bootstrap_addrs: Optional[List[str]] = No
                 # await dht.put_value(val_key, val_data)
                 # logger.info(f"Stored value with key: {base58.b58encode(val_key).decode()}")
 
-                # Retrieve the value from the DHT
-                val_key = create_key_from_binary(b"example-key")
-                logger.info(f"Looking up key: {base58.b58encode(val_key).decode()}")
-                value = await dht.get_value(val_key)
-                if value:
-                    logger.info(f"Retrieved value: {value.decode()}")
+                # Create a piece of content and advertise as provider
+                # content = f"Hello from provider node ".encode()
+                # content_key = calculate_content_id(content)
+                # logger.info(f"Generated content with ID: {content_key.hex()}")
+                
+                # Advertise that we can provide this content
+                # logger.info(f"Advertising as provider for content: {content_key.hex()}")
+                # success = await dht.provide(content_key)
+                # if success:
+                #     logger.info("Successfully advertised as content provider")
+                # else:
+                #     logger.warning("Failed to advertise as content provider")
+
+                # Also check if we can find providers for our own content to test the system
+                # content_key = create_key_from_binary(b"b450d77d0ad3446a5be10290915f72c6f8ce164280f26beeb52445e051eae7ad")
+                content_key = "25e19514a354bac2413dc71f5f8e0b974577cd07663ca02d8715ac2a6d110460"
+                logger.info(f"Looking for providers of content: {content_key}")
+                # Convert hex content ID to bytes
+                content_key = bytes.fromhex(content_key)
+                logger.info(f"Looking for providers of content1: {content_key.hex()}")
+                # bytes to string
+                # content_key = content_key.decode()
+                logger.info(f"decoded content key is %s:", {content_key})
+                providers = await dht.find_providers(content_key)
+                if providers:
+                    logger.info(f"Found {len(providers)} providers for our content: {[p.peer_id.pretty() for p in providers]}")
                 else:
-                    logger.warning("Failed to retrieve value")
+                    logger.warning(f"No providers found for our content {content_key.hex()}")
 
                 # Print bootstrap command for consumer nodes
                 bootstrap_cmd = f"--bootstrap {addr_str}"
                 logger.info(f"To connect to this node, use: {bootstrap_cmd}")
                 print(f"\nTo connect to this node, use: {bootstrap_cmd}\n")
+                print(f"Content ID for discovery: {content_key.hex()}")
 
                 # Keep the node running
                 while True:
                     logger.info(f"Provider running with {dht.get_routing_table_size()} peers")
-                    logger.info("Peers in Routing table are: " + str(dht.routing_table.get_peer_ids()))
-                    logger.info("Peer store size" + str(dht.host.get_peerstore().peer_ids()))
-                    # logger.info("shortest path to peer: " + str(dht.routing_table.find_closest_peers(content_key,20)))
-                    logger.info("value store contains: " + str(dht.value_store.store))
-                    await trio.sleep(10)
+                    # logger.info("Peers in Routing table are: " + str(dht.routing_table.get_peer_ids()))
+                    # logger.info("Peer store size: " + str(dht.host.get_peerstore().peer_ids()))
+                    # logger.info("Value store contains: " + str(dht.value_store.store))
+                    logger.info("Provider store contains: " + str(dht.provider_store.providers))
+                    logger.info("Provider store size: " + str(dht.provider_store.size()))
+                    
+                    # Display content provider information
+                    for key in dht.provider_store.providers:
+                        providers = dht.provider_store.get_providers(key)
+                        logger.info(f"Key {key.hex()} is provided by {[p.peer_id for p in providers]}")
+                    
+                    await trio.sleep(100)
 
     except Exception as e:
         logger.error(f"Provider node error: {e}", exc_info=True)
         sys.exit(1)
 
 
-async def run_consumer_node(port: int, bootstrap_addrs: List[str]) -> None:
+async def run_consumer_node(port: int, bootstrap_addrs: List[str], content_id: Optional[str] = None) -> None:
     """Run a node that consumes content from the DHT with setup inlined."""
     try:
         # Validate bootstrap addresses
@@ -169,7 +213,7 @@ async def run_consumer_node(port: int, bootstrap_addrs: List[str]) -> None:
         # Start the host
         async with host.run(listen_addrs=[listen_addr]):
             await host.get_network().listen(listen_addr)
-            logger.info("Host running sucessfully")
+            logger.info("Host running successfully")
             peer_id = host.get_id().pretty()
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             logger.info(f"Node listening on: {addr_str}")
@@ -186,43 +230,63 @@ async def run_consumer_node(port: int, bootstrap_addrs: List[str]) -> None:
                 for bootstrap_info in bootstrap_peers:
                     try:
                         await dht.host.connect(bootstrap_info)
-                        stream = await dht.host.new_stream(bootstrap_info.peer_id, [PROTOCOL_ID])
-                        await stream.write(b"PING") # Send a ping message
-                        await stream.close()
                         logger.info(f"Connected to bootstrap node: {bootstrap_info.peer_id.pretty()}")
                     except Exception as e:
                         logger.error(f"Failed to connect to bootstrap node: {e}")
                         sys.exit(1)
 
+                # Store a value in the DHT
+                val_key = create_key_from_binary(b"example-key")
+                val_data = f"This is a value from consumer node at {trio.current_time()}".encode()
+                logger.info(f"Storing value with key: {base58.b58encode(val_key).decode()}")
+                await dht.put_value(val_key, val_data)
+                logger.info(f"Stored value with key: {base58.b58encode(val_key).decode()}")
+                
                 # Wait for the DHT to bootstrap
                 await trio.sleep(3)
+
                 # Try to retrieve the value
-                # val_key = create_key_from_binary(b"example-key")
-                # logger.info(f"Looking up key: {base58.b58encode(val_key).decode()}")
-
-                # for attempt in range(1, 3):
-                #     value = await dht.get_value(val_key)
-                #     if value:
-                #         logger.info(f"Retrieved value: {value.decode()}")
-                #         print(f"Retrieved value: {value.decode()}")
-                #         break
-                #     logger.info(f"Value not found (attempt {attempt}/2), waiting...")
-                #     await trio.sleep(2)
-                # else:
-                #     logger.warning("Failed to retrieve value")
-
-                content = f"Hello from provider node".encode()
-                content_key = create_key_from_binary(content)
-                value = await dht.get_value(content_key)
+                logger.info(f"Looking up key: {base58.b58encode(val_key).decode()}")
+                value = await dht.get_value(val_key)
                 if value:
-                    print(f"Retrieved content: {value}")
+                    logger.info(f"Retrieved value: {value.decode()}")
+                    print(f"Retrieved value: {value.decode()}")
                 else:
-                    logger.warning("Failed to retrieve content")                
+                    logger.warning("Failed to retrieve value")
+
+                # If content ID was provided, try to find providers
+                if content_id:
+                    try:
+                        # Convert hex content ID to bytes
+                        content_key = bytes.fromhex(content_id)
+                        logger.info(f"Looking for providers of content: {content_id}")
+                        
+                        # Find providers for this content
+                        providers = await dht.find_providers(content_key)
+                        if providers:
+                            logger.info(f"Found {len(providers)} providers for content {content_id}")
+                            for provider in providers:
+                                logger.info(f"Content provider: {provider.peer_id.pretty()}")
+                                logger.info(f"Provider addresses: {provider.addrs}")
+                                print(f"Found content provider: {provider.peer_id.pretty()} at {provider.addrs}")
+                        else:
+                            logger.warning(f"No providers found for content {content_id}")
+                            print(f"No providers found for content {content_id}")
+                    except Exception as e:
+                        logger.error(f"Error finding content providers: {e}")
 
                 # Keep the node running
                 while True:
                     logger.info(f"Consumer running with {dht.get_routing_table_size()} peers")
-                    logger.info("Peer store size" + str(dht.host.get_peerstore().peer_ids()))
+                    logger.info("Peer store size: " + str(dht.host.get_peerstore().peer_ids()))
+                    
+                    # Check if we have new provider records
+                    if content_id:
+                        content_key = bytes.fromhex(content_id)
+                        local_providers = dht.provider_store.get_providers(content_key)
+                        if local_providers:
+                            logger.info(f"Locally known providers for {content_id}: {[p.peer_id.pretty() for p in local_providers]}")
+                    
                     await trio.sleep(30)
 
     except Exception as e:
@@ -232,7 +296,7 @@ async def run_consumer_node(port: int, bootstrap_addrs: List[str]) -> None:
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Kademlia DHT example")
+    parser = argparse.ArgumentParser(description="Kademlia DHT example with content provider functionality")
     parser.add_argument(
         "--mode", 
         choices=["provider", "consumer"], 
@@ -255,6 +319,11 @@ def parse_args():
         "--use-saved",
         action="store_true",
         help="Use saved node info for bootstrap (consumer mode only)"
+    )
+    parser.add_argument(
+        "--content-id",
+        type=str,
+        help="Hex-encoded content ID to look for providers (consumer mode only)"
     )
     
     args = parser.parse_args()
@@ -288,7 +357,7 @@ if __name__ == "__main__":
         if args.mode == "provider":
             trio.run(run_provider_node, args.port, args.bootstrap)
         else:
-            trio.run(run_consumer_node, args.port, args.bootstrap)
+            trio.run(run_consumer_node, args.port, args.bootstrap, args.content_id)
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
