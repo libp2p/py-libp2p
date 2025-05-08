@@ -28,7 +28,7 @@ class X25519PublicKey(PublicKey):
 
     def get_type(self) -> KeyType:
         # Not in protobuf, but for Noise use only
-        return KeyType.Ed25519  # Or define KeyType.X25519 if you want to extend
+        return KeyType.X25519  # Or define KeyType.X25519 if you want to extend
 
     def verify(self, data: bytes, signature: bytes) -> bool:
         raise NotImplementedError("X25519 does not support signatures.")
@@ -54,8 +54,7 @@ class X25519PrivateKey(PrivateKey):
         return cls(x25519.X25519PrivateKey.from_private_bytes(data))
 
     def get_type(self) -> KeyType:
-        # Not in protobuf, but for Noise use only
-        return KeyType.Ed25519  # Or define KeyType.X25519 if you want to extend
+        return KeyType.X25519
 
     def sign(self, data: bytes) -> bytes:
         raise NotImplementedError("X25519 does not support signatures.")

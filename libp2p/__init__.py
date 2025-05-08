@@ -2,8 +2,6 @@ from collections.abc import (
     Mapping,
 )
 from importlib.metadata import version as __version
-import logging
-import os
 from typing import (
     Type,
     cast,
@@ -64,9 +62,6 @@ from libp2p.transport.tcp.tcp import (
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
-
-log_level = os.environ.get("LIBP2P_DEBUG", "INFO").upper()
-logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 
 
 def generate_new_rsa_identity() -> KeyPair:
