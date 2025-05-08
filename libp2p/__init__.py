@@ -2,6 +2,8 @@ from collections.abc import (
     Mapping,
 )
 from importlib.metadata import version as __version
+import logging
+import os
 from typing import (
     Type,
     cast,
@@ -21,6 +23,7 @@ from libp2p.crypto.keys import (
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
     TMuxerOptions,
     TProtocol,
@@ -62,6 +65,9 @@ from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
 
+log_level = os.environ.get("LIBP2P_DEBUG", "INFO").upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
+
 
 def generate_new_rsa_identity() -> KeyPair:
     return create_new_key_pair()
@@ -100,9 +106,14 @@ def new_swarm(
     # TODO: Parse `listen_addrs` to determine transport
     transport = TCP()
 
+    # Generate X25519 keypair for Noise
+    noise_key_pair = create_new_x25519_key_pair()
+
     # Default security transports (using Noise as per your change)
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
-        NOISE_PROTOCOL_ID: NoiseTransport(key_pair, noise_privkey=key_pair.private_key),
+        NOISE_PROTOCOL_ID: NoiseTransport(
+            key_pair, noise_privkey=noise_key_pair.private_key
+        ),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
         TProtocol(secio.ID): secio.Transport(key_pair),
     }

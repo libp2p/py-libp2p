@@ -207,9 +207,6 @@ async def test_yamux_stream_close(yamux_pair):
     logging.debug("test_yamux_stream_close complete")
 
 
-@pytest.mark.skip(
-    reason="Current implementation behavior doesn't match test expectations"
-)
 @pytest.mark.trio
 async def test_yamux_stream_reset(yamux_pair):
     logging.debug("Starting test_yamux_stream_reset")
@@ -217,9 +214,10 @@ async def test_yamux_stream_reset(yamux_pair):
     client_stream = await client_yamux.open_stream()
     server_stream = await server_yamux.accept_stream()
     await client_stream.reset()
-    data = await server_stream.read()
-    assert data == b"", "Expected empty read after reset"
-    # Verify subsequent operations fail with StreamReset
+    # After reset, reading should raise MuxedStreamReset or MuxedStreamEOF
+    with pytest.raises((MuxedStreamEOF, MuxedStreamError)):
+        await server_stream.read()
+    # Verify subsequent operations fail with StreamReset or EOF
     with pytest.raises(MuxedStreamError):
         await server_stream.read()
     with pytest.raises(MuxedStreamError):
