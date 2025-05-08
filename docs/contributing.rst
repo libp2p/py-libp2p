@@ -212,9 +212,6 @@ We can run all tests with:
 
     make test
 
-At this time, the interop tests are not passing. You can run just the internal tests
-with ``pytest tests/core``.
-
 
 Code Style
 ~~~~~~~~~~
