@@ -92,8 +92,16 @@ async def background_anyio_service(
     )
 
     manager = AnyIOManager(service)
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(manager.run)
+
+    async def run_manager() -> None:
+        await manager.run()
+
+    async with anyio.create_task_group() as tg:
+
+        async def _run() -> None:
+            await run_manager()
+
+        tg.spawn(_run)  # type: ignore[unused-coroutine]
         await manager.wait_started()
         yield manager
     manager.cancel()
