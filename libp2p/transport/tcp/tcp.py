@@ -70,7 +70,7 @@ class TCPListener(IListener):
                 remote_host,remote_port = tcp_stream.get_remote_address()    
                 await self.handler(tcp_stream)
             except Exception as e:
-                logger.error(f"Connection from {remote_host}:{remote_port} failed.")
+                logger.debug(f"Connection from {remote_host}:{remote_port} failed.")
 
         listeners = await nursery.start(
             serve_tcp,
