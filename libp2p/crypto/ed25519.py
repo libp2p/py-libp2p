@@ -1,16 +1,12 @@
-from Crypto.Hash import (
-    SHA256,
+from cryptography.exceptions import (
+    InvalidSignature,
 )
-from nacl.exceptions import (
-    BadSignatureError,
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey as CryptoEd25519PrivateKey,
 )
-from nacl.public import PrivateKey as PrivateKeyImpl
-from nacl.public import PublicKey as PublicKeyImpl
-from nacl.signing import (
-    SigningKey,
-    VerifyKey,
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PublicKey as CryptoEd25519PublicKey,
 )
-import nacl.utils as utils
 
 from libp2p.crypto.keys import (
     KeyPair,
@@ -21,58 +17,52 @@ from libp2p.crypto.keys import (
 
 
 class Ed25519PublicKey(PublicKey):
-    def __init__(self, impl: PublicKeyImpl) -> None:
+    def __init__(self, impl: CryptoEd25519PublicKey) -> None:
         self.impl = impl
 
     def to_bytes(self) -> bytes:
-        return bytes(self.impl)
+        return self.impl.public_bytes_raw()
 
     @classmethod
     def from_bytes(cls, key_bytes: bytes) -> "Ed25519PublicKey":
-        return cls(PublicKeyImpl(key_bytes))
+        return cls(CryptoEd25519PublicKey.from_public_bytes(key_bytes))
 
     def get_type(self) -> KeyType:
         return KeyType.Ed25519
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        verify_key = VerifyKey(self.to_bytes())
         try:
-            verify_key.verify(data, signature)
-        except BadSignatureError:
+            self.impl.verify(signature, data)
+            return True
+        except InvalidSignature:
             return False
-        return True
 
 
 class Ed25519PrivateKey(PrivateKey):
-    def __init__(self, impl: PrivateKeyImpl) -> None:
+    def __init__(self, impl: CryptoEd25519PrivateKey) -> None:
         self.impl = impl
 
     @classmethod
     def new(cls, seed: bytes = None) -> "Ed25519PrivateKey":
         if not seed:
-            seed = utils.random()
-
-        private_key_impl = PrivateKeyImpl.from_seed(seed)
-        return cls(private_key_impl)
+            return cls(CryptoEd25519PrivateKey.generate())
+        return cls(CryptoEd25519PrivateKey.from_private_bytes(seed[:32]))
 
     def to_bytes(self) -> bytes:
-        return bytes(self.impl)
+        return self.impl.private_bytes_raw()
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "Ed25519PrivateKey":
-        impl = PrivateKeyImpl(data)
-        return cls(impl)
+        return cls(CryptoEd25519PrivateKey.from_private_bytes(data))
 
     def get_type(self) -> KeyType:
         return KeyType.Ed25519
 
     def sign(self, data: bytes) -> bytes:
-        h = SHA256.new(data)
-        signing_key = SigningKey(self.to_bytes())
-        return signing_key.sign(h.digest())
+        return self.impl.sign(data)
 
     def get_public_key(self) -> PublicKey:
-        return Ed25519PublicKey(self.impl.public_key)
+        return Ed25519PublicKey(self.impl.public_key())
 
 
 def create_new_key_pair(seed: bytes = None) -> KeyPair:
