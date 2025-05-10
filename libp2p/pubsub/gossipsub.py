@@ -7,6 +7,7 @@ from collections import (
 from collections.abc import (
     Iterable,
     Sequence,
+    Set,
 )
 import logging
 import random
@@ -28,6 +29,12 @@ from libp2p.network.stream.exceptions import (
 )
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore import (
+    PERMANENT_ADDR_TTL,
 )
 from libp2p.pubsub import (
     floodsub,
@@ -82,17 +89,24 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_initial_delay: float
     heartbeat_interval: int
 
+    direct_peers: Set[PeerInfo]
+    direct_connect_initial_delay: int
+    direct_connect_interval: int
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
         degree: int,
         degree_low: int,
         degree_high: int,
+        direct_peers: Set[PeerInfo],
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
         heartbeat_interval: int = 120,
+        direct_connect_initial_delay: int = 1,
+        direct_connect_interval: int = 300,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -119,6 +133,11 @@ class GossipSub(IPubsubRouter, Service):
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
 
+        # Create direct peers
+        self.direct_peers = direct_peers
+        self.direct_connect_interval = direct_connect_interval
+        self.direct_connect_initial_delay = direct_connect_initial_delay
+
     async def run(self) -> None:
         if self.pubsub is None:
             raise NoPubsubAttached
@@ -141,6 +160,12 @@ class GossipSub(IPubsubRouter, Service):
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
+
+        if len(self.direct_peers) > 0:
+            for pi in self.direct_peers:
+                self.pubsub.host.get_peerstore().add_addrs(
+                    pi.peer_id, pi.addrs, PERMANENT_ADDR_TTL
+                )
 
         logger.debug("attached to pusub")
 
