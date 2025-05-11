@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package circuit.pb.v2;
+
+// Circuit v2 message types
+message HopMessage {
+  enum Type {
+    RESERVE = 0;
+    CONNECT = 1;
+    STATUS = 2;
+  }
+
+  Type type = 1;
+  bytes peer = 2;
+  Reservation reservation = 3;
+  Limit limit = 4;
+  Status status = 5;
+}
+
+message StopMessage {
+  enum Type {
+    CONNECT = 0;
+    STATUS = 1;
+  }
+
+  Type type = 1;
+  bytes peer = 2;
+  Status status = 3;
+}
+
+message Reservation {
+  bytes voucher = 1;
+  bytes signature = 2;
+  int64 expire = 3;
+}
+
+message Limit {
+  int64 duration = 1;
+  int64 data = 2;
+}
+
+message Status {
+  enum Code {
+    OK = 0;
+    RESERVATION_REFUSED = 100;
+    RESOURCE_LIMIT_EXCEEDED = 101;
+    PERMISSION_DENIED = 102;
+    CONNECTION_FAILED = 200;
+    DIAL_REFUSED = 201;
+    STOP_FAILED = 300;
+    MALFORMED_MESSAGE = 400;
+  }
+  Code code = 1;
+  string message = 2;
+} 
