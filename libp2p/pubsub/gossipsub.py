@@ -697,6 +697,13 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
+            if sender_peer_id in self.direct_peers:
+                logger.warning(
+                    "GRAFT: ignoring request from direct peer %s", sender_peer_id
+                )
+                await self.emit_prune(topic, sender_peer_id)
+                return
+
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
         else:
