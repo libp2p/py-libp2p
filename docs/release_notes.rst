@@ -256,3 +256,23 @@ v0.1.2
 --------------
 
 Welcome to the great beyond, where changes were not tracked by release...
+
+py-libp2p v0.2.6 (2025-05-01)
+-----------------------------
+
+Features
+~~~~~~~~
+
+- Transitioned from `async_service` to `anyio_service`, leveraging AnyIO's robust async primitives for improved task management and exception handling. This change enhances compatibility with modern async patterns and improves overall service reliability. (`#600 <https://github.com/ethereum/py-libp2p/issues/600>`__)
+
+- Updated the service implementation to handle `ExceptionGroup` correctly, ensuring proper exception propagation and alignment with Python 3.11+ semantics. (`#601 <https://github.com/ethereum/py-libp2p/issues/601>`__)
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Updated the documentation to reflect the transition to AnyIO, including changes to module names and descriptions. (`#602 <https://github.com/ethereum/py-libp2p/issues/602>`__)
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Refactored internal service management logic to align with AnyIO's task group semantics, improving maintainability and reducing technical debt. (`#603 <https://github.com/ethereum/py-libp2p/issues/603>`__)

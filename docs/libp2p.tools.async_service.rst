@@ -1,53 +1,45 @@
-libp2p.tools.async\_service package
+libp2p.tools.anyio_service package
 ===================================
 
 Submodules
 ----------
 
-libp2p.tools.async\_service.abc module
+libp2p.tools.anyio_service.abc module
 --------------------------------------
 
-.. automodule:: libp2p.tools.async_service.abc
+.. automodule:: libp2p.tools.anyio_service.abc
    :members:
    :undoc-members:
    :show-inheritance:
 
-libp2p.tools.async\_service.base module
+libp2p.tools.anyio_service.base module
 ---------------------------------------
 
-.. automodule:: libp2p.tools.async_service.base
+.. automodule:: libp2p.tools.anyio_service.base
    :members:
    :undoc-members:
    :show-inheritance:
 
-libp2p.tools.async\_service.exceptions module
+libp2p.tools.anyio_service.exceptions module
 ---------------------------------------------
 
-.. automodule:: libp2p.tools.async_service.exceptions
+.. automodule:: libp2p.tools.anyio_service.exceptions
    :members:
    :undoc-members:
    :show-inheritance:
 
-libp2p.tools.async\_service.stats module
+libp2p.tools.anyio_service.stats module
 ----------------------------------------
 
-.. automodule:: libp2p.tools.async_service.stats
+.. automodule:: libp2p.tools.anyio_service.stats
    :members:
    :undoc-members:
    :show-inheritance:
 
-libp2p.tools.async\_service.trio\_service module
-------------------------------------------------
-
-.. automodule:: libp2p.tools.async_service.trio_service
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-libp2p.tools.async\_service.typing module
+libp2p.tools.anyio_service.typing module
 -----------------------------------------
 
-.. automodule:: libp2p.tools.async_service.typing
+.. automodule:: libp2p.tools.anyio_service.typing
    :members:
    :undoc-members:
    :show-inheritance:
@@ -55,7 +47,7 @@ libp2p.tools.async\_service.typing module
 Module contents
 ---------------
 
-.. automodule:: libp2p.tools.async_service
+.. automodule:: libp2p.tools.anyio_service
    :members:
    :undoc-members:
    :show-inheritance:

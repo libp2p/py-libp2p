@@ -1,0 +1,1 @@
+Transitioned from `async_service` to `anyio_service`, leveraging AnyIO's robust async primitives for improved task management and exception handling. This change enhances compatibility with modern async patterns and improves overall service reliability. 
