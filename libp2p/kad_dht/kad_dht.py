@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from typing import Dict, List, Optional, Set, Union
-
+import datetime
 import trio
 from multiaddr import Multiaddr
 
@@ -33,7 +33,7 @@ logger = logging.getLogger("libp2p.kademlia.kad_dht")
 # Default parameters
 PROTOCOL_ID = "/ipfs/kad/1.0.0"
 ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60 # 1 min in seconds for testing
-
+TTL = 24*60*60 # 24 hours in seconds
 
 class KadDHT(Service):
     """
