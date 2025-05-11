@@ -142,6 +142,8 @@ class GossipSub(IPubsubRouter, Service):
         if self.pubsub is None:
             raise NoPubsubAttached
         self.manager.run_daemon_task(self.heartbeat)
+        if len(self.direct_peers) > 0:
+            self.manager.run_daemon_task(self.direct_connect_heartbeat)
         await self.manager.wait_finished()
 
     # Interface functions
