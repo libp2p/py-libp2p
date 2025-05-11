@@ -450,6 +450,24 @@ class GossipSub(IPubsubRouter, Service):
 
             await trio.sleep(self.heartbeat_interval)
 
+    async def direct_connect_heartbeat(self) -> None:
+        """
+        Connect to direct peers.
+        """
+        await trio.sleep(self.direct_connect_initial_delay)
+        while True:
+            for _peer in self.direct_peers:
+                if _peer.peer_id not in self.pubsub.peers:
+                    try:
+                        await self.pubsub.host.connect(_peer)
+                    except Exception as e:
+                        logger.debug(
+                            "failed to connect to a direct peer %s: %s",
+                            _peer.peer_id,
+                            e,
+                        )
+            await trio.sleep(self.direct_connect_interval)
+
     def mesh_heartbeat(
         self,
     ) -> tuple[DefaultDict[ID, list[str]], DefaultDict[ID, list[str]]]:
