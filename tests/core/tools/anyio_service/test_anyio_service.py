@@ -3,7 +3,9 @@ import anyio
 import sys
 
 if sys.version_info >= (3, 11):
-    from builtins import ExceptionGroup
+    from builtins import (
+        ExceptionGroup,
+    )
 else:
     from exceptiongroup import ExceptionGroup
 
@@ -12,8 +14,6 @@ from libp2p.tools.anyio_service import (
     AnyioManager,
     as_service,
     background_anyio_service,
-    DaemonTaskExit,
-    LifecycleError,
 )
 
 @pytest.mark.anyio
@@ -39,7 +39,10 @@ async def test_exception_handling():
 
     with pytest.raises(ExceptionGroup) as exc_info:
         await manager.run()
-    assert any(isinstance(e, RuntimeError) and str(e) == "Service error" for e in exc_info.value.exceptions)
+    assert any(
+        isinstance(e, RuntimeError) and str(e) == "Service error"
+        for e in exc_info.value.exceptions
+    )
 
 @pytest.mark.anyio
 async def test_task_management():
@@ -49,7 +52,6 @@ async def test_task_management():
     async def TaskService(manager):
         async def task_fn():
             task_event.set()
-            manager.cancel() 
 
         manager.run_task(task_fn)
         await manager.wait_finished()
@@ -57,7 +59,6 @@ async def test_task_management():
     async with background_anyio_service(TaskService()):
         with anyio.fail_after(0.1):
             await task_event.wait()
-
 
 @pytest.mark.anyio
 async def test_cancellation_and_cleanup():

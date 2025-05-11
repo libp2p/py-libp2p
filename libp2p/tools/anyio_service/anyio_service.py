@@ -204,11 +204,11 @@ class AnyioManager(InternalManagerAPI):
         self._total_task_count = 0
         self._done_task_count = 0
 
-        self._started = anyio.Event()
-        self._cancelled = anyio.Event()
-        self._finished = anyio.Event()
+        self._started = anyio.create_event()
+        self._cancelled = anyio.create_event()
+        self._finished = anyio.create_event()
 
-        self._run_lock = anyio.Lock()
+        self._run_lock = anyio.create_lock()
         self._task_group: Optional[anyio.abc.TaskGroup] = None
 
     def __str__(self) -> str:
@@ -297,11 +297,19 @@ class AnyioManager(InternalManagerAPI):
 
         # Handle ExceptionGroup if multiple exceptions occurred
         if len(self._errors) > 1:
-            exceptions = [exc_value.with_traceback(exc_tb) for exc_type, exc_value, exc_tb in self._errors]
+            exceptions = [
+                exc_value.with_traceback(exc_tb)
+                for exc_type, exc_value, exc_tb in self._errors
+            ]
             if sys.version_info >= (3, 11):
                 raise ExceptionGroup("Multiple exceptions occurred", exceptions)
             else:
-                raise RuntimeError("; ".join(f"{exc_type.__name__}: {str(exc_value)}" for exc_type, exc_value, exc_tb in self._errors))
+                raise RuntimeError(
+                    "; ".join(
+                        f"{exc_type.__name__}: {str(exc_value)}"
+                        for exc_type, exc_value, exc_tb in self._errors
+                    )
+                )
 
     @classmethod
     async def run_service(cls, service: ServiceAPI) -> None:
