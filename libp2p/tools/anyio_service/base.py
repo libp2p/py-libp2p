@@ -1,14 +1,9 @@
-from abc import (
-    abstractmethod,
-)
 from collections.abc import (
     Awaitable,
 )
 from typing import (
     Any,
     Callable,
-    TypeVar,
-    cast,
 )
 
 from .abc import (
@@ -63,4 +58,4 @@ def as_service(service_fn: LogicFnType) -> type[ServiceAPI]:
 
     _Service.__name__ = service_fn.__name__
     _Service.__doc__ = service_fn.__doc__
-    return _Service 
+    return _Service

@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 
 
 @dataclass
@@ -9,4 +11,4 @@ class TaskStats:
 
 @dataclass
 class Stats:
-    tasks: TaskStats 
+    tasks: TaskStats

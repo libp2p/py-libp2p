@@ -205,7 +205,11 @@ class InternalManagerAPI(ManagerAPI):
 
     @abstractmethod
     def run_task(
-        self, async_fn: AsyncFn, *args: Any, daemon: bool = False, name: Optional[str] = None
+        self,
+        async_fn: AsyncFn,
+        *args: Any,
+        daemon: bool = False,
+        name: Optional[str] = None
     ) -> None:
         """
         Run a task in the background.  If the function throws an exception it
@@ -217,7 +221,9 @@ class InternalManagerAPI(ManagerAPI):
         ...
 
     @abstractmethod
-    def run_daemon_task(self, async_fn: AsyncFn, *args: Any, name: Optional[str] = None) -> None:
+    def run_daemon_task(
+        self, async_fn: AsyncFn, *args: Any, name: Optional[str] = None
+    ) -> None:
         """
         Run a daemon task in the background.
 
@@ -247,4 +253,4 @@ class InternalManagerAPI(ManagerAPI):
 
         Equivalent to `run_child_service(..., daemon=True)`.
         """
-        ... 
+        ...

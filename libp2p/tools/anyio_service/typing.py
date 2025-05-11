@@ -11,4 +11,4 @@ EXC_INFO = tuple[type[BaseException], BaseException, Any]
 
 AsyncFn = Callable[..., Awaitable[Any]]
 
-TFunc = TypeVar("TFunc", bound=Callable[..., Awaitable[Any]]) 
+TFunc = TypeVar("TFunc", bound=Callable[..., Awaitable[Any]])

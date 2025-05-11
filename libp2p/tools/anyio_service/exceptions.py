@@ -13,4 +13,4 @@ class LifecycleError(ServiceException):
 class DaemonTaskExit(ServiceException):
     """
     Raised when a daemon task exits unexpectedly.
-    """ 
+    """

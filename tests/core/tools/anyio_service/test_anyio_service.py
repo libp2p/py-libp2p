@@ -1,6 +1,7 @@
+import sys
+
 import pytest
 import anyio
-import sys
 
 if sys.version_info >= (3, 11):
     from builtins import (
@@ -10,11 +11,12 @@ else:
     from exceptiongroup import ExceptionGroup
 
 from libp2p.tools.anyio_service import (
-    Service,
     AnyioManager,
+    Service,
     as_service,
     background_anyio_service,
 )
+
 
 @pytest.mark.anyio
 async def test_service_lifecycle():
@@ -27,6 +29,7 @@ async def test_service_lifecycle():
         assert manager.is_started
         assert manager.is_running
     assert manager.is_finished
+
 
 @pytest.mark.anyio
 async def test_exception_handling():
@@ -44,6 +47,7 @@ async def test_exception_handling():
         for e in exc_info.value.exceptions
     )
 
+
 @pytest.mark.anyio
 async def test_task_management():
     task_event = anyio.Event()
@@ -60,6 +64,7 @@ async def test_task_management():
         with anyio.fail_after(0.1):
             await task_event.wait()
 
+
 @pytest.mark.anyio
 async def test_cancellation_and_cleanup():
     class CancellableService(Service):
@@ -71,4 +76,4 @@ async def test_cancellation_and_cleanup():
         assert manager.is_running
         manager.cancel()
     assert manager.is_cancelled
-    assert manager.is_finished 
+    assert manager.is_finished

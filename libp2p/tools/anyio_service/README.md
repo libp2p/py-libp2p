@@ -55,9 +55,9 @@ The implementation maintains the same public API as the previous async service i
 To migrate from the previous async service implementation:
 
 1. Update imports to use `libp2p.tools.anyio_service` instead of `libp2p.tools.async_service`
-2. No other code changes required - the API is fully compatible
+1. No other code changes required - the API is fully compatible
 
 ## Requirements
 
 - Python 3.7+
-- anyio library 
+- anyio library

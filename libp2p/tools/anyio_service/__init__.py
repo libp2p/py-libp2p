@@ -1,6 +1,10 @@
 from .abc import (
     ServiceAPI,
 )
+from .anyio_service import (
+    AnyioManager,
+    background_anyio_service,
+)
 from .base import (
     Service,
     as_service,
@@ -8,10 +12,6 @@ from .base import (
 from .exceptions import (
     DaemonTaskExit,
     LifecycleError,
-)
-from .anyio_service import (
-    AnyioManager,
-    background_anyio_service,
 )
 
 __all__ = [
@@ -22,4 +22,4 @@ __all__ = [
     "LifecycleError",
     "AnyioManager",
     "background_anyio_service",
-] 
+]

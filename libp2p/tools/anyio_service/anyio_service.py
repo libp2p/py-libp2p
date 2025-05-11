@@ -1,7 +1,5 @@
-import anyio
-import logging
-import sys
 from collections.abc import (
+    AsyncIterator,
     Awaitable,
     Callable,
 )
@@ -11,14 +9,16 @@ from contextlib import (
 from functools import (
     wraps,
 )
+import logging
+import sys
 from typing import (
     Any,
-    AsyncIterator,
     Optional,
     TypeVar,
     cast,
-    Union,
 )
+
+import anyio
 
 if sys.version_info >= (3, 11):
     from builtins import (
@@ -52,11 +52,8 @@ logger = logging.getLogger("anyio_service.Manager")
 
 T = TypeVar("T", bound=Callable[..., Any])
 
+
 def external_api(func: T) -> T:
-    """
-    Decorator to mark a method as an external API that can be called from outside the service.
-    This ensures that the service is in the correct state before allowing the method to be called.
-    """
     @wraps(func)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         if not hasattr(self, "manager"):
@@ -64,6 +61,7 @@ def external_api(func: T) -> T:
         if not self.manager.is_running:
             raise LifecycleError("Service is not running")
         return func(self, *args, **kwargs)
+
     return cast(T, wrapper)
 
 
@@ -204,11 +202,11 @@ class AnyioManager(InternalManagerAPI):
         self._total_task_count = 0
         self._done_task_count = 0
 
-        self._started = anyio.create_event()
-        self._cancelled = anyio.create_event()
-        self._finished = anyio.create_event()
+        self._started = anyio.Event()
+        self._cancelled = anyio.Event()
+        self._finished = anyio.Event()
 
-        self._run_lock = anyio.create_lock()
+        self._run_lock = anyio.Lock()
         self._task_group: Optional[anyio.abc.TaskGroup] = None
 
     def __str__(self) -> str:
@@ -238,7 +236,10 @@ class AnyioManager(InternalManagerAPI):
             await self.wait_finished()
 
     def run_daemon_task(
-        self, async_fn: Callable[..., Awaitable[Any]], *args: Any, name: Optional[str] = None
+        self,
+        async_fn: Callable[..., Awaitable[Any]],
+        *args: Any,
+        name: Optional[str] = None,
     ) -> None:
         self.run_task(async_fn, *args, daemon=True, name=name)
 
@@ -255,7 +256,9 @@ class AnyioManager(InternalManagerAPI):
             tasks=TaskStats(total_count=total_count, finished_count=finished_count)
         )
 
-    def _add_child_task(self, parent: Optional[TaskWithChildrenAPI], task: TaskAPI) -> None:
+    def _add_child_task(
+        self, parent: Optional[TaskWithChildrenAPI], task: TaskAPI
+    ) -> None:
         if parent is not None:
             parent.add_child(task)
 
@@ -355,7 +358,7 @@ class AnyioManager(InternalManagerAPI):
                     if not isinstance(exc_value, DaemonTaskExit):
                         exceptions.append(exc_value.with_traceback(exc_tb))
                         error_messages.append(f"{exc_type.__name__}: {str(exc_value)}")
-            
+
             if len(exceptions) == 1:
                 raise exceptions[0]
             elif len(exceptions) > 1:
@@ -440,8 +443,9 @@ class AnyioManager(InternalManagerAPI):
 
 @asynccontextmanager
 async def background_anyio_service(service: ServiceAPI) -> AsyncIterator[ManagerAPI]:
-    """Run a service in the background and yield its manager.
-    
+    """
+    Run a service in the background and yield its manager.
+
     The service will be stopped when the context exits.
     """
     async with anyio.create_task_group() as tg:
