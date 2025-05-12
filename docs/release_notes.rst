@@ -3,6 +3,29 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.6 (2025-05-12)
+-----------------------------
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Expand the Introduction section in the documentation with a detailed overview of Py-libp2p. (`#560 <https://github.com/libp2p/py-libp2p/issues/560>`__)
+
+
+Features
+~~~~~~~~
+
+- Added identify-push protocol implementation and examples to demonstrate how peers can proactively push their identity information to other peers when it changes. (`#552 <https://github.com/libp2p/py-libp2p/issues/552>`__)
+- Added AutoNAT protocol (`#561 <https://github.com/libp2p/py-libp2p/issues/561>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Bumps dependency to ``protobuf>=6.30.1``. (`#576 <https://github.com/libp2p/py-libp2p/issues/576>`__)
+- Removes old interop tests, creates placeholders for new ones, and turns on interop testing in CI. (`#588 <https://github.com/libp2p/py-libp2p/issues/588>`__)
+
+
 py-libp2p v0.2.5 (2025-04-14)
 -----------------------------
 
