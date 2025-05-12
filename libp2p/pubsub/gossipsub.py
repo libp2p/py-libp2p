@@ -89,7 +89,7 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_initial_delay: float
     heartbeat_interval: int
 
-    direct_peers: Set[PeerInfo]
+    direct_peers: set[PeerInfo]
     direct_connect_initial_delay: int
     direct_connect_interval: int
 
@@ -134,7 +134,7 @@ class GossipSub(IPubsubRouter, Service):
         self.heartbeat_interval = heartbeat_interval
 
         # Create direct peers
-        self.direct_peers = direct_peers
+        self.direct_peers = set(direct_peers)
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
 

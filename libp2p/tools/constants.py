@@ -38,6 +38,8 @@ class GossipsubParams(NamedTuple):
     gossip_history: int = 5
     heartbeat_initial_delay: float = 0.1
     heartbeat_interval: float = 0.5
+    direct_connect_init_delay: int = 1
+    direct_connect_interval: int = 300
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()

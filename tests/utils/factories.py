@@ -427,6 +427,8 @@ class GossipsubFactory(factory.Factory):
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
+    direct_connect_initial_delay = GOSSIPSUB_PARAMS.direct_connect_init_delay
+    direct_connect_interval = GOSSIPSUB_PARAMS.direct_connect_interval
 
 
 class PubsubFactory(factory.Factory):
@@ -549,6 +551,8 @@ class PubsubFactory(factory.Factory):
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
         heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
+        direct_connect_init_delay: int = GOSSIPSUB_PARAMS.direct_connect_init_delay,
+        direct_connect_interval: int = GOSSIPSUB_PARAMS.direct_connect_interval,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
         msg_id_constructor: Callable[
@@ -565,7 +569,11 @@ class PubsubFactory(factory.Factory):
                 direct_peers=direct_peers,
                 time_to_live=time_to_live,
                 gossip_window=gossip_window,
+                gossip_history=gossip_history,
+                heartbeat_initial_delay=heartbeat_initial_delay,
                 heartbeat_interval=heartbeat_interval,
+                direct_connect_initial_delay=direct_connect_init_delay,
+                direct_connect_interval=direct_connect_interval,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
