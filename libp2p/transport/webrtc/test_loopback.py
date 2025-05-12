@@ -13,38 +13,36 @@ from trio import (
     Nursery,
 )
 
+from libp2p import (
+    new_host,
+)
 from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
 from libp2p.host.basic_host import (
-    BasicHost,
-)
-from libp2p.network.swarm import (
-    Swarm,
+    IHost,
 )
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
 from libp2p.peer.peerstore import (
-    PeerStore,
+    PeerInfo,
 )
-from libp2p.security.noise.transport import (
-    PROTOCOL_ID,
+from libp2p.pubsub.gossipsub import (
+    GossipSub,
 )
-from libp2p.security.noise.transport import Transport as NoiseTransport
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_PROTOCOL_ID,
-    Mplex,
-)
-from libp2p.transport.upgrader import (
-    TransportUpgrader,
+from libp2p.pubsub.pubsub import (
+    Pubsub,
 )
 
 from .connection import (
     WebRTCRawConnection,
 )
-from .listener import (
-    WebRTCListener,
+from .gen_certhash import (
+    filter_addresses,
 )
 from .webrtc import (
     SIGNAL_PROTOCOL,
@@ -55,21 +53,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webrtc-loopback-test")
 
 
-async def build_host(name: str) -> tuple[BasicHost, ID, WebRTCTransport]:
+async def build_host(name: str) -> tuple[IHost, ID, WebRTCTransport]:
     key_pair = create_new_key_pair()
     peer_id = ID.from_pubkey(key_pair.public_key)
+    key_pair.private_key
+    key_pair.public_key
     logger.info(f"[{name}] Peer ID: {peer_id}")
 
-    webrtc_transport = WebRTCTransport(peer_id=peer_id, host=None)
-    peer_store = PeerStore()
-
-    secure_transports = {PROTOCOL_ID: NoiseTransport(libp2p_keypair=key_pair)}
-    muxer_transports = {MPLEX_PROTOCOL_ID: Mplex}
-    upgrader = TransportUpgrader(secure_transports, muxer_transports)
-
-    swarm = Swarm(peer_id, peer_store, upgrader, webrtc_transport)
-    host = BasicHost(swarm)
-    webrtc_transport.host = host
+    host = new_host()
+    pubsub = Pubsub(
+        host,
+        GossipSub(protocols=[SIGNAL_PROTOCOL], degree=10, degree_low=3, degree_high=15),
+        None,
+    )
+    webrtc_transport = WebRTCTransport(host, pubsub)
 
     return host, peer_id, webrtc_transport
 
@@ -77,32 +74,35 @@ async def build_host(name: str) -> tuple[BasicHost, ID, WebRTCTransport]:
 async def run_loopback_test(nursery: Nursery) -> None:
     host_b, peer_id_b, webrtc_transport_b = await build_host("Server")
     logger.info(f"[B] Peer ID: {peer_id_b}")
-    logger.info(f"[B] Listening Addrs: {host_b.get_connected_peers()}")
+    addrs = host_b.get_addrs()
+    PeerInfo(peer_id_b, addrs)
+    listen = host_b.run(addrs)
+    logger.info(f"[B] Listening Addrs: {addrs} --- {listen}")
+    logger.info(f"[B] Active Addrs: {host_b.get_live_peers()}")
     webrtc_proto = Protocol(name="webrtc", code=277, codec=None)
     add_protocol(webrtc_proto)
-    webrtc_conn = webrtc_transport_b.create_listener(WebRTCListener)
+    # webrtc_conn = await webrtc_transport_b.create_listener(handler_func=)
 
-    # await webrtc_listener.listen(
+    # await webrtc_conn.listen(
     #     Multiaddr(f"/ip4/127.0.0.1/tcp/9095/ws/p2p/{peer_id_b}/p2p-circuit/webrtc"),
     #     nursery,
     # )
-
-    # for addr in webrtc_listener.:
-    #     logger.info(f"[B] Listening on: {addr}")
 
     logger.info("[B] Listening WebRTC setup complete.")
 
     async def act_as_server() -> None:
         try:
             logger.info("[B] Waiting to accept connection...")
-            conn: WebRTCRawConnection = await webrtc_conn
-            logger.info("[B] Connection accepted.")
+            active_maddr = host_b.get_addrs()
+            info = info_from_p2p_addr(active_maddr[0])
+            conn = host_b.connect(info)
+            logger.info(f"[B] Connection accepted. {conn}")
 
-            stream = await host_b.new_stream(conn.peer_id, [SIGNAL_PROTOCOL])
+            stream = await host_b.new_stream(peer_id_b, [SIGNAL_PROTOCOL])
             offer_data = await stream.read()
             offer_json = json.loads(offer_data.decode())
 
-            await webrtc_transport_b.handle_offer_from_peer(stream, offer_json)
+            await webrtc_transport_b._handle_signal_message(peer_id_b, offer_json)
             answer = await webrtc_transport_b.peer_connection.createAnswer()
             await webrtc_transport_b.peer_connection.setLocalDescription(answer)
 
@@ -127,15 +127,21 @@ async def run_loopback_test(nursery: Nursery) -> None:
 
     async def act_as_client() -> None:
         host_a, peer_id_a, webrtc_client = await build_host("Client")
-        await webrtc_client.create_data_channel()
+        pc = webrtc_client._create_peer_connection()
+        await webrtc_client.create_data_channel(pc)
 
-        maddr = Multiaddr(
-            f"/ip4/127.0.0.1/tcp/4001/ws/p2p/{peer_id_b}/p2p-circuit/webrtc"
-        )
-        host_a.get_network().peerstore.add_addr(peer_id_b, maddr, 3000)
+        valid = [
+            Multiaddr(f"/ip4/127.0.0.1/udp/9095/webrtc/p2p/{peer_id_a}"),
+            Multiaddr(f"/ip4/127.0.0.1/tcp/4001/ws/p2p/{peer_id_a}/p2p-circuit/webrtc"),
+            Multiaddr(f"/ip4/127.0.0.1/tcp/4001/ws/p2p/{peer_id_b}/p2p-circuit/webrtc"),
+            Multiaddr(f"/ip4/127.0.0.1/udp/9095/webrtc/p2p/{peer_id_b}"),
+        ]
+
+        maddr = filter_addresses(valid)
+        host_a.get_network().peerstore.add_addr(peer_id_a, maddr, 3000)
         logger.info(f"[A] Peerstore updated with address: {maddr}")
 
-        stream = await host_a.new_stream(peer_id_b, [SIGNAL_PROTOCOL])
+        stream = await host_a.new_stream(peer_id_a, [SIGNAL_PROTOCOL])
 
         offer = await webrtc_client.peer_connection.createOffer()
         await webrtc_client.peer_connection.setLocalDescription(offer)
@@ -150,7 +156,7 @@ async def run_loopback_test(nursery: Nursery) -> None:
         await trio.sleep(1)
 
         if webrtc_client.data_channel is not None:
-            conn = WebRTCRawConnection(peer_id_b, webrtc_client.data_channel)
+            conn = WebRTCRawConnection(peer_id_a, webrtc_client.data_channel)
             await conn.write(b"Hello from A")
             reply = await conn.read()
             logger.info(f"[A] Received: {reply.decode()}")

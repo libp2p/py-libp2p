@@ -2,8 +2,8 @@ import json
 import logging
 from typing import (
     Any,
-    Tuple,
 )
+
 from aiortc import (
     RTCDataChannel,
     RTCPeerConnection,
@@ -12,43 +12,55 @@ from aiortc import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
 from trio import (
-    Nursery,
     Event,
     MemoryReceiveChannel,
-    MemorySendChannel
+    MemorySendChannel,
 )
-import trio
 
 from libp2p.abc import (
     IListener,
-    TProtocol
+    THandler,
+    TProtocol,
 )
 from libp2p.host.basic_host import (
     BasicHost,
 )
-from libp2p.peer.id import (
-    ID,
-)
+
 from .connection import (
-    WebRTCRawConnection
-) 
+    WebRTCRawConnection,
+)
+from .gen_certhash import (
+    CertificateManager,
+)
 
 logger = logging.getLogger("webrtc")
 logging.basicConfig(level=logging.INFO)
-SIGNAL_PROTOCOL: TProtocol =  TProtocol("/libp2p/webrtc/signal/1.0.0")
+SIGNAL_PROTOCOL: TProtocol = TProtocol("/libp2p/webrtc/signal/1.0.0")
 
 
 class WebRTCListener(IListener):
-    def __init__(self, host: BasicHost, peer_id: ID):
-        self.host = host
-        self.peer_id = peer_id
+    def __init__(self, handler: THandler):
+        self._handle_stream = handler
+        # self.peer_id = peer_id , peer_id: ID
+        self.host: BasicHost = None
         self.conn_send_channel: MemorySendChannel[WebRTCRawConnection]
         self.conn_receive_channel: MemoryReceiveChannel[WebRTCRawConnection]
-        self.conn_send_channel, self.conn_receive_channel = trio.open_memory_channel(0)
+        self.conn_send_channel, self.conn_receive_channel = trio.open_memory_channel(5)
+        self.certificate = str
 
-    async def listen(self, maddr: Multiaddr, nursery: Nursery) -> bool:
-        self.host.set_stream_handler(SIGNAL_PROTOCOL, lambda stream: nursery.start_soon(self._handle_stream, stream))
+    def set_host(self, host: BasicHost) -> None:
+        self.host = host
+
+    async def listen(self, maddr: Multiaddr) -> bool:
+        if not self.host:
+            raise RuntimeError("Host is not initialized in WebRTCListener")
+
+        self.host.set_stream_handler(
+            SIGNAL_PROTOCOL,
+            self._handle_stream_wrapper,
+        )
         await self.host.get_network().listen(maddr)
         return True
 
@@ -59,19 +71,33 @@ class WebRTCListener(IListener):
         await self.conn_send_channel.aclose()
         await self.conn_receive_channel.aclose()
 
-    async def _handle_stream(self, stream: Any) -> None:
+    async def _handle_stream_wrapper(self, stream: trio.SocketStream) -> None:
+        try:
+            await self._handle_stream_logic(stream)
+        except Exception as e:
+            logger.exception(f"Error in stream handler: {e}")
+        finally:
+            await stream.aclose()
+
+    async def _handle_stream_logic(self, stream: trio.SocketStream) -> None:
         pc = RTCPeerConnection()
         channel_ready = Event()
 
         @pc.on("datachannel")
         def on_datachannel(channel: RTCDataChannel) -> None:
+            logger.info(f"DataChannel received: {channel.label}")
+
             @channel.on("open")
-            def opened() -> None:
+            def on_open() -> None:
+                logger.info("DataChannel opened.")
                 channel_ready.set()
-            self.conn_send_channel.send_nowait(WebRTCRawConnection(self.peer_id, channel))
+
+            self.conn_send_channel.send_nowait(
+                WebRTCRawConnection(self.host.get_id(), channel)
+            )
 
         @pc.on("icecandidate")
-        def on_ice_candidate(candidate: Any) -> None:
+        async def on_ice_candidate(candidate: Any) -> None:
             if candidate:
                 msg = {
                     "type": "ice",
@@ -83,9 +109,12 @@ class WebRTCListener(IListener):
                     "port": candidate.port,
                     "protocol": candidate.protocol,
                 }
-                trio.lowlevel.spawn_system_task(stream.write, json.dumps(msg).encode())
+                try:
+                    await stream.send_all(json.dumps(msg).encode())
+                except Exception as e:
+                    logger.warning(f"Failed to send ICE candidate: {e}")
 
-        offer_data = await stream.read()
+        offer_data = await stream.receive_some(4096)
         offer_msg = json.loads(offer_data.decode())
         offer = RTCSessionDescription(**offer_msg)
         await pc.setRemoteDescription(offer)
@@ -93,11 +122,25 @@ class WebRTCListener(IListener):
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        await stream.write(json.dumps({"sdp": answer.sdp, "type": answer.type}).encode())
-        await channel_ready.wait()
-        await stream.close()
-
-    def get_addrs(self) -> Tuple[Multiaddr, ...]:
-        return (
-            Multiaddr(f"/ip4/127.0.0.1/tcp/4001/ws/p2p/{self.peer_id}/p2p-circuit/webrtc"),
+        await stream.send_all(
+            json.dumps(
+                {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+            ).encode()
         )
+
+        await channel_ready.wait()
+        await pc.close()
+
+    def get_addrs(self) -> list[Multiaddr]:
+        peer_id = self.host.get_id()
+        certhash = CertificateManager()._compute_certhash(self.certificate.x509)
+
+        base = "/ip4/127.0.0.1/tcp/0"
+        maddr_str = f"{base}/webrtc-direct/certhash/{certhash}/p2p/{peer_id}"
+
+        try:
+            maddr = Multiaddr(maddr_str)
+            return [maddr]
+        except Exception as e:
+            logger.error(f"[WebRTCTransport] Failed to create listen Multiaddr: {e}")
+            return []

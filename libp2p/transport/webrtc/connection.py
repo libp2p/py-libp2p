@@ -1,27 +1,25 @@
 import logging
 from typing import (
     Any,
-    Tuple,
+)
+
+from aiortc import (
+    RTCDataChannel,
 )
 import trio
-
-from libp2p.peer.id import (
-    ID,
-)
-from aiortc import (
-    RTCDataChannel
-) 
 from trio import (
     MemoryReceiveChannel,
-    MemorySendChannel
+    MemorySendChannel,
 )
-import trio
 
 from libp2p.abc import (
     ISecureConn,
 )
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.stream_muxer.mplex.mplex import (
-    Mplex
+    Mplex,
 )
 
 logger = logging.getLogger("webrtc")
@@ -34,7 +32,7 @@ class WebRTCRawConnection(ISecureConn):
         self.channel = channel
         self.send_channel: MemorySendChannel[Any]
         self.receive_channel: MemoryReceiveChannel[Any]
-        self.send_channel, self.receive_channel = trio.open_memory_channel(0)
+        self.send_channel, self.receive_channel = trio.open_memory_channel(50)
 
         @channel.on("message")
         def on_message(message: Any) -> None:
@@ -60,7 +58,7 @@ class WebRTCRawConnection(ISecureConn):
     async def write(self, data: bytes) -> None:
         self.channel.send(data)
 
-    def get_remote_address(self) -> Tuple[str, int] | None:
+    def get_remote_address(self) -> tuple[str, int] | None:
         return self.get_remote_address()
 
     async def close(self) -> None:
