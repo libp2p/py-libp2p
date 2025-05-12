@@ -1,6 +1,14 @@
 libp2p.host package
 ===================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.host.autonat
+
 Submodules
 ----------
 
