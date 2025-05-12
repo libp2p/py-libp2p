@@ -268,6 +268,10 @@ class GossipSub(IPubsubRouter, Service):
             if topic not in self.pubsub.peer_topics:
                 continue
 
+            # direct peers
+            _direct_peers: set[ID] = {_peer.peer_id for _peer in self.direct_peers}
+            send_to.update(_direct_peers)
+
             # floodsub peers
             floodsub_peers: set[ID] = {
                 peer_id
@@ -699,12 +703,13 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
-            if sender_peer_id in self.direct_peers:
-                logger.warning(
-                    "GRAFT: ignoring request from direct peer %s", sender_peer_id
-                )
-                await self.emit_prune(topic, sender_peer_id)
-                return
+            for _peer in self.direct_peers:
+                if _peer.peer_id == sender_peer_id:
+                    logger.warning(
+                        "GRAFT: ignoring request from direct peer %s", sender_peer_id
+                    )
+                    await self.emit_prune(topic, sender_peer_id)
+                    return
 
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
