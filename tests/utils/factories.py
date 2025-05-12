@@ -1,6 +1,7 @@
 from collections.abc import (
     AsyncIterator,
     Sequence,
+    Set,
 )
 from contextlib import (
     AsyncExitStack,
@@ -421,6 +422,7 @@ class GossipsubFactory(factory.Factory):
     degree = GOSSIPSUB_PARAMS.degree
     degree_low = GOSSIPSUB_PARAMS.degree_low
     degree_high = GOSSIPSUB_PARAMS.degree_high
+    direct_peers = GOSSIPSUB_PARAMS.direct_peers
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
@@ -541,6 +543,7 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
+        direct_peers: Set[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
@@ -559,6 +562,7 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
                 time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
@@ -569,6 +573,7 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
             )
