@@ -124,7 +124,7 @@ ifndef bump
 endif
 
 check-git:
-	# require that upstream is configured for ethereum/py-libp2p
+	# require that upstream is configured for libp2p/py-libp2p
 	@if ! git remote -v | grep "upstream[[:space:]]git@github.com:libp2p/py-libp2p.git (push)\|upstream[[:space:]]https://github.com/libp2p/py-libp2p (push)"; then \
 		echo "Error: You must have a remote named 'upstream' that points to 'py-libp2p'"; \
 		exit 1; \
