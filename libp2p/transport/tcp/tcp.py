@@ -63,13 +63,13 @@ class TCPListener(IListener):
             await trio.serve_tcp(handler, port, host=host, task_status=task_status)
 
         async def handler(stream: trio.SocketStream) -> None:
-            remote_host : str = ""
-            remote_port : int = 0
+            remote_host: str = ""
+            remote_port: int = 0
             try:
                 tcp_stream = TrioTCPStream(stream)
-                remote_host,remote_port = tcp_stream.get_remote_address()    
+                remote_host, remote_port = tcp_stream.get_remote_address()
                 await self.handler(tcp_stream)
-            except Exception as e:
+            except Exception:
                 logger.debug(f"Connection from {remote_host}:{remote_port} failed.")
 
         listeners = await nursery.start(
