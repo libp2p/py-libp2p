@@ -6,7 +6,7 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 
 import logging
 import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger("libp2p.kademlia.value_store")
 
