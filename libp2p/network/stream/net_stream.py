@@ -12,6 +12,7 @@ from libp2p.custom_types import (
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
+    MuxedStreamError,
     MuxedStreamReset,
 )
 
@@ -68,7 +69,7 @@ class NetStream(INetStream):
         """
         try:
             await self.muxed_stream.write(data)
-        except MuxedStreamClosed as error:
+        except (MuxedStreamClosed, MuxedStreamError) as error:
             raise StreamClosed() from error
 
     async def close(self) -> None:
