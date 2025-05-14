@@ -57,7 +57,7 @@ class KadDHT(Service):
         self.local_peer_id = host.get_id()
         
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id)
+        self.routing_table = RoutingTable(self.local_peer_id, self.host)
         
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)

@@ -5,12 +5,14 @@ Kademlia DHT routing table implementation.
 from collections import defaultdict, OrderedDict
 import logging
 import time
+import trio
 from typing import Dict, List, Optional, Set, Tuple, Mapping
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
 from .utils import distance, shared_prefix_len, sort_peer_ids_by_distance
+from .pb.kademlia_pb2 import Message 
 
 logger = logging.getLogger("libp2p.kademlia.routing_table")
 
@@ -26,7 +28,7 @@ class KBucket:
     Each k-bucket stores up to k (BUCKET_SIZE) peers, sorted by least-recently seen.
     """
     
-    def __init__(self, bucket_size: int = BUCKET_SIZE):
+    def __init__(self, host, bucket_size: int = BUCKET_SIZE):
         """
         Initialize a new k-bucket.
         
@@ -34,6 +36,7 @@ class KBucket:
             bucket_size: Maximum number of peers to store in the bucket
         """
         self.bucket_size = bucket_size
+        self.host = host
         # Store PeerInfo objects along with last-seen timestamp
         self.peers: OrderedDict[ID, Tuple[PeerInfo, float]] = OrderedDict()
         
@@ -96,6 +99,173 @@ class KBucket:
         """Get the number of peers in the bucket."""
         return len(self.peers)
 
+    def get_stale_peers(self, stale_threshold_seconds: int = 3600) -> List[ID]:
+        """
+        Get peers that haven't been pinged recently.
+        
+        Args:
+            stale_threshold_seconds: Time in seconds after which a peer is considered stale
+            
+        Returns:
+            List of peer IDs that need to be refreshed
+        """
+        current_time = time.time()
+        stale_peers = []
+        
+        for bucket in self.buckets.values():
+            for peer_id, (_, last_seen) in bucket.peers.items():
+                if current_time - last_seen > stale_threshold_seconds:
+                    stale_peers.append(peer_id)
+                    
+        return stale_peers
+    
+    async def _periodic_peer_refresh(self):
+        """Background task to periodically refresh peers"""
+        try:
+            while True:
+                await trio.sleep(60)  # Check every minute
+                
+                # Find stale peers (not pinged in last hour)
+                stale_peers = self.routing_table.get_stale_peers(stale_threshold_seconds=3600)
+                if stale_peers:
+                    logger.info(f"Found {len(stale_peers)} stale peers to refresh")
+                    
+                    for peer_id in stale_peers:
+                        try:
+                            # Try to ping the peer
+                            logger.debug(f"Pinging stale peer {peer_id}")
+                            await self._ping_peer(peer_id)
+                            # If successful, last_seen will be updated in the ping handler
+                            logger.debug(f"Successfully refreshed peer {peer_id}")
+                        except Exception as e:
+                            # If ping fails, remove the peer
+                            logger.debug(f"Failed to ping peer {peer_id}: {e}")
+                            self.routing_table.remove_peer(peer_id)
+                            logger.info(f"Removed unresponsive peer {peer_id}")
+        except trio.Cancelled:
+            logger.debug("Peer refresh task cancelled")
+        except Exception as e:
+            logger.error(f"Error in peer refresh task: {e}", exc_info=True)
+
+    async def _periodic_peer_refresh(self):
+        """Background task to periodically refresh peers"""
+        try:
+            while True:
+                await trio.sleep(60)  # Check every minute
+                
+                # Find stale peers (not pinged in last hour)
+                stale_peers = self.routing_table.get_stale_peers(stale_threshold_seconds=3600)
+                if stale_peers:
+                    logger.info(f"Found {len(stale_peers)} stale peers to refresh")
+                    
+                    for peer_id in stale_peers:
+                        try:
+                            # Try to ping the peer
+                            logger.debug(f"Pinging stale peer {peer_id}")
+                            await self._ping_peer(peer_id)
+                            # If successful, last_seen will be updated in the ping handler
+                            logger.debug(f"Successfully refreshed peer {peer_id}")
+                        except Exception as e:
+                            # If ping fails, remove the peer
+                            logger.debug(f"Failed to ping peer {peer_id}: {e}")
+                            self.routing_table.remove_peer(peer_id)
+                            logger.info(f"Removed unresponsive peer {peer_id}")
+        except trio.Cancelled:
+            logger.debug("Peer refresh task cancelled")
+        except Exception as e:
+            logger.error(f"Error in peer refresh task: {e}", exc_info=True)
+
+    async def _ping_peer(self, peer_id: ID) -> bool:
+        """
+        Ping a peer using protobuf message to check if it's still alive and update last seen time.
+        
+        Args:
+            peer_id: The ID of the peer to ping
+            
+        Returns:
+            bool: True if ping successful, raises exception otherwise
+        """
+        # Get peer info from routing table
+        peer_info = self.routing_table.get_peer_info(peer_id)
+        if not peer_info:
+            raise ValueError(f"Peer {peer_id} not in routing table")
+        
+        try:
+            # Open a stream to the peer with the DHT protocol
+            stream = await self.host.new_stream(peer_id, [self.protocol_id])
+            
+            try:
+                # Create ping protobuf message
+                ping_msg = Message()
+                ping_msg.type = Message.MessageType.PING
+                
+                # Serialize and send with length prefix (4 bytes big-endian)
+                msg_bytes = ping_msg.SerializeToString()
+                logger.debug(f"Sending PING message to {peer_id}, size: {len(msg_bytes)} bytes")
+                await stream.write(len(msg_bytes).to_bytes(4, "big"))
+                await stream.write(msg_bytes)
+                
+                # Wait for response with timeout
+                with trio.move_on_after(10):  # 10 second timeout
+                    # Read response length (4 bytes)
+                    length_bytes = await stream.read(4)
+                    if not length_bytes or len(length_bytes) < 4:
+                        raise ConnectionError(f"Peer {peer_id} disconnected during ping")
+                        
+                    msg_len = int.from_bytes(length_bytes, "big")
+                    logger.debug(f"Received response from {peer_id}, size: {msg_len} bytes")
+                    
+                    # Read full message
+                    response_bytes = await stream.read(msg_len)
+                    
+                    # Parse protobuf response
+                    response = Message()
+                    response.ParseFromString(response_bytes)
+                    
+                    if response.type == Message.MessageType.PING:
+                        # Update the last seen timestamp for this peer
+                        self.routing_table.refresh_peer(peer_id)
+                        logger.debug(f"Successfully pinged peer {peer_id}")
+                        return True
+                    else:
+                        logger.warning(f"Unexpected response type from {peer_id}: {response.type}")
+                        raise ValueError(f"Unexpected response type: {response.type}")
+                
+                # If we get here, the ping timed out
+                raise TimeoutError(f"Ping to peer {peer_id} timed out")
+                
+            finally:
+                await stream.close()
+                
+        except Exception as e:
+            logger.error(f"Error pinging peer {peer_id}: {str(e)}")
+            raise
+    
+    def refresh_peer(self, peer_id: ID) -> bool:
+        """
+        Update the last-seen timestamp for a peer in the routing table.
+        
+        Args:
+            peer_id: The ID of the peer to refresh
+            
+        Returns:
+            bool: True if the peer was found and refreshed, False otherwise
+        """
+        if peer_id == self.local_peer_id:
+            return False
+            
+        peer_key = peer_id.to_bytes()
+        prefix_length = shared_prefix_len(self.local_key, peer_key)
+        
+        if prefix_length in self.buckets and peer_id in self.buckets[prefix_length].peers:
+            # Get current peer info and update the timestamp
+            peer_info, _ = self.buckets[prefix_length].peers[peer_id]
+            self.buckets[prefix_length].peers[peer_id] = (peer_info, time.time())
+            # Move to end of ordered dict to mark as most recently seen
+            self.buckets[prefix_length].peers.move_to_end(peer_id)
+            return True
+        
+        return False
 
 class RoutingTable:
     """
@@ -108,6 +278,7 @@ class RoutingTable:
     def __init__(
         self, 
         local_peer_id: ID, 
+        host,
         bucket_size: int = BUCKET_SIZE
     ):
         """
@@ -119,6 +290,7 @@ class RoutingTable:
         """
         self.local_peer_id = local_peer_id
         self.local_key = local_peer_id.to_bytes()
+        self.host = host
         self.bucket_size = bucket_size
         self.buckets: Dict[int, KBucket] = defaultdict(lambda: KBucket(bucket_size))
     
