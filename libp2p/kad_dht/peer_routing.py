@@ -174,7 +174,7 @@ class PeerRouting(IPeerRouting):
                 addrs = self.host.get_peerstore().addrs(peer)
                 if addrs:
                     peer_info = PeerInfo(peer, addrs)
-                    self.routing_table.add_peer(peer_info)
+                    await self.routing_table.add_peer(peer_info)
             except Exception as e:
                 logger.debug(f"Failed to add peer {peer} to routing table: {e}")
             
@@ -393,8 +393,8 @@ class PeerRouting(IPeerRouting):
             self.host.get_peerstore().add_addrs(
                 peer_info.peer_id, peer_info.addrs, 3600
             )
-            # Pass the PeerInfo object rather than just the ID
-            self.routing_table.add_peer(peer_info)
+            # Now properly await the async add_peer method
+            await self.routing_table.add_peer(peer_info)
             
         # If we have bootstrap peers, refresh the routing table
         if bootstrap_peers:

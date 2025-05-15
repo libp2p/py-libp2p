@@ -337,39 +337,51 @@ class RoutingTable:
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
     
-    def add_peer(self, peer_id):
+    async def add_peer(self, peer_obj):
         """
         Add a peer to the routing table.
         
         Args:
-            peer_info: The peer info to add
+            peer_obj: Either PeerInfo object or peer ID to add
             
         Returns:
             bool: True if the peer was added or updated, False otherwise
         """
+        peer_id = None
+        peer_info = None
 
         try:
-            # Get addresses from the peerstore if available
-            addrs = self.host.get_peerstore().addrs(peer_id)
-            if addrs:
-                # Create PeerInfo object and add to routing table
-                peer_info = PeerInfo(peer_id, addrs)
+            # Handle different types of input
+            if isinstance(peer_obj, PeerInfo):
+                # Already have PeerInfo object
+                peer_info = peer_obj
+                peer_id = peer_obj.peer_id
             else:
-                logger.warning(f"No addresses found for peer {peer_id}, cannot add to routing table")
-                return False
-            if peer_info.peer_id == self.local_id:
+                # Assume it's a peer ID
+                peer_id = peer_obj
+                # Get addresses from the peerstore if available
+                addrs = self.host.get_peerstore().addrs(peer_id)
+                if addrs:
+                    # Create PeerInfo object
+                    peer_info = PeerInfo(peer_id, addrs)
+                else:
+                    logger.warning(f"No addresses found for peer {peer_id}, cannot add to routing table")
+                    return False
+                    
+            # Don't add ourselves
+            if peer_id == self.local_id:
                 return False
                 
             # Find the right bucket for this peer
-            bucket = self.find_bucket(peer_info.peer_id)
+            bucket = self.find_bucket(peer_id)
             
             # Try to add to the bucket
-            return bucket.add_peer(peer_info)
+            return await bucket.add_peer(peer_info)
         
         except Exception as e:
-            logger.warning(f"Error adding peer {peer_id} to routing table: {e}")
+            logger.warning(f"Error adding peer {peer_obj} to routing table: {e}")
             return False
-        
+    
     def remove_peer(self, peer_id):
         """
         Remove a peer from the routing table.
@@ -383,16 +395,19 @@ class RoutingTable:
         bucket = self.find_bucket(peer_id)
         return bucket.remove_peer(peer_id)
         
-    def find_bucket(self, peer_id):
+    def find_bucket(self, peer_obj):
         """
-        Find the bucket that would contain the given peer ID.
+        Find the bucket that would contain the given peer ID or PeerInfo.
         
         Args:
-            peer_id: The peer ID to find a bucket for
+            peer_obj: Either a peer ID or a PeerInfo object
             
         Returns:
             KBucket: The bucket for this peer
         """
+        # Handle PeerInfo objects or peer IDs
+        peer_id = peer_obj.peer_id if hasattr(peer_obj, 'peer_id') else peer_obj
+            
         for bucket in self.buckets:
             if bucket.key_in_range(peer_id.to_bytes()):
                 return bucket

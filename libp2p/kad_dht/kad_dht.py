@@ -63,7 +63,7 @@ class KadDHT(Service):
         self.peer_routing = PeerRouting(host, self.routing_table)
         
         # Initialize value store
-        self.value_store = ValueStore()
+        self.value_store = ValueStore(host=host, local_peer_id=self.local_peer_id)
         
         # Initialize provider store
         self.provider_store = ProviderStore()
@@ -116,7 +116,8 @@ class KadDHT(Service):
 
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
-        self.add_peer(peer_id)
+        # Call the async method properly with await
+        await self.add_peer(peer_id)
         logger.info(f"Added peer {peer_id} to routing table")
         try:
             # Read 4 bytes for the length prefix
@@ -476,7 +477,7 @@ class KadDHT(Service):
 
     # Utility methods
     
-    def add_peer(self, peer_id: ID) -> bool:
+    async def add_peer(self, peer_id: ID) -> bool:
         """
         Add a peer to the routing table.
         
@@ -486,7 +487,7 @@ class KadDHT(Service):
         Returns:
             bool: True if peer was added or updated, False otherwise
         """
-        return self.routing_table.add_peer(peer_id)
+        return await self.routing_table.add_peer(peer_id)
         
     def get_routing_table_size(self) -> int:
         """
@@ -505,3 +506,26 @@ class KadDHT(Service):
             int: Number of items
         """
         return self.value_store.size()
+        
+    async def _get_from_peer(self, peer_id: ID, key: bytes) -> Optional[bytes]:
+        """
+        Get a value from a specific peer.
+        
+        Args:
+            peer_id: The ID of the peer to get the value from
+            key: The key to retrieve
+            
+        Returns:
+            Optional[bytes]: The value if found, None otherwise
+        """
+        try:
+            # Don't try to get from ourselves
+            if peer_id == self.local_peer_id:
+                return None
+                
+            # Delegate to the value store's method
+            return await self.value_store._get_from_peer(peer_id, key)
+            
+        except Exception as e:
+            logger.warning(f"Failed to get value from peer {peer_id}: {e}")
+            return None
