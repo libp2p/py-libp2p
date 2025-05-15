@@ -7,6 +7,8 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 import logging
 import datetime
 from typing import Dict, Optional, Tuple
+from .pb.kademlia_pb2 import Message
+from libp2p.peer.id import ID
 
 logger = logging.getLogger("libp2p.kademlia.value_store")
 
@@ -42,7 +44,83 @@ class ValueStore:
         logger.info(f"Storing value for key {key.hex()[:8]}... with validity {validity}")
         self.store[key] = (value, validity)
         logger.debug(f"Stored value for key {key.hex()[:8]}...")
+
+    async def _store_at_peer(self, peer_id: ID, key: str, value: bytes) -> bool:
+        """
+        Store a value at a specific peer.
         
+        Args:
+            peer_id: The ID of the peer to store the value at
+            key: The key to store
+            value: The value to store
+            
+        Returns:
+            bool: True if the value was successfully stored, False otherwise
+        """
+        try:
+            # Don't try to store at ourselves
+            if peer_id == self.local_peer_id:
+                return True
+                
+            logger.info(f"Storing value for key {key} at peer {peer_id}")
+            
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            logger.info(f"Opened stream to peer {peer_id}")
+
+            # Create the PUT_VALUE message with protobuf
+            message = Message()
+            message.type = Message.MessageType.PUT_VALUE
+            
+            # Convert key to bytes if it's a string
+            key_bytes = key if isinstance(key, bytes) else key.encode()
+            
+            # Set message fields
+            message.key = key_bytes
+            message.record.key = key_bytes
+            message.record.value = value
+            message.record.timeReceived = str(time.time())
+            
+            # Serialize and send the protobuf message with length prefix
+            proto_bytes = message.SerializeToString()
+            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(proto_bytes)
+            logger.info("Sent PUT_VALUE protobuf message")
+
+            # Read response length (4 bytes)
+            length_bytes = await stream.read(4)
+            if len(length_bytes) < 4:
+                logger.warning("Failed to read response length")
+                return False
+                
+            response_length = int.from_bytes(length_bytes, byteorder='big')
+            
+            # Read response
+            response_bytes = await stream.read(response_length)
+            if len(response_bytes) < response_length:
+                logger.warning("Failed to read complete response")
+                return False
+                
+            # Parse protobuf response
+            response = Message()
+            response.ParseFromString(response_bytes)
+            
+            # Check if response is valid
+            if response.type == Message.MessageType.PUT_VALUE:
+                logger.debug(f"Successfully stored value at peer {peer_id}")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Failed to store value at peer {peer_id}: {e}")
+            return False
+            
+        finally:
+            if stream:
+                await stream.close()
+            
+
     def get(self, key: bytes) -> Optional[bytes]:
         """
         Retrieve a value from the DHT.
@@ -65,6 +143,106 @@ class ValueStore:
             return None
             
         return value
+    
+
+    async def _get_from_peer(self, peer_id: ID, key: str) -> Optional[bytes]:
+        """
+        Retrieve a value from a specific peer.
+        
+        Args:
+            peer_id: The ID of the peer to retrieve the value from
+            key: The key to retrieve
+            
+        Returns:
+            Optional[bytes]: The value if found, None otherwise
+        """
+        stream = None
+        try:
+            # Don't try to get from ourselves
+            if peer_id == self.local_peer_id:
+                return None
+                
+            logger.info(f"Getting value for key {key} from peer {peer_id}")
+            
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            logger.info(f"Opened stream to peer {peer_id} for GET_VALUE")
+
+            # Create the GET_VALUE message using protobuf
+            message = Message()
+            message.type = Message.MessageType.GET_VALUE
+            
+            # Convert key to bytes if it's a string
+            key_bytes = key if isinstance(key, bytes) else key.encode()
+            message.key = key_bytes
+            
+            # Serialize and send the protobuf message
+            proto_bytes = message.SerializeToString()
+            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(proto_bytes)
+            
+            # Read response length (4 bytes)
+            length_bytes = b""
+            remaining = 4
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.debug(f"Connection closed by peer {peer_id} while reading length")
+                    return None
+                    
+                length_bytes += chunk
+                remaining -= len(chunk)
+                
+            response_length = int.from_bytes(length_bytes, byteorder='big')
+            
+            # Read response data
+            response_bytes = b""
+            remaining = response_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.debug(f"Connection closed by peer {peer_id} while reading data")
+                    return None
+                    
+                response_bytes += chunk
+                remaining -= len(chunk)
+                
+            # Parse protobuf response
+            try:
+                response = Message()
+                response.ParseFromString(response_bytes)
+                logger.info(f"Received protobuf response from peer {peer_id}, type: {response.type}")
+                
+                # Process protobuf response
+                if (response.type == Message.MessageType.GET_VALUE and
+                    response.HasField('record') and 
+                    response.record.value):
+                    logger.debug(f"Received value for key {key_bytes.hex()} from peer {peer_id}")
+                    return response.record.value
+                    
+            except Exception as proto_err:
+                # Fall back to JSON for backward compatibility
+                logger.warning(f"Failed to parse as protobuf, trying JSON: {proto_err}")
+                try:
+                    json_response = json.loads(response_bytes.decode())
+                    if json_response.get("type") == "VALUE" and "value" in json_response:
+                        value = json_response["value"]
+                        if isinstance(value, str):
+                            value = value.encode()
+                        logger.debug(f"Received JSON value for key {key} from peer {peer_id}")
+                        return value
+                except Exception as json_err:
+                    logger.error(f"Failed to parse as JSON too: {json_err}")
+                
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to get value from peer {peer_id}: {e}")
+            return None
+            
+        finally:
+            if stream:
+                await stream.close()
         
     def remove(self, key: bytes) -> bool:
         """
