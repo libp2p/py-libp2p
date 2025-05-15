@@ -142,12 +142,16 @@ def setup_logging() -> None:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        # Default log file with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Default log file with timestamp and unique identifier
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        unique_id = os.urandom(4).hex()  # Add a unique identifier to prevent collisions
         if os.name == "nt":  # Windows
-            log_file = f"C:\\Windows\\Temp\\{timestamp}_py-libp2p.log"
+            log_file = f"C:\\Windows\\Temp\\py-libp2p_{timestamp}_{unique_id}.log"
         else:  # Unix-like
-            log_file = f"/tmp/{timestamp}_py-libp2p.log"
+            log_file = f"/tmp/py-libp2p_{timestamp}_{unique_id}.log"
+
+        # Print the log file path so users know where to find it
+        print(f"Logging to: {log_file}", file=sys.stderr)
 
     file_handler = logging.FileHandler(log_file, mode="w")  # Use 'w' mode to clear file
     file_handler.setFormatter(formatter)
@@ -177,7 +181,7 @@ def setup_logging() -> None:
             logger.handlers.clear()
             logger.addHandler(queue_handler)
             logger.setLevel(level)
-            logger.propagate = True
+            logger.propagate = False  # Prevent message duplication
 
     # Start the listener AFTER configuring all loggers
     _current_listener = logging.handlers.QueueListener(
