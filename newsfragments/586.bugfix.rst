@@ -1,2 +1,2 @@
-``handler()`` inside ``TCPListener.listen()`` does not catch exceptions thrown during handshaking steps (from ```Sawrm``).
+``handler()`` inside ``TCPListener.listen()`` does not catch exceptions thrown during handshaking steps (from ``Sawrm``).
 These innocuous exceptions will become fatal and crash the process if not handled.
