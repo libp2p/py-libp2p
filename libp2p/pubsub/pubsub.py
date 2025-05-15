@@ -53,7 +53,7 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.tools.timed_cache.last_seen_cache import (
