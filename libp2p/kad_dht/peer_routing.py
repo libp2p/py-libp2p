@@ -60,34 +60,59 @@ class PeerRouting(IPeerRouting):
         Returns:
             Optional[PeerInfo]: The peer information if found, None otherwise
         """
-        # Check if we already know about this peer
-        logger.info(f"Looking for peer {peer_id}")
+        # Check if this is actually our peer ID
+        if peer_id == self.host.get_id():
+            try:
+                # Return our own peer info
+                return PeerInfo(peer_id, self.host.get_addrs())
+            except Exception:
+                logger.exception("Error getting our own peer info")
+                return None
+
+        # First check if the peer is in our routing table
+        peer_info = self.routing_table.get_peer_info(peer_id)
+        if peer_info:
+            logger.debug(f"Found peer {peer_id} in routing table")
+            return peer_info
+            
+        # Then check if the peer is in our peerstore
         try:
             addrs = self.host.get_peerstore().addrs(peer_id)
             if addrs:
-                logger.info("Found peer in local peerstore")
-                logger.debug(f"Found peer {peer_id} in local peerstore")
+                logger.debug(f"Found peer {peer_id} in peerstore")
                 return PeerInfo(peer_id, addrs)
-        except PeerStoreError:
+        except Exception:
             pass
-        
-        logger.info("Peer not found in local peerstore, querying DHT")
-        # If not, we need to query the DHT
-        logger.debug(f"Looking for peer {peer_id} in the DHT")
-        closest_peers = self.routing_table.find_closest_peers(peer_id.to_bytes())
-        logger.info(f"Closest peers found: {closest_peers}")
-        # Check if we found the peer we're looking for
-        peer_infos = []
-        for found_peer in closest_peers:
-            try:
-                addrs = self.host.get_peerstore().addrs(found_peer)
-                if addrs:
-                    peer_infos.append(PeerInfo(found_peer, addrs))
-                else:
-                    logger.warning(f"Found peer {found_peer} but no addresses available")
-            except PeerStoreError:
-                logger.warning(f"Error retrieving addresses for peer {found_peer}")
-        return peer_infos
+            
+        # If not found locally, search the network
+        try:
+            closest_peers = await self.find_closest_peers_network(peer_id.to_bytes())
+            logger.info(f"Closest peers found: {closest_peers}")
+            
+            # Check if we found the peer we're looking for
+            for found_peer in closest_peers:
+                if found_peer == peer_id:
+                    try:
+                        addrs = self.host.get_peerstore().addrs(found_peer)
+                        if addrs:
+                            return PeerInfo(found_peer, addrs)
+                    except Exception:
+                        pass
+                        
+            # If we didn't find the exact peer but want to return the closest one
+            # for found_peer in closest_peers:
+            #     try:
+            #         addrs = self.host.get_peerstore().addrs(found_peer)
+            #         if addrs:
+            #             return PeerInfo(found_peer, addrs)
+            #     except Exception:
+            #         pass
+        except Exception as e:
+            logger.error(f"Error searching for peer {peer_id}: {e}")
+                
+        # Not found
+        logger.info(f"Peer {peer_id} not found")
+        return None
     
     async def find_closest_peers_network(self, target_key: bytes, count: int = 20) -> List[ID]:
         """

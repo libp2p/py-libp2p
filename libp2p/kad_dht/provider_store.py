@@ -10,6 +10,7 @@ from typing import Dict, List, Set, Optional, Tuple
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+from .pb.kademlia_pb2 import Message
 
 logger = logging.getLogger("libp2p.kademlia.provider_store")
 
@@ -17,7 +18,7 @@ logger = logging.getLogger("libp2p.kademlia.provider_store")
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
 PROVIDER_ADDRESS_TTL = 30 * 60  # 30 minutes in seconds
-
+PROTOCOL_ID = "/ipfs/kad/1.0.0"
 
 class ProviderRecord:
     """
@@ -52,6 +53,269 @@ class ProviderStore:
         """Initialize a new provider store."""
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: Dict[bytes, Dict[str, ProviderRecord]] = {}
+
+        async def _republish_provider_records(self) -> None:
+            """Republish all provider records for content this node is providing."""
+            for key in self._providing_keys:
+                logger.info(f"Republishing provider record for key {key.hex()}")
+                await self.provide(key)
+
+        def add_provider(self, key: bytes, provider: PeerInfo) -> None:
+            """
+            Add a provider for a given content key.
+            
+            Args:
+                key: The content key
+                provider: The provider's peer information
+            """
+            # Initialize providers for this key if needed
+            if key not in self.providers:
+                self.providers[key] = {}
+            
+            # Add or update the provider record
+            peer_id_str = str(provider.peer_id)  # Use string representation as dict key
+            self.providers[key][peer_id_str] = ProviderRecord(
+                peer_id=provider.peer_id,
+                addresses=provider.addrs,
+                timestamp=time.time()
+            )
+            logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
+
+        async def provide(self, key: bytes) -> bool:
+            """
+            Advertise that this node can provide a piece of content.
+            
+            Finds the k closest peers to the key and sends them ADD_PROVIDER messages.
+            
+            Args:
+                key: The content key (multihash) to advertise
+                
+            Returns:
+                bool: True if the advertisement was successful
+            """
+            # Add to local provider store
+            local_addrs = []
+            for addr in self.host.get_addrs():
+                local_addrs.append(addr)
+            
+            local_peer_info = PeerInfo(self.local_peer_id, local_addrs)
+            self.add_provider(key, local_peer_info)
+            
+            # Track that we're providing this key
+            self._providing_keys.add(key)
+            
+            # Find the k closest peers to the key
+            closest_peers = await self.peer_routing.find_closest_peers_network(key)
+            logger.info(f"Found {len(closest_peers)} peers close to key {key.hex()} for provider advertisement")
+            
+            # Send ADD_PROVIDER messages to these peers
+            success_count = 0
+            for peer_id in closest_peers:
+                if peer_id == self.local_peer_id:
+                    continue
+                    
+                try:
+                    success = await self._send_add_provider(peer_id, key)
+                    if success:
+                        success_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}: {e}")
+                    
+            return success_count > 0
+        
+    async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
+        """
+        Send ADD_PROVIDER message to a specific peer.
+        
+        Args:
+            peer_id: The peer to send the message to
+            key: The content key being provided
+            
+        Returns:
+            bool: True if the message was successfully sent and acknowledged
+        """
+        try:
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            
+            try:
+                # Get our addresses to include in the message
+                addrs = []
+                for addr in self.host.get_addrs():
+                    addrs.append(addr.to_bytes())
+                
+                # Create the ADD_PROVIDER message
+                message = Message()
+                message.type = Message.MessageType.ADD_PROVIDER
+                message.key = key
+                
+                # Add our provider info
+                provider = message.providerPeers.add()
+                provider.id = self.local_peer_id.to_bytes()
+                provider.addrs.extend(addrs)
+                
+                # Serialize and send the message
+                proto_bytes = message.SerializeToString()
+                await stream.write(len(proto_bytes).to_bytes(4, byteorder='big'))
+                await stream.write(proto_bytes)
+                
+                # Read response (length prefix)
+                length_bytes = await stream.read(4)
+                if len(length_bytes) < 4:
+                    return False
+                    
+                response_length = int.from_bytes(length_bytes, byteorder='big')
+                
+                # Read response data
+                response_bytes = await stream.read(response_length)
+                if len(response_bytes) < response_length:
+                    return False
+                    
+                # Parse response
+                response = Message()
+                response.ParseFromString(response_bytes)
+                
+                # Check response type
+                return response.type == Message.MessageType.ADD_PROVIDER
+                
+            finally:
+                await stream.close()
+                
+        except Exception as e:
+            logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            return False
+            
+    async def find_providers(self, key: bytes, count: int = 20) -> List[PeerInfo]:
+        """
+        Find content providers for a given key.
+        
+        Args:
+            key: The content key to look for
+            count: Maximum number of providers to return
+            
+        Returns:
+            List[PeerInfo]: List of content providers
+        """
+        # Check local provider store first
+        local_providers = self.provider_store.get_providers(key)
+        if local_providers:
+            logger.info(f"Found {len(local_providers)} providers locally for {key.hex()}")
+            return local_providers[:count]
+        logger.info("local providers are %s", local_providers)
+        # Find the closest peers to the key
+        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+        logger.info(f"Searching {len(closest_peers)} peers for providers of {key.hex()}")
+        
+        # Query these peers for providers
+        all_providers = []
+        for peer_id in closest_peers:
+            if peer_id == self.local_peer_id:
+                continue
+                
+            try:
+                providers = await self._get_providers_from_peer(peer_id, key)
+                if providers:
+                    # Add providers to our local store
+                    for provider in providers:
+                        self.provider_store.add_provider(key, provider)
+                    
+                    # Add to our result list
+                    all_providers.extend(providers)
+                    
+                    # Stop if we've found enough providers
+                    if len(all_providers) >= count:
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to get providers from {peer_id}: {e}")
+                
+        return all_providers[:count]
+        
+    async def _get_providers_from_peer(self, peer_id: ID, key: bytes) -> List[PeerInfo]:
+        """
+        Get content providers from a specific peer.
+        
+        Args:
+            peer_id: The peer to query
+            key: The content key to look for
+            
+        Returns:
+            List[PeerInfo]: List of provider information
+        """
+        try:
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            
+            try:
+                # Create the GET_PROVIDERS message
+                message = Message()
+                message.type = Message.MessageType.GET_PROVIDERS
+                message.key = key
+                
+                # Serialize and send the message
+                proto_bytes = message.SerializeToString()
+                await stream.write(len(proto_bytes).to_bytes(4, byteorder='big'))
+                await stream.write(proto_bytes)
+                
+                # Read response (length prefix)
+                length_bytes = b""
+                remaining = 4
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        return []
+                        
+                    length_bytes += chunk
+                    remaining -= len(chunk)
+                    
+                response_length = int.from_bytes(length_bytes, byteorder='big')
+                
+                # Read response data
+                response_bytes = b""
+                remaining = response_length
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        return []
+                        
+                    response_bytes += chunk
+                    remaining -= len(chunk)
+                    
+                # Parse response
+                response = Message()
+                response.ParseFromString(response_bytes)
+                
+                # Check response type
+                if response.type != Message.MessageType.GET_PROVIDERS:
+                    return []
+                    
+                # Extract provider information
+                providers = []
+                for provider_proto in response.providerPeers:
+                    try:
+                        # Create peer ID from bytes
+                        provider_id = ID(provider_proto.id)
+                        
+                        # Convert addresses to Multiaddr
+                        addrs = []
+                        for addr_bytes in provider_proto.addrs:
+                            try:
+                                addrs.append(Multiaddr(addr_bytes))
+                            except:
+                                pass  # Skip invalid addresses
+                                
+                        # Create PeerInfo and add to result
+                        providers.append(PeerInfo(provider_id, addrs))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse provider info: {e}")
+                        
+                return providers
+                
+            finally:
+                await stream.close()
+                
+        except Exception as e:
+            logger.warning(f"Error getting providers from {peer_id}: {e}")
+            return []
         
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
