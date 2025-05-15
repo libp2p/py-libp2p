@@ -7,6 +7,7 @@ import logging
 import time
 import trio
 from typing import Dict, List, Optional, Set, Tuple, Mapping
+from libp2p.abc import IHost
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
@@ -19,7 +20,8 @@ logger = logging.getLogger("libp2p.kademlia.routing_table")
 # Default parameters
 BUCKET_SIZE = 20  # k in the Kademlia paper
 MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
-
+PEER_REFRESH_INTERVAL = 60  # Interval to refresh peers in seconds
+STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
 
 class KBucket:
     """
@@ -28,15 +30,20 @@ class KBucket:
     Each k-bucket stores up to k (BUCKET_SIZE) peers, sorted by least-recently seen.
     """
     
-    def __init__(self, host, bucket_size: int = BUCKET_SIZE):
+    def __init__(self, host: IHost, bucket_size: int = BUCKET_SIZE, min_range: int = 0, max_range: int = 2**256):
         """
         Initialize a new k-bucket.
         
         Args:
+            host: The host this bucket belongs to
             bucket_size: Maximum number of peers to store in the bucket
+            min_range: Lower boundary of the bucket's key range (inclusive)
+            max_range: Upper boundary of the bucket's key range (exclusive)
         """
         self.bucket_size = bucket_size
         self.host = host
+        self.min_range = min_range
+        self.max_range = max_range
         # Store PeerInfo objects along with last-seen timestamp
         self.peers: OrderedDict[ID, Tuple[PeerInfo, float]] = OrderedDict()
         
@@ -48,7 +55,13 @@ class KBucket:
         """Get all PeerInfo objects in the bucket."""
         return [info for info, _ in self.peers.values()]
     
-    def add_peer(self, peer_info: PeerInfo) -> bool:
+    def get_oldest_peer(self) -> Optional[ID]:
+        """Get the least-recently seen peer."""
+        if not self.peers:
+            return None
+        return next(iter(self.peers.keys()))
+    
+    async def add_peer(self, peer_info: PeerInfo) -> bool:
         """
         Add a peer to the bucket. Returns True if the peer was added or updated,
         False if the bucket is full.
@@ -58,15 +71,34 @@ class KBucket:
         
         # If peer is already in the bucket, move it to the end (most recently seen)
         if peer_id in self.peers:
-            self.peers.move_to_end(peer_id)
-            self.peers[peer_id] = (peer_info, current_time)
+            self.refresh_peer_last_seen(peer_id)
             return True
             
         # If bucket has space, add the peer
         if len(self.peers) < self.bucket_size:
             self.peers[peer_id] = (peer_info, current_time)
             return True
+        
+        # If bucket is full, we need to replace the least-recently seen peer
+        # Get the least-recently seen peer
+        oldest_peer_id = self.get_oldest_peer()
+        
+        # Check if the old peer is responsive to ping request
+        try:
+            # Try to ping the oldest peer, not the new peer
+            response = await self._ping_peer(oldest_peer_id)
+            if response:
+                # If the old peer is still alive, we will not add the new peer
+                logger.debug(f"Old peer {oldest_peer_id} is still alive, cannot add new peer {peer_id}")
+                return False
+        except Exception as e:
+            # If the old peer is unresponsive, we can replace it with the new peer
+            logger.debug(f"Old peer {oldest_peer_id} is unresponsive, replacing with new peer {peer_id}: {str(e)}")
+            self.peers.popitem(last=False)  # Remove oldest peer
+            self.peers[peer_id] = (peer_info, current_time)
+            return True
             
+        # If we got here, the oldest peer responded but we couldn't add the new peer
         return False
     
     def remove_peer(self, peer_id: ID) -> bool:
@@ -89,12 +121,6 @@ class KBucket:
             return self.peers[peer_id][0]
         return None
     
-    def get_oldest_peer(self) -> Optional[ID]:
-        """Get the least-recently seen peer."""
-        if not self.peers:
-            return None
-        return next(iter(self.peers.keys()))
-    
     def size(self) -> int:
         """Get the number of peers in the bucket."""
         return len(self.peers)
@@ -112,49 +138,20 @@ class KBucket:
         current_time = time.time()
         stale_peers = []
         
-        for bucket in self.buckets.values():
-            for peer_id, (_, last_seen) in bucket.peers.items():
-                if current_time - last_seen > stale_threshold_seconds:
-                    stale_peers.append(peer_id)
+        for peer_id, (_, last_seen) in self.peers.items():
+            if current_time - last_seen > stale_threshold_seconds:
+                stale_peers.append(peer_id)
                     
         return stale_peers
-    
-    async def _periodic_peer_refresh(self):
-        """Background task to periodically refresh peers"""
-        try:
-            while True:
-                await trio.sleep(60)  # Check every minute
-                
-                # Find stale peers (not pinged in last hour)
-                stale_peers = self.routing_table.get_stale_peers(stale_threshold_seconds=3600)
-                if stale_peers:
-                    logger.info(f"Found {len(stale_peers)} stale peers to refresh")
-                    
-                    for peer_id in stale_peers:
-                        try:
-                            # Try to ping the peer
-                            logger.debug(f"Pinging stale peer {peer_id}")
-                            await self._ping_peer(peer_id)
-                            # If successful, last_seen will be updated in the ping handler
-                            logger.debug(f"Successfully refreshed peer {peer_id}")
-                        except Exception as e:
-                            # If ping fails, remove the peer
-                            logger.debug(f"Failed to ping peer {peer_id}: {e}")
-                            self.routing_table.remove_peer(peer_id)
-                            logger.info(f"Removed unresponsive peer {peer_id}")
-        except trio.Cancelled:
-            logger.debug("Peer refresh task cancelled")
-        except Exception as e:
-            logger.error(f"Error in peer refresh task: {e}", exc_info=True)
 
     async def _periodic_peer_refresh(self):
         """Background task to periodically refresh peers"""
         try:
             while True:
-                await trio.sleep(60)  # Check every minute
+                await trio.sleep(PEER_REFRESH_INTERVAL)  # Check every minute
                 
                 # Find stale peers (not pinged in last hour)
-                stale_peers = self.routing_table.get_stale_peers(stale_threshold_seconds=3600)
+                stale_peers = self.get_stale_peers(stale_threshold_seconds=STALE_PEER_THRESHOLD)
                 if stale_peers:
                     logger.info(f"Found {len(stale_peers)} stale peers to refresh")
                     
@@ -162,13 +159,23 @@ class KBucket:
                         try:
                             # Try to ping the peer
                             logger.debug(f"Pinging stale peer {peer_id}")
-                            await self._ping_peer(peer_id)
+                            responce = await self._ping_peer(peer_id)
+                            if responce:
+                                # Update the last seen time
+                                self.refresh_peer_last_seen(peer_id)
+                                logger.debug(f"Refreshed peer {peer_id}")
+                            else:
+                                # If ping fails, remove the peer
+                                logger.debug(f"Failed to ping peer {peer_id}")
+                                self.remove_peer(peer_id)
+                                logger.info(f"Removed unresponsive peer {peer_id}")
+
                             # If successful, last_seen will be updated in the ping handler
                             logger.debug(f"Successfully refreshed peer {peer_id}")
                         except Exception as e:
                             # If ping fails, remove the peer
                             logger.debug(f"Failed to ping peer {peer_id}: {e}")
-                            self.routing_table.remove_peer(peer_id)
+                            self.remove_peer(peer_id)
                             logger.info(f"Removed unresponsive peer {peer_id}")
         except trio.Cancelled:
             logger.debug("Peer refresh task cancelled")
@@ -183,67 +190,83 @@ class KBucket:
             peer_id: The ID of the peer to ping
             
         Returns:
-            bool: True if ping successful, raises exception otherwise
+            bool: True if ping successful, False otherwise
         """
-        # Get peer info from routing table
-        peer_info = self.routing_table.get_peer_info(peer_id)
+        # Get peer info directly from the bucket
+        peer_info = self.get_peer_info(peer_id)
         if not peer_info:
-            raise ValueError(f"Peer {peer_id} not in routing table")
+            raise ValueError(f"Peer {peer_id} not in bucket")
+        
+        # Default protocol ID for Kademlia DHT
+        protocol_id = "/ipfs/kad/1.0.0"
         
         try:
             # Open a stream to the peer with the DHT protocol
-            stream = await self.host.new_stream(peer_id, [self.protocol_id])
+            stream = await self.host.new_stream(peer_id, [protocol_id])
             
             try:
                 # Create ping protobuf message
                 ping_msg = Message()
-                ping_msg.type = Message.MessageType.PING
+                ping_msg.type = Message.PING  # Use correct enum
                 
                 # Serialize and send with length prefix (4 bytes big-endian)
                 msg_bytes = ping_msg.SerializeToString()
                 logger.debug(f"Sending PING message to {peer_id}, size: {len(msg_bytes)} bytes")
-                await stream.write(len(msg_bytes).to_bytes(4, "big"))
+                await stream.write(len(msg_bytes).to_bytes(4, byteorder="big"))
                 await stream.write(msg_bytes)
+                await stream.close_write()
                 
                 # Wait for response with timeout
                 with trio.move_on_after(10):  # 10 second timeout
                     # Read response length (4 bytes)
-                    length_bytes = await stream.read(4)
+                    length_bytes = await stream.read_exact(4)
                     if not length_bytes or len(length_bytes) < 4:
-                        raise ConnectionError(f"Peer {peer_id} disconnected during ping")
+                        logger.warning(f"Peer {peer_id} disconnected during ping")
+                        return False
                         
-                    msg_len = int.from_bytes(length_bytes, "big")
-                    logger.debug(f"Received response from {peer_id}, size: {msg_len} bytes")
+                    msg_len = int.from_bytes(length_bytes, byteorder="big")
+                    if msg_len <= 0 or msg_len > 1024 * 1024:  # Sanity check on message size
+                        logger.warning(f"Invalid message length from {peer_id}: {msg_len}")
+                        return False
+                    
+                    logger.debug(f"Receiving response from {peer_id}, size: {msg_len} bytes")
                     
                     # Read full message
-                    response_bytes = await stream.read(msg_len)
+                    response_bytes = await stream.read_exact(msg_len)
+                    if not response_bytes:
+                        logger.warning(f"Failed to read response from {peer_id}")
+                        return False
                     
                     # Parse protobuf response
                     response = Message()
-                    response.ParseFromString(response_bytes)
+                    try:
+                        response.ParseFromString(response_bytes)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse protobuf response from {peer_id}: {e}")
+                        return False
                     
-                    if response.type == Message.MessageType.PING:
+                    if response.type == Message.PING:
                         # Update the last seen timestamp for this peer
-                        self.routing_table.refresh_peer(peer_id)
                         logger.debug(f"Successfully pinged peer {peer_id}")
                         return True
                     else:
                         logger.warning(f"Unexpected response type from {peer_id}: {response.type}")
-                        raise ValueError(f"Unexpected response type: {response.type}")
+                        return False
                 
                 # If we get here, the ping timed out
-                raise TimeoutError(f"Ping to peer {peer_id} timed out")
+                logger.warning(f"Ping to peer {peer_id} timed out")
+                return False
                 
             finally:
                 await stream.close()
                 
         except Exception as e:
             logger.error(f"Error pinging peer {peer_id}: {str(e)}")
-            raise
+            return False
     
-    def refresh_peer(self, peer_id: ID) -> bool:
+    def refresh_peer_last_seen(self, peer_id: ID) -> bool:
         """
-        Update the last-seen timestamp for a peer in the routing table.
+        Update the last-seen timestamp for a peer in the bucket.
         
         Args:
             peer_id: The ID of the peer to refresh
@@ -251,205 +274,232 @@ class KBucket:
         Returns:
             bool: True if the peer was found and refreshed, False otherwise
         """
-        if peer_id == self.local_peer_id:
-            return False
-            
-        peer_key = peer_id.to_bytes()
-        prefix_length = shared_prefix_len(self.local_key, peer_key)
-        
-        if prefix_length in self.buckets and peer_id in self.buckets[prefix_length].peers:
+        if peer_id in self.peers:
             # Get current peer info and update the timestamp
-            peer_info, _ = self.buckets[prefix_length].peers[peer_id]
-            self.buckets[prefix_length].peers[peer_id] = (peer_info, time.time())
+            peer_info, _ = self.peers[peer_id]
+            current_time = time.time()
+            self.peers[peer_id] = (peer_info, current_time)
             # Move to end of ordered dict to mark as most recently seen
-            self.buckets[prefix_length].peers.move_to_end(peer_id)
+            self.peers.move_to_end(peer_id)
             return True
         
         return False
 
-class RoutingTable:
-    """
-    Kademlia DHT routing table implementation.
-    
-    The routing table consists of k-buckets, where each bucket holds peers
-    that share a specific prefix length with the local peer ID.
-    """
-    
-    def __init__(
-        self, 
-        local_peer_id: ID, 
-        host,
-        bucket_size: int = BUCKET_SIZE
-    ):
+    def key_in_range(self, key: bytes) -> bool:
         """
-        Initialize a new routing table.
+        Check if a key is in the range of this bucket.
         
         Args:
-            local_peer_id: The ID of the local peer
-            bucket_size: Maximum size for each k-bucket
+            key: The key to check (bytes)
+            
+        Returns:
+            bool: True if the key is in range, False otherwise
         """
-        self.local_peer_id = local_peer_id
-        self.local_key = local_peer_id.to_bytes()
-        self.host = host
-        self.bucket_size = bucket_size
-        self.buckets: Dict[int, KBucket] = defaultdict(lambda: KBucket(bucket_size))
+        key_int = int.from_bytes(key, byteorder='big')
+        return self.min_range <= key_int < self.max_range
+        
+    def split(self) -> Tuple["KBucket", "KBucket"]:
+        """
+        Split the bucket into two buckets.
+        
+        Returns:
+            tuple: (lower_bucket, upper_bucket)
+        """
+        midpoint = (self.min_range + self.max_range) // 2
+        lower_bucket = KBucket(self.host, self.bucket_size, self.min_range, midpoint)
+        upper_bucket = KBucket(self.host, self.bucket_size, midpoint, self.max_range)
+        
+        # Redistribute peers
+        for peer_id, (peer_info, timestamp) in self.peers.items():
+            peer_key = int.from_bytes(peer_id.to_bytes(), byteorder='big')
+            if peer_key < midpoint:
+                lower_bucket.peers[peer_id] = (peer_info, timestamp)
+            else:
+                upper_bucket.peers[peer_id] = (peer_info, timestamp)
+                
+        return lower_bucket, upper_bucket
+
+class RoutingTable:
+    """
+    The Kademlia routing table maintains information on which peers to contact for any
+    given peer ID in the network.
+    """
     
-    def add_peer(self, peer_info: PeerInfo) -> bool:
+    def __init__(self, local_id, host: IHost):
+        """
+        Initialize the routing table.
+        
+        Args:
+            local_id: The ID of the local node
+            host: The host this routing table belongs to
+        """
+        self.local_id = local_id
+        self.host = host
+        self.buckets = [KBucket(host, BUCKET_SIZE)]
+    
+    def add_peer(self, peer_id):
         """
         Add a peer to the routing table.
         
         Args:
-            peer_info: The PeerInfo object to add
+            peer_info: The peer info to add
             
         Returns:
-            bool: True if peer was added or updated, False otherwise
+            bool: True if the peer was added or updated, False otherwise
         """
-        peer_id = peer_info.peer_id
-        if peer_id == self.local_peer_id:
+
+        try:
+            # Get addresses from the peerstore if available
+            addrs = self.host.get_peerstore().addrs(peer_id)
+            if addrs:
+                # Create PeerInfo object and add to routing table
+                peer_info = PeerInfo(peer_id, addrs)
+            else:
+                logger.warning(f"No addresses found for peer {peer_id}, cannot add to routing table")
+                return False
+            if peer_info.peer_id == self.local_id:
+                return False
+                
+            # Find the right bucket for this peer
+            bucket = self.find_bucket(peer_info.peer_id)
+            
+            # Try to add to the bucket
+            return bucket.add_peer(peer_info)
+        
+        except Exception as e:
+            logger.warning(f"Error adding peer {peer_id} to routing table: {e}")
             return False
-            
-        peer_key = peer_id.to_bytes()
-        prefix_length = shared_prefix_len(self.local_key, peer_key)
-        return self.buckets[prefix_length].add_peer(peer_info)
-    
-    def remove_peer(self, peer_id: ID) -> bool:
-        """Remove a peer from the routing table."""
-        if peer_id == self.local_peer_id:
-            return False
-            
-        peer_key = peer_id.to_bytes()
-        prefix_length = shared_prefix_len(self.local_key, peer_key)
-        return self.buckets[prefix_length].remove_peer(peer_id)
-    
-    def find_closest_peers(self, target_key: bytes, count: int = 20) -> List[ID]:
+        
+    def remove_peer(self, peer_id):
         """
-        Find the closest peers to a target key.
+        Remove a peer from the routing table.
         
         Args:
-            target_key: The target key to find neighbors for
-            count: The maximum number of peers to return
+            peer_id: The ID of the peer to remove
             
         Returns:
-            List[ID]: The closest peers, sorted by distance to the target key
+            bool: True if the peer was removed, False otherwise
         """
-        # Special case: if the target key is the same as our local key
-        if target_key == self.local_key:
-            # When searching for our own ID, start with the highest bucket (255)
-            # and work downward until we find enough peers
-            collected_peers = []
-            max_bucket_idx = MAXIMUM_BUCKETS - 1  # Typically 255 for 32-byte keys
-            
-            logger.info("max bucket index: %d", max_bucket_idx)
-            # Start from max bucket index and move downward
-            for bucket_idx in range(max_bucket_idx, -1, -1):
-                if bucket_idx in self.buckets:
-                    collected_peers.extend(self.buckets[bucket_idx].peer_ids())
-                    
-                # Stop if we've collected enough peers
-                if len(collected_peers) >= count:
-                    break
-                    
-            logger.info("collected peers: %s", collected_peers)
-            # Return the closest peers, up to the requested count
-            return sort_peer_ids_by_distance(target_key, collected_peers)[:count]
+        bucket = self.find_bucket(peer_id)
+        return bucket.remove_peer(peer_id)
         
-        # First determine which bucket the target would belong to
-        target_bucket_idx = shared_prefix_len(self.local_key, target_key)
-        
-        # Start with peers from the target bucket
-        collected_peers = []
-        if target_bucket_idx in self.buckets:
-            collected_peers.extend(self.buckets[target_bucket_idx].peer_ids())
-        
-        # If we need more peers, expand outward (+1/-1) from the target bucket
-        if len(collected_peers) < count:
-            # Maximum bucket index is the bit length of the key (typically 256 bits for Kademlia)
-            max_bucket_idx = len(self.local_key) * 8 - 1  # Typically 255 for 32-byte keys
-            
-            # Expand outward one step at a time
-            distance = 1
-            while len(collected_peers) < count and distance <= max_bucket_idx:
-                # Try bucket with index (target_bucket_idx + distance)
-                higher_bucket_idx = target_bucket_idx + distance
-                if higher_bucket_idx <= max_bucket_idx and higher_bucket_idx in self.buckets:
-                    collected_peers.extend(self.buckets[higher_bucket_idx].peer_ids())
-                
-                # Try bucket with index (target_bucket_idx - distance)
-                lower_bucket_idx = target_bucket_idx - distance
-                if lower_bucket_idx >= 0 and lower_bucket_idx in self.buckets:
-                    collected_peers.extend(self.buckets[lower_bucket_idx].peer_ids())
-                
-                # Increase distance for next iteration
-                distance += 1
-                
-                # If we've collected enough peers, stop expanding
-                if len(collected_peers) >= count:
-                    break
-        
-        # Sort all collected peers by XOR distance to the target key and return up to count
-        return sort_peer_ids_by_distance(target_key, collected_peers)[:count]
-    
-    def find_closest_peer_infos(self, target_key: bytes, count: int = 20) -> List[PeerInfo]:
+    def find_bucket(self, peer_id):
         """
-        Find the closest peers to a target key and return their PeerInfo objects.
+        Find the bucket that would contain the given peer ID.
         
         Args:
-            target_key: The target key to find neighbors for
-            count: The maximum number of peers to return
+            peer_id: The peer ID to find a bucket for
             
         Returns:
-            List[PeerInfo]: The closest peers' PeerInfo objects, sorted by distance to the target key
+            KBucket: The bucket for this peer
         """
-        closest_peer_ids = self.find_closest_peers(target_key, count)
-        result = []
-        
-        for peer_id in closest_peer_ids:
-            # Find which bucket this peer belongs to
-            peer_key = peer_id.to_bytes()
-            prefix_length = shared_prefix_len(self.local_key, peer_key)
-            
-            # Get the PeerInfo
-            peer_info = self.buckets[prefix_length].get_peer_info(peer_id)
-            if peer_info:
-                result.append(peer_info)
+        for bucket in self.buckets:
+            if bucket.key_in_range(peer_id.to_bytes()):
+                return bucket
                 
-        return result
-    
-    def get_peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+        # This shouldn't happen with proper bucket splitting
+        return self.buckets[0]
+        
+    def find_closest_peers(self, key, count=20):
         """
-        Get the PeerInfo for a specific peer ID if it exists in the routing table.
+        Find the closest peers to a given key.
         
         Args:
-            peer_id: The ID of the peer to look for
+            key: The key to find closest peers to (bytes)
+            count: Maximum number of peers to return
             
         Returns:
-            Optional[PeerInfo]: The PeerInfo if found, None otherwise
+            List[ID]: List of peer IDs closest to the key
         """
-        peer_key = peer_id.to_bytes()
-        prefix_length = shared_prefix_len(self.local_key, peer_key)
-        
-        if prefix_length in self.buckets:
-            return self.buckets[prefix_length].get_peer_info(peer_id)
-        return None
-    
-    def size(self) -> int:
-        """Get the total number of peers in the routing table."""
-        return sum(bucket.size() for bucket in self.buckets.values())
-    
-    def get_bucket_sizes(self) -> Dict[int, int]:
-        """Get the size of each bucket (for diagnostics)."""
-        return {prefix: bucket.size() for prefix, bucket in self.buckets.items()}
-    
-    def get_peer_ids(self) -> List[ID]:
-        """Get all peer IDs in the routing table."""
+        # Get all peers from all buckets
         all_peers = []
-        for bucket in self.buckets.values():
+        for bucket in self.buckets:
             all_peers.extend(bucket.peer_ids())
-        return all_peers
+            
+        # Sort by XOR distance to the key
+        all_peers.sort(key=lambda p: self._distance(p.to_bytes(), key))
         
-    def get_peer_infos(self) -> List[PeerInfo]:
-        """Get all PeerInfo objects in the routing table."""
-        all_peer_infos = []
-        for bucket in self.buckets.values():
-            all_peer_infos.extend(bucket.peer_infos())
-        return all_peer_infos
+        return all_peers[:count]
+        
+    def get_peer_ids(self):
+        """
+        Get all peer IDs in the routing table.
+        
+        Returns:
+            List[ID]: List of all peer IDs
+        """
+        peers = []
+        for bucket in self.buckets:
+            peers.extend(bucket.peer_ids())
+        return peers
+        
+    def get_peer_info(self, peer_id):
+        """
+        Get the peer info for a specific peer.
+        
+        Args:
+            peer_id: The ID of the peer to get info for
+            
+        Returns:
+            PeerInfo: The peer info, or None if not found
+        """
+        bucket = self.find_bucket(peer_id)
+        return bucket.get_peer_info(peer_id)
+        
+    def peer_in_table(self, peer_id):
+        """
+        Check if a peer is in the routing table.
+        
+        Args:
+            peer_id: The ID of the peer to check
+            
+        Returns:
+            bool: True if the peer is in the routing table, False otherwise
+        """
+        bucket = self.find_bucket(peer_id)
+        return bucket.has_peer(peer_id)
+        
+    def size(self):
+        """
+        Get the number of peers in the routing table.
+        
+        Returns:
+            int: Number of peers
+        """
+        count = 0
+        for bucket in self.buckets:
+            count += bucket.size()
+        return count
+        
+    def _distance(self, key1, key2):
+        """
+        Calculate the XOR distance between two keys.
+        
+        Args:
+            key1: First key (bytes)
+            key2: Second key (bytes)
+            
+        Returns:
+            int: XOR distance between the keys
+        """
+        # Convert to integers
+        k1 = int.from_bytes(key1, byteorder='big')
+        k2 = int.from_bytes(key2, byteorder='big')
+        
+        # Calculate XOR distance
+        return k1 ^ k2
+        
+    def get_stale_peers(self, stale_threshold_seconds=3600):
+        """
+        Get all stale peers from all buckets
+        
+        Args:
+            stale_threshold_seconds: Time in seconds after which a peer is considered stale
+            
+        Returns:
+            List of stale peer IDs
+        """
+        stale_peers = []
+        for bucket in self.buckets:
+            stale_peers.extend(bucket.get_stale_peers(stale_threshold_seconds))
+        return stale_peers
