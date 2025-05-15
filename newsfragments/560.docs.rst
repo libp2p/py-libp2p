@@ -1,1 +1,0 @@
-Expand the Introduction section in the documentation with a detailed overview of Py-libp2p.

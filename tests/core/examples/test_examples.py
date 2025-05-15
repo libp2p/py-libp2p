@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import trio
 
@@ -6,6 +8,11 @@ from libp2p.custom_types import (
 )
 from libp2p.host.exceptions import (
     StreamFailure,
+)
+from libp2p.identity.identify_push import (
+    ID_PUSH,
+    identify_push_handler_for,
+    push_identify_to_peer,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -25,6 +32,8 @@ from libp2p.tools.utils import (
 from tests.utils.factories import (
     HostFactory,
 )
+
+logger = logging.getLogger(__name__)
 
 CHAT_PROTOCOL_ID = "/chat/1.0.0"
 ECHO_PROTOCOL_ID = "/echo/1.0.0"
@@ -246,6 +255,55 @@ async def pubsub_demo(host_a, host_b):
     assert b_received.is_set()
 
 
+async def identify_push_demo(host_a, host_b):
+    # Set up the identify/push handlers on both hosts
+    host_a.set_stream_handler(ID_PUSH, identify_push_handler_for(host_a))
+    host_b.set_stream_handler(ID_PUSH, identify_push_handler_for(host_b))
+
+    # Ensure both hosts have the required protocols
+    # This is needed because the test hosts
+    # might not have all protocols loaded by default
+    host_a_protocols = set(host_a.get_mux().get_protocols())
+
+    # Log protocols before push
+    logger.debug("Host A protocols before push: %s", host_a_protocols)
+
+    # Push identify information from host_a to host_b
+    success = await push_identify_to_peer(host_a, host_b.get_id())
+    assert success is True
+
+    # Add a small delay to allow processing
+    await trio.sleep(0.1)
+
+    # Check that host_b's peerstore has been updated with host_a's information
+    peer_id = host_a.get_id()
+    peerstore = host_b.get_peerstore()
+
+    # Check that the peer is in the peerstore
+    assert peer_id in peerstore.peer_ids()
+
+    # If peerstore has no protocols for this peer, manually update them for the test
+    peerstore_protocols = set(peerstore.get_protocols(peer_id))
+
+    # Log protocols after push
+    logger.debug("Host A protocols after push: %s", host_a_protocols)
+    logger.debug("Peerstore protocols after push: %s", peerstore_protocols)
+
+    # Check that the protocols were updated
+    assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
+
+    # Check that the addresses were updated
+    host_a_addrs = set(host_a.get_addrs())
+    peerstore_addrs = set(peerstore.addrs(peer_id))
+
+    # Log addresses after push
+    logger.debug("Host A addresses: %s", host_a_addrs)
+    logger.debug("Peerstore addresses: %s", peerstore_addrs)
+
+    # Check that the addresses were updated
+    assert all(addr in peerstore_addrs for addr in host_a_addrs)
+
+
 @pytest.mark.parametrize(
     "test",
     [
@@ -257,6 +315,7 @@ async def pubsub_demo(host_a, host_b):
         echo_demo,
         ping_demo,
         pubsub_demo,
+        identify_push_demo,
     ],
 )
 @pytest.mark.trio
