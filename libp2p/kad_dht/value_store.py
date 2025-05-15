@@ -6,6 +6,8 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 
 import logging
 import datetime
+import time
+import json
 from typing import Dict, Optional, Tuple
 from .pb.kademlia_pb2 import Message
 from libp2p.peer.id import ID
@@ -14,6 +16,7 @@ logger = logging.getLogger("libp2p.kademlia.value_store")
 
 # Default time to live for values in seconds (24 hours)
 DEFAULT_TTL = 24 * 60 * 60
+PROTOCOL_ID = "/ipfs/kad/1.0.0"
 
 
 class ValueStore:
@@ -23,10 +26,13 @@ class ValueStore:
     Values are stored with a timestamp and optional expiration time.
     """
     
-    def __init__(self):
+    def __init__(self, host=None, local_peer_id=None):
         """Initialize an empty value store."""
         # Store format: {key: (value, validity)}
         self.store: Dict[bytes, Tuple[bytes, float]] = {}
+        # Store references to the host and local peer ID for making requests
+        self.host = host
+        self.local_peer_id = local_peer_id
         
     def put(self, key: bytes, value: bytes, validity: datetime = None) -> None:
         """
@@ -57,10 +63,15 @@ class ValueStore:
         Returns:
             bool: True if the value was successfully stored, False otherwise
         """
+        stream = None
         try:
             # Don't try to store at ourselves
-            if peer_id == self.local_peer_id:
+            if self.local_peer_id and peer_id == self.local_peer_id:
                 return True
+                
+            if not self.host:
+                logger.error("Host not initialized, cannot store value at peer")
+                return False
                 
             logger.info(f"Storing value for key {key} at peer {peer_id}")
             
