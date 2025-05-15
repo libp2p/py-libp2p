@@ -99,14 +99,6 @@ class PeerRouting(IPeerRouting):
                     except Exception:
                         pass
                         
-            # If we didn't find the exact peer but want to return the closest one
-            # for found_peer in closest_peers:
-            #     try:
-            #         addrs = self.host.get_peerstore().addrs(found_peer)
-            #         if addrs:
-            #             return PeerInfo(found_peer, addrs)
-            #     except Exception:
-            #         pass
         except Exception as e:
             logger.error(f"Error searching for peer {peer_id}: {e}")
                 
