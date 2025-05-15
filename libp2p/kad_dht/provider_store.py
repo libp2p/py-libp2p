@@ -11,6 +11,8 @@ from typing import Dict, List, Set, Optional, Tuple
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from .pb.kademlia_pb2 import Message
+from libp2p.abc import IHost
+from multiaddr import Multiaddr
 
 logger = logging.getLogger("libp2p.kademlia.provider_store")
 
@@ -49,79 +51,71 @@ class ProviderStore:
     Maps content keys to provider records, with support for expiration.
     """
     
-    def __init__(self):
-        """Initialize a new provider store."""
+    def __init__(self, host: IHost=None, peer_routing=None):
+        """Initialize a new provider store.
+        
+        Args:
+            host: The libp2p host instance (optional)
+            peer_routing: The peer routing instance (optional)
+        """
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: Dict[bytes, Dict[str, ProviderRecord]] = {}
+        self.host = host
+        self.peer_routing = peer_routing
+        self.providing_keys: Set[bytes] = set()
+        self.local_peer_id = host.get_id() if host else None
 
-        async def _republish_provider_records(self) -> None:
-            """Republish all provider records for content this node is providing."""
-            for key in self._providing_keys:
-                logger.info(f"Republishing provider record for key {key.hex()}")
-                await self.provide(key)
+    async def _republish_provider_records(self) -> None:
+        """Republish all provider records for content this node is providing."""
+        for key in self.providing_keys:
+            logger.info(f"Republishing provider record for key {key.hex()}")
+            await self.provide(key)
 
-        def add_provider(self, key: bytes, provider: PeerInfo) -> None:
-            """
-            Add a provider for a given content key.
+    async def provide(self, key: bytes) -> bool:
+        """
+        Advertise that this node can provide a piece of content.
+        
+        Finds the k closest peers to the key and sends them ADD_PROVIDER messages.
+        
+        Args:
+            key: The content key (multihash) to advertise
             
-            Args:
-                key: The content key
-                provider: The provider's peer information
-            """
-            # Initialize providers for this key if needed
-            if key not in self.providers:
-                self.providers[key] = {}
+        Returns:
+            bool: True if the advertisement was successful
+        """
+        if not self.host or not self.peer_routing:
+            logger.error("Host or peer_routing not initialized, cannot provide content")
+            return False
             
-            # Add or update the provider record
-            peer_id_str = str(provider.peer_id)  # Use string representation as dict key
-            self.providers[key][peer_id_str] = ProviderRecord(
-                peer_id=provider.peer_id,
-                addresses=provider.addrs,
-                timestamp=time.time()
-            )
-            logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
-
-        async def provide(self, key: bytes) -> bool:
-            """
-            Advertise that this node can provide a piece of content.
-            
-            Finds the k closest peers to the key and sends them ADD_PROVIDER messages.
-            
-            Args:
-                key: The content key (multihash) to advertise
+        # Add to local provider store
+        local_addrs = []
+        for addr in self.host.get_addrs():
+            local_addrs.append(addr)
+        
+        local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
+        self.add_provider(key, local_peer_info)
+        
+        # Track that we're providing this key
+        self.providing_keys.add(key)
+        
+        # Find the k closest peers to the key
+        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+        logger.info(f"Found {len(closest_peers)} peers close to key {key.hex()} for provider advertisement")
+        
+        # Send ADD_PROVIDER messages to these peers
+        success_count = 0
+        for peer_id in closest_peers:
+            if peer_id == self.local_peer_id:
+                continue
                 
-            Returns:
-                bool: True if the advertisement was successful
-            """
-            # Add to local provider store
-            local_addrs = []
-            for addr in self.host.get_addrs():
-                local_addrs.append(addr)
-            
-            local_peer_info = PeerInfo(self.local_peer_id, local_addrs)
-            self.add_provider(key, local_peer_info)
-            
-            # Track that we're providing this key
-            self._providing_keys.add(key)
-            
-            # Find the k closest peers to the key
-            closest_peers = await self.peer_routing.find_closest_peers_network(key)
-            logger.info(f"Found {len(closest_peers)} peers close to key {key.hex()} for provider advertisement")
-            
-            # Send ADD_PROVIDER messages to these peers
-            success_count = 0
-            for peer_id in closest_peers:
-                if peer_id == self.local_peer_id:
-                    continue
-                    
-                try:
-                    success = await self._send_add_provider(peer_id, key)
-                    if success:
-                        success_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}: {e}")
-                    
-            return success_count > 0
+            try:
+                success = await self._send_add_provider(peer_id, key)
+                if success:
+                    success_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}: {e}")
+                
+        return success_count > 0
         
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
         """
@@ -196,12 +190,17 @@ class ProviderStore:
         Returns:
             List[PeerInfo]: List of content providers
         """
+        if not self.host or not self.peer_routing:
+            logger.error("Host or peer_routing not initialized, cannot find providers")
+            return []
+            
         # Check local provider store first
-        local_providers = self.provider_store.get_providers(key)
+        local_providers = self.get_providers(key)
         if local_providers:
             logger.info(f"Found {len(local_providers)} providers locally for {key.hex()}")
             return local_providers[:count]
         logger.info("local providers are %s", local_providers)
+        
         # Find the closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
         logger.info(f"Searching {len(closest_peers)} peers for providers of {key.hex()}")
@@ -217,7 +216,7 @@ class ProviderStore:
                 if providers:
                     # Add providers to our local store
                     for provider in providers:
-                        self.provider_store.add_provider(key, provider)
+                        self.add_provider(key, provider)
                     
                     # Add to our result list
                     all_providers.extend(providers)

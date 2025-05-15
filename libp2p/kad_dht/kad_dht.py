@@ -65,14 +65,11 @@ class KadDHT(Service):
         # Initialize value store
         self.value_store = ValueStore(host=host, local_peer_id=self.local_peer_id)
         
-        # Initialize provider store
-        self.provider_store = ProviderStore()
+        # Initialize provider store with host and peer_routing references
+        self.provider_store = ProviderStore(host=host, peer_routing=self.peer_routing)
         
         # Store bootstrap peers for later use
         self.bootstrap_peers = bootstrap_peers or []
-        
-        # Track content keys this node is providing
-        self._providing_keys: Set[bytes] = set()
         
         # Last time we republished provider records
         self._last_provider_republish = time.time()
