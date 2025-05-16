@@ -1,3 +1,5 @@
+import logging
+
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
@@ -29,11 +31,6 @@ class Transport(ISecureTransport):
     early_data: bytes
     with_noise_pipes: bool
 
-    # NOTE: Implementations that support Noise Pipes must decide whether to use
-    #   an XX or IK handshake based on whether they possess a cached static
-    #   Noise key for the remote peer.
-    # TODO: A storage of seen noise static keys for pattern IK?
-
     def __init__(
         self,
         libp2p_keypair: KeyPair,
@@ -46,7 +43,6 @@ class Transport(ISecureTransport):
         self.local_peer = ID.from_pubkey(libp2p_keypair.public_key)
         self.early_data = early_data
         self.with_noise_pipes = with_noise_pipes
-
         if self.with_noise_pipes:
             raise NotImplementedError
 
@@ -54,16 +50,26 @@ class Transport(ISecureTransport):
         if self.with_noise_pipes:
             raise NotImplementedError
         else:
+            logging.debug(
+                f"libp2p key: {self.libp2p_privkey}, "
+                f"noise key: {self.noise_privkey}"
+            )
+            noise_key = (
+                self.noise_privkey or self.libp2p_privkey
+            )  # Fallback to libp2p key
             return PatternXX(
                 self.local_peer,
                 self.libp2p_privkey,
-                self.noise_privkey,
+                noise_key,
                 self.early_data,
             )
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
+        logging.debug("Starting inbound handshake")
         pattern = self.get_pattern()
-        return await pattern.handshake_inbound(conn)
+        secure_conn = await pattern.handshake_inbound(conn)
+        logging.debug("Handshake completed successfully")
+        return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         pattern = self.get_pattern()
