@@ -3,7 +3,7 @@ Contributing
 
 Thank you for your interest in contributing! We welcome all contributions no matter
 their size. Please read along to learn how to get started. If you get stuck, feel free
-to ask for help in `Ethereum Python Discord server <https://discord.gg/GHryRvPB84>`_.
+to ask for help in `Libp2p Discover Server <https://discord.gg/GK8TxRNh2s>`_.
 
 Setting the stage
 ~~~~~~~~~~~~~~~~~
