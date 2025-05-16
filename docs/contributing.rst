@@ -3,41 +3,54 @@ Contributing
 
 Thank you for your interest in contributing! We welcome all contributions no matter
 their size. Please read along to learn how to get started. If you get stuck, feel free
-to ask for help in `Ethereum Python Discord server <https://discord.gg/GHryRvPB84>`_.
-
-Dependencies
-^^^^^^^^^^^^
-
-The following dependencies are needed to build py-libp2p:
-
-* `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
-* `CMake <https://cmake.org>`
-* `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`
-
-On Debian Linux you can install them using the following command:
-
-.. code:: sh
-
-    sudo apt-get install cmake pkg-config libgmp-dev
-
-On MacOS, you can install them using the following command:
-
-.. code:: sh
-
-   brew install cmake pkgconfig gmp
+to ask for help in `Libp2p Discover Server <https://discord.gg/GK8TxRNh2s>`_.
 
 Setting the stage
 ~~~~~~~~~~~~~~~~~
 
-To get started, fork the repository to your own github account, then clone it
+To get started, fork the repository to your own GitHub account, then clone it
 to your development machine:
 
 .. code:: sh
 
     git clone git@github.com:your-github-username/py-libp2p.git
 
-Next, install the development dependencies. We recommend using a virtual
-environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
+Next, install the development dependencies and set up the project. We recommend using a
+virtual environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
+Python's built-in ``venv`` module. Instructions vary by platform:
+
+Linux Setup
+^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+On Debian Linux, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
+
+.. code:: sh
+
+    sudo apt-get install cmake pkg-config libgmp-dev
+
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+An alternative using ``virtualenv``:
 
 .. code:: sh
 
@@ -47,22 +60,140 @@ environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_.
     python -m pip install -e ".[dev]"
     pre-commit install
 
-An alternative to virtualenv is to use the built-in Python3 venv module:
+macOS Setup
+^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+On macOS, you need to install the following dependencies:
+
+- `GNU Multiprecision Arithmetic Library <https://gmplib.org/>`_
+- `CMake <https://cmake.org>`_
+- `freedesktop.org pkg-config <https://www.freedesktop.org/wiki/Software/pkg-config>`_
+
+Install them with:
 
 .. code:: sh
 
-   cd py-libp2p
-   python3 -m venv ./venv
-   . venv/bin/activate
-   python3 -m pip install -e ".[dev]"
-   pre-commit install
+    brew install cmake pkgconfig gmp
 
-Currently, on MacOS you must help the build command find and link against the
-gmp library. On MacOS run the following to build py-libp2p:
+Setup Steps
+"""""""""""
+
+Install the development dependencies using a virtual environment:
 
 .. code:: sh
 
-   CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+    cd py-libp2p
+    python3 -m venv ./venv
+    . venv/bin/activate
+    python3 -m pip install -e ".[dev]"
+    pre-commit install
+
+On macOS, help the build command find and link against the ``gmp`` library:
+
+.. code:: sh
+
+    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" python3 -m pip install -e ".[dev]"
+
+An alternative using ``virtualenv``:
+
+.. code:: sh
+
+    cd py-libp2p
+    virtualenv -p python venv
+    . venv/bin/activate
+    python -m pip install -e ".[dev]"
+    pre-commit install
+
+Windows Development Setup
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Prerequisites
+"""""""""""""
+
+1. **Python 3.11+**
+   - Download and install Python from `python.org <https://www.python.org/downloads/>`_ or the Microsoft Store.
+   - Verify installation:
+
+   .. code:: powershell
+
+        python --version
+
+2. **Git**
+   - Install Git using Windows Package Manager (``winget``) or download from `git-scm.com <https://git-scm.com/download/win>`_.
+   - Verify:
+
+   .. code:: powershell
+
+        winget install --id Git.Git -e
+        git --version
+
+3. **CMake**
+   - Install CMake with ``winget`` or download from `cmake.org <https://cmake.org/download/>`_.
+   - Add CMake to your PATH during installation, then verify:
+
+   .. code:: powershell
+
+        winget install --id Kitware.CMake -e
+        cmake --version
+
+4. **Make**
+    - Option 1: Use Git Bash (included with Git) as a shell.
+    - Option 2: Install ``make`` via Chocolatey (install Chocolatey first if needed: `choco.io <https://chocolatey.org/install>`_).
+    - Verify installation:
+
+   .. code:: powershell
+
+        choco install make
+        make --version
+
+
+Setup Steps
+"""""""""""
+
+1. **Clone the Repository**
+   - Open PowerShell or Git Bash and run:
+
+   .. code:: powershell
+
+        git clone git@github.com:your-github-username/py-libp2p.git
+        cd py-libp2p
+
+2. **Create a Virtual Environment**
+   - In PowerShell:
+
+   .. code:: powershell
+
+        python -m venv venv
+        .\venv\Scripts\activate
+
+3. **Install Dependencies**
+   - Install the project and dev dependencies:
+
+   .. code:: powershell
+
+        pip install -e ".[dev]"
+
+4. **Verify Setup**
+   - Run the tests to ensure everything works:
+
+   .. code:: powershell
+
+        pytest -v
+
+   - If using ``make test`` with Git Bash:
+
+   .. code:: bash
+
+        make test
+
+Notes
+"""""
+
+- Use PowerShell, Command Prompt, or Git Bash as your shell.
+- Ensure all tools (Python, Git, CMake) are in your system PATH.
 
 Requirements
 ^^^^^^^^^^^^
@@ -80,9 +211,6 @@ We can run all tests with:
 .. code:: sh
 
     make test
-
-At this time, the interop tests are not passing. You can run just the internal tests
-with ``pytest tests/core``.
 
 
 Code Style
@@ -166,7 +294,7 @@ do not pass the CI build yet won't get reviewed unless explicitly requested.
 
 If the pull request introduces changes that should be reflected in the release notes,
 please add a newsfragment file as explained
-`here <https://github.com/ethereum/py-libp2p/blob/main/newsfragments/README.md>`_.
+`here <https://github.com/libp2p/py-libp2p/tree/main/newsfragments>`_.
 
 If possible, the change to the release notes file should be included in the commit that
 introduces the feature or bugfix.
