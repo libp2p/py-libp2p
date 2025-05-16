@@ -1,0 +1,1 @@
+Fixed the `contributing.rst` file to include the Libp2p Discord Server Link.
