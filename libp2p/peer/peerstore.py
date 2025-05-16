@@ -4,6 +4,7 @@ from collections import (
 from collections.abc import (
     Sequence,
 )
+import sys
 from typing import (
     Any,
 )
@@ -31,6 +32,8 @@ from .peerdata import (
 from .peerinfo import (
     PeerInfo,
 )
+
+PERMANENT_ADDR_TTL = sys.maxsize
 
 
 class PeerStore(IPeerStore):
