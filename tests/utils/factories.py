@@ -1,7 +1,6 @@
 from collections.abc import (
     AsyncIterator,
     Sequence,
-    Set,
 )
 from contextlib import (
     AsyncExitStack,
@@ -545,13 +544,13 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
-        direct_peers: Set[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
+        direct_peers: Sequence[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
         heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
-        direct_connect_init_delay: int = GOSSIPSUB_PARAMS.direct_connect_init_delay,
+        direct_connect_init_delay: float = GOSSIPSUB_PARAMS.direct_connect_init_delay,
         direct_connect_interval: int = GOSSIPSUB_PARAMS.direct_connect_interval,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,

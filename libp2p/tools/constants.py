@@ -1,5 +1,5 @@
 from collections.abc import (
-    Set,
+    Sequence,
 )
 from typing import (
     NamedTuple,
@@ -32,13 +32,13 @@ class GossipsubParams(NamedTuple):
     degree: int = 10
     degree_low: int = 9
     degree_high: int = 11
-    direct_peers: Set[PeerInfo] = set()
+    direct_peers: Sequence[PeerInfo] = list()
     time_to_live: int = 30
     gossip_window: int = 3
     gossip_history: int = 5
     heartbeat_initial_delay: float = 0.1
     heartbeat_interval: float = 0.5
-    direct_connect_init_delay: int = 1
+    direct_connect_init_delay: float = 0.1
     direct_connect_interval: int = 300
 
 

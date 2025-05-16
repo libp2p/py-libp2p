@@ -7,7 +7,6 @@ from collections import (
 from collections.abc import (
     Iterable,
     Sequence,
-    Set,
 )
 import logging
 import random
@@ -89,8 +88,8 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_initial_delay: float
     heartbeat_interval: int
 
-    direct_peers: set[PeerInfo]
-    direct_connect_initial_delay: int
+    direct_peers: dict[ID, PeerInfo]
+    direct_connect_initial_delay: float
     direct_connect_interval: int
 
     def __init__(
@@ -99,13 +98,13 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        direct_peers: Set[PeerInfo],
+        direct_peers: Sequence[PeerInfo],
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
         heartbeat_interval: int = 120,
-        direct_connect_initial_delay: int = 1,
+        direct_connect_initial_delay: float = 0.1,
         direct_connect_interval: int = 300,
     ) -> None:
         self.protocols = list(protocols)
@@ -134,7 +133,9 @@ class GossipSub(IPubsubRouter, Service):
         self.heartbeat_interval = heartbeat_interval
 
         # Create direct peers
-        self.direct_peers = set(direct_peers)
+        self.direct_peers = dict()
+        for _peer in direct_peers:
+            self.direct_peers[_peer.peer_id] = _peer
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
 
@@ -166,7 +167,7 @@ class GossipSub(IPubsubRouter, Service):
         if len(self.direct_peers) > 0:
             for pi in self.direct_peers:
                 self.pubsub.host.get_peerstore().add_addrs(
-                    pi.peer_id, pi.addrs, PERMANENT_ADDR_TTL
+                    pi, self.direct_peers[pi].addrs, PERMANENT_ADDR_TTL
                 )
 
         logger.debug("attached to pusub")
@@ -269,7 +270,7 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             # direct peers
-            _direct_peers: set[ID] = {_peer.peer_id for _peer in self.direct_peers}
+            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
             send_to.update(_direct_peers)
 
             # floodsub peers
@@ -463,13 +464,13 @@ class GossipSub(IPubsubRouter, Service):
         await trio.sleep(self.direct_connect_initial_delay)
         while True:
             for _peer in self.direct_peers:
-                if _peer.peer_id not in self.pubsub.peers:
+                if _peer not in self.pubsub.peers:
                     try:
-                        await self.pubsub.host.connect(_peer)
+                        await self.pubsub.host.connect(self.direct_peers[_peer])
                     except Exception as e:
                         logger.debug(
                             "failed to connect to a direct peer %s: %s",
-                            _peer.peer_id,
+                            _peer,
                             e,
                         )
             await trio.sleep(self.direct_connect_interval)
@@ -704,7 +705,7 @@ class GossipSub(IPubsubRouter, Service):
         # Add peer to mesh for topic
         if topic in self.mesh:
             for _peer in self.direct_peers:
-                if _peer.peer_id == sender_peer_id:
+                if _peer == sender_peer_id:
                     logger.warning(
                         "GRAFT: ignoring request from direct peer %s", sender_peer_id
                     )
