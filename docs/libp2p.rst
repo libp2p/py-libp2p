@@ -19,6 +19,7 @@ Subpackages
    libp2p.stream_muxer
    libp2p.tools
    libp2p.transport
+   libp2p.utils
 
 Submodules
 ----------
