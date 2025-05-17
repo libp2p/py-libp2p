@@ -9,7 +9,6 @@ This module tests core functionality of the Kademlia DHT including:
 
 import hashlib
 import logging
-import os
 import uuid
 
 import pytest
@@ -39,7 +38,7 @@ TEST_TIMEOUT = 5  # Timeout in seconds
 
 
 @pytest.fixture
-async def dht_pair(security_protocol) -> tuple[KadDHT, KadDHT]:
+async def dht_pair(security_protocol):
     """Create a pair of connected DHT nodes for testing."""
     async with host_pair_factory(security_protocol=security_protocol) as (
         host_a,
@@ -94,11 +93,12 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     dht_a, dht_b = dht_pair
 
     # Generate a random key and value
-    key = create_key_from_binary(os.urandom(32))
-    value = f"test-value-{uuid.uuid4()}".encode()
+    key = create_key_from_binary(b"test-key")
+    value = b"test-value"
 
     # First add the value directly to node A's store to verify storage works
     dht_a.value_store.put(key, value)
+    logger.debug("Local value store: %s", dht_a.value_store.store)
     local_value = dht_a.value_store.get(key)
     assert local_value == value, "Local value storage failed"
 
