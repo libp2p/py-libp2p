@@ -98,8 +98,8 @@ from libp2p.stream_muxer.mplex.mplex import (
 from libp2p.stream_muxer.mplex.mplex_stream import (
     MplexStream,
 )
-from libp2p.tools.async_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service import (
+    background_anyio_service,
 )
 from libp2p.tools.constants import (
     FLOODSUB_PROTOCOL_ID,
@@ -302,7 +302,7 @@ class SwarmFactory(factory.Factory):
         if muxer_opt is not None:
             optional_kwargs["muxer_opt"] = muxer_opt
         swarm = cls(**optional_kwargs)
-        async with background_trio_service(swarm):
+        async with background_anyio_service(swarm):
             await swarm.listen(LISTEN_MADDR)
             yield swarm
 
@@ -457,7 +457,7 @@ class PubsubFactory(factory.Factory):
             strict_signing=strict_signing,
             msg_id_constructor=msg_id_constructor,
         )
-        async with background_trio_service(pubsub):
+        async with background_anyio_service(pubsub):
             await pubsub.wait_until_ready()
             yield pubsub
 
@@ -584,7 +584,7 @@ class PubsubFactory(factory.Factory):
         ) as pubsubs:
             async with AsyncExitStack() as stack:
                 for router in gossipsubs:
-                    await stack.enter_async_context(background_trio_service(router))
+                    await stack.enter_async_context(background_anyio_service(router))
                 yield pubsubs
 
 
