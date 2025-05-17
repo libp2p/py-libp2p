@@ -69,9 +69,7 @@ class PeerRouting(IPeerRouting):
         """
         Find a peer with the given ID.
 
-        Args:
-        ----
-            peer_id: The ID of the peer to find
+        :param peer_id: The ID of the peer to find
 
         Returns
         -------
