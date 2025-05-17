@@ -78,18 +78,24 @@ def setup_logging() -> None:
     Set up logging configuration based on environment variables.
 
     Environment Variables:
-    - LIBP2P_DEBUG: Controls logging levels. Examples:
-        - "DEBUG" (all modules at DEBUG level)
-        - "libp2p.identity.identify:DEBUG" (only identify module at DEBUG)
-        - "identity.identify:DEBUG" (same as above, libp2p prefix optional)
-        - "libp2p.identity:DEBUG,libp2p.transport:INFO" (multiple modules)
-        - "*:DEBUG" (all modules at DEBUG)
-    - LIBP2P_DEBUG_FILE: If set, specifies the file path for log output
+        LIBP2P_DEBUG
+            Controls logging levels. Examples:
+            - "DEBUG" (all modules at DEBUG level)
+            - "libp2p.identity.identify:DEBUG" (only identify module at DEBUG)
+            - "identity.identify:DEBUG" (same as above, libp2p prefix optional)
+            - "libp2p.identity:DEBUG,libp2p.transport:INFO" (multiple modules)
+
+        LIBP2P_DEBUG_FILE
+            If set, specifies the file path for log output. When this variable is set,
+            logs will only be written to the specified file. If not set, logs will be
+            written to both a default file (in the system's temp directory) and to
+            stderr (console output).
 
     The logging system uses Python's native hierarchical logging:
-    - Loggers are organized in a hierarchy using dots (e.g., libp2p.identity.identify)
-    - Child loggers inherit their parent's level unless explicitly set
-    - The root libp2p logger controls the default level
+        - Loggers are organized in a hierarchy using dots
+          (e.g., libp2p.identity.identify)
+        - Child loggers inherit their parent's level unless explicitly set
+        - The root libp2p logger controls the default level
     """
     global _current_listener, _listener_ready
 
@@ -103,6 +109,7 @@ def setup_logging() -> None:
 
     # Get the log level from environment variable
     debug_str = os.environ.get("LIBP2P_DEBUG", "")
+
     if not debug_str:
         # If LIBP2P_DEBUG is not set, disable logging
         root_logger = logging.getLogger("libp2p")
@@ -131,12 +138,13 @@ def setup_logging() -> None:
     handlers: list[Union[logging.StreamHandler[Any], logging.FileHandler]] = []
 
     # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setFormatter(formatter)
     handlers.append(console_handler)
 
     # File handler (if configured)
     log_file = os.environ.get("LIBP2P_DEBUG_FILE")
+
     if log_file:
         # Ensure the directory exists
         log_path = Path(log_file)
@@ -153,9 +161,15 @@ def setup_logging() -> None:
         # Print the log file path so users know where to find it
         print(f"Logging to: {log_file}", file=sys.stderr)
 
-    file_handler = logging.FileHandler(log_file, mode="w")  # Use 'w' mode to clear file
-    file_handler.setFormatter(formatter)
-    handlers.append(file_handler)
+    try:
+        file_handler = logging.FileHandler(
+            log_file, mode="w"
+        )  # Use 'w' mode to clear file
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+    except Exception as e:
+        print(f"Error creating file handler: {e}", file=sys.stderr)
+        raise
 
     # Create a QueueHandler and QueueListener
     queue_handler = logging.handlers.QueueHandler(log_queue)
