@@ -148,58 +148,71 @@ async def run_provider_node(
 
                 # Store a value in the DHT
                 val_key = create_key_from_binary(b"example-key")
-                # Build value data
-                msg = f"This is an example value at {trio.current_time()}"
-                val_data = msg.encode()
-                logger.info(
-                    f"Storing value with key: {base58.b58encode(val_key).decode()}"
-                )
-                await dht.put_value(val_key, val_data)
-                logger.info(
-                    f"Stored value with key: {base58.b58encode(val_key).decode()}"
-                )
+                # # Build value data
+                # msg = f"This is an example value at {trio.current_time()}"
+                # val_data = msg.encode()
+                # logger.info(
+                #     f"Storing value with key: {base58.b58encode(val_key).decode()}"
+                # )
+                # await dht.put_value(val_key, val_data)
+                # logger.info(
+                #     f"Stored value with key: {base58.b58encode(val_key).decode()}"
+                # )
+                # logger.info("Value stored is %s", val_data.decode())
 
-                # Create a piece of content and advertise as provider
-                content = b"Hello from provider node "
-                content_key = calculate_content_id(content)
-                logger.info(f"Generated content with ID: {content_key.hex()}")
-
-                # Advertise that we can provide this content
-                logger.info(f"Advertising as provider for content: {content_key.hex()}")
-                success = await dht.provide(content_key)
-                if success:
-                    logger.info("Successfully advertised as content provider")
+                # retrieve the value
+                logger.info("Looking up key: %s", base58.b58encode(val_key).decode())
+                val_data = await dht.get_value(val_key)
+                if val_data:
+                    logger.info(f"Retrieved value: ")
+                    try:
+                        logger.info(f"Retrieved value: {val_data.hex()}")
+                    except UnicodeDecodeError:
+                        logger.info(f"Retrieved value (bytes): {val_data!r}")
                 else:
-                    logger.warning("Failed to advertise as content provider")
+                    logger.warning("Failed to retrieve value")
 
-                # Also check if we can find providers for our own content
-                content_key = (
-                    "25e19514a354bac2413dc71f5f8e0b974577cd07663ca02d8715ac2a6d110460"
-                )
-                logger.info("Looking for providers of content: %s", content_key)
-                # Convert hex content ID to bytes
-                content_key = bytes.fromhex(content_key)
-                logger.info("Looking for providers of content1: %s", content_key.hex())
-                # bytes to string
-                content_key = content_key.decode()
-                logger.info("decoded content key is: %s", content_key)
-                providers = await dht.find_providers(content_key)
-                if providers:
-                    logger.info(
-                        "Found %d providers for our content: %s",
-                        len(providers),
-                        [p.peer_id.pretty() for p in providers],
-                    )
-                else:
-                    logger.warning(
-                        "No providers found for our content %s", content_key.hex()
-                    )
+                # # Create a piece of content and advertise as provider
+                # content = b"Hello from provider node "
+                # content_key = calculate_content_id(content)
+                # logger.info(f"Generated content with ID: {content_key.hex()}")
+
+                # # Advertise that we can provide this content
+                # logger.info(f"Advertising as provider for content: {content_key.hex()}")
+                # success = await dht.provide(content_key)
+                # if success:
+                #     logger.info("Successfully advertised as content provider")
+                # else:
+                #     logger.warning("Failed to advertise as content provider")
+
+                # # Also check if we can find providers for our own content
+                # content_key = (
+                #     "25e19514a354bac2413dc71f5f8e0b974577cd07663ca02d8715ac2a6d110460"
+                # )
+                # logger.info("Looking for providers of content: %s", content_key)
+                # # Convert hex content ID to bytes
+                # content_key = bytes.fromhex(content_key)
+                # logger.info("Looking for providers of content1: %s", content_key.hex())
+                # # bytes to string
+                # content_key = content_key.decode()
+                # logger.info("decoded content key is: %s", content_key)
+                # providers = await dht.find_providers(content_key)
+                # if providers:
+                #     logger.info(
+                #         "Found %d providers for our content: %s",
+                #         len(providers),
+                #         [p.peer_id.pretty() for p in providers],
+                #     )
+                # else:
+                #     logger.warning(
+                #         "No providers found for our content %s", content_key.hex()
+                #     )
 
                 # Print bootstrap command for consumer nodes
                 bootstrap_cmd = f"--bootstrap {addr_str}"
                 logger.info("To connect to this node, use: %s", bootstrap_cmd)
                 print(f"\nTo connect to this node, use: {bootstrap_cmd}\n")
-                print(f"Content ID for discovery: {content_key.hex()}")
+                # print(f"Content ID for discovery: {content_key.hex()}")
 
                 # Keep the node running
                 while True:
@@ -214,21 +227,21 @@ async def run_provider_node(
                         "Peer store size: %s", dht.host.get_peerstore().peer_ids()
                     )
                     logger.info("Value store contains: %s", dht.value_store.store)
-                    logger.info(
-                        "Provider store contains: %s", str(dht.provider_store.providers)
-                    )
-                    logger.info(
-                        "Provider store size: %s", str(dht.provider_store.size())
-                    )
+                    # logger.info(
+                    #     "Provider store contains: %s", str(dht.provider_store.providers)
+                    # )
+                    # logger.info(
+                    #     "Provider store size: %s", str(dht.provider_store.size())
+                    # )
 
                     # Display content provider information
-                    for key in dht.provider_store.providers:
-                        providers = dht.provider_store.get_providers(key)
-                        logger.info(
-                            "Key %s is provided by %s",
-                            key.hex(),
-                            [p.peer_id for p in providers],
-                        )
+                    # for key in dht.provider_store.providers:
+                    #     providers = dht.provider_store.get_providers(key)
+                    #     logger.info(
+                    #         "Key %s is provided by %s",
+                    #         key.hex(),
+                    #         [p.peer_id for p in providers],
+                    #     )
 
                     await trio.sleep(100)
 
@@ -408,6 +421,18 @@ def parse_args():
         type=str,
         help="Hex-encoded content ID to look for providers (consumer mode only)",
     )
+    # add option to use verbose logging
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+
+    # Set logging level based on verbosity
+    if parser.parse_args().verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
 
     args = parser.parse_args()
 
