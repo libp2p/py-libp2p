@@ -4,7 +4,6 @@ Value store implementation for Kademlia DHT.
 Provides a way to store and retrieve key-value pairs with optional expiration.
 """
 
-import datetime
 import json
 import logging
 import time
@@ -12,6 +11,12 @@ from typing import (
     Optional,
 )
 
+from libp2p.abc import (
+    IHost,
+)
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -24,7 +29,7 @@ logger = logging.getLogger("libp2p.kademlia.value_store")
 
 # Default time to live for values in seconds (24 hours)
 DEFAULT_TTL = 24 * 60 * 60
-PROTOCOL_ID = "/ipfs/kad/1.0.0"
+PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 
 
 class ValueStore:
@@ -34,29 +39,38 @@ class ValueStore:
     Values are stored with a timestamp and optional expiration time.
     """
 
-    def __init__(self, host=None, local_peer_id=None):
-        """Initialize an empty value store."""
+    def __init__(self, host: IHost = None, local_peer_id: Optional[ID] = None):
+        """
+        Initialize an empty value store.
+
+        :param host: The libp2p host instance.
+        :param local_peer_id: The local peer ID to ignore in peer requests.
+
+        """
         # Store format: {key: (value, validity)}
         self.store: dict[bytes, tuple[bytes, float]] = {}
         # Store references to the host and local peer ID for making requests
         self.host = host
         self.local_peer_id = local_peer_id
 
-    def put(self, key: bytes, value: bytes, validity: datetime = None) -> None:
+    def put(self, key: bytes, value: bytes, validity: Optional[float] = None) -> None:
         """
         Store a value in the DHT.
 
-        Args:
-            key: The key to store the value under
-            value: The value to store
-            ttl: Time to live in seconds, or None for no expiration
-        """
+        :param key: The key to store the value under
+        :param value: The value to store
+        :param ttl: Time to live in seconds, or None for no expiration
 
+        Returns
+        -------
+        None
+
+        """
         if validity is None:
             # If no validity is provided, set a default TTL
-            validity = datetime.date.today() + datetime.timedelta(seconds=DEFAULT_TTL)
+            validity = time.time() + DEFAULT_TTL
         logger.info(
-            f"Storing value for key {key.hex()[:8]}... with validity {validity}"
+            "Storing value for key %s... with validity %s", key.hex()[:8], validity
         )
         self.store[key] = (value, validity)
         logger.debug(f"Stored value for key {key.hex()[:8]}...")
@@ -70,8 +84,11 @@ class ValueStore:
             key: The key to store
             value: The value to store
 
-        Returns:
-            bool: True if the value was successfully stored, False otherwise
+        Returns
+        -------
+        bool
+            True if the value was successfully stored, False otherwise
+
         """
         stream = None
         try:
@@ -148,23 +165,32 @@ class ValueStore:
         Args:
             key: The key to look up
 
-        Returns:
-            Optional[bytes]: The stored value, or None if not found or expired
+        Returns
+        -------
+        Optional[bytes]
+            The stored value, or None if not found or expired
+
         """
-        logger.info(f"Retrieving value for key {key.hex()[:8]}...")
+        logger.info("Retrieving value for key %s...", key.hex()[:8])
         if key not in self.store:
             return None
 
         value, validity = self.store[key]
-        logger.info(f"Found value for key {key.hex()[:8]}... with validity {validity}")
+        logger.info(
+            "Found value for key %s... with validity %s",
+            key.hex()[:8],
+            validity,
+        )
         # Check if the value has expired
-        if validity < datetime.date.today():
+        if validity < time.time():
             self.remove(key)
             return None
 
         return value
 
-    async def _get_from_peer(self, peer_id: ID, key: str) -> Optional[bytes]:
+    async def _get_from_peer(
+        self, peer_id: ID, key: Optional[str | bytes]
+    ) -> Optional[bytes]:
         """
         Retrieve a value from a specific peer.
 
@@ -172,8 +198,11 @@ class ValueStore:
             peer_id: The ID of the peer to retrieve the value from
             key: The key to retrieve
 
-        Returns:
-            Optional[bytes]: The value if found, None otherwise
+        Returns
+        -------
+        Optional[bytes]
+            The value if found, None otherwise
+
         """
         stream = None
         try:
@@ -184,7 +213,7 @@ class ValueStore:
             logger.info(f"Getting value for key {key} from peer {peer_id}")
 
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
             logger.info(f"Opened stream to peer {peer_id} for GET_VALUE")
 
             # Create the GET_VALUE message using protobuf
@@ -192,7 +221,7 @@ class ValueStore:
             message.type = Message.MessageType.GET_VALUE
 
             # Convert key to bytes if it's a string
-            key_bytes = key if isinstance(key, bytes) else key.encode()
+            key_bytes = key.encode() if isinstance(key, str) else key
             message.key = key_bytes
 
             # Serialize and send the protobuf message
@@ -235,7 +264,8 @@ class ValueStore:
                 response = Message()
                 response.ParseFromString(response_bytes)
                 logger.info(
-                    f"Received protobuf response from peer {peer_id}, type: {response.type}"
+                    f"Received protobuf response from peer"
+                    f" {peer_id}, type: {response.type}"
                 )
 
                 # Process protobuf response
@@ -285,8 +315,11 @@ class ValueStore:
         Args:
             key: The key to remove
 
-        Returns:
-            bool: True if the key was found and removed, False otherwise
+        Returns
+        -------
+        bool
+            True if the key was found and removed, False otherwise
+
         """
         if key in self.store:
             del self.store[key]
@@ -301,14 +334,17 @@ class ValueStore:
         Args:
             key: The key to check
 
-        Returns:
-            bool: True if the key exists and hasn't expired, False otherwise
+        Returns
+        -------
+        bool
+            True if the key exists and hasn't expired, False otherwise
+
         """
         if key not in self.store:
             return False
 
         _, validity = self.store[key]
-        if validity is not None and datetime.date.today() > validity:
+        if validity is not None and time.time() > validity:
             self.remove(key)
             return False
 
@@ -318,10 +354,13 @@ class ValueStore:
         """
         Remove all expired values from the store.
 
-        Returns:
-            int: The number of expired values that were removed
+        Returns
+        -------
+        int
+            The number of expired values that were removed
+
         """
-        current_time = datetime.date.today()
+        current_time = time.time()
         expired_keys = [
             key
             for key, (_, validity) in self.store.items()
@@ -340,8 +379,11 @@ class ValueStore:
         """
         Get all non-expired keys in the store.
 
-        Returns:
-            list[bytes]: List of keys
+        Returns
+        -------
+        list[bytes]
+            List of keys
+
         """
         # Clean up expired values first
         self.cleanup_expired()
@@ -351,8 +393,11 @@ class ValueStore:
         """
         Get the number of items in the store (after removing expired entries).
 
-        Returns:
-            int: Number of items
+        Returns
+        -------
+        int
+            Number of items
+
         """
         self.cleanup_expired()
         return len(self.store)

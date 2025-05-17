@@ -7,6 +7,7 @@ This module implements the storage for content provider records in the Kademlia 
 import logging
 import time
 from typing import (
+    Any,
     Optional,
 )
 
@@ -16,6 +17,9 @@ from multiaddr import (
 
 from libp2p.abc import (
     IHost,
+)
+from libp2p.custom_types import (
+    TProtocol,
 )
 from libp2p.peer.id import (
     ID,
@@ -45,15 +49,19 @@ class ProviderRecord:
     """
 
     def __init__(
-        self, peer_id: ID, addresses: Optional[list] = None, timestamp: float = None
-    ):
+        self,
+        peer_id: ID,
+        addresses: Optional[list[Multiaddr]] = None,
+        timestamp: Optional[float] = None,
+    ) -> None:
         """
         Initialize a new provider record.
 
-        Args:
-            peer_id: The ID of the provider peer
-            addresses: Optional network addresses of the provider peer
-            timestamp: Time this record was created/updated (defaults to current time)
+        :param peer_id: The ID of the provider peer
+        :param addresses: Optional network addresses of the provider peer
+        :param timestamp: Time this record was created/updated
+                          (defaults to current time)
+
         """
         self.peer_id = peer_id
         self.addresses = addresses or []
@@ -68,12 +76,12 @@ class ProviderStore:
     Maps content keys to provider records, with support for expiration.
     """
 
-    def __init__(self, host: IHost = None, peer_routing=None):
-        """Initialize a new provider store.
+    def __init__(self, host: IHost = None, peer_routing: Any = None) -> None:
+        """
+        Initialize a new provider store.
 
-        Args:
-            host: The libp2p host instance (optional)
-            peer_routing: The peer routing instance (optional)
+        :param host: The libp2p host instance (optional)
+        :param peer_routing: The peer routing instance (optional)
         """
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: dict[bytes, dict[str, ProviderRecord]] = {}
@@ -94,11 +102,13 @@ class ProviderStore:
 
         Finds the k closest peers to the key and sends them ADD_PROVIDER messages.
 
-        Args:
-            key: The content key (multihash) to advertise
+        :param key: The content key (multihash) to advertise
 
-        Returns:
-            bool: True if the advertisement was successful
+        Returns
+        -------
+        bool
+            True if the advertisement was successful
+
         """
         if not self.host or not self.peer_routing:
             logger.error("Host or peer_routing not initialized, cannot provide content")
@@ -118,7 +128,9 @@ class ProviderStore:
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
         logger.info(
-            f"Found {len(closest_peers)} peers close to key {key.hex()} for provider advertisement"
+            "Found %d peers close to key %s for provider advertisement",
+            len(closest_peers),
+            key.hex(),
         )
 
         # Send ADD_PROVIDER messages to these peers
@@ -140,16 +152,18 @@ class ProviderStore:
         """
         Send ADD_PROVIDER message to a specific peer.
 
-        Args:
-            peer_id: The peer to send the message to
-            key: The content key being provided
+        :param peer_id: The peer to send the message to
+        :param key: The content key being provided
 
-        Returns:
-            bool: True if the message was successfully sent and acknowledged
+        Returns
+        -------
+        bool
+            True if the message was successfully sent and acknowledged
+
         """
         try:
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
 
             try:
                 # Get our addresses to include in the message
@@ -202,12 +216,14 @@ class ProviderStore:
         """
         Find content providers for a given key.
 
-        Args:
-            key: The content key to look for
-            count: Maximum number of providers to return
+        :param key: The content key to look for
+        :param count: Maximum number of providers to return
 
-        Returns:
-            List[PeerInfo]: List of content providers
+        Returns
+        -------
+        List[PeerInfo]
+            List of content providers
+
         """
         if not self.host or not self.peer_routing:
             logger.error("Host or peer_routing not initialized, cannot find providers")
@@ -256,16 +272,18 @@ class ProviderStore:
         """
         Get content providers from a specific peer.
 
-        Args:
-            peer_id: The peer to query
-            key: The content key to look for
+        :param peer_id: The peer to query
+        :param key: The content key to look for
 
-        Returns:
-            List[PeerInfo]: List of provider information
+        Returns
+        -------
+        List[PeerInfo]
+            List of provider information
+
         """
         try:
             # Open a stream to the peer
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
 
             try:
                 # Create the GET_PROVIDERS message
@@ -322,7 +340,7 @@ class ProviderStore:
                         for addr_bytes in provider_proto.addrs:
                             try:
                                 addrs.append(Multiaddr(addr_bytes))
-                            except:
+                            except Exception:
                                 pass  # Skip invalid addresses
 
                         # Create PeerInfo and add to result
@@ -343,9 +361,13 @@ class ProviderStore:
         """
         Add a provider for a given content key.
 
-        Args:
-            key: The content key
-            provider: The provider's peer information
+        :param key: The content key
+        :param provider: The provider's peer information
+
+        Returns
+        -------
+        None
+
         """
         # Initialize providers for this key if needed
         if key not in self.providers:
@@ -362,11 +384,13 @@ class ProviderStore:
         """
         Get all providers for a given content key.
 
-        Args:
-            key: The content key
+        :param key: The content key
 
-        Returns:
-            List[PeerInfo]: List of providers for the key
+        Returns
+        -------
+        List[PeerInfo]
+            List of providers for the key
+
         """
         if key not in self.providers:
             return []
@@ -435,11 +459,13 @@ class ProviderStore:
         """
         Get all content keys provided by a specific peer.
 
-        Args:
-            peer_id: The peer ID to look for
+        :param peer_id: The peer ID to look for
 
-        Returns:
-            List[bytes]: List of content keys provided by the peer
+        Returns
+        -------
+        List[bytes]
+            List of content keys provided by the peer
+
         """
         peer_id_str = str(peer_id)
         result = []
@@ -454,7 +480,10 @@ class ProviderStore:
         """
         Get the number of content keys in the provider store.
 
-        Returns:
-            int: Number of content keys
+        Returns
+        -------
+        int
+            Number of content keys
+
         """
         return len(self.providers)
