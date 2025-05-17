@@ -375,14 +375,14 @@ class PeerRouting(IPeerRouting):
         """
         try:
             # Read message length
-            length_bytes = await stream.read_exac(4)
+            length_bytes = await stream.read(4)
             if not length_bytes:
                 return
 
             message_length = int.from_bytes(length_bytes, byteorder="big")
 
             # Read message
-            message_bytes = await stream.read_exactly(message_length)
+            message_bytes = await stream.read(message_length)
             if not message_bytes:
                 return
 
@@ -423,7 +423,6 @@ class PeerRouting(IPeerRouting):
                     response_bytes = response.SerializeToString()
                     await stream.write(len(response_bytes).to_bytes(4, byteorder="big"))
                     await stream.write(response_bytes)
-                    await stream.flush()
 
             except Exception as parse_err:
                 logger.error(f"Failed to parse protocol buffer message: {parse_err}")

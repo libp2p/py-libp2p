@@ -5,12 +5,10 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
-import json
 import logging
 import time
 from typing import (
     Optional,
-    Union,
 )
 
 from multiaddr import (
@@ -149,7 +147,7 @@ class KadDHT(Service):
         try:
             # Read 4 bytes for the length prefix
             length_prefix = await stream.read(4)
-            logger.info(f"Read length prefix1: {length_prefix}")
+            logger.info(f"Read length prefix1: {length_prefix.decode()}")
             if len(length_prefix) < 4:
                 logger.error("Failed to read length prefix from stream")
                 await stream.close()
@@ -179,7 +177,7 @@ class KadDHT(Service):
                     target_key = message.key
 
                     # Find closest peers to the target key
-                    closest_peers = self.routing_table.find_closest_peers(
+                    closest_peers = self.routing_table.find_local_closest_peers(
                         target_key, 20
                     )
                     logger.info(f"Found {len(closest_peers)} peers close to target")
@@ -295,7 +293,9 @@ class KadDHT(Service):
 
                     # Also include closest peers if we don't have providers
                     if not providers:
-                        closest_peers = self.routing_table.find_closest_peers(key, 20)
+                        closest_peers = self.routing_table.find_local_closest_peers(
+                            key, 20
+                        )
                         logger.info(
                             "No providers found, including %d closest peers",
                             len(closest_peers),
@@ -331,7 +331,9 @@ class KadDHT(Service):
                     logger.info(f"Received GET_VALUE request for key {key.hex()}")
 
                     value = self.value_store.get(key)
-                    logger.info(f"Retrieved value for key {key.hex()}: {value}")
+                    logger.info(
+                        f"Retrieved value for key {key.decode()}: {value.decode()}"
+                    )
 
                     if value:
                         # Create response using protobuf
@@ -378,95 +380,6 @@ class KadDHT(Service):
                     f"Failed to parse as protobuf, trying legacy JSON: {proto_err}"
                 )
 
-                # Fall back to JSON parsing for backward compatibility
-                try:
-                    message = json.loads(msg_bytes.decode())
-                    logger.info(
-                        f"Received legacy JSON DHT message from {peer_id}: {message}"
-                    )
-
-                    # Handle JSON messages (legacy code)
-                    if message.get("type") == "FIND_NODE":
-                        # Handle FIND_NODE message
-                        target = message.get("target")
-                        if target:
-                            # Convert hex target to bytes
-                            target_key = bytes.fromhex(target)
-                            # Find closest peers to the target key
-                            closest_peers = self.routing_table.find_closest_peers(
-                                target_key, 20
-                            )
-
-                            # Format response with peer information
-                            peer_data = []
-                            for peer in closest_peers:
-                                # Skip if the peer is the requester
-                                if peer == peer_id:
-                                    continue
-
-                                peer_info = {"id": peer.to_bytes().hex()}
-
-                                # Add addresses if available
-                                try:
-                                    addrs = self.host.get_peerstore().addrs(peer)
-                                    if addrs:
-                                        peer_info["addrs"] = [
-                                            str(addr) for addr in addrs
-                                        ]
-                                except Exception:
-                                    pass
-
-                                peer_data.append(peer_info)
-
-                            # Create and send response
-                            response = {
-                                "type": "FIND_NODE_RESPONSE",
-                                "peers": peer_data,
-                            }
-                            response_bytes = json.dumps(response).encode()
-                            await stream.write(len(response_bytes).to_bytes(4, "big"))
-                            await stream.write(response_bytes)
-                            logger.info(
-                                "Sent JSON response with %d peers to %s",
-                                len(peer_data),
-                                peer_id,
-                            )
-
-                    elif message.get("type") == "GET_VALUE":
-                        # Handle GET_VALUE message (legacy)
-                        key = message.get("key")
-                        logger.info(f"Received legacy GET_VALUE request for key {key}")
-                        if key:
-                            value = self.value_store.get(key.encode())
-                            logger.info(f"Retrieved value for key {key}: {value}")
-                            if value:
-                                response = {
-                                    "type": "VALUE",
-                                    "key": key,
-                                    "value": value.decode(),
-                                }
-                                response_bytes = json.dumps(response).encode()
-                                # Send length prefix SEPARATELY from data
-                                await stream.write(
-                                    len(response_bytes).to_bytes(4, "big")
-                                )
-                                await stream.write(response_bytes)
-                                logger.info(f"Sent legacy value response for key {key}")
-
-                    elif message.get("type") == "PUT_VALUE":
-                        # Handle PUT_VALUE message (legacy)
-                        key = message.get("key")
-                        value = message.get("value")
-                        if key and value:
-                            self.value_store.put(key.encode(), value.encode())
-                            logger.info(f"Stored legacy value for key {key}")
-                        else:
-                            logger.error("Invalid PUT_VALUE message format")
-                except Exception as json_err:
-                    logger.error(
-                        f"Failed to parse message as protobuf or JSON: {json_err}"
-                    )
-
             await stream.close()
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
@@ -495,7 +408,7 @@ class KadDHT(Service):
         """
         return await self.peer_routing.find_peer(peer_id)
 
-    async def put_value(self, key: Union[str, bytes], value: bytes) -> None:
+    async def put_value(self, key: bytes, value: bytes) -> None:
         """
         Store a value in the DHT.
 
@@ -509,11 +422,8 @@ class KadDHT(Service):
         None
 
         """
-        # Check key type and convert if needed
-        key_bytes = key if isinstance(key, bytes) else key.encode()
-
         # 1. Find peers closest to the key
-        closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
+        closest_peers = await self.peer_routing.find_closest_peers_network(key)
         logger.info(
             "Closest peers for key for storing %s: %s",
             key,
@@ -522,13 +432,13 @@ class KadDHT(Service):
 
         # 2. Store locally and at those peers
         self.value_store.put(key, value)
-        logger.info(f"Stored value for key {key} locally1")
+        logger.info(f"Stored value for key {key.decode()} locally1")
 
         # 3. Store at remote peers
         for peer in closest_peers:
             await self.value_store._store_at_peer(peer, key, value)
 
-    async def get_value(self, key: str) -> Optional[bytes]:
+    async def get_value(self, key: bytes) -> Optional[bytes]:
         """
         Retrieve a value from the DHT.
 
@@ -542,16 +452,13 @@ class KadDHT(Service):
             The value if found, None otherwise.
 
         """
-        # Check key type and convert if needed
-        key_bytes = key if isinstance(key, bytes) else key.encode()
-
         # 1. Check local store first
-        local_value = self.value_store.get(key_bytes)
+        local_value = self.value_store.get(key)
         if local_value:
             return local_value
 
         # 2. Not found locally, search the network
-        closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
+        closest_peers = await self.peer_routing.find_closest_peers_network(key)
         logger.info(
             "Closest peers for key for retrieving %s: %s",
             key,
@@ -567,8 +474,9 @@ class KadDHT(Service):
             )
             if value:
                 # Store for future use
-                self.value_store.put(key_bytes, value)
+                self.value_store.put(key, value)
                 return value
+        return None
 
     # Add these methods in the Utility methods section
 
