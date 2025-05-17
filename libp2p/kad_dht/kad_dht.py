@@ -160,7 +160,6 @@ class KadDHT(Service):
                 await stream.close()
                 return
 
-            # Try to parse as protobuf first, fall back to JSON if needed
             try:
                 # Parse as protobuf
                 message = Message()
@@ -328,12 +327,10 @@ class KadDHT(Service):
                 elif message.type == Message.MessageType.GET_VALUE:
                     # Process GET_VALUE
                     key = message.key
-                    logger.info(f"Received GET_VALUE request for key {key.hex()}")
+                    logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
                     value = self.value_store.get(key)
-                    logger.info(
-                        f"Retrieved value for key {key.decode()}: {value.decode()}"
-                    )
+                    logger.debug(f"Retrieved value for key {key.hex()}: {value.hex()}")
 
                     if value:
                         # Create response using protobuf
@@ -377,7 +374,7 @@ class KadDHT(Service):
 
             except Exception as proto_err:
                 logger.warning(
-                    f"Failed to parse as protobuf, trying legacy JSON: {proto_err}"
+                    f"Failed to parse as protobuf {proto_err}"
                 )
 
             await stream.close()
@@ -408,6 +405,8 @@ class KadDHT(Service):
         """
         return await self.peer_routing.find_peer(peer_id)
 
+    # Value storage and retrieval methods
+
     async def put_value(self, key: bytes, value: bytes) -> None:
         """
         Store a value in the DHT.
@@ -432,7 +431,7 @@ class KadDHT(Service):
 
         # 2. Store locally and at those peers
         self.value_store.put(key, value)
-        logger.info(f"Stored value for key {key.decode()} locally1")
+        logger.info(f"Stored value for key {key.hex()} locally")
 
         # 3. Store at remote peers
         for peer in closest_peers:

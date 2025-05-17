@@ -4,7 +4,6 @@ Value store implementation for Kademlia DHT.
 Provides a way to store and retrieve key-value pairs with optional expiration.
 """
 
-import json
 import logging
 import time
 from typing import (
@@ -175,11 +174,15 @@ class ValueStore:
         value, validity = self.store[key]
         logger.info(
             "Found value for key %s... with validity %s",
-            key.hex()[:8],
+            key.hex(),
             validity,
         )
         # Check if the value has expired
         if validity < time.time():
+            logger.debug(
+                "Value for key %s... has expired, removing it",
+                key.hex()[:8],
+            )
             self.remove(key)
             return None
 
@@ -205,7 +208,7 @@ class ValueStore:
             if peer_id == self.local_peer_id:
                 return None
 
-            logger.info(f"Getting value for key {key.decode()} from peer {peer_id}")
+            logger.info(f"Getting value for key {key.hex()} from peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
@@ -267,29 +270,12 @@ class ValueStore:
                     and response.record.value
                 ):
                     logger.debug(
-                        f"Received value for key {key.decode()} from peer {peer_id}"
+                        f"Received value for key {key.hex()} from peer {peer_id}"
                     )
                     return response.record.value
 
             except Exception as proto_err:
-                # Fall back to JSON for backward compatibility
-                logger.warning(f"Failed to parse as protobuf, trying JSON: {proto_err}")
-                try:
-                    json_response = json.loads(response_bytes.decode())
-                    if (
-                        json_response.get("type") == "VALUE"
-                        and "value" in json_response
-                    ):
-                        value = json_response["value"]
-                        if isinstance(value, str):
-                            value = value.encode()
-                        logger.debug(
-                            f"Received JSON value for key {key.decode()}"
-                            " from peer {peer_id}"
-                        )
-                        return value
-                except Exception as json_err:
-                    logger.error(f"Failed to parse as JSON too: {json_err}")
+                logger.warning(f"Failed to parse as protobuf: {proto_err}")
 
             return None
 

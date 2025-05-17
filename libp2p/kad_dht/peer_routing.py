@@ -10,7 +10,6 @@ from typing import (
     Optional,
 )
 
-# Remove json import and add protobuf imports
 from libp2p.abc import (
     IHost,
     INetStream,
@@ -295,68 +294,6 @@ class PeerRouting(IPeerRouting):
             # Ensure stream is closed even if an exception occurs
             if stream:
                 await stream.close()
-
-    async def find_closest_peers(self, peer_id: ID, count: int = 20) -> list[ID]:
-        """
-        Find the closest peers to a given peer ID.
-
-        Args:
-        ----
-            peer_id: The target peer ID
-            count: Maximum number of peers to return
-
-        Returns
-        -------
-        List[ID]
-            List of closest peer IDs
-
-        """
-        target_key = peer_id.to_bytes()
-
-        # Get initial set of peers to query from our routing table
-        initial_peers = self.routing_table.find_local_closest_peers(target_key, ALPHA)
-        if not initial_peers:
-            logger.debug("No peers in routing table to start lookup")
-            return []
-
-        # Prepare sets for the algorithm
-        queried_peers: set[ID] = set()
-        pending_peers: set[ID] = set(initial_peers)
-        closest_peers: list[ID] = initial_peers.copy()
-
-        # Kademlia iterative lookup
-        for _ in range(MAX_PEER_LOOKUP_ROUNDS):
-            if not pending_peers:
-                break
-
-            # Select alpha peers to query in this round
-            peers_to_query = list(pending_peers)[:ALPHA]
-            for peer in peers_to_query:
-                pending_peers.remove(peer)
-                queried_peers.add(peer)
-
-            # Query selected peers in parallel
-            new_peers = await self._query_peers_for_closer_peers(
-                peers_to_query, target_key
-            )
-
-            # Update our closest peers list
-            for new_peer in new_peers:
-                if new_peer not in queried_peers and new_peer not in pending_peers:
-                    pending_peers.add(new_peer)
-                    closest_peers.append(new_peer)
-
-            # Keep the closest peers only
-            closest_peers = self.routing_table.find_local_closest_peers(
-                target_key, count
-            )
-
-            # If we haven't found any new closer peers, we can stop
-            if all(peer in queried_peers for peer in closest_peers):
-                break
-
-        logger.debug(f"Found {len(closest_peers)} peers close to {peer_id}")
-        return closest_peers
 
     async def _handle_kad_stream(self, stream: INetStream) -> None:
         """
