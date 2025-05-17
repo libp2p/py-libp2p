@@ -75,7 +75,7 @@ class ValueStore:
         self.store[key] = (value, validity)
         logger.debug(f"Stored value for key {key.hex()[:8]}...")
 
-    async def _store_at_peer(self, peer_id: ID, key: str, value: bytes) -> bool:
+    async def _store_at_peer(self, peer_id: ID, key: bytes, value: bytes) -> bool:
         """
         Store a value at a specific peer.
 
@@ -100,7 +100,7 @@ class ValueStore:
                 logger.error("Host not initialized, cannot store value at peer")
                 return False
 
-            logger.info(f"Storing value for key {key} at peer {peer_id}")
+            logger.info(f"Storing value for key {key.decode()} at peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
@@ -110,12 +110,9 @@ class ValueStore:
             message = Message()
             message.type = Message.MessageType.PUT_VALUE
 
-            # Convert key to bytes if it's a string
-            key_bytes = key if isinstance(key, bytes) else key.encode()
-
             # Set message fields
-            message.key = key_bytes
-            message.record.key = key_bytes
+            message.key = key
+            message.record.key = key
             message.record.value = value
             message.record.timeReceived = str(time.time())
 
@@ -188,9 +185,7 @@ class ValueStore:
 
         return value
 
-    async def _get_from_peer(
-        self, peer_id: ID, key: Optional[str | bytes]
-    ) -> Optional[bytes]:
+    async def _get_from_peer(self, peer_id: ID, key: bytes) -> Optional[bytes]:
         """
         Retrieve a value from a specific peer.
 
@@ -210,7 +205,7 @@ class ValueStore:
             if peer_id == self.local_peer_id:
                 return None
 
-            logger.info(f"Getting value for key {key} from peer {peer_id}")
+            logger.info(f"Getting value for key {key.decode()} from peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
@@ -219,10 +214,7 @@ class ValueStore:
             # Create the GET_VALUE message using protobuf
             message = Message()
             message.type = Message.MessageType.GET_VALUE
-
-            # Convert key to bytes if it's a string
-            key_bytes = key.encode() if isinstance(key, str) else key
-            message.key = key_bytes
+            message.key = key
 
             # Serialize and send the protobuf message
             proto_bytes = message.SerializeToString()
@@ -275,7 +267,7 @@ class ValueStore:
                     and response.record.value
                 ):
                     logger.debug(
-                        f"Received value for key {key_bytes.hex()} from peer {peer_id}"
+                        f"Received value for key {key.decode()} from peer {peer_id}"
                     )
                     return response.record.value
 
@@ -292,7 +284,8 @@ class ValueStore:
                         if isinstance(value, str):
                             value = value.encode()
                         logger.debug(
-                            f"Received JSON value for key {key} from peer {peer_id}"
+                            f"Received JSON value for key {key.decode()}"
+                            " from peer {peer_id}"
                         )
                         return value
                 except Exception as json_err:
