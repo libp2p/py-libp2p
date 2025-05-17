@@ -21,6 +21,9 @@ import trio
 from libp2p.abc import (
     IHost,
 )
+from libp2p.custom_types import (
+    TProtocol,
+)
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -53,7 +56,7 @@ from .value_store import (
 logger = logging.getLogger("libp2p.kademlia.kad_dht")
 
 # Default parameters
-PROTOCOL_ID = "/ipfs/kad/1.0.0"
+PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60  # 1 min in seconds for testing
 TTL = 24 * 60 * 60  # 24 hours in seconds
 
@@ -70,9 +73,9 @@ class KadDHT(Service):
         """
         Initialize a new Kademlia DHT node.
 
-        Args:
-            host: The libp2p host
-            bootstrap_peers: Initial peers to bootstrap the routing table
+        :param host: The libp2p host.
+        :param bootstrap_peers: Initial peers to bootstrap the routing table.
+
         """
         super().__init__()
 
@@ -130,9 +133,14 @@ class KadDHT(Service):
         Handle an incoming stream.
 
         Args:
-            stream: The incoming stream
-        """
+        ----
+        stream: The incoming stream.
 
+        Returns
+        -------
+        None
+
+        """
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
         # Call the async method properly with await
@@ -160,7 +168,8 @@ class KadDHT(Service):
                 message = Message()
                 message.ParseFromString(msg_bytes)
                 logger.info(
-                    f"Received DHT protobuf message from {peer_id}, type: {message.type}"
+                    f"Received DHT protobuf message"
+                    f" from {peer_id}, type: {message.type}"
                 )
                 logger.info("complete message: %s", message)
 
@@ -204,7 +213,8 @@ class KadDHT(Service):
                     await stream.write(len(response_bytes).to_bytes(4, "big"))
                     await stream.write(response_bytes)
                     logger.info(
-                        f"Sent protobuf response with {len(response.closerPeers)} peers to {peer_id}"
+                        f"Sent protobuf response with"
+                        f" {len(response.closerPeers)} peers to {peer_id}"
                     )
 
                 # Handle ADD_PROVIDER message
@@ -220,7 +230,8 @@ class KadDHT(Service):
                             provider_id = ID(provider_proto.id)
                             if provider_id != peer_id:
                                 logger.warning(
-                                    f"Provider ID {provider_id} doesn't match sender {peer_id}, ignoring"
+                                    f"Provider ID {provider_id} doesn't match"
+                                    f" sender {peer_id}, ignoring"
                                 )
                                 continue
 
@@ -261,7 +272,11 @@ class KadDHT(Service):
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
-                    logger.info(f"Found {len(providers)} providers for key {key.hex()}")
+                    logger.info(
+                        "Found %d providers for key %s",
+                        len(providers),
+                        key.hex(),
+                    )
 
                     # Create response
                     response = Message()
@@ -282,7 +297,8 @@ class KadDHT(Service):
                     if not providers:
                         closest_peers = self.routing_table.find_closest_peers(key, 20)
                         logger.info(
-                            f"No providers found, including {len(closest_peers)} closest peers"
+                            "No providers found, including %d closest peers",
+                            len(closest_peers),
                         )
 
                         for peer in closest_peers:
@@ -411,7 +427,9 @@ class KadDHT(Service):
                             await stream.write(len(response_bytes).to_bytes(4, "big"))
                             await stream.write(response_bytes)
                             logger.info(
-                                f"Sent JSON response with {len(peer_data)} peers to {peer_id}"
+                                "Sent JSON response with %d peers to %s",
+                                len(peer_data),
+                                peer_id,
                             )
 
                     elif message.get("type") == "GET_VALUE":
@@ -466,12 +484,15 @@ class KadDHT(Service):
         Find a peer with the given ID.
 
         Args:
-            peer_id: The ID of the peer to find
+        ----
+        peer_id: The ID of the peer to find.
 
-        Returns:
-            Optional[PeerInfo]: The peer information if found, None otherwise
+        Returns
+        -------
+        Optional[PeerInfo]
+            The peer information if found, None otherwise.
+
         """
-
         return await self.peer_routing.find_peer(peer_id)
 
     async def put_value(self, key: Union[str, bytes], value: bytes) -> None:
@@ -479,15 +500,25 @@ class KadDHT(Service):
         Store a value in the DHT.
 
         Args:
-            key: The key to store (string or bytes)
-            value: The value to store
+        ----
+        key: The key to store (string or bytes).
+        value: The value to store.
+
+        Returns
+        -------
+        None
+
         """
         # Check key type and convert if needed
         key_bytes = key if isinstance(key, bytes) else key.encode()
 
         # 1. Find peers closest to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
-        logger.info(f"Closest peers for key for storing {key}: {closest_peers}")
+        logger.info(
+            "Closest peers for key for storing %s: %s",
+            key,
+            closest_peers,
+        )
 
         # 2. Store locally and at those peers
         self.value_store.put(key, value)
@@ -498,8 +529,19 @@ class KadDHT(Service):
             await self.value_store._store_at_peer(peer, key, value)
 
     async def get_value(self, key: str) -> Optional[bytes]:
-        """Retrieve a value from the DHT."""
+        """
+        Retrieve a value from the DHT.
 
+        Args:
+        ----
+        key: The key to retrieve.
+
+        Returns
+        -------
+        Optional[bytes]
+            The value if found, None otherwise.
+
+        """
         # Check key type and convert if needed
         key_bytes = key if isinstance(key, bytes) else key.encode()
 
@@ -510,11 +552,19 @@ class KadDHT(Service):
 
         # 2. Not found locally, search the network
         closest_peers = await self.peer_routing.find_closest_peers_network(key_bytes)
-        logger.info("Closest peers for key for retrieving %s: %s", key, closest_peers)
+        logger.info(
+            "Closest peers for key for retrieving %s: %s",
+            key,
+            closest_peers,
+        )
         # 3. Query those peers
         for peer in closest_peers:
-            value = await self._get_from_peer(peer, key_bytes)
-            logger.info("Found value at peer %s: %s", peer, value)
+            value = await self.value_store._get_from_peer(peer, key)
+            logger.info(
+                "Found value at peer %s: %s",
+                peer,
+                value,
+            )
             if value:
                 # Store for future use
                 self.value_store.put(key_bytes, value)
@@ -529,10 +579,14 @@ class KadDHT(Service):
         Add a peer to the routing table.
 
         Args:
-            peer_id: The peer ID to add
+        ----
+        peer_id: The peer ID to add.
 
-        Returns:
-            bool: True if peer was added or updated, False otherwise
+        Returns
+        -------
+        bool
+            True if peer was added or updated, False otherwise.
+
         """
         return await self.routing_table.add_peer(peer_id)
 
@@ -540,8 +594,11 @@ class KadDHT(Service):
         """
         Get the number of peers in the routing table.
 
-        Returns:
-            int: Number of peers
+        Returns
+        -------
+        int
+            Number of peers.
+
         """
         return self.routing_table.size()
 
@@ -549,30 +606,10 @@ class KadDHT(Service):
         """
         Get the number of items in the value store.
 
-        Returns:
-            int: Number of items
+        Returns
+        -------
+        int
+            Number of items.
+
         """
         return self.value_store.size()
-
-    async def _get_from_peer(self, peer_id: ID, key: bytes) -> Optional[bytes]:
-        """
-        Get a value from a specific peer.
-
-        Args:
-            peer_id: The ID of the peer to get the value from
-            key: The key to retrieve
-
-        Returns:
-            Optional[bytes]: The value if found, None otherwise
-        """
-        try:
-            # Don't try to get from ourselves
-            if peer_id == self.local_peer_id:
-                return None
-
-            # Delegate to the value store's method
-            return await self.value_store._get_from_peer(peer_id, key)
-
-        except Exception as e:
-            logger.warning(f"Failed to get value from peer {peer_id}: {e}")
-            return None

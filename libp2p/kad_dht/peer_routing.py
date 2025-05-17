@@ -13,7 +13,11 @@ from typing import (
 # Remove json import and add protobuf imports
 from libp2p.abc import (
     IHost,
+    INetStream,
     IPeerRouting,
+)
+from libp2p.custom_types import (
+    TProtocol,
 )
 from libp2p.peer.id import (
     ID,
@@ -51,13 +55,13 @@ class PeerRouting(IPeerRouting):
         """
         Initialize the peer routing service.
 
-        Args:
-            host: The libp2p host
-            routing_table: The Kademlia routing table
+        :param host: The libp2p host
+        :param routing_table: The Kademlia routing table
+
         """
         self.host = host
         self.routing_table = routing_table
-        self.protocol_id = "/ipfs/kad/1.0.0"
+        self.protocol_id = TProtocol("/ipfs/kad/1.0.0")
         # Register protocol handler for incoming requests
         self.host.set_stream_handler(self.protocol_id, self._handle_kad_stream)
 
@@ -66,10 +70,14 @@ class PeerRouting(IPeerRouting):
         Find a peer with the given ID.
 
         Args:
+        ----
             peer_id: The ID of the peer to find
 
-        Returns:
-            Optional[PeerInfo]: The peer information if found, None otherwise
+        Returns
+        -------
+        Optional[PeerInfo]
+            The peer information if found, None otherwise
+
         """
         # Check if this is actually our peer ID
         if peer_id == self.host.get_id():
@@ -124,9 +132,15 @@ class PeerRouting(IPeerRouting):
         Find the closest peers to a target key in the entire network.
 
         Performs an iterative lookup by querying peers for their closest peers.
+
+        Returns
+        -------
+        list[ID]
+            Closest peer IDs
+
         """
         # Start with closest peers from our routing table
-        closest_peers = self.routing_table.find_closest_peers(target_key, count)
+        closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
         logger.info("local closest peers are %s", closest_peers)
         queried_peers = set()
 
@@ -144,7 +158,9 @@ class PeerRouting(IPeerRouting):
                 try:
                     peer_results = await self._query_peer_for_closest(peer, target_key)
                     logger.info(
-                        f"Queried peer {peer} for closest peers, got {len(peer_results)} results"
+                        "Queried peer %s for closest peers, got %d results",
+                        peer,
+                        len(peer_results),
                     )
                     new_peers.extend(peer_results)
                 except Exception:
@@ -168,11 +184,15 @@ class PeerRouting(IPeerRouting):
         Query a peer for their closest peers to the target key.
 
         Args:
+        ----
             peer: The peer to query
             target_key: The target key to find closest peers for
 
-        Returns:
-            List[ID]: List of peer IDs that are closest to the target key
+        Returns
+        -------
+        List[ID]
+            List of peer IDs that are closest to the target key
+
         """
         stream = None
         results = []
@@ -243,7 +263,9 @@ class PeerRouting(IPeerRouting):
             response_msg = Message()
             response_msg.ParseFromString(response_bytes)
             logger.info(
-                f"Received response from {peer} with {len(response_msg.closerPeers)} peers"
+                "Received response from %s with %d peers",
+                peer,
+                len(response_msg.closerPeers),
             )
 
             # Process closest peers from response
@@ -281,16 +303,20 @@ class PeerRouting(IPeerRouting):
         Find the closest peers to a given peer ID.
 
         Args:
+        ----
             peer_id: The target peer ID
             count: Maximum number of peers to return
 
-        Returns:
-            List[ID]: List of closest peer IDs
+        Returns
+        -------
+        List[ID]
+            List of closest peer IDs
+
         """
         target_key = peer_id.to_bytes()
 
         # Get initial set of peers to query from our routing table
-        initial_peers = self.routing_table.find_closest_peers(target_key, ALPHA)
+        initial_peers = self.routing_table.find_local_closest_peers(target_key, ALPHA)
         if not initial_peers:
             logger.debug("No peers in routing table to start lookup")
             return []
@@ -323,7 +349,9 @@ class PeerRouting(IPeerRouting):
                     closest_peers.append(new_peer)
 
             # Keep the closest peers only
-            closest_peers = self.routing_table.find_closest_peers(target_key, count)
+            closest_peers = self.routing_table.find_local_closest_peers(
+                target_key, count
+            )
 
             # If we haven't found any new closer peers, we can stop
             if all(peer in queried_peers for peer in closest_peers):
@@ -332,16 +360,22 @@ class PeerRouting(IPeerRouting):
         logger.debug(f"Found {len(closest_peers)} peers close to {peer_id}")
         return closest_peers
 
-    async def _handle_kad_stream(self, stream):
+    async def _handle_kad_stream(self, stream: INetStream) -> None:
         """
         Handle incoming Kademlia protocol streams.
 
         Args:
+        ----
             stream: The incoming stream
+
+        Returns
+        -------
+        None
+
         """
         try:
             # Read message length
-            length_bytes = await stream.read_exactly(4)
+            length_bytes = await stream.read_exac(4)
             if not length_bytes:
                 return
 
@@ -362,7 +396,7 @@ class PeerRouting(IPeerRouting):
                     target_key = kad_message.key
 
                     # Find closest peers to target
-                    closest_peers = self.routing_table.find_closest_peers(
+                    closest_peers = self.routing_table.find_local_closest_peers(
                         target_key, 20
                     )
 
@@ -404,7 +438,13 @@ class PeerRouting(IPeerRouting):
         Bootstrap the routing table with a list of known peers.
 
         Args:
+        ----
             bootstrap_peers: List of known peers to start with
+
+        Returns
+        -------
+        None
+
         """
         logger.info(f"Bootstrapping with {len(bootstrap_peers)} peers")
 
@@ -421,7 +461,14 @@ class PeerRouting(IPeerRouting):
             await self.refresh_routing_table()
 
     async def refresh_routing_table(self) -> None:
-        """Refresh the routing table by performing lookups for random keys."""
+        """
+        Refresh the routing table by performing lookups for random keys.
+
+        Returns
+        -------
+        None
+
+        """
         logger.info("Refreshing routing table")
 
         # Perform a lookup for ourselves to populate the routing table
