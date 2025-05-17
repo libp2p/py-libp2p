@@ -164,7 +164,6 @@ async def run_provider_node(
                 logger.info("Looking up key: %s", base58.b58encode(val_key).decode())
                 val_data = await dht.get_value(val_key)
                 if val_data:
-                    logger.info(f"Retrieved value: ")
                     try:
                         logger.info(f"Retrieved value: {val_data.hex()}")
                     except UnicodeDecodeError:
@@ -178,7 +177,8 @@ async def run_provider_node(
                 # logger.info(f"Generated content with ID: {content_key.hex()}")
 
                 # # Advertise that we can provide this content
-                # logger.info(f"Advertising as provider for content: {content_key.hex()}")
+                # logger.info("Advertising as provider for content:"
+                #             f" {content_key.hex()}")
                 # success = await dht.provide(content_key)
                 # if success:
                 #     logger.info("Successfully advertised as content provider")
@@ -192,8 +192,7 @@ async def run_provider_node(
                 # logger.info("Looking for providers of content: %s", content_key)
                 # # Convert hex content ID to bytes
                 # content_key = bytes.fromhex(content_key)
-                # logger.info("Looking for providers of content1: %s", content_key.hex())
-                # # bytes to string
+                # bytes to string
                 # content_key = content_key.decode()
                 # logger.info("decoded content key is: %s", content_key)
                 # providers = await dht.find_providers(content_key)
@@ -227,9 +226,9 @@ async def run_provider_node(
                         "Peer store size: %s", dht.host.get_peerstore().peer_ids()
                     )
                     logger.info("Value store contains: %s", dht.value_store.store)
-                    # logger.info(
-                    #     "Provider store contains: %s", str(dht.provider_store.providers)
-                    # )
+                    logger.info(
+                        "Provider store contains: %s", str(dht.provider_store.providers)
+                    )
                     # logger.info(
                     #     "Provider store size: %s", str(dht.provider_store.size())
                     # )

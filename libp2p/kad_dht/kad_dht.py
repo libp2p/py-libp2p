@@ -373,9 +373,7 @@ class KadDHT(Service):
                         logger.error("Invalid PUT_VALUE message format")
 
             except Exception as proto_err:
-                logger.warning(
-                    f"Failed to parse as protobuf {proto_err}"
-                )
+                logger.warning(f"Failed to parse as protobuf {proto_err}")
 
             await stream.close()
         except Exception as e:
