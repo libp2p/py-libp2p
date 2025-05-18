@@ -22,6 +22,7 @@ The Python implementation of the libp2p networking stack
 
     Examples <examples>
     API <libp2p>
+    Kademlia DHT <libp2p.kad_dht>
 
 .. toctree::
     :maxdepth: 1
