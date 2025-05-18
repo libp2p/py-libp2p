@@ -581,8 +581,12 @@ class PubsubFactory(factory.Factory):
                 degree_low=degree_low,
                 degree_high=degree_high,
                 direct_peers=direct_peers,
+                time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
+                heartbeat_initial_delay=heartbeat_initial_delay,
+                direct_connect_initial_delay=direct_connect_init_delay,
+                direct_connect_interval=direct_connect_interval,
             )
 
         async with cls._create_batch_with_router(
