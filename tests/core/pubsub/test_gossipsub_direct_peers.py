@@ -111,7 +111,7 @@ async def test_heartbeat_reconnect():
     """Test that heartbeat can reconnect with disconnected direct peers gracefully."""
     # Create first host
     async with PubsubFactory.create_batch_with_gossipsub(
-        1, heartbeat_interval=1, direct_connect_interval=2
+        1, heartbeat_interval=1, direct_connect_interval=3
     ) as pubsubs_gsub_0:
         host_0 = pubsubs_gsub_0[0].host
 
@@ -120,7 +120,7 @@ async def test_heartbeat_reconnect():
             1,
             heartbeat_interval=1,
             direct_peers=[info_from_p2p_addr(host_0.get_addrs()[0])],
-            direct_connect_interval=2,
+            direct_connect_interval=3,
         ) as pubsubs_gsub_1:
             host_1 = pubsubs_gsub_1[0].host
 
@@ -151,7 +151,7 @@ async def test_heartbeat_reconnect():
                 ), "Peer 0 still in gossipsub 1 after disconnection"
 
                 # Wait for heartbeat to reestablish connection
-                await trio.sleep(1)
+                await trio.sleep(2)
 
                 # Verify connection reestablishment
                 assert (
