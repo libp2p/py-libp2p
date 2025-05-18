@@ -1,3 +1,8 @@
+from typing import (
+    Any,
+)
+
+
 class BaseLibp2pError(Exception):
     pass
 
@@ -13,4 +18,11 @@ class ParseError(BaseLibp2pError):
 class MultiError(BaseLibp2pError):
     """Raised with multiple exceptions."""
 
-    # todo: find some way for this to fancy-print all encapsulated errors
+    def __init__(self, errors: list[Any]) -> None:
+        super().__init__(errors)
+        self.errors = errors  # Storing list of errors
+
+    def __str__(self) -> str:
+        return "\n".join(
+            f"Error {i + 1}: {error}" for i, error in enumerate(self.errors)
+        )
