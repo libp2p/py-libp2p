@@ -97,7 +97,7 @@ async def run_test(
 
             handshake_plus_ping = (time.perf_counter() - handshake_start) * 1000.0
 
-            logger.info(f"handshake time: {handshake_plus_ping}")
+            logger.info(f"handshake time: {handshake_plus_ping:.2f}ms")
             return
 
         await trio.sleep_forever()
