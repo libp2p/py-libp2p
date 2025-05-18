@@ -51,6 +51,62 @@ async def test_attach_peer_records():
 
 
 @pytest.mark.trio
+async def test_reject_graft():
+    """Test that graft requests are rejected if the sender is a direct peer."""
+    # Create first host
+    async with PubsubFactory.create_batch_with_gossipsub(
+        1, heartbeat_interval=1, direct_connect_interval=2
+    ) as pubsubs_gsub_0:
+        host_0 = pubsubs_gsub_0[0].host
+
+        # Create second host with first host as direct peer
+        async with PubsubFactory.create_batch_with_gossipsub(
+            1,
+            heartbeat_interval=1,
+            direct_peers=[info_from_p2p_addr(host_0.get_addrs()[0])],
+            direct_connect_interval=2,
+        ) as pubsubs_gsub_1:
+            host_1 = pubsubs_gsub_1[0].host
+
+            try:
+                # Connect the hosts
+                await connect(host_0, host_1)
+
+                # Wait 2 seconds for heartbeat to allow mesh to connect
+                await trio.sleep(1)
+
+                topic = "test_reject_graft"
+
+                # Gossipsub 0 joins topic
+                await pubsubs_gsub_0[0].router.join(topic)
+
+                # Pre-Graft assertions
+                assert (
+                    topic in pubsubs_gsub_0[0].router.mesh
+                ), "topic not in mesh for gossipsub 0"
+                assert (
+                    topic not in pubsubs_gsub_1[0].router.mesh
+                ), "topic in mesh for gossipsub 1"
+
+                # Gossipsub 1 emits a graft request to Gossipsub 0
+                await pubsubs_gsub_1[0].router.emit_graft(topic, host_0.get_id())
+
+                await trio.sleep(1)
+
+                # Post-Graft assertions
+                assert (
+                    topic in pubsubs_gsub_0[0].router.mesh
+                ), "topic not in mesh for gossipsub 0"
+                assert (
+                    topic not in pubsubs_gsub_1[0].router.mesh
+                ), "topic in mesh for gossipsub 1"
+
+            except Exception as e:
+                print(f"Test failed with error: {e}")
+                raise
+
+
+@pytest.mark.trio
 async def test_heartbeat_reconnect():
     """Test that heartbeat can reconnect with disconnected direct peers gracefully."""
     # Create first host
