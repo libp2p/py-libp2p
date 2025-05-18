@@ -181,7 +181,7 @@ class PeerRouting(IPeerRouting):
         Query a peer for their closest peers to the target key.
 
         Args:
-        ----
+        -----
             peer: The peer to query
             target_key: The target key to find closest peers for
 
@@ -300,7 +300,7 @@ class PeerRouting(IPeerRouting):
         Handle incoming Kademlia protocol streams.
 
         Args:
-        ----
+        -----
             stream: The incoming stream
 
         Returns
@@ -372,7 +372,7 @@ class PeerRouting(IPeerRouting):
         Bootstrap the routing table with a list of known peers.
 
         Args:
-        ----
+        -----
             bootstrap_peers: List of known peers to start with
 
         Returns

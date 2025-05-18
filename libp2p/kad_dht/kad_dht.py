@@ -131,7 +131,7 @@ class KadDHT(Service):
         Handle an incoming stream.
 
         Args:
-        ----
+        -----
         stream: The incoming stream.
 
         Returns
@@ -392,7 +392,7 @@ class KadDHT(Service):
         Find a peer with the given ID.
 
         Args:
-        ----
+        -----
         peer_id: The ID of the peer to find.
 
         Returns
@@ -410,7 +410,7 @@ class KadDHT(Service):
         Store a value in the DHT.
 
         Args:
-        ----
+        -----
         key: The key to store (string or bytes).
         value: The value to store.
 
@@ -440,7 +440,7 @@ class KadDHT(Service):
         Retrieve a value from the DHT.
 
         Args:
-        ----
+        -----
         key: The key to retrieve.
 
         Returns
@@ -484,7 +484,7 @@ class KadDHT(Service):
         Add a peer to the routing table.
 
         Args:
-        ----
+        -----
         peer_id: The peer ID to add.
 
         Returns
