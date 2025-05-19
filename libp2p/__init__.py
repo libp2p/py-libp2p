@@ -2,8 +2,7 @@ from collections.abc import (
     Mapping,
 )
 from importlib.metadata import version as __version
-import logging
-import os
+
 from typing import (
     Literal,
     Optional,
