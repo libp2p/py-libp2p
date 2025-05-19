@@ -11,6 +11,9 @@ import trio
 from libp2p.exceptions import (
     ValidationError,
 )
+from libp2p.network.stream.exceptions import (
+    StreamEOF,
+)
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -354,6 +357,11 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
                 await wait_for_event_occurring(events.push_msg)
             with pytest.raises(trio.TooSlowError):
                 await wait_for_event_occurring(events.handle_subscription)
+        # After all messages, close the write end to signal EOF
+        await stream_pair[1].close()
+        # Now reading should raise StreamEOF
+        with pytest.raises(StreamEOF):
+            await stream_pair[0].read(1)
 
 
 # TODO: Add the following tests after they are aligned with Go.

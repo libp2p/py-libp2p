@@ -26,6 +26,9 @@ from libp2p.abc import (
     IMuxedStream,
     ISecureConn,
 )
+from libp2p.io.exceptions import (
+    IncompleteReadError,
+)
 from libp2p.network.connection.exceptions import (
     RawConnError,
 )
@@ -159,8 +162,14 @@ class YamuxStream(IMuxedStream):
                     logging.debug(f"Stream {self.stream_id}: Connection shutting down")
                     raise MuxedStreamEOF("Connection shut down")
                 if self.closed:
-                    logging.debug(f"Stream {self.stream_id}: Stream is closed")
-                    raise MuxedStreamReset("Stream is reset or closed")
+                    if self.reset_received:
+                        logging.debug(f"Stream {self.stream_id}: Stream was reset")
+                        raise MuxedStreamReset("Stream was reset")
+                    else:
+                        logging.debug(
+                            f"Stream {self.stream_id}: Stream closed cleanly (EOF)"
+                        )
+                        raise MuxedStreamEOF("Stream closed cleanly (EOF)")
                 buffer = self.conn.stream_buffers.get(self.stream_id)
                 if buffer is None:
                     logging.debug(
@@ -588,10 +597,31 @@ class Yamux(IMuxedConn):
                                 )
                                 stream.send_window += increment
             except Exception as e:
-                logging.error(
-                    f"Error in handle_incoming for peer"
-                    f"{self.peer_id}: {type(e).__name__}: {str(e)}"
-                )
+                # Special handling for expected IncompleteReadError on stream close
+                if isinstance(e, IncompleteReadError):
+                    details = getattr(e, "args", [{}])[0]
+                    if (
+                        isinstance(details, dict)
+                        and details.get("requested_count") == 2
+                        and details.get("received_count") == 0
+                    ):
+                        logging.info(
+                            f"Stream closed cleanly for peer {self.peer_id}"
+                            + f" (IncompleteReadError: {details})"
+                        )
+                        self.event_shutting_down.set()
+                        await self._cleanup_on_error()
+                        break
+                    else:
+                        logging.error(
+                            f"Error in handle_incoming for peer {self.peer_id}: "
+                            + f"{type(e).__name__}: {str(e)}"
+                        )
+                else:
+                    logging.error(
+                        f"Error in handle_incoming for peer {self.peer_id}: "
+                        + f"{type(e).__name__}: {str(e)}"
+                    )
                 # Don't crash the whole connection for temporary errors
                 if self.event_shutting_down.is_set() or isinstance(
                     e, (RawConnError, OSError)
@@ -611,9 +641,9 @@ class Yamux(IMuxedConn):
                 stream.closed = True
                 stream.send_closed = True
                 stream.recv_closed = True
-                # Do not set reset_received to
-                # avoid interfering with buffered data reads
-
+                # Set the event so any waiters are woken up
+                if stream.stream_id in self.stream_events:
+                    self.stream_events[stream.stream_id].set()
             # Clear buffers and events
             self.stream_buffers.clear()
             self.stream_events.clear()
