@@ -77,29 +77,36 @@ async def test_reject_graft():
 
                 topic = "test_reject_graft"
 
-                # Gossipsub 0 joins topic
+                # Gossipsub 0 and 1 joins topic
                 await pubsubs_gsub_0[0].router.join(topic)
+                await pubsubs_gsub_1[0].router.join(topic)
 
                 # Pre-Graft assertions
                 assert (
                     topic in pubsubs_gsub_0[0].router.mesh
                 ), "topic not in mesh for gossipsub 0"
                 assert (
-                    topic not in pubsubs_gsub_1[0].router.mesh
-                ), "topic in mesh for gossipsub 1"
+                    topic in pubsubs_gsub_1[0].router.mesh
+                ), "topic not in mesh for gossipsub 1"
+                assert (
+                    host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic]
+                ), "gossipsub 1 in mesh topic for gossipsub 0"
+                assert (
+                    host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic]
+                ), "gossipsub 0 in mesh topic for gossipsub 1"
 
                 # Gossipsub 1 emits a graft request to Gossipsub 0
-                await pubsubs_gsub_1[0].router.emit_graft(topic, host_0.get_id())
+                await pubsubs_gsub_0[0].router.emit_graft(topic, host_1.get_id())
 
                 await trio.sleep(1)
 
                 # Post-Graft assertions
                 assert (
-                    topic in pubsubs_gsub_0[0].router.mesh
-                ), "topic not in mesh for gossipsub 0"
+                    host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic]
+                ), "gossipsub 1 in mesh topic for gossipsub 0"
                 assert (
-                    topic not in pubsubs_gsub_1[0].router.mesh
-                ), "topic in mesh for gossipsub 1"
+                    host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic]
+                ), "gossipsub 0 in mesh topic for gossipsub 1"
 
             except Exception as e:
                 print(f"Test failed with error: {e}")
