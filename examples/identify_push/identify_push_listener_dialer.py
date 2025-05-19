@@ -38,17 +38,17 @@ from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
 from libp2p.identity.identify import (
+    ID as ID_IDENTIFY,
     identify_handler_for,
 )
-from libp2p.identity.identify import ID as ID_IDENTIFY
 from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
 from libp2p.identity.identify_push import (
+    ID_PUSH as ID_IDENTIFY_PUSH,
     identify_push_handler_for,
     push_identify_to_peer,
 )
-from libp2p.identity.identify_push import ID_PUSH as ID_IDENTIFY_PUSH
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )

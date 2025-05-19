@@ -28,33 +28,27 @@ class TaskAPI(Hashable):
     parent: Optional["TaskWithChildrenAPI"]
 
     @abstractmethod
-    async def run(self) -> None:
-        ...
+    async def run(self) -> None: ...
 
     @abstractmethod
-    async def cancel(self) -> None:
-        ...
+    async def cancel(self) -> None: ...
 
     @property
     @abstractmethod
-    def is_done(self) -> bool:
-        ...
+    def is_done(self) -> bool: ...
 
     @abstractmethod
-    async def wait_done(self) -> None:
-        ...
+    async def wait_done(self) -> None: ...
 
 
 class TaskWithChildrenAPI(TaskAPI):
     children: set[TaskAPI]
 
     @abstractmethod
-    def add_child(self, child: TaskAPI) -> None:
-        ...
+    def add_child(self, child: TaskAPI) -> None: ...
 
     @abstractmethod
-    def discard_child(self, child: TaskAPI) -> None:
-        ...
+    def discard_child(self, child: TaskAPI) -> None: ...
 
 
 class ServiceAPI(ABC):

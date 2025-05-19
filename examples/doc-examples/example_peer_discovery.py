@@ -12,8 +12,10 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
 )

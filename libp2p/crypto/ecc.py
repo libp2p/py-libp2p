@@ -9,16 +9,18 @@ from libp2p.crypto.keys import (
 
 if sys.platform != "win32":
     from fastecdsa import (
+        curve as curve_types,
         keys,
         point,
     )
-    from fastecdsa import curve as curve_types
     from fastecdsa.encoding.sec1 import (
         SEC1Encoder,
     )
 else:
-    from coincurve import PrivateKey as CPrivateKey
-    from coincurve import PublicKey as CPublicKey
+    from coincurve import (
+        PrivateKey as CPrivateKey,
+        PublicKey as CPublicKey,
+    )
 
 
 def infer_local_type(curve: str) -> object:

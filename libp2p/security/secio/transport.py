@@ -14,14 +14,10 @@ from libp2p.abc import (
 )
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
-)
-from libp2p.crypto.authenticated_encryption import (
     InvalidMACException,
-)
-from libp2p.crypto.authenticated_encryption import (
+    MacAndCipher as Encrypter,
     initialize_pair as initialize_pair_for_encryption,
 )
-from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import (
     ECCPublicKey,
 )

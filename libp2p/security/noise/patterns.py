@@ -7,8 +7,10 @@ from cryptography.hazmat.primitives import (
     serialization,
 )
 from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
-from noise.connection import Keypair as NoiseKeypairEnum
-from noise.connection import NoiseConnection as NoiseState
+from noise.connection import (
+    Keypair as NoiseKeypairEnum,
+    NoiseConnection as NoiseState,
+)
 
 from libp2p.abc import (
     IRawConnection,
@@ -47,14 +49,12 @@ from .messages import (
 
 class IPattern(ABC):
     @abstractmethod
-    async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
-        ...
+    async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn: ...
 
     @abstractmethod
     async def handshake_outbound(
         self, conn: IRawConnection, remote_peer: ID
-    ) -> ISecureConn:
-        ...
+    ) -> ISecureConn: ...
 
 
 class BasePattern(IPattern):

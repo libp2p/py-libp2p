@@ -12,31 +12,14 @@ repos:
     hooks:
     -   id: pyupgrade
         args: [--py39-plus]
--   repo: https://github.com/psf/black
-    rev: 23.9.1
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.2 # Or any more recent stable version
     hooks:
-    -   id: black
--   repo: https://github.com/PyCQA/flake8
-    rev: 6.1.0
-    hooks:
-    -   id: flake8
-        additional_dependencies:
-        -   flake8-bugbear==23.9.16
-        exclude: setup.py
--   repo: https://github.com/PyCQA/autoflake
-    rev: v2.2.1
-    hooks:
-    -   id: autoflake
--   repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-    -   id: isort
--   repo: https://github.com/pycqa/pydocstyle
-    rev: 6.3.0
-    hooks:
-    -   id: pydocstyle
-        additional_dependencies:
-        -   tomli  # required until >= python311
+    # Run the linter (includes autofixing like autoflake, isort).
+    -   id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+    # Run the formatter (replaces black).
+    -   id: ruff-format
 -   repo: https://github.com/executablebooks/mdformat
     rev: 0.7.22
     hooks:

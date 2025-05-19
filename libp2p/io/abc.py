@@ -9,20 +9,17 @@ from typing import (
 
 class Closer(ABC):
     @abstractmethod
-    async def close(self) -> None:
-        ...
+    async def close(self) -> None: ...
 
 
 class Reader(ABC):
     @abstractmethod
-    async def read(self, n: int = None) -> bytes:
-        ...
+    async def read(self, n: int = None) -> bytes: ...
 
 
 class Writer(ABC):
     @abstractmethod
-    async def write(self, data: bytes) -> None:
-        ...
+    async def write(self, data: bytes) -> None: ...
 
 
 class WriteCloser(Writer, Closer):
@@ -50,14 +47,12 @@ class ReadWriteCloser(Reader, Writer, Closer):
 
 class MsgReader(ABC):
     @abstractmethod
-    async def read_msg(self) -> bytes:
-        ...
+    async def read_msg(self) -> bytes: ...
 
 
 class MsgWriter(ABC):
     @abstractmethod
-    async def write_msg(self, msg: bytes) -> None:
-        ...
+    async def write_msg(self, msg: bytes) -> None: ...
 
 
 class MsgReadWriteCloser(MsgReader, MsgWriter, Closer):
@@ -66,12 +61,10 @@ class MsgReadWriteCloser(MsgReader, MsgWriter, Closer):
 
 class Encrypter(ABC):
     @abstractmethod
-    def encrypt(self, data: bytes) -> bytes:
-        ...
+    def encrypt(self, data: bytes) -> bytes: ...
 
     @abstractmethod
-    def decrypt(self, data: bytes) -> bytes:
-        ...
+    def decrypt(self, data: bytes) -> bytes: ...
 
 
 class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):

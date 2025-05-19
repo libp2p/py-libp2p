@@ -8,6 +8,7 @@ into network after network has already started listening
 TODO: Add tests for closed_stream, listen_close when those
 features are implemented in swarm
 """
+
 import enum
 
 import pytest

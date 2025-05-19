@@ -4,8 +4,10 @@ from Crypto.Hash import (
 from nacl.exceptions import (
     BadSignatureError,
 )
-from nacl.public import PrivateKey as PrivateKeyImpl
-from nacl.public import PublicKey as PublicKeyImpl
+from nacl.public import (
+    PrivateKey as PrivateKeyImpl,
+    PublicKey as PublicKeyImpl,
+)
 from nacl.signing import (
     SigningKey,
     VerifyKey,

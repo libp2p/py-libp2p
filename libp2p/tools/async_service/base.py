@@ -286,8 +286,7 @@ class BaseManager(InternalManagerAPI):
     # Task Management
     #
     @abstractmethod
-    def _schedule_task(self, task: TaskAPI) -> None:
-        ...
+    def _schedule_task(self, task: TaskAPI) -> None: ...
 
     def _common_run_task(self, task: TaskAPI) -> None:
         if not self.is_running:

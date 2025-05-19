@@ -14,12 +14,10 @@ TIMEOUT_DURATION = 30
 
 class AbstractInterativeProcess(ABC):
     @abstractmethod
-    async def start(self) -> None:
-        ...
+    async def start(self) -> None: ...
 
     @abstractmethod
-    async def close(self) -> None:
-        ...
+    async def close(self) -> None: ...
 
 
 class BaseInteractiveProcess(AbstractInterativeProcess):

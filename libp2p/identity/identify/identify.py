@@ -40,7 +40,7 @@ def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
 
 
 def _remote_address_to_multiaddr(
-    remote_address: Optional[tuple[str, int]]
+    remote_address: Optional[tuple[str, int]],
 ) -> Optional[Multiaddr]:
     """Convert a (host, port) tuple to a Multiaddr."""
     if remote_address is None:

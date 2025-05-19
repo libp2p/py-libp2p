@@ -330,6 +330,22 @@ class INetConn(Closer):
         :return: A tuple containing instances of INetStream.
         """
 
+    @abstractmethod
+    def local_multiaddr(self) -> "Multiaddr":
+        """
+        Get the local multiaddress of the underlying connection.
+
+        :return: The local multiaddress.
+        """
+
+    @abstractmethod
+    def remote_multiaddr(self) -> "Multiaddr":
+        """
+        Get the remote multiaddress of the underlying connection.
+
+        :return: The remote multiaddress.
+        """
+
 
 # -------------------------- peermetadata interface.py --------------------------
 

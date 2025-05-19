@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import os
-import sys
-import re
 from pathlib import Path
+import re
+import sys
 
 
 def _find_files(project_root):
