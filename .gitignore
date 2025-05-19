@@ -177,3 +177,4 @@ env.bak/
 
 #lockfiles
 uv.lock
+poetry.lock
