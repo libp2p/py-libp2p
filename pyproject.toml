@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 backend-path = ["."]
 
 [project]
-name = "py-libp2p"
+name = "libp2p"
 version = "0.2.6"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"

@@ -294,11 +294,12 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
             m.setattr(pubsubs_fsub[0].router, "handle_rpc", mock_handle_rpc)
             yield Events(event_push_msg, event_handle_subscription, event_handle_rpc)
 
-    async with PubsubFactory.create_batch_with_floodsub(
-        1, security_protocol=security_protocol
-    ) as pubsubs_fsub, net_stream_pair_factory(
-        security_protocol=security_protocol
-    ) as stream_pair:
+    async with (
+        PubsubFactory.create_batch_with_floodsub(
+            1, security_protocol=security_protocol
+        ) as pubsubs_fsub,
+        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
+    ):
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         # Kick off the task `continuously_read_stream`
         nursery.start_soon(pubsubs_fsub[0].continuously_read_stream, stream_pair[0])
@@ -421,11 +422,12 @@ async def test_handle_talk():
 
 @pytest.mark.trio
 async def test_message_all_peers(monkeypatch, security_protocol):
-    async with PubsubFactory.create_batch_with_floodsub(
-        1, security_protocol=security_protocol
-    ) as pubsubs_fsub, net_stream_pair_factory(
-        security_protocol=security_protocol
-    ) as stream_pair:
+    async with (
+        PubsubFactory.create_batch_with_floodsub(
+            1, security_protocol=security_protocol
+        ) as pubsubs_fsub,
+        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
+    ):
         peer_id = IDFactory()
         mock_peers = {peer_id: stream_pair[0]}
         with monkeypatch.context() as m:
@@ -522,15 +524,15 @@ async def test_publish_push_msg_is_called(monkeypatch):
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
 
-            assert (
-                len(msgs) == 2
-            ), "`push_msg` should be called every time `publish` is called"
+            assert len(msgs) == 2, (
+                "`push_msg` should be called every time `publish` is called"
+            )
             assert (msg_forwarders[0] == msg_forwarders[1]) and (
                 msg_forwarders[1] == pubsubs_fsub[0].my_id
             )
-            assert (
-                msgs[0].seqno != msgs[1].seqno
-            ), "`seqno` should be different every time"
+            assert msgs[0].seqno != msgs[1].seqno, (
+                "`seqno` should be different every time"
+            )
 
 
 @pytest.mark.trio

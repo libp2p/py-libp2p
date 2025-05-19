@@ -355,7 +355,7 @@ class HolePunchService:
                         f"DirectConnect task for {task_l_peer_id} was cancelled."
                     )
                     # Re-raise unless specific handling is needed here.
-                    # Cancellation will propagate from the nursery if this task was started in a CancelScope.
+                    # Cancellation propagates from nursery if started in CancelScope.
                 except Exception as e:
                     logger.exception(
                         f"Task for {task_l_peer_id} failed in DirectConnect. "
