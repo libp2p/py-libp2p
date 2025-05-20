@@ -46,6 +46,7 @@ async def host_pair(muxer_preference=None, muxer_opt=None):
         logging.warning(f"Error closing host_b: {e}")
 
 
+@pytest.mark.trio
 @pytest.mark.parametrize("muxer_preference", [MUXER_YAMUX, MUXER_MPLEX])
 async def test_multiplexer_preference_parameter(muxer_preference):
     """Test that muxer_preference parameter works correctly."""
@@ -112,6 +113,7 @@ async def test_multiplexer_preference_parameter(muxer_preference):
                 logging.warning(f"Error closing host_b: {e}")
 
 
+@pytest.mark.trio
 @pytest.mark.parametrize(
     "muxer_option_func,expected_stream_class",
     [
@@ -183,6 +185,7 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
                 logging.warning(f"Error closing host_b: {e}")
 
 
+@pytest.mark.trio
 @pytest.mark.parametrize("global_default", [MUXER_YAMUX, MUXER_MPLEX])
 async def test_global_default_muxer(global_default):
     """Test that global default muxer setting works correctly."""
