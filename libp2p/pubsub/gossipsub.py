@@ -89,7 +89,7 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_interval: int
 
     direct_peers: dict[ID, PeerInfo]
-    direct_connect_init_delay: float
+    direct_connect_initial_delay: float
     direct_connect_interval: int
 
     def __init__(
@@ -137,7 +137,7 @@ class GossipSub(IPubsubRouter, Service):
         for direct_peer in direct_peers or []:
             self.direct_peers[direct_peer.peer_id] = direct_peer
         self.direct_connect_interval = direct_connect_interval
-        self.direct_connect_init_delay = direct_connect_initial_delay
+        self.direct_connect_initial_delay = direct_connect_initial_delay
 
     async def run(self) -> None:
         if self.pubsub is None:
@@ -461,7 +461,7 @@ class GossipSub(IPubsubRouter, Service):
         """
         Connect to direct peers.
         """
-        await trio.sleep(self.direct_connect_init_delay)
+        await trio.sleep(self.direct_connect_initial_delay)
         while True:
             for direct_peer in self.direct_peers:
                 if direct_peer not in self.pubsub.peers:
