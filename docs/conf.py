@@ -53,7 +53,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "py-libp2p"
-copyright = '2019, The Ethereum Foundation'
+copyright = "2019, The libp2p team"
+author = "The libp2p team"
 
 __version__ = setup_version
 # The version info for the project you're documenting, acts as replacement for
@@ -326,3 +327,15 @@ MOCK_MODULES = [
     "fastecdsa.encoding.sec1",
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
+# -- Extension configuration -------------------------------------------------
+
+# -- Options for todo extension ----------------------------------------------
+
+# If true, `todo` and `todoList` produce output, else they produce nothing.
+todo_include_todos = True
+
+# -- Options for autodoc extension ------------------------------------------
+
+# Allow duplicate object descriptions
+nitpicky = False
+nitpick_ignore = [("py:class", "type")]
