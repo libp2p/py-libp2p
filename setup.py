@@ -53,6 +53,7 @@ install_requires = [
     "base58>=1.0.3",
     "coincurve>=10.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "multiaddr>=0.0.9",
     "mypy-protobuf>=3.0.0",
@@ -72,7 +73,7 @@ install_requires.extend(crypto_requires)
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. See Contributing docs for the release process.
-    version="0.2.5",
+    version="0.2.6",
     description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",

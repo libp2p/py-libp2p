@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         python: ['3.9', '3.10', '3.11', '3.12', '3.13']
-        toxenv: [core, lint, wheel, demos]
+        toxenv: [core, interop, lint, wheel, demos]
         include:
           - python: '3.10'
             toxenv: docs
@@ -46,7 +46,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ['3.11']  # Using a stable Python version for Windows testing
+        python-version: ['3.11', '3.12', '3.13']
         toxenv: [core, wheel]
       fail-fast: false
     steps:

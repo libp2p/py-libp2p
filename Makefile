@@ -38,8 +38,7 @@ lint:
 	)
 
 test:
-	# remove core specification once interop tests pass
-	python -m pytest tests/core
+	python -m pytest tests
 
 # protobufs management
 
@@ -48,7 +47,8 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/security/insecure/pb/plaintext.proto \
 	libp2p/security/secio/pb/spipe.proto \
 	libp2p/security/noise/pb/noise.proto \
-	libp2p/identity/identify/pb/identify.proto
+	libp2p/identity/identify/pb/identify.proto \
+	libp2p/host/autonat/pb/autonat.proto
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)
 
@@ -124,8 +124,20 @@ ifndef bump
 endif
 
 check-git:
-	# require that upstream is configured for ethereum/py-libp2p
+	# require that upstream is configured for libp2p/py-libp2p
 	@if ! git remote -v | grep "upstream[[:space:]]git@github.com:libp2p/py-libp2p.git (push)\|upstream[[:space:]]https://github.com/libp2p/py-libp2p (push)"; then \
 		echo "Error: You must have a remote named 'upstream' that points to 'py-libp2p'"; \
 		exit 1; \
 	fi
+
+# autonat specific protobuf targets
+format-autonat-proto:
+	black libp2p/host/autonat/pb/autonat_pb2*.py*
+	isort libp2p/host/autonat/pb/autonat_pb2*.py*
+
+autonat-proto: clean-autonat
+	protoc --python_out=. --mypy_out=. libp2p/host/autonat/pb/autonat.proto
+	$(MAKE) format-autonat-proto
+
+clean-autonat:
+	rm -f libp2p/host/autonat/pb/autonat_pb2*.py*

@@ -1,1 +1,0 @@
-Bumps dependency to ``protobuf>=6.30.1``.
