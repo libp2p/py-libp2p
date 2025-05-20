@@ -3,6 +3,8 @@ from collections.abc import (
 )
 from importlib.metadata import version as __version
 from typing import (
+    Literal,
+    Optional,
     Type,
     cast,
 )
@@ -56,12 +58,67 @@ from libp2p.stream_muxer.mplex.mplex import (
 from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
 )
+from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+
+# Default multiplexer choice
+DEFAULT_MUXER = "YAMUX"
+
+# Multiplexer options
+MUXER_YAMUX = "YAMUX"
+MUXER_MPLEX = "MPLEX"
+
+
+def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
+    """
+    Set the default multiplexer protocol to use.
+
+    :param muxer_name: Either "YAMUX" or "MPLEX"
+    :raise ValueError: If an unsupported muxer name is provided
+    """
+    global DEFAULT_MUXER
+    muxer_upper = muxer_name.upper()
+    if muxer_upper not in [MUXER_YAMUX, MUXER_MPLEX]:
+        raise ValueError(f"Unknown muxer: {muxer_name}. Use 'YAMUX' or 'MPLEX'.")
+    DEFAULT_MUXER = muxer_upper
+
+
+def get_default_muxer() -> str:
+    """
+    Returns the currently selected default muxer.
+
+    :return: Either "YAMUX" or "MPLEX"
+    """
+    return DEFAULT_MUXER
+
+
+def create_yamux_muxer_option() -> TMuxerOptions:
+    """
+    Returns muxer options with Yamux as the primary choice.
+
+    :return: Muxer options with Yamux first
+    """
+    return {
+        TProtocol(YAMUX_PROTOCOL_ID): Yamux,  # Primary choice
+        TProtocol(MPLEX_PROTOCOL_ID): Mplex,  # Fallback for compatibility
+    }
+
+
+def create_mplex_muxer_option() -> TMuxerOptions:
+    """
+    Returns muxer options with Mplex as the primary choice.
+
+    :return: Muxer options with Mplex first
+    """
+    return {
+        TProtocol(MPLEX_PROTOCOL_ID): Mplex,  # Primary choice
+        TProtocol(YAMUX_PROTOCOL_ID): Yamux,  # Fallback
+    }
 
 
 def generate_new_rsa_identity() -> KeyPair:
@@ -73,11 +130,24 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
     return ID.from_pubkey(public_key)
 
 
+def get_default_muxer_options() -> TMuxerOptions:
+    """
+    Returns the default muxer options based on the current default muxer setting.
+
+    :return: Muxer options with the preferred muxer first
+    """
+    if DEFAULT_MUXER == "MPLEX":
+        return create_mplex_muxer_option()
+    else:  # YAMUX is default
+        return create_yamux_muxer_option()
+
+
 def new_swarm(
-    key_pair: KeyPair = None,
-    muxer_opt: TMuxerOptions = None,
-    sec_opt: TSecurityOptions = None,
-    peerstore_opt: IPeerStore = None,
+    key_pair: Optional[KeyPair] = None,
+    muxer_opt: Optional[TMuxerOptions] = None,
+    sec_opt: Optional[TSecurityOptions] = None,
+    peerstore_opt: Optional[IPeerStore] = None,
+    muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -86,6 +156,7 @@ def new_swarm(
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
+    :param muxer_preference: optional explicit muxer preference
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -104,20 +175,34 @@ def new_swarm(
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()
 
-    # Default security transports (using Noise as per your change)
+    # Default security transports (using Noise as primary)
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
         TProtocol(secio.ID): secio.Transport(key_pair),
+        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
     }
 
-    # Default muxer transports: include both Yamux (preferred) and Mplex (legacy)
-    muxer_transports_by_protocol: Mapping[TProtocol, type[IMuxedConn]] = muxer_opt or {
-        cast(TProtocol, "/yamux/1.0.0"): Yamux,  # Preferred multiplexer
-        MPLEX_PROTOCOL_ID: Mplex,  # Legacy, retained for compatibility
-    }
+    # Use given muxer preference if provided, otherwise use global default
+    if muxer_preference is not None:
+        temp_pref = muxer_preference.upper()
+        if temp_pref not in [MUXER_YAMUX, MUXER_MPLEX]:
+            raise ValueError(
+                f"Unknown muxer: {muxer_preference}. Use 'YAMUX' or 'MPLEX'."
+            )
+        active_preference = temp_pref
+    else:
+        active_preference = DEFAULT_MUXER
+
+    # Use provided muxer options if given, otherwise create based on preference
+    if muxer_opt is not None:
+        muxer_transports_by_protocol = muxer_opt
+    else:
+        if active_preference == MUXER_MPLEX:
+            muxer_transports_by_protocol = create_mplex_muxer_option()
+        else:  # YAMUX is default
+            muxer_transports_by_protocol = create_yamux_muxer_option()
 
     upgrader = TransportUpgrader(
         secure_transports_by_protocol=secure_transports_by_protocol,
@@ -132,11 +217,12 @@ def new_swarm(
 
 
 def new_host(
-    key_pair: KeyPair = None,
-    muxer_opt: TMuxerOptions = None,
-    sec_opt: TSecurityOptions = None,
-    peerstore_opt: IPeerStore = None,
-    disc_opt: IPeerRouting = None,
+    key_pair: Optional[KeyPair] = None,
+    muxer_opt: Optional[TMuxerOptions] = None,
+    sec_opt: Optional[TSecurityOptions] = None,
+    peerstore_opt: Optional[IPeerStore] = None,
+    disc_opt: Optional[IPeerRouting] = None,
+    muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -146,6 +232,7 @@ def new_host(
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
     :param disc_opt: optional discovery
+    :param muxer_preference: optional explicit muxer preference
     :return: return a host instance
     """
     swarm = new_swarm(
@@ -153,13 +240,12 @@ def new_host(
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,
+        muxer_preference=muxer_preference,
     )
-    host: IHost
-    if disc_opt:
-        host = RoutedHost(swarm, disc_opt)
-    else:
-        host = BasicHost(swarm)
-    return host
+
+    if disc_opt is not None:
+        return RoutedHost(swarm, disc_opt)
+    return BasicHost(swarm)
 
 
 __version__ = __version("libp2p")
