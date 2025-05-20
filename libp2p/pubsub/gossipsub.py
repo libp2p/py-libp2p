@@ -98,7 +98,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        direct_peers: Sequence[PeerInfo],
+        direct_peers: Sequence[PeerInfo] = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
@@ -134,8 +134,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Create direct peers
         self.direct_peers = dict()
-        for _peer in direct_peers:
-            self.direct_peers[_peer.peer_id] = _peer
+        for direct_peer in direct_peers or []:
+            self.direct_peers[direct_peer.peer_id] = direct_peer
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
 
@@ -463,14 +463,14 @@ class GossipSub(IPubsubRouter, Service):
         """
         await trio.sleep(self.direct_connect_initial_delay)
         while True:
-            for _peer in self.direct_peers:
-                if _peer not in self.pubsub.peers:
+            for direct_peer in self.direct_peers:
+                if direct_peer not in self.pubsub.peers:
                     try:
-                        await self.pubsub.host.connect(self.direct_peers[_peer])
+                        await self.pubsub.host.connect(self.direct_peers[direct_peer])
                     except Exception as e:
                         logger.debug(
                             "failed to connect to a direct peer %s: %s",
-                            _peer,
+                            direct_peer,
                             e,
                         )
             await trio.sleep(self.direct_connect_interval)
@@ -704,8 +704,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
-            for _peer in self.direct_peers:
-                if _peer == sender_peer_id:
+            for direct_peer in self.direct_peers:
+                if direct_peer == sender_peer_id:
                     logger.warning(
                         "GRAFT: ignoring request from direct peer %s", sender_peer_id
                     )
