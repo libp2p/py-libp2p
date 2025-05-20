@@ -1,0 +1,1 @@
+Replaced async_service implementation with a more efficient anyio-based service management system, improving performance and reducing code complexity.
