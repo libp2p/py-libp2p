@@ -9,6 +9,7 @@ Subpackages
 
    libp2p.crypto
    libp2p.host
+   libp2p.holepunch
    libp2p.identity
    libp2p.io
    libp2p.network
