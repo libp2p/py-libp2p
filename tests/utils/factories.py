@@ -423,10 +423,13 @@ class GossipsubFactory(factory.Factory):
     degree = GOSSIPSUB_PARAMS.degree
     degree_low = GOSSIPSUB_PARAMS.degree_low
     degree_high = GOSSIPSUB_PARAMS.degree_high
+    direct_peers = GOSSIPSUB_PARAMS.direct_peers
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
+    direct_connect_initial_delay = GOSSIPSUB_PARAMS.direct_connect_initial_delay
+    direct_connect_interval = GOSSIPSUB_PARAMS.direct_connect_interval
 
 
 class PubsubFactory(factory.Factory):
@@ -543,11 +546,14 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
+        direct_peers: Sequence[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
         heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
+        direct_connect_initial_delay: float = GOSSIPSUB_PARAMS.direct_connect_initial_delay,  # noqa: E501
+        direct_connect_interval: int = GOSSIPSUB_PARAMS.direct_connect_interval,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
         msg_id_constructor: Callable[
@@ -561,9 +567,14 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
                 time_to_live=time_to_live,
                 gossip_window=gossip_window,
+                gossip_history=gossip_history,
+                heartbeat_initial_delay=heartbeat_initial_delay,
                 heartbeat_interval=heartbeat_interval,
+                direct_connect_initial_delay=direct_connect_initial_delay,
+                direct_connect_interval=direct_connect_interval,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -571,8 +582,13 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
+                time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
+                heartbeat_initial_delay=heartbeat_initial_delay,
+                direct_connect_initial_delay=direct_connect_initial_delay,
+                direct_connect_interval=direct_connect_interval,
             )
 
         async with cls._create_batch_with_router(

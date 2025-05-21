@@ -1,6 +1,3 @@
-from importlib.metadata import (
-    version,
-)
 import itertools
 import logging
 import math
@@ -11,19 +8,17 @@ from libp2p.exceptions import (
 from libp2p.io.abc import (
     Reader,
 )
-
-from .io.utils import (
+from libp2p.io.utils import (
     read_exactly,
 )
 
-logger = logging.getLogger("libp2p.utils")
+logger = logging.getLogger("libp2p.utils.varint")
 
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
 
 LOW_MASK = 2**7 - 1
 HIGH_MASK = 2**7
-
 
 # The maximum shift width for a 64 bit integer.  We shouldn't have to decode
 # integers larger than this.
@@ -90,19 +85,3 @@ async def read_delim(reader: Reader) -> bytes:
             f'`msg_bytes` is not delimited by b"\\n": `msg_bytes`={msg_bytes!r}'
         )
     return msg_bytes[:-1]
-
-
-def get_agent_version() -> str:
-    """
-    Return the version of libp2p.
-
-    If the version cannot be determined due to an exception, return "py-libp2p/unknown".
-
-    :return: The version of libp2p.
-    :rtype: str
-    """
-    try:
-        return f"py-libp2p/{version('libp2p')}"
-    except Exception as e:
-        logger.warning("Could not fetch libp2p version: %s", e)
-        return "py-libp2p/unknown"
