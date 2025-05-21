@@ -128,9 +128,7 @@ def get_direct_connection(host: "IHost", peer_id: ID) -> Optional[INetConn]:
         return None
     conn = network.connections[peer_id]
 
-    if not is_relay_addr(conn.remote_multiaddr()):
-        return conn
-    return None
+    return conn
 
 
 class HolePunchActiveError(Exception):
@@ -338,7 +336,7 @@ class HolePunchService:
                 return None
 
             # Create a new cancel scope for the task.
-            new_task_scope = trio.CancelScope(cancelled_caught=True)
+            new_task_scope = trio.CancelScope()
 
             async def task_wrapper(
                 task_l_peer_id: ID, task_l_scope: trio.CancelScope

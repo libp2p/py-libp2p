@@ -156,7 +156,11 @@ class IMuxedConn(ABC):
     event_started: trio.Event
 
     @abstractmethod
-    def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        conn: ISecureConn,
+        peer_id: ID,
+    ) -> None:
         """
         Initialize a new multiplexed connection.
 
@@ -328,22 +332,6 @@ class INetConn(Closer):
         Retrieve all active streams associated with this connection.
 
         :return: A tuple containing instances of INetStream.
-        """
-
-    @abstractmethod
-    def local_multiaddr(self) -> "Multiaddr":
-        """
-        Get the local multiaddress of the underlying connection.
-
-        :return: The local multiaddress.
-        """
-
-    @abstractmethod
-    def remote_multiaddr(self) -> "Multiaddr":
-        """
-        Get the remote multiaddress of the underlying connection.
-
-        :return: The remote multiaddress.
         """
 
 

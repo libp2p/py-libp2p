@@ -416,12 +416,12 @@ def external_api(func: TFunc) -> TFunc:
         async with trio.open_nursery() as nursery:
             # mypy's type hints for start_soon break with this invocation.
             nursery.start_soon(
-                _wait_api_fn,
+                _wait_api_fn,  # type: ignore
                 self,
                 func,
                 args,
                 kwargs,
-                send_channel,  # type: ignore
+                send_channel,
             )
             nursery.start_soon(_wait_finished, self, func, send_channel)
             result, err = await receive_channel.receive()

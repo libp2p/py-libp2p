@@ -678,5 +678,5 @@ async def net_stream_pair_factory(
         hosts[1].set_stream_handler(protocol_id, handler)
 
         stream_0 = await hosts[0].new_stream(hosts[1].get_id(), [protocol_id])
-        yield stream_0, stream_1
+        yield stream_0, stream_1  # noqa: F821
         event_handler_finished.set()

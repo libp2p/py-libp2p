@@ -2,9 +2,6 @@ from typing import (
     TYPE_CHECKING,
 )
 
-from multiaddr import (
-    Multiaddr,
-)
 import trio
 
 from libp2p.abc import (
@@ -32,22 +29,16 @@ class SwarmConn(INetConn):
     muxed_conn: IMuxedConn
     swarm: "Swarm"
     streams: set[NetStream]
-    remote_multiaddr: Multiaddr
-    local_multiaddr: Multiaddr
     event_closed: trio.Event
 
     def __init__(
         self,
         muxed_conn: IMuxedConn,
         swarm: "Swarm",
-        remote_multiaddr: Multiaddr,
-        local_multiaddr: Multiaddr,
     ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
-        self.remote_multiaddr = remote_multiaddr
-        self.local_multiaddr = local_multiaddr
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
 

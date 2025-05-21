@@ -332,14 +332,9 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
-        self_addrs = self.peerstore.peer_info(self.self_id).addrs
-
-        remote_addrs = self.peerstore.peer_info(muxed_conn.peer_id).addrs
         swarm_conn = SwarmConn(
             muxed_conn,
             self,
-            local_multiaddr=self_addrs[0],
-            remote_multiaddr=remote_addrs[0],
         )
 
         self.manager.run_task(muxed_conn.start)
