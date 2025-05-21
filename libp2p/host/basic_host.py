@@ -195,6 +195,29 @@ class BasicHost(IHost):
         net_stream.set_protocol(selected_protocol)
         return net_stream
 
+    async def send_command(self, peer_id: ID, command: str) -> list[str]:
+        """
+        Send a multistream-select command to the specified peer and return
+        the response.
+
+        :param peer_id: peer_id that host is connecting
+        :param command: supported multistream-select command (e.g., "ls)
+        :raise StreamFailure: If the stream cannot be opened or negotiation fails
+        :return: list of strings representing the response from peer.
+        """
+        new_stream = await self._network.new_stream(peer_id)
+
+        try:
+            response = await self.multiselect_client.query_multistream_command(
+                MultiselectCommunicator(new_stream), command
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await new_stream.reset()
+            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
+
+        return response
+
     async def connect(self, peer_info: PeerInfo) -> None:
         """
         Ensure there is a connection between this host and the peer
