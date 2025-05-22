@@ -1,4 +1,5 @@
 from importlib.metadata import version as __version
+from typing import Optional
 
 from libp2p.abc import (
     IHost,
@@ -65,10 +66,10 @@ def generate_peer_id_from(key_pair: KeyPair) -> ID:
 
 
 def new_swarm(
-    key_pair: KeyPair = None,
-    muxer_opt: TMuxerOptions = None,
-    sec_opt: TSecurityOptions = None,
-    peerstore_opt: IPeerStore = None,
+    key_pair: Optional[KeyPair] = None,
+    muxer_opt: Optional[TMuxerOptions] = None,
+    sec_opt: Optional[TSecurityOptions] = None,
+    peerstore_opt: Optional[IPeerStore]= None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -104,11 +105,11 @@ def new_swarm(
 
 
 def new_host(
-    key_pair: KeyPair = None,
-    muxer_opt: TMuxerOptions = None,
-    sec_opt: TSecurityOptions = None,
-    peerstore_opt: IPeerStore = None,
-    disc_opt: IPeerRouting = None,
+    key_pair: Optional[KeyPair] = None,
+    muxer_opt: Optional[TMuxerOptions] = None,
+    sec_opt: Optional[TSecurityOptions] = None,
+    peerstore_opt: Optional[IPeerStore] = None,
+    disc_opt: Optional[IPeerRouting] = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
