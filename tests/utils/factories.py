@@ -9,7 +9,6 @@ from contextlib import (
 from typing import (
     Any,
     Callable,
-    Optional,
     cast,
 )
 
@@ -176,7 +175,7 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 
 
 def security_options_factory_factory(
-    protocol_id: Optional[TProtocol] = None,
+    protocol_id: TProtocol = None,
 ) -> Callable[[KeyPair], TSecurityOptions]:
     if protocol_id is None:
         protocol_id = DEFAULT_SECURITY_PROTOCOL_ID
@@ -208,8 +207,8 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 async def raw_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
-    conn_0: Optional[IRawConnection] = None
-    conn_1: Optional[IRawConnection] = None
+    conn_0 = None
+    conn_1 = None
     event = trio.Event()
 
     async def tcp_stream_handler(stream: ReadWriteCloser) -> None:
@@ -224,13 +223,6 @@ async def raw_conn_factory(
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
-
-    if conn_0 is None or conn_1 is None:
-        raise Exception(
-            "could not create raw connection tuple"
-            f"conn_0 or conn_1 is None. conn_0={conn_0}, conn_1={conn_1}"
-        )
-
     yield conn_0, conn_1
 
 
@@ -245,8 +237,8 @@ async def noise_conn_factory(
         NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
     )
 
-    local_secure_conn: Optional[ISecureConn] = None
-    remote_secure_conn: Optional[ISecureConn] = None
+    local_secure_conn: ISecureConn = None
+    remote_secure_conn: ISecureConn = None
 
     async def upgrade_local_conn() -> None:
         nonlocal local_secure_conn
@@ -297,9 +289,9 @@ class SwarmFactory(factory.Factory):
     @asynccontextmanager
     async def create_and_listen(
         cls,
-        key_pair: Optional[KeyPair] = None,
-        security_protocol: Optional[TProtocol] = None,
-        muxer_opt: Optional[TMuxerOptions] = None,
+        key_pair: KeyPair = None,
+        security_protocol: TProtocol = None,
+        muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[Swarm]:
         # `factory.Factory.__init__` does *not* prepare a *default value* if we pass
         # an argument explicitly with `None`. If an argument is `None`, we don't pass it
@@ -321,8 +313,8 @@ class SwarmFactory(factory.Factory):
     async def create_batch_and_listen(
         cls,
         number: int,
-        security_protocol: Optional[TProtocol] = None,
-        muxer_opt: Optional[TMuxerOptions] = None,
+        security_protocol: TProtocol = None,
+        muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[tuple[Swarm, ...]]:
         async with AsyncExitStack() as stack:
             ctx_mgrs = [
@@ -342,7 +334,7 @@ class HostFactory(factory.Factory):
 
     class Params:
         key_pair = factory.LazyFunction(default_key_pair_factory)
-        security_protocol: Optional[TProtocol] = None
+        security_protocol: TProtocol = None
         muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
 
     network = factory.LazyAttribute(
@@ -356,8 +348,8 @@ class HostFactory(factory.Factory):
     async def create_batch_and_listen(
         cls,
         number: int,
-        security_protocol: Optional[TProtocol] = None,
-        muxer_opt: Optional[TMuxerOptions] = None,
+        security_protocol: TProtocol = None,
+        muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[tuple[BasicHost, ...]]:
         async with SwarmFactory.create_batch_and_listen(
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
@@ -377,10 +369,7 @@ class DummyRouter(IPeerRouting):
 
     async def find_peer(self, peer_id: ID) -> PeerInfo:
         await trio.lowlevel.checkpoint()
-        peer = self._routing_table.get(peer_id, None)
-        if peer is None:
-            raise Exception(f"peer {peer_id} not found")
-        return peer
+        return self._routing_table.get(peer_id, None)
 
 
 class RoutedHostFactory(factory.Factory):
@@ -389,7 +378,7 @@ class RoutedHostFactory(factory.Factory):
 
     class Params:
         key_pair = factory.LazyFunction(default_key_pair_factory)
-        security_protocol: Optional[TProtocol] = None
+        security_protocol: TProtocol = None
         muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
 
     network = factory.LazyAttribute(
@@ -404,8 +393,8 @@ class RoutedHostFactory(factory.Factory):
     async def create_batch_and_listen(
         cls,
         number: int,
-        security_protocol: Optional[TProtocol] = None,
-        muxer_opt: Optional[TMuxerOptions] = None,
+        security_protocol: TProtocol = None,
+        muxer_opt: TMuxerOptions = None,
     ) -> AsyncIterator[tuple[RoutedHost, ...]]:
         routing_table = DummyRouter()
         async with HostFactory.create_batch_and_listen(
