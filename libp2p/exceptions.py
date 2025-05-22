@@ -16,13 +16,14 @@ class ParseError(BaseLibp2pError):
 
 
 class MultiError(BaseLibp2pError):
-    """
+    r"""
     A combined error that wraps multiple exceptions into a single error object.
     This error is raised when multiple exceptions need to be reported together,
     typically in scenarios where parallel operations or multiple validations fail.
 
-    Example:
-    -------
+    Example\:
+    ---------
+        >>> from libp2p.exceptions import MultiError
         >>> errors = [
         ...     ValueError("Invalid input"),
         ...     TypeError("Wrong type"),
@@ -34,8 +35,8 @@ class MultiError(BaseLibp2pError):
         Error 2: Wrong type
         Error 3: Operation failed
 
-    Note:
-    ----
+    Note\:
+    ------
         The string representation of this error will number and list all contained
         errors sequentially, making it easier to identify individual issues in
         complex error scenarios.
