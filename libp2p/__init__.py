@@ -47,6 +47,12 @@ from libp2p.transport.tcp.tcp import (
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+from libp2p.utils.logging import (
+    setup_logging,
+)
+
+# Initialize logging configuration
+setup_logging()
 
 
 def generate_new_rsa_identity() -> KeyPair:
