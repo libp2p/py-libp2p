@@ -13,6 +13,7 @@ import random
 from typing import (
     Any,
     DefaultDict,
+    Optional,
 )
 
 import trio
@@ -66,7 +67,7 @@ logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
-    pubsub: Pubsub
+    pubsub: Optional[Pubsub]
 
     degree: int
     degree_high: int
@@ -98,7 +99,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        direct_peers: Sequence[PeerInfo] = None,
+        direct_peers: Optional[Sequence[PeerInfo]] = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
@@ -230,6 +231,9 @@ class GossipSub(IPubsubRouter, Service):
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
         self.mcache.put(pubsub_msg)
 
         peers_gen = self._get_peers_to_send(
@@ -264,6 +268,9 @@ class GossipSub(IPubsubRouter, Service):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
         send_to: set[ID] = set()
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
@@ -315,6 +322,9 @@ class GossipSub(IPubsubRouter, Service):
 
         :param topic: topic to join
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
         logger.debug("joining topic %s", topic)
 
         if topic in self.mesh:
@@ -461,6 +471,8 @@ class GossipSub(IPubsubRouter, Service):
         """
         Connect to direct peers.
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
         await trio.sleep(self.direct_connect_initial_delay)
         while True:
             for direct_peer in self.direct_peers:
@@ -478,6 +490,8 @@ class GossipSub(IPubsubRouter, Service):
     def mesh_heartbeat(
         self,
     ) -> tuple[DefaultDict[ID, list[str]], DefaultDict[ID, list[str]]]:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         peers_to_graft: DefaultDict[ID, list[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, list[str]] = defaultdict(list)
         for topic in self.mesh:
@@ -513,6 +527,8 @@ class GossipSub(IPubsubRouter, Service):
         return peers_to_graft, peers_to_prune
 
     def fanout_heartbeat(self) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.fanout:
             # Delete topic entry if it's not in `pubsub.peer_topics`
@@ -543,6 +559,8 @@ class GossipSub(IPubsubRouter, Service):
                     self.fanout[topic].update(selected_peers)
 
     def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
@@ -614,6 +632,8 @@ class GossipSub(IPubsubRouter, Service):
     def _get_in_topic_gossipsub_peers_from_minus(
         self, topic: str, num_to_select: int, minus: Iterable[ID]
     ) -> list[ID]:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
@@ -627,6 +647,8 @@ class GossipSub(IPubsubRouter, Service):
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
         """Checks the seen set and requests unknown messages with an IWANT message."""
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
@@ -653,13 +675,15 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # FIXME: Update type of message ID
         # FIXME: Find a better way to parse the msg ids
         msg_ids: list[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            msg: rpc_pb2.Message = self.mcache.get(msg_id_iwant)
+            msg: Optional[rpc_pb2.Message] = self.mcache.get(msg_id_iwant)
 
             # Cache hit
             if msg:
@@ -731,9 +755,9 @@ class GossipSub(IPubsubRouter, Service):
 
     def pack_control_msgs(
         self,
-        ihave_msgs: list[rpc_pb2.ControlIHave],
-        graft_msgs: list[rpc_pb2.ControlGraft],
-        prune_msgs: list[rpc_pb2.ControlPrune],
+        ihave_msgs: Optional[list[rpc_pb2.ControlIHave]],
+        graft_msgs: Optional[list[rpc_pb2.ControlGraft]],
+        prune_msgs: Optional[list[rpc_pb2.ControlPrune]],
     ) -> rpc_pb2.ControlMessage:
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:
@@ -788,6 +812,8 @@ class GossipSub(IPubsubRouter, Service):
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)
