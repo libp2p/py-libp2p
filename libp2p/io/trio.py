@@ -34,7 +34,7 @@ class TrioTCPStream(ReadWriteCloser):
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
                 raise IOException from error
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         async with self.read_lock:
             if n is not None and n == 0:
                 return b""

@@ -75,7 +75,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = len(msg)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         if n == 0:
             return b""
 

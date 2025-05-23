@@ -156,7 +156,11 @@ class IMuxedConn(ABC):
     event_started: trio.Event
 
     @abstractmethod
-    def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        conn: ISecureConn,
+        peer_id: ID,
+    ) -> None:
         """
         Initialize a new multiplexed connection.
 

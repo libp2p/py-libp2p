@@ -360,7 +360,11 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
-        swarm_conn = SwarmConn(muxed_conn, self)
+        swarm_conn = SwarmConn(
+            muxed_conn,
+            self,
+        )
+
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
         self.manager.run_task(swarm_conn.start)

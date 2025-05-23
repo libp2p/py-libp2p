@@ -88,7 +88,7 @@ class BasicHost(IHost):
     def __init__(
         self,
         network: INetworkService,
-        default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
+        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)

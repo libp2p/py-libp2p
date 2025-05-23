@@ -75,7 +75,7 @@ class FunctionTask(BaseFunctionTask):
 
         # Each task gets its own `CancelScope` which is how we can manually
         # control cancellation order of the task DAG
-        self._cancel_scope = trio.CancelScope()
+        self._cancel_scope = trio.CancelScope()  # type: ignore[call-arg]
 
     #
     # Trio specific API
@@ -309,7 +309,7 @@ class TrioManager(BaseManager):
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
         daemon: bool = False,
-        name: str = None,
+        name: Optional[str] = None,
     ) -> None:
         task = FunctionTask(
             name=get_task_name(async_fn, name),
@@ -322,7 +322,7 @@ class TrioManager(BaseManager):
         self._common_run_task(task)
 
     def run_child_service(
-        self, service: ServiceAPI, daemon: bool = False, name: str = None
+        self, service: ServiceAPI, daemon: bool = False, name: Optional[str] = None
     ) -> ManagerAPI:
         task = ChildServiceTask(
             name=get_task_name(service, name),
@@ -416,7 +416,12 @@ def external_api(func: TFunc) -> TFunc:
         async with trio.open_nursery() as nursery:
             # mypy's type hints for start_soon break with this invocation.
             nursery.start_soon(
-                _wait_api_fn, self, func, args, kwargs, send_channel  # type: ignore
+                _wait_api_fn,  # type: ignore
+                self,
+                func,
+                args,
+                kwargs,
+                send_channel,
             )
             nursery.start_soon(_wait_finished, self, func, send_channel)
             result, err = await receive_channel.receive()

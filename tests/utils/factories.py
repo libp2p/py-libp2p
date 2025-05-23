@@ -88,8 +88,10 @@ from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
+)
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
@@ -736,5 +738,5 @@ async def net_stream_pair_factory(
         hosts[1].set_stream_handler(protocol_id, handler)
 
         stream_0 = await hosts[0].new_stream(hosts[1].get_id(), [protocol_id])
-        yield stream_0, stream_1
+        yield stream_0, stream_1  # noqa: F821
         event_handler_finished.set()
