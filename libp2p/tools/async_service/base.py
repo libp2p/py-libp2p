@@ -259,12 +259,15 @@ class BaseManager(InternalManagerAPI):
     # Wait API
     #
     def run_daemon_task(
-        self, async_fn: Callable[..., Awaitable[Any]], *args: Any, name: str = None
+        self,
+        async_fn: Callable[..., Awaitable[Any]],
+        *args: Any,
+        name: Optional[str] = None,
     ) -> None:
         self.run_task(async_fn, *args, daemon=True, name=name)
 
     def run_daemon_child_service(
-        self, service: ServiceAPI, name: str = None
+        self, service: ServiceAPI, name: Optional[str] = None
     ) -> ManagerAPI:
         return self.run_child_service(service, daemon=True, name=name)
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.2.6"
+version = "0.2.7"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.9, <4.0"
@@ -116,7 +116,7 @@ strict_optional = false
 warn_redundant_casts = true
 warn_return_any = false
 warn_unused_configs = true
-warn_unused_ignores = true
+warn_unused_ignores = false
 
 
 # Explanation:

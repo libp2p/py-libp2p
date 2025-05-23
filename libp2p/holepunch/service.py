@@ -336,7 +336,7 @@ class HolePunchService:
                 return None
 
             # Create a new cancel scope for the task.
-            new_task_scope = trio.CancelScope()
+            new_task_scope = trio.CancelScope()  # type: ignore[call-arg]
 
             async def task_wrapper(
                 task_l_peer_id: ID, task_l_scope: trio.CancelScope
