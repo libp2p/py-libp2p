@@ -1,9 +1,12 @@
 from collections.abc import (
     Awaitable,
 )
+import logging
 from typing import (
     Callable,
 )
+
+import trio
 
 from libp2p.abc import (
     IHost,
@@ -32,16 +35,104 @@ async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:
         for addr in transport.get_addrs()
     )
     swarm_0.peerstore.add_addrs(peer_id, addrs, 10000)
-    await swarm_0.dial_peer(peer_id)
-    assert swarm_0.get_peer_id() in swarm_1.connections
-    assert swarm_1.get_peer_id() in swarm_0.connections
+
+    # Add retry logic for more robust connection
+    max_retries = 3
+    retry_delay = 0.2
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            await swarm_0.dial_peer(peer_id)
+
+            # Verify connection is established in both directions
+            if (
+                swarm_0.get_peer_id() in swarm_1.connections
+                and swarm_1.get_peer_id() in swarm_0.connections
+            ):
+                return
+
+            # Connection partially established, wait a bit for it to complete
+            await trio.sleep(0.1)
+
+            if (
+                swarm_0.get_peer_id() in swarm_1.connections
+                and swarm_1.get_peer_id() in swarm_0.connections
+            ):
+                return
+
+            logging.debug(
+                "Swarm connection verification failed on attempt"
+                + f" {attempt+1}, retrying..."
+            )
+
+        except Exception as e:
+            last_error = e
+            logging.debug(f"Swarm connection attempt {attempt+1} failed: {e}")
+            await trio.sleep(retry_delay)
+
+    # If we got here, all retries failed
+    if last_error:
+        raise RuntimeError(
+            f"Failed to connect swarms after {max_retries} attempts"
+        ) from last_error
+    else:
+        err_msg = (
+            "Failed to establish bidirectional swarm connection"
+            + f" after {max_retries} attempts"
+        )
+        raise RuntimeError(err_msg)
 
 
 async def connect(node1: IHost, node2: IHost) -> None:
     """Connect node1 to node2."""
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
-    await node1.connect(info)
+
+    # Add retry logic for more robust connection
+    max_retries = 3
+    retry_delay = 0.2
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            await node1.connect(info)
+
+            # Verify connection is established in both directions
+            if (
+                node2.get_id() in node1.get_network().connections
+                and node1.get_id() in node2.get_network().connections
+            ):
+                return
+
+            # Connection partially established, wait a bit for it to complete
+            await trio.sleep(0.1)
+
+            if (
+                node2.get_id() in node1.get_network().connections
+                and node1.get_id() in node2.get_network().connections
+            ):
+                return
+
+            logging.debug(
+                f"Connection verification failed on attempt {attempt+1}, retrying..."
+            )
+
+        except Exception as e:
+            last_error = e
+            logging.debug(f"Connection attempt {attempt+1} failed: {e}")
+            await trio.sleep(retry_delay)
+
+    # If we got here, all retries failed
+    if last_error:
+        raise RuntimeError(
+            f"Failed to connect after {max_retries} attempts"
+        ) from last_error
+    else:
+        err_msg = (
+            f"Failed to establish bidirectional connection after {max_retries} attempts"
+        )
+        raise RuntimeError(err_msg)
 
 
 def create_echo_stream_handler(
