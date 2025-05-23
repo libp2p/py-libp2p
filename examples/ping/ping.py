@@ -57,7 +57,7 @@ async def send_ping(stream: INetStream) -> None:
 async def run(port: int, destination: str) -> None:
     localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    host = new_host()
+    host = new_host(listen_addrs=[listen_addr])
 
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         if not destination:
