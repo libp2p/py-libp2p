@@ -1,5 +1,9 @@
 import logging
 
+# logger = logging.getLogger("libp2p.network.swarm")
+from loguru import (
+    logger,
+)
 from multiaddr import (
     Multiaddr,
 )
@@ -51,8 +55,6 @@ from .connection.swarm_connection import (
 from .exceptions import (
     SwarmException,
 )
-
-logger = logging.getLogger("libp2p.network.swarm")
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -127,6 +129,7 @@ class Swarm(Service, INetworkService):
         :return: muxed connection
         """
         if peer_id in self.connections:
+            logger.info("WE ARE RETURNING, PEER ALREADAY EXISTS")
             # If muxed connection already exists for peer_id,
             # set muxed connection equal to existing muxed connection
             return self.connections[peer_id]
@@ -147,6 +150,7 @@ class Swarm(Service, INetworkService):
         # Try all known addresses
         for multiaddr in addrs:
             try:
+                logger.info("HANDSHAKE GOING TO HAPPEN")
                 return await self.dial_addr(multiaddr, peer_id)
             except SwarmException as e:
                 exceptions.append(e)
@@ -221,8 +225,11 @@ class Swarm(Service, INetworkService):
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
+        logger.info("INETCONN CREATED")
 
         net_stream = await swarm_conn.new_stream()
+        logger.info("INETSTREAM CREATED")
+
         logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
 

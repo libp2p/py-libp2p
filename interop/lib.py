@@ -89,10 +89,18 @@ async def run_test(
 
             handshake_start = time.perf_counter()
 
+            logger.info("GETTING READY FOR CONNECTION")
             await host.connect(info)
-            stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
+            logger.info("HOST CONNECTED")
 
+            # TILL HERE EVERYTHING IS FINE
+
+            stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
+            logger.info("CREATED NEW STREAM")
+
+            # DOES NOT MORE FORWARD FROM THIS
             logger.info("Remote conection established")
+
             nursery.start_soon(send_ping, stream)
 
             handshake_plus_ping = (time.perf_counter() - handshake_start) * 1000.0

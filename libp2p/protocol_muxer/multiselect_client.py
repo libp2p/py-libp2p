@@ -4,6 +4,10 @@ from collections.abc import (
 
 import trio
 
+from loguru import (
+    logger,
+)
+
 from libp2p.abc import (
     IMultiselectClient,
     IMultiselectCommunicator,
@@ -39,12 +43,16 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
+            logger.error("WROTE FAIL")
             raise MultiselectClientError() from error
 
+        logger.info(f"WROTE SUC, {MULTISELECT_PROTOCOL_ID}")
         try:
             handshake_contents = await communicator.read()
 
+            logger.info(f"READ SUC, {handshake_contents}")
         except MultiselectCommunicatorError as error:
+            logger.error(f"READ FAIL, {error}")
             raise MultiselectClientError() from error
 
         if not is_valid_handshake(handshake_contents):
@@ -136,12 +144,18 @@ class MultiselectClient(IMultiselectClient):
         """
         try:
             await communicator.write(protocol)
+            from loguru import (
+                logger,
+            )
+
+            logger.info(protocol)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
         try:
             response = await communicator.read()
 
+            logger.info("Response: ", response)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
