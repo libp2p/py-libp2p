@@ -29,6 +29,12 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore import (
+    PERMANENT_ADDR_TTL,
+)
 from libp2p.pubsub import (
     floodsub,
 )
@@ -82,17 +88,24 @@ class GossipSub(IPubsubRouter, Service):
     heartbeat_initial_delay: float
     heartbeat_interval: int
 
+    direct_peers: dict[ID, PeerInfo]
+    direct_connect_initial_delay: float
+    direct_connect_interval: int
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
         degree: int,
         degree_low: int,
         degree_high: int,
+        direct_peers: Sequence[PeerInfo] = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
         heartbeat_interval: int = 120,
+        direct_connect_initial_delay: float = 0.1,
+        direct_connect_interval: int = 300,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -119,10 +132,19 @@ class GossipSub(IPubsubRouter, Service):
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
 
+        # Create direct peers
+        self.direct_peers = dict()
+        for direct_peer in direct_peers or []:
+            self.direct_peers[direct_peer.peer_id] = direct_peer
+        self.direct_connect_interval = direct_connect_interval
+        self.direct_connect_initial_delay = direct_connect_initial_delay
+
     async def run(self) -> None:
         if self.pubsub is None:
             raise NoPubsubAttached
         self.manager.run_daemon_task(self.heartbeat)
+        if len(self.direct_peers) > 0:
+            self.manager.run_daemon_task(self.direct_connect_heartbeat)
         await self.manager.wait_finished()
 
     # Interface functions
@@ -141,6 +163,12 @@ class GossipSub(IPubsubRouter, Service):
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
+
+        if len(self.direct_peers) > 0:
+            for pi in self.direct_peers:
+                self.pubsub.host.get_peerstore().add_addrs(
+                    pi, self.direct_peers[pi].addrs, PERMANENT_ADDR_TTL
+                )
 
         logger.debug("attached to pusub")
 
@@ -240,6 +268,10 @@ class GossipSub(IPubsubRouter, Service):
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
                 continue
+
+            # direct peers
+            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
+            send_to.update(_direct_peers)
 
             # floodsub peers
             floodsub_peers: set[ID] = {
@@ -424,6 +456,24 @@ class GossipSub(IPubsubRouter, Service):
             self.mcache.shift()
 
             await trio.sleep(self.heartbeat_interval)
+
+    async def direct_connect_heartbeat(self) -> None:
+        """
+        Connect to direct peers.
+        """
+        await trio.sleep(self.direct_connect_initial_delay)
+        while True:
+            for direct_peer in self.direct_peers:
+                if direct_peer not in self.pubsub.peers:
+                    try:
+                        await self.pubsub.host.connect(self.direct_peers[direct_peer])
+                    except Exception as e:
+                        logger.debug(
+                            "failed to connect to a direct peer %s: %s",
+                            direct_peer,
+                            e,
+                        )
+            await trio.sleep(self.direct_connect_interval)
 
     def mesh_heartbeat(
         self,
@@ -654,6 +704,14 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
+            for direct_peer in self.direct_peers:
+                if direct_peer == sender_peer_id:
+                    logger.warning(
+                        "GRAFT: ignoring request from direct peer %s", sender_peer_id
+                    )
+                    await self.emit_prune(topic, sender_peer_id)
+                    return
+
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
         else:

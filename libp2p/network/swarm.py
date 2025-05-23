@@ -313,7 +313,35 @@ class Swarm(Service, INetworkService):
         return False
 
     async def close(self) -> None:
-        await self.manager.stop()
+        """
+        Close the swarm instance and cleanup resources.
+        """
+        # Check if manager exists before trying to stop it
+        if hasattr(self, "_manager") and self._manager is not None:
+            await self._manager.stop()
+        else:
+            # Perform alternative cleanup if the manager isn't initialized
+            # Close all connections manually
+            if hasattr(self, "connections"):
+                for conn_id in list(self.connections.keys()):
+                    conn = self.connections[conn_id]
+                    await conn.close()
+
+                # Clear connection tracking dictionary
+                self.connections.clear()
+
+            # Close all listeners
+            if hasattr(self, "listeners"):
+                for listener in self.listeners.values():
+                    await listener.close()
+                self.listeners.clear()
+
+            # Close the transport if it exists and has a close method
+            if hasattr(self, "transport") and self.transport is not None:
+                # Check if transport has close method before calling it
+                if hasattr(self.transport, "close"):
+                    await self.transport.close()
+
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:

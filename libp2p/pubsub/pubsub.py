@@ -242,45 +242,50 @@ class Pubsub(Service, IPubsub):
         """
         peer_id = stream.muxed_conn.peer_id
 
-        while self.manager.is_running:
-            incoming: bytes = await read_varint_prefixed_bytes(stream)
-            rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
-            rpc_incoming.ParseFromString(incoming)
-            if rpc_incoming.publish:
-                # deal with RPC.publish
-                for msg in rpc_incoming.publish:
-                    if not self._is_subscribed_to_msg(msg):
-                        continue
-                    logger.debug(
-                        "received `publish` message %s from peer %s", msg, peer_id
-                    )
-                    self.manager.run_task(self.push_msg, peer_id, msg)
+        try:
+            while self.manager.is_running:
+                incoming: bytes = await read_varint_prefixed_bytes(stream)
+                rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
+                rpc_incoming.ParseFromString(incoming)
+                if rpc_incoming.publish:
+                    # deal with RPC.publish
+                    for msg in rpc_incoming.publish:
+                        if not self._is_subscribed_to_msg(msg):
+                            continue
+                        logger.debug(
+                            "received `publish` message %s from peer %s", msg, peer_id
+                        )
+                        self.manager.run_task(self.push_msg, peer_id, msg)
 
-            if rpc_incoming.subscriptions:
-                # deal with RPC.subscriptions
-                # We don't need to relay the subscription to our
-                # peers because a given node only needs its peers
-                # to know that it is subscribed to the topic (doesn't
-                # need everyone to know)
-                for message in rpc_incoming.subscriptions:
+                if rpc_incoming.subscriptions:
+                    # deal with RPC.subscriptions
+                    # We don't need to relay the subscription to our
+                    # peers because a given node only needs its peers
+                    # to know that it is subscribed to the topic (doesn't
+                    # need everyone to know)
+                    for message in rpc_incoming.subscriptions:
+                        logger.debug(
+                            "received `subscriptions` message %s from peer %s",
+                            message,
+                            peer_id,
+                        )
+                        self.handle_subscription(peer_id, message)
+
+                # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
+                #   This is necessary because `control` is an optional field in pb2.
+                #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
+                if rpc_incoming.HasField("control"):
+                    # Pass rpc to router so router could perform custom logic
                     logger.debug(
-                        "received `subscriptions` message %s from peer %s",
-                        message,
+                        "received `control` message %s from peer %s",
+                        rpc_incoming.control,
                         peer_id,
                     )
-                    self.handle_subscription(peer_id, message)
-
-            # NOTE: Check if `rpc_incoming.control` is set through `HasField`.
-            #   This is necessary because `control` is an optional field in pb2.
-            #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
-            if rpc_incoming.HasField("control"):
-                # Pass rpc to router so router could perform custom logic
-                logger.debug(
-                    "received `control` message %s from peer %s",
-                    rpc_incoming.control,
-                    peer_id,
-                )
-                await self.router.handle_rpc(rpc_incoming, peer_id)
+                    await self.router.handle_rpc(rpc_incoming, peer_id)
+        except StreamEOF:
+            logger.debug(
+                f"Stream closed for peer {peer_id}, exiting read loop cleanly."
+            )
 
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool

@@ -94,14 +94,106 @@ For Python, you can use the bootstrap list to connect to known peers:
 Debugging
 ---------
 
-When running libp2p you may want to see what things are happening behind the scenes. You can enable debug logging by setting the appropriate log level:
+When running libp2p you may want to see what things are happening behind the scenes. You can enable debug logging using the `LIBP2P_DEBUG` environment variable. This allows for fine-grained control over which modules log at which levels.
 
-.. code:: python
+Basic Usage
+~~~~~~~~~~~
 
-    import logging
+To enable debug logging for all modules:
 
-    # Set debug level for libp2p
-    logging.getLogger('libp2p').setLevel(logging.DEBUG)
+.. code:: bash
+
+    # Method 1: Using export (persists for the shell session)
+    # On Unix-like systems (Linux, macOS):
+    export LIBP2P_DEBUG=DEBUG
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=DEBUG
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="DEBUG"
+
+    # Method 2: Setting for a single command
+    # On Unix-like systems:
+    LIBP2P_DEBUG=DEBUG python your_script.py
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=DEBUG && python your_script.py
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="DEBUG"; python your_script.py
+
+    # Method 3: Redirect logs to /dev/null to suppress console output
+    # On Unix-like systems:
+    LIBP2P_DEBUG=DEBUG python your_script.py 2>/dev/null
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=DEBUG && python your_script.py >nul 2>&1
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="DEBUG"; python your_script.py *> $null
+
+To enable debug logging for specific modules:
+
+.. code:: bash
+
+    # Debug logging for identity module only
+    # On Unix-like systems:
+    export LIBP2P_DEBUG=identity.identify:DEBUG
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=identity.identify:DEBUG
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="identity.identify:DEBUG"
+
+    # Multiple modules with different levels
+    # On Unix-like systems:
+    export LIBP2P_DEBUG=identity.identify:DEBUG,transport:INFO
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=identity.identify:DEBUG,transport:INFO
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="identity.identify:DEBUG,transport:INFO"
+
+Log Files
+~~~~~~~~~
+
+By default, logs are written to a file in the system's temporary directory with a timestamp and unique identifier. The file path is printed to stderr when logging starts.
+
+When no custom log file is specified:
+    - Logs are written to both a default file and to stderr (console output)
+    - The default file path is printed to stderr when logging starts
+
+When a custom log file is specified:
+    - Logs are written only to the specified file
+    - No console output is generated
+
+To specify a custom log file location:
+
+.. code:: bash
+
+    # Method 1: Using export (persists for the shell session)
+    # On Unix-like systems:
+    export LIBP2P_DEBUG_FILE=/path/to/your/logfile.log
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG_FILE=C:\path\to\your\logfile.log
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG_FILE="C:\path\to\your\logfile.log"
+
+    # Method 2: Setting for a single command
+    # On Unix-like systems:
+    LIBP2P_DEBUG=DEBUG LIBP2P_DEBUG_FILE=/path/to/your/logfile.log python your_script.py
+    # On Windows (Command Prompt):
+    set LIBP2P_DEBUG=DEBUG && set LIBP2P_DEBUG_FILE=C:\path\to\your\logfile.log && python your_script.py
+    # On Windows (PowerShell):
+    $env:LIBP2P_DEBUG="DEBUG"; $env:LIBP2P_DEBUG_FILE="C:\path\to\your\logfile.log"; python your_script.py
+
+Log Format
+~~~~~~~~~~
+
+Log messages follow this format:
+
+.. code:: text
+
+    timestamp - module_name - level - message
+
+Example output:
+
+.. code:: text
+
+    2024-01-01 12:00:00,123 - libp2p.identity.identify - DEBUG - Starting identify protocol
 
 What's Next
 -----------

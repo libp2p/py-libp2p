@@ -1,3 +1,5 @@
+"""Key types and interfaces."""
+
 from abc import (
     ABC,
     abstractmethod,
@@ -9,17 +11,24 @@ from enum import (
     Enum,
     unique,
 )
+from typing import (
+    cast,
+)
 
-from .pb import crypto_pb2 as protobuf
+from libp2p.crypto.pb import (
+    crypto_pb2,
+)
 
 
 @unique
 class KeyType(Enum):
-    RSA = protobuf.KeyType.RSA
-    Ed25519 = protobuf.KeyType.Ed25519
-    Secp256k1 = protobuf.KeyType.Secp256k1
-    ECDSA = protobuf.KeyType.ECDSA
-    ECC_P256 = protobuf.KeyType.ECC_P256
+    RSA = crypto_pb2.KeyType.RSA
+    Ed25519 = crypto_pb2.KeyType.Ed25519
+    Secp256k1 = crypto_pb2.KeyType.Secp256k1
+    ECDSA = crypto_pb2.KeyType.ECDSA
+    ECC_P256 = crypto_pb2.KeyType.ECC_P256
+    # X25519 is added for Noise protocol
+    X25519 = cast(crypto_pb2.KeyType.ValueType, 5)
 
 
 class Key(ABC):
@@ -52,11 +61,11 @@ class PublicKey(Key):
         """
         ...
 
-    def _serialize_to_protobuf(self) -> protobuf.PublicKey:
+    def _serialize_to_protobuf(self) -> crypto_pb2.PublicKey:
         """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
-        protobuf_key = protobuf.PublicKey(key_type=key_type, data=data)
+        protobuf_key = crypto_pb2.PublicKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
@@ -64,8 +73,8 @@ class PublicKey(Key):
         return self._serialize_to_protobuf().SerializeToString()
 
     @classmethod
-    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PublicKey:
-        return protobuf.PublicKey.FromString(protobuf_data)
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> crypto_pb2.PublicKey:
+        return crypto_pb2.PublicKey.FromString(protobuf_data)
 
 
 class PrivateKey(Key):
@@ -79,11 +88,11 @@ class PrivateKey(Key):
     def get_public_key(self) -> PublicKey:
         ...
 
-    def _serialize_to_protobuf(self) -> protobuf.PrivateKey:
+    def _serialize_to_protobuf(self) -> crypto_pb2.PrivateKey:
         """Return the protobuf representation of this ``Key``."""
         key_type = self.get_type().value
         data = self.to_bytes()
-        protobuf_key = protobuf.PrivateKey(key_type=key_type, data=data)
+        protobuf_key = crypto_pb2.PrivateKey(key_type=key_type, data=data)
         return protobuf_key
 
     def serialize(self) -> bytes:
@@ -91,8 +100,8 @@ class PrivateKey(Key):
         return self._serialize_to_protobuf().SerializeToString()
 
     @classmethod
-    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> protobuf.PrivateKey:
-        return protobuf.PrivateKey.FromString(protobuf_data)
+    def deserialize_from_protobuf(cls, protobuf_data: bytes) -> crypto_pb2.PrivateKey:
+        return crypto_pb2.PrivateKey.FromString(protobuf_data)
 
 
 @dataclass(frozen=True)

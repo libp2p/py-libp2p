@@ -116,7 +116,7 @@ async def test_readding_after_expiry():
     """Test that an item can be re-added after expiry."""
     cache = FirstSeenCache(ttl=2, sweep_interval=1)
     cache.add(MSG_1)
-    await trio.sleep(2)  # Let it expire
+    await trio.sleep(3)  # Let it expire
     assert cache.add(MSG_1) is True  # Should allow re-adding
     assert cache.has(MSG_1) is True
     cache.stop()

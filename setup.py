@@ -73,7 +73,7 @@ install_requires.extend(crypto_requires)
 setup(
     name="libp2p",
     # *IMPORTANT*: Don't manually change the version here. See Contributing docs for the release process.
-    version="0.2.6",
+    version="0.2.7",
     description=description,
     long_description=long_description,
     long_description_content_type="text/markdown",
