@@ -1,5 +1,6 @@
 import hashlib
 from typing import (
+    Optional,
     Union,
 )
 
@@ -24,7 +25,7 @@ if ENABLE_INLINING:
         _digest: bytes
 
         def __init__(self) -> None:
-            self._digest = bytearray()
+            self._digest = b""
 
         def update(self, input: bytes) -> None:
             self._digest += input
@@ -39,8 +40,8 @@ if ENABLE_INLINING:
 
 class ID:
     _bytes: bytes
-    _xor_id: int = None
-    _b58_str: str = None
+    _xor_id: Optional[int] = None
+    _b58_str: Optional[str] = None
 
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes

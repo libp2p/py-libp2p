@@ -87,7 +87,7 @@ class InsecureSession(BaseSession):
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         return await self.conn.read(n)
 
     async def close(self) -> None:

@@ -46,7 +46,7 @@ class NetStream(INetStream):
         """
         self.protocol_id = protocol_id
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         """
         Read from stream.
 

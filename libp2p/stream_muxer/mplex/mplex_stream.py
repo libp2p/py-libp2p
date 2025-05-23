@@ -89,7 +89,7 @@ class MplexStream(IMuxedStream):
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
 
-    def _read_return_when_blocked(self) -> bytes:
+    def _read_return_when_blocked(self) -> bytearray:
         buf = bytearray()
         while True:
             try:
@@ -99,7 +99,7 @@ class MplexStream(IMuxedStream):
                 break
         return buf
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         """
         Read up to n bytes. Read possibly returns fewer than `n` bytes, if
         there are not enough bytes in the Mplex buffer. If `n is None`, read

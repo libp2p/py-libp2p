@@ -32,7 +32,7 @@ class RawConnection(IRawConnection):
         except IOException as error:
             raise RawConnError from error
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         """
         Read up to ``n`` bytes from the underlying stream. This call is
         delegated directly to the underlying ``self.reader``.

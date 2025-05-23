@@ -1,3 +1,5 @@
+from typing import Optional
+
 from Crypto.Hash import (
     SHA256,
 )
@@ -50,7 +52,7 @@ class Ed25519PrivateKey(PrivateKey):
         self.impl = impl
 
     @classmethod
-    def new(cls, seed: bytes = None) -> "Ed25519PrivateKey":
+    def new(cls, seed: Optional[bytes] = None) -> "Ed25519PrivateKey":
         if not seed:
             seed = utils.random()
 
@@ -77,7 +79,7 @@ class Ed25519PrivateKey(PrivateKey):
         return Ed25519PublicKey(self.impl.public_key)
 
 
-def create_new_key_pair(seed: bytes = None) -> KeyPair:
+def create_new_key_pair(seed: Optional[bytes] = None) -> KeyPair:
     private_key = Ed25519PrivateKey.new(seed)
     public_key = private_key.get_public_key()
     return KeyPair(private_key, public_key)

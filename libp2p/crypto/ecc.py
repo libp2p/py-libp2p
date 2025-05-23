@@ -70,7 +70,10 @@ if sys.platform != "win32":
             return cls(private_key_impl, curve_type)
 
         def to_bytes(self) -> bytes:
-            return keys.export_key(self.impl, self.curve)
+            key_str = keys.export_key(self.impl, self.curve)
+            if key_str is None:
+                raise Exception("Key not found")
+            return key_str.encode()
 
         def get_type(self) -> KeyType:
             return KeyType.ECC_P256
