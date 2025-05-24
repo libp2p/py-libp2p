@@ -4,11 +4,14 @@ Resource management for Circuit Relay v2.
 This module handles resource limits and reservations for relay operations.
 """
 
+from dataclasses import (
+    dataclass,
+)
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional
 
-from libp2p.peer.id import ID
+from libp2p.peer.id import (
+    ID,
+)
 
 from .pb import circuit_pb2 as proto
 
@@ -40,6 +43,13 @@ class Reservation:
         self.expires_at = self.created_at + limits.duration
         self.data_used = 0
         self.active_connections = 0
+        self.voucher = self._generate_voucher()
+
+    def _generate_voucher(self) -> bytes:
+        """Generate a unique voucher for this reservation."""
+        # For now, just use a simple timestamp-based voucher
+        # In production, this should be a cryptographically secure token
+        return str(int(self.created_at * 1000000)).encode()
 
     def is_expired(self) -> bool:
         """Check if the reservation has expired."""
@@ -57,8 +67,8 @@ class Reservation:
         """Convert the reservation to its protobuf representation."""
         return proto.Reservation(
             expire=int(self.expires_at),
-            # TODO: Implement voucher and signature generation
-            voucher=b"",
+            voucher=self.voucher,
+            # TODO: In production, this should be a proper signature
             signature=b"",
         )
 
@@ -81,7 +91,7 @@ class RelayResourceManager:
             limits: The resource limits to enforce
         """
         self.limits = limits
-        self._reservations: Dict[ID, Reservation] = {}
+        self._reservations: dict[ID, Reservation] = {}
 
     def can_accept_reservation(self, peer_id: ID) -> bool:
         """
@@ -159,4 +169,4 @@ class RelayResourceManager:
             if now > res.expires_at
         ]
         for peer_id in expired:
-            del self._reservations[peer_id] 
+            del self._reservations[peer_id]

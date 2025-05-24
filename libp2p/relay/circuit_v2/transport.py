@@ -6,20 +6,41 @@ allowing peers to establish connections through relay nodes.
 """
 
 import logging
-from typing import Optional, Tuple, List
+from typing import (
+    Optional,
+)
 
-from libp2p.abc import IHost, INetStream, ITransport, ITransportListener
-from libp2p.io.abc import ReadWriteCloser
-from libp2p.network.connection.raw import RawConnection
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.tools.async_service import Service
-from libp2p.typing import TProtocol
+from libp2p.abc import (
+    IHost,
+    IListener,
+    INetStream,
+    ITransport,
+)
+from libp2p.network.connection.raw_connection import (
+    RawConnection,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.tools.async_service import (
+    Service,
+)
 
+from .config import (
+    ClientConfig,
+    RelayConfig,
+)
+from .discovery import (
+    RelayDiscovery,
+)
 from .pb import circuit_pb2 as proto
-from .protocol import CircuitV2Protocol, PROTOCOL_ID
-from .discovery import RelayDiscovery
-from .config import RelayConfig, ClientConfig
+from .protocol import (
+    PROTOCOL_ID,
+    CircuitV2Protocol,
+)
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
 
@@ -92,7 +113,9 @@ class CircuitV2Transport(ITransport):
             if self.config.enable_client:
                 success = await self._make_reservation(relay_stream, relay_peer_id)
                 if not success:
-                    logger.warning("Failed to make reservation with relay %s", relay_peer_id)
+                    logger.warning(
+                        "Failed to make reservation with relay %s", relay_peer_id
+                    )
 
             # Send HOP CONNECT message
             hop_msg = proto.HopMessage(
@@ -107,9 +130,7 @@ class CircuitV2Transport(ITransport):
             resp.ParseFromString(resp_bytes)
 
             if resp.status.code != proto.Status.OK:
-                raise ConnectionError(
-                    f"Relay connection failed: {resp.status.message}"
-                )
+                raise ConnectionError(f"Relay connection failed: {resp.status.message}")
 
             # Create raw connection from stream
             return RawConnection(
@@ -140,11 +161,11 @@ class CircuitV2Transport(ITransport):
                 # TODO: Implement more sophisticated relay selection
                 # For now, just return the first available relay
                 return relay_id
-            
+
             # Wait and try discovery
             await trio.sleep(1)
             attempts += 1
-        
+
         return None
 
     async def _make_reservation(
@@ -191,17 +212,17 @@ class CircuitV2Transport(ITransport):
             logger.error("Error making reservation: %s", str(e))
             return False
 
-    def create_listener(self) -> ITransportListener:
+    def create_listener(self) -> IListener:
         """
         Create a listener for incoming relay connections.
 
         Returns:
-            ITransportListener: The created listener
+            IListener: The created listener
         """
         return CircuitV2Listener(self.host, self.protocol, self.config)
 
 
-class CircuitV2Listener(Service, ITransportListener):
+class CircuitV2Listener(Service, IListener):
     """Listener for incoming relay connections."""
 
     def __init__(
@@ -275,11 +296,11 @@ class CircuitV2Listener(Service, ITransportListener):
         # TODO: Implement proper multiaddr handling for relayed addresses
         self.multiaddrs.append(multiaddr)
 
-    def get_addrs(self) -> List[str]:
+    def get_addrs(self) -> list[str]:
         """Get the listening addresses."""
         return self.multiaddrs.copy()
 
     async def close(self) -> None:
         """Close the listener."""
         self.multiaddrs.clear()
-        await self.manager.stop() 
+        await self.manager.stop()

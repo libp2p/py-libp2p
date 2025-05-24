@@ -5,6 +5,8 @@ from typing import (
     Callable,
 )
 
+import trio
+
 from libp2p.abc import (
     IHost,
     INetStream,
@@ -41,7 +43,10 @@ async def connect(node1: IHost, node2: IHost) -> None:
     """Connect node1 to node2."""
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
-    await node1.connect(info)
+    with trio.move_on_after(5):  # 5 second timeout
+        await node1.connect(info)
+        # Wait a bit to ensure the connection is fully established
+        await trio.sleep(0.1)
 
 
 def create_echo_stream_handler(
