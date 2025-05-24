@@ -1,128 +1,357 @@
 """
-Relay discovery implementation for Circuit Relay v2.
+Discovery mechanism for Circuit Relay v2.
 
-This module implements mechanisms for discovering and selecting relay nodes
-in the network.
+This module provides functionality to discover and maintain a list of Circuit Relay nodes.
 """
 
 import logging
-import random
-from typing import List, Optional, Set
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set
 
-from libp2p.abc import IHost
+import trio
+
+from libp2p.abc import IHost, INetStream
 from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
+from libp2p.peer.peerstore import PeerStoreError
 from libp2p.tools.async_service import Service
-
-from .protocol import PROTOCOL_ID
+from libp2p.relay.circuit_v2.protocol import PROTOCOL_ID, STOP_PROTOCOL_ID
+from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
+# Default values for discovery
+DEFAULT_DISCOVERY_INTERVAL = 60  # seconds
+MAX_RELAYS_TO_TRACK = 10
+STREAM_TIMEOUT = 10  # seconds
+
+@dataclass
+class RelayInfo:
+    """Information about a discovered relay."""
+    peer_id: ID
+    discovered_at: float
+    last_seen: float
+    has_reservation: bool = False
+    reservation_expires_at: Optional[float] = None
+    reservation_data_limit: Optional[int] = None
 
 class RelayDiscovery(Service):
     """
-    RelayDiscovery implements mechanisms for finding and selecting relay nodes.
-
-    This service:
-    - Maintains a list of known relay nodes
-    - Periodically discovers new relays
-    - Selects appropriate relays based on criteria
+    Discovery service for Circuit Relay v2 nodes.
+    
+    This service discovers and keeps track of available relay nodes, and optionally
+    makes reservations with them.
     """
-
+    
     def __init__(
         self,
         host: IHost,
-        bootstrap_relays: Optional[List[PeerInfo]] = None,
-        min_relays: int = 3,
-        max_relays: int = 20,
+        auto_reserve: bool = False,
+        discovery_interval: int = DEFAULT_DISCOVERY_INTERVAL,
+        max_relays: int = MAX_RELAYS_TO_TRACK,
     ) -> None:
         """
-        Initialize the relay discovery service.
-
+        Initialize the discovery service.
+        
         Args:
-            host: The libp2p host this service runs on
-            bootstrap_relays: Initial list of known relay nodes
-            min_relays: Minimum number of relays to maintain
+            host: The libp2p host this discovery service is running on
+            auto_reserve: Whether to automatically make reservations with discovered relays
+            discovery_interval: How often to run discovery, in seconds
             max_relays: Maximum number of relays to track
         """
         super().__init__()
         self.host = host
-        self.min_relays = min_relays
+        self.auto_reserve = auto_reserve
+        self.discovery_interval = discovery_interval
         self.max_relays = max_relays
-        self._known_relays: Set[ID] = set()
-        self._active_relays: Set[ID] = set()
-
-        # Add bootstrap relays
-        if bootstrap_relays:
-            for peer_info in bootstrap_relays:
-                self._known_relays.add(peer_info.peer_id)
-
-    async def run(self) -> None:
+        self._discovered_relays: Dict[ID, RelayInfo] = {}
+        self._protocol_cache: Dict[ID, Set[str]] = {}  # Cache protocol info to reduce queries
+        self.event_started = trio.Event()
+        self.is_running = False
+        
+    async def run(self, *, task_status=trio.TASK_STATUS_IGNORED) -> None:
         """Run the discovery service."""
         try:
-            while True:
-                await self._discover_relays()
-                await trio.sleep(300)  # Run discovery every 5 minutes
-        except Exception as e:
-            logger.error("Error in relay discovery: %s", str(e))
-
-    async def _discover_relays(self) -> None:
+            self.is_running = True
+            self.event_started.set()
+            task_status.started()
+            
+            # Main discovery loop
+            async with trio.open_nursery() as nursery:
+                # Run initial discovery
+                nursery.start_soon(self.discover_relays)
+                
+                # Set up periodic discovery
+                while True:
+                    await trio.sleep(self.discovery_interval)
+                    if not self.manager.is_running:
+                        break
+                    nursery.start_soon(self.discover_relays)
+                    
+                    # Cleanup expired relays and reservations
+                    await self._cleanup_expired()
+        
+        finally:
+            self.is_running = False
+    
+    async def discover_relays(self) -> None:
         """
-        Discover new relay nodes in the network.
-
-        This method:
-        1. Queries the DHT for relay providers
-        2. Tests discovered relays for availability
-        3. Updates the known and active relay sets
+        Discover relay nodes in the network.
+        
+        This method queries the network for peers that support the Circuit Relay v2 protocol.
         """
-        # TODO: Implement DHT-based discovery
-        # For now, we just verify known relays
-
-        # Test known relays
-        for peer_id in list(self._known_relays):
-            if await self._test_relay(peer_id):
-                self._active_relays.add(peer_id)
-            else:
-                self._known_relays.remove(peer_id)
-                self._active_relays.discard(peer_id)
-
-    async def _test_relay(self, peer_id: ID) -> bool:
-        """
-        Test if a peer is a valid and responsive relay.
-
-        Args:
-            peer_id: The peer ID to test
-
-        Returns:
-            bool: True if the peer is a valid relay
-        """
+        logger.debug("Starting relay discovery")
+        
         try:
-            # Try to open a stream with the relay protocol
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-            if stream:
-                await stream.close()
-                return True
+            # Get connected peers
+            connected_peers = self.host.get_connected_peers()
+            logger.debug("Checking %d connected peers for relay support", len(connected_peers))
+            
+            # Check each peer if they support the relay protocol
+            for peer_id in connected_peers:
+                if peer_id == self.host.get_id():
+                    continue  # Skip ourselves
+                
+                if peer_id in self._discovered_relays:
+                    # Update last seen time for existing relay
+                    self._discovered_relays[peer_id].last_seen = time.time()
+                    continue
+                
+                # Check if peer supports the relay protocol
+                with trio.move_on_after(5):  # Don't wait too long for protocol info
+                    if await self._supports_relay_protocol(peer_id):
+                        await self._add_relay(peer_id)
+            
+            # Limit number of relays we track
+            if len(self._discovered_relays) > self.max_relays:
+                # Sort by last seen time and keep only the most recent ones
+                sorted_relays = sorted(
+                    self._discovered_relays.items(),
+                    key=lambda x: x[1].last_seen,
+                    reverse=True
+                )
+                to_remove = sorted_relays[self.max_relays:]
+                for peer_id, _ in to_remove:
+                    del self._discovered_relays[peer_id]
+            
+            logger.debug("Discovery completed, tracking %d relays", len(self._discovered_relays))
+        
         except Exception as e:
-            logger.debug("Failed to test relay %s: %s", peer_id, str(e))
-        return False
-
-    def get_relay(self) -> Optional[ID]:
+            logger.error("Error during relay discovery: %s", str(e))
+    
+    async def _supports_relay_protocol(self, peer_id: ID) -> bool:
         """
-        Get a suitable relay node for connection.
-
-        Returns:
-            Optional[ID]: A selected relay peer ID, or None if no relays available
-        """
-        if not self._active_relays:
-            return None
-        return random.choice(list(self._active_relays))
-
-    def add_relay(self, peer_info: PeerInfo) -> None:
-        """
-        Add a new relay to the known relays list.
-
+        Check if a peer supports the Circuit Relay v2 protocol.
+        
         Args:
-            peer_info: The peer info of the relay to add
+            peer_id: The ID of the peer to check
+            
+        Returns:
+            bool: True if the peer supports the relay protocol, False otherwise
         """
-        if len(self._known_relays) < self.max_relays:
-            self._known_relays.add(peer_info.peer_id) 
+        # First check if we already know the protocols
+        if peer_id in self._protocol_cache:
+            return PROTOCOL_ID in self._protocol_cache[peer_id]
+        
+        try:
+            # Try different methods to get protocols
+            try:
+                # Method 1: Using peerstore
+                protocols = set(await self.host.get_peerstore().get_protocols(peer_id))
+                self._protocol_cache[peer_id] = protocols
+                return PROTOCOL_ID in protocols
+            except (PeerStoreError, AttributeError, Exception) as e:
+                logger.debug("Error getting protocols from peerstore: %s", str(e))
+            
+            # Method 2: Try to open a stream directly with timeout
+            try:
+                with trio.fail_after(STREAM_TIMEOUT):
+                    stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+                    if stream:
+                        await stream.close()
+                        self._protocol_cache[peer_id] = {PROTOCOL_ID}
+                        return True
+            except Exception as e:
+                logger.debug("Failed to open relay protocol stream to %s: %s", peer_id, str(e))
+            
+            # Method 3: Check if the peer has the relay protocols registered
+            # This is a fallback method and may not be accurate
+            try:
+                if hasattr(self.host, "multiselect") and hasattr(self.host.multiselect, "protocols"):
+                    peer_protocols = set()
+                    for protocol in self.host.multiselect.protocols:
+                        try:
+                            with trio.fail_after(2):  # Quick check
+                                stream = await self.host.new_stream(peer_id, [protocol])
+                                if stream:
+                                    peer_protocols.add(protocol)
+                                    await stream.close()
+                        except Exception:
+                            pass
+                    
+                    self._protocol_cache[peer_id] = peer_protocols
+                    return PROTOCOL_ID in peer_protocols
+            except Exception as e:
+                logger.debug("Error checking protocols via multiselect: %s", str(e))
+            
+            # If we got here, we couldn't determine if the peer supports the protocol
+            return False
+            
+        except Exception as e:
+            logger.debug("Error checking relay protocol support for %s: %s", peer_id, str(e))
+            return False
+    
+    async def _add_relay(self, peer_id: ID) -> None:
+        """
+        Add a peer as a relay and optionally make a reservation.
+        
+        Args:
+            peer_id: The ID of the peer to add as a relay
+        """
+        now = time.time()
+        relay_info = RelayInfo(
+            peer_id=peer_id,
+            discovered_at=now,
+            last_seen=now,
+        )
+        self._discovered_relays[peer_id] = relay_info
+        logger.debug("Added relay %s to discovered relays", peer_id)
+        
+        # If auto-reserve is enabled, make a reservation with this relay
+        if self.auto_reserve:
+            await self.make_reservation(peer_id)
+    
+    async def make_reservation(self, peer_id: ID) -> bool:
+        """
+        Make a reservation with a relay.
+        
+        Args:
+            peer_id: The ID of the relay to make a reservation with
+            
+        Returns:
+            bool: True if reservation succeeded, False otherwise
+        """
+        if peer_id not in self._discovered_relays:
+            logger.error("Cannot make reservation with unknown relay %s", peer_id)
+            return False
+        
+        try:
+            logger.debug("Making reservation with relay %s", peer_id)
+            
+            # Open a stream to the relay with timeout
+            stream = None
+            try:
+                with trio.fail_after(STREAM_TIMEOUT):
+                    stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+                    if not stream:
+                        logger.error("Failed to open stream to relay %s", peer_id)
+                        return False
+            except trio.TooSlowError:
+                logger.error("Timeout opening stream to relay %s", peer_id)
+                return False
+            
+            try:
+                # Create and send reservation request
+                request = proto.HopMessage(
+                    type=proto.HopMessage.RESERVE,
+                    peer=self.host.get_id().to_bytes()
+                )
+                
+                with trio.fail_after(STREAM_TIMEOUT):
+                    await stream.write(request.SerializeToString())
+                    
+                    # Wait for response
+                    response_bytes = await stream.read()
+                    if not response_bytes:
+                        logger.error("No response received from relay %s", peer_id)
+                        return False
+                    
+                    # Parse response
+                    response = proto.HopMessage()
+                    response.ParseFromString(response_bytes)
+                    
+                    # Check if reservation was successful
+                    if (response.type == proto.HopMessage.RESERVE and 
+                        response.HasField("status") and 
+                        response.status.code == proto.Status.OK):
+                        
+                        # Update relay info with reservation details
+                        relay_info = self._discovered_relays[peer_id]
+                        relay_info.has_reservation = True
+                        
+                        if response.HasField("reservation") and response.HasField("limit"):
+                            relay_info.reservation_expires_at = response.reservation.expire
+                            relay_info.reservation_data_limit = response.limit.data
+                        
+                        logger.debug("Successfully made reservation with relay %s", peer_id)
+                        return True
+                    else:
+                        logger.warning(
+                            "Reservation request rejected by relay %s: %s", 
+                            peer_id, 
+                            response.status.message if response.HasField("status") else "Unknown error"
+                        )
+                        return False
+            
+            except trio.TooSlowError:
+                logger.error("Timeout during reservation process with relay %s", peer_id)
+                return False
+            
+            finally:
+                # Always close the stream
+                if stream:
+                    await stream.close()
+        
+        except Exception as e:
+            logger.error("Error making reservation with relay %s: %s", peer_id, str(e))
+            return False
+    
+    async def _cleanup_expired(self) -> None:
+        """Clean up expired relays and reservations."""
+        now = time.time()
+        to_remove = []
+        
+        for peer_id, relay_info in self._discovered_relays.items():
+            # Check if relay hasn't been seen in a while (3x discovery interval)
+            if now - relay_info.last_seen > self.discovery_interval * 3:
+                to_remove.append(peer_id)
+                continue
+            
+            # Check if reservation has expired
+            if (relay_info.has_reservation and 
+                relay_info.reservation_expires_at and 
+                now > relay_info.reservation_expires_at):
+                relay_info.has_reservation = False
+                relay_info.reservation_expires_at = None
+                relay_info.reservation_data_limit = None
+                
+                # If auto-reserve is enabled, try to renew
+                if self.auto_reserve:
+                    await self.make_reservation(peer_id)
+        
+        # Remove expired relays
+        for peer_id in to_remove:
+            del self._discovered_relays[peer_id]
+            if peer_id in self._protocol_cache:
+                del self._protocol_cache[peer_id]
+    
+    def get_relays(self) -> List[ID]:
+        """
+        Get a list of discovered relay peer IDs.
+        
+        Returns:
+            List[ID]: List of discovered relay peer IDs
+        """
+        return list(self._discovered_relays.keys())
+    
+    def get_relay_info(self, peer_id: ID) -> Optional[RelayInfo]:
+        """
+        Get information about a specific relay.
+        
+        Args:
+            peer_id: The ID of the relay to get information about
+            
+        Returns:
+            Optional[RelayInfo]: Information about the relay, or None if not found
+        """
+        return self._discovered_relays.get(peer_id) 
