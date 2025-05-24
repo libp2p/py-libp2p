@@ -15,6 +15,7 @@ from multiaddr import (
     Multiaddr,
 )
 import trio
+import varint
 
 from libp2p.abc import (
     IHost,
@@ -51,8 +52,8 @@ from .value_store import (
     ValueStore,
 )
 
-logger = logging.getLogger("libp2p.kademlia.kad_dht")
-
+logger = logging.getLogger("kademlia-example.kad_dht")
+# logger = logging.getLogger("libp2p.kademlia")
 # Default parameters
 PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60  # 1 min in seconds for testing
@@ -128,31 +129,27 @@ class KadDHT(Service):
 
     async def handle_stream(self, stream: INetStream) -> None:
         """
-        Handle an incoming stream.
-
-        Args:
-        ----
-        stream: The incoming stream.
-
-        Returns
-        -------
-        None
-
+        Handle an incoming DHT stream using varint length prefixes.
         """
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
-        # Call the async method properly with await
         await self.add_peer(peer_id)
         logger.info(f"Added peer {peer_id} to routing table")
+
         try:
-            # Read 4 bytes for the length prefix
-            length_prefix = await stream.read(4)
-            logger.info(f"Read length prefix1: {length_prefix.decode()}")
-            if len(length_prefix) < 4:
-                logger.error("Failed to read length prefix from stream")
-                await stream.close()
-                return
-            msg_length = int.from_bytes(length_prefix, "big")
+            # Read varint-prefixed length for the message
+            length_prefix = b""
+            while True:
+                byte = await stream.read(1)
+                if not byte:
+                    logger.error("Stream closed while reading varint length")
+                    await stream.close()
+                    return
+                length_prefix += byte
+                if byte[0] & 0x80 == 0:
+                    break
+            msg_length = varint.decode_bytes(length_prefix)
+
             # Read the message bytes
             msg_bytes = await stream.read(msg_length)
             if len(msg_bytes) < msg_length:
@@ -207,7 +204,7 @@ class KadDHT(Service):
 
                     # Serialize and send response
                     response_bytes = response.SerializeToString()
-                    await stream.write(len(response_bytes).to_bytes(4, "big"))
+                    await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.info(
                         f"Sent protobuf response with"
@@ -401,6 +398,7 @@ class KadDHT(Service):
             The peer information if found, None otherwise.
 
         """
+        logger.info("find peers is called with peer_id: %s", peer_id)
         return await self.peer_routing.find_peer(peer_id)
 
     # Value storage and retrieval methods
