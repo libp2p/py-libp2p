@@ -10,6 +10,8 @@ from typing import (
     Optional,
 )
 
+import varint
+
 from libp2p.abc import (
     IHost,
     INetStream,
@@ -35,7 +37,8 @@ from .utils import (
     sort_peer_ids_by_distance,
 )
 
-logger = logging.getLogger("libp2p.kademlia.peer_routing")
+# logger = logging.getLogger("libp2p.kademlia.peer_routing")
+logger = logging.getLogger("kademlia-example.peer_routing")
 
 # Constants for the Kademlia algorithm
 ALPHA = 3  # Concurrency parameter
@@ -60,6 +63,7 @@ class PeerRouting(IPeerRouting):
         """
         self.host = host
         self.routing_table = routing_table
+        # Use the standard Kademlia DHT protocol ID
         self.protocol_id = TProtocol("/ipfs/kad/1.0.0")
         # Register protocol handler for incoming requests
         self.host.set_stream_handler(self.protocol_id, self._handle_kad_stream)
@@ -178,25 +182,14 @@ class PeerRouting(IPeerRouting):
 
     async def _query_peer_for_closest(self, peer: ID, target_key: bytes) -> list[ID]:
         """
-        Query a peer for their closest peers to the target key.
-
-        Args:
-        ----
-            peer: The peer to query
-            target_key: The target key to find closest peers for
-
-        Returns
-        -------
-        List[ID]
-            List of peer IDs that are closest to the target key
-
+        Query a peer for their closest peers
+        to the target key using varint length prefix
         """
         stream = None
         results = []
         try:
             # Add the peer to our routing table regardless of query outcome
             try:
-                # Create PeerInfo from ID to add to routing table
                 addrs = self.host.get_peerstore().addrs(peer)
                 if addrs:
                     peer_info = PeerInfo(peer, addrs)
@@ -218,31 +211,27 @@ class PeerRouting(IPeerRouting):
             find_node_msg.type = Message.MessageType.FIND_NODE
             find_node_msg.key = target_key  # Set target key directly as bytes
 
-            # Serialize and send the protobuf message with length prefix
+            # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
-            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            logger.info(
+                f"Sending FIND_NODE: {proto_bytes.hex()} (len={len(proto_bytes)})"
+            )
+            await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
 
-            # Read response length (4 bytes)
+            # Read varint-prefixed response length
             length_bytes = b""
-            remaining = 4
-            while remaining > 0:
-                try:
-                    chunk = await stream.read(remaining)
-                except Exception as e:
-                    logger.warning(f"Error reading from stream: {e}")
-                    return []
-
-                if not chunk:
-                    logger.debug(
-                        f"Connection closed by peer {peer} while reading length"
+            while True:
+                b = await stream.read(1)
+                if not b:
+                    logger.warning(
+                        "Error reading varint length from stream: connection closed"
                     )
                     return []
-
-                length_bytes += chunk
-                remaining -= len(chunk)
-
-            response_length = int.from_bytes(length_bytes, byteorder="big")
+                length_bytes += b
+                if b[0] & 0x80 == 0:
+                    break
+            response_length = varint.decode_bytes(length_bytes)
 
             # Read response data
             response_bytes = b""
@@ -252,7 +241,6 @@ class PeerRouting(IPeerRouting):
                 if not chunk:
                     logger.debug(f"Connection closed by peer {peer} while reading data")
                     return []
-
                 response_bytes += chunk
                 remaining -= len(chunk)
 
@@ -264,18 +252,17 @@ class PeerRouting(IPeerRouting):
                 peer,
                 len(response_msg.closerPeers),
             )
+            # logger.info(
+            #     "Response message is1: %s",
+            #     response_msg,
+            # )
 
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:
                 for peer_data in response_msg.closerPeers:
-                    # Create peer ID from returned data
                     new_peer_id = ID(peer_data.id)
-
-                    # Add to results if not already present
                     if new_peer_id not in results:
                         results.append(new_peer_id)
-
-                    # Store peer addresses in peerstore if provided
                     if peer_data.addrs:
                         from multiaddr import (
                             Multiaddr,
@@ -283,7 +270,6 @@ class PeerRouting(IPeerRouting):
 
                         addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
-
             return results
 
         except Exception as e:
@@ -291,7 +277,6 @@ class PeerRouting(IPeerRouting):
             return []
 
         finally:
-            # Ensure stream is closed even if an exception occurs
             if stream:
                 await stream.close()
 
@@ -384,11 +369,24 @@ class PeerRouting(IPeerRouting):
 
         # Add the bootstrap peers to the routing table
         for peer_info in bootstrap_peers:
-            self.host.get_peerstore().add_addrs(
-                peer_info.peer_id, peer_info.addrs, 3600
-            )
-            # Now properly await the async add_peer method
-            await self.routing_table.add_peer(peer_info)
+            try:
+                # Add to peerstore first
+                self.host.get_peerstore().add_addrs(
+                    peer_info.peer_id, peer_info.addrs, 3600
+                )
+
+                # Establish connection to bootstrap peer
+                await self.host.connect(peer_info)
+                logger.info(f"Connected to bootstrap peer {peer_info.peer_id}")
+
+                # Add to routing table
+                await self.routing_table.add_peer(peer_info)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to connect to bootstrap peer {peer_info.peer_id}: {e}"
+                )
+                continue
 
         # If we have bootstrap peers, refresh the routing table
         if bootstrap_peers:
@@ -407,7 +405,14 @@ class PeerRouting(IPeerRouting):
 
         # Perform a lookup for ourselves to populate the routing table
         local_id = self.host.get_id()
-        await self.find_closest_peers_network(local_id.to_bytes())
+        closest_peers = await self.find_closest_peers_network(local_id.to_bytes())
 
-        # In a complete implementation, you would also refresh buckets
-        # that haven't been updated recently
+        # Add discovered peers to routing table
+        for peer_id in closest_peers:
+            try:
+                addrs = self.host.get_peerstore().addrs(peer_id)
+                if addrs:
+                    peer_info = PeerInfo(peer_id, addrs)
+                    await self.routing_table.add_peer(peer_info)
+            except Exception as e:
+                logger.debug(f"Failed to add discovered peer {peer_id}: {e}")

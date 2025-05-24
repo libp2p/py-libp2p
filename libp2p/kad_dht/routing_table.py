@@ -31,7 +31,8 @@ from .pb.kademlia_pb2 import (
     Message,
 )
 
-logger = logging.getLogger("libp2p.kademlia.routing_table")
+# logger = logging.getLogger("libp2p.kademlia.routing_table")
+logger = logging.getLogger("kademlia-example.routing_table")
 
 # Default parameters
 BUCKET_SIZE = 20  # k in the Kademlia paper
@@ -243,11 +244,11 @@ class KBucket:
             raise ValueError(f"Peer {peer_id} not in bucket")
 
         # Default protocol ID for Kademlia DHT
-        protocol_id = "/ipfs/kad/1.0.0"
+        protocol_id = TProtocol("/ipfs/kad/1.0.0")
 
         try:
             # Open a stream to the peer with the DHT protocol
-            stream = await self.host.new_stream(peer_id, [TProtocol(protocol_id)])
+            stream = await self.host.new_stream(peer_id, [protocol_id])
 
             try:
                 # Create ping protobuf message
