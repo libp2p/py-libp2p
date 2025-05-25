@@ -10,7 +10,6 @@ from libp2p.abc import (
 )
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
-    MsgReadWriteCloser,
     ReadWriteCloser,
 )
 from libp2p.io.msgio import (
@@ -40,7 +39,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     implemented by the subclasses.
     """
 
-    read_writer: MsgReadWriteCloser
+    read_writer: NoisePacketReadWriter
     noise_state: NoiseState
 
     # FIXME: This prefix is added in msg#3 in Go. Check whether it's a desired behavior.
@@ -70,12 +69,10 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         # Delegate to the underlying connection if possible
         if hasattr(self.read_writer, "read_write_closer") and hasattr(
-            cast(NoisePacketReadWriter, self.read_writer).read_write_closer,
+            self.read_writer.read_write_closer,
             "get_remote_address",
         ):
-            return cast(
-                NoisePacketReadWriter, self.read_writer
-            ).read_write_closer.get_remote_address()
+            return self.read_writer.read_write_closer.get_remote_address()
         return None
 
 
