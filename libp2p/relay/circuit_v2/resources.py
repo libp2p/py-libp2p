@@ -170,3 +170,24 @@ class RelayResourceManager:
         ]
         for peer_id in expired:
             del self._reservations[peer_id]
+
+    def reserve(self, peer_id: ID) -> int:
+        """
+        Create or update a reservation for a peer and return the TTL.
+
+        Args:
+            peer_id: The peer ID to reserve for
+
+        Returns:
+            int: The TTL of the reservation in seconds
+        """
+        # Check for existing reservation
+        existing = self._reservations.get(peer_id)
+        if existing and not existing.is_expired():
+            # Return remaining time for existing reservation
+            remaining = max(0, int(existing.expires_at - time.time()))
+            return remaining
+
+        # Create new reservation
+        self.create_reservation(peer_id)
+        return self.limits.duration

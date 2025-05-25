@@ -72,9 +72,9 @@ class CircuitV2Transport(ITransport):
         self.config = config
         self.client_config = ClientConfig()
         self.discovery = RelayDiscovery(
-            host,
-            bootstrap_relays=config.bootstrap_relays,
-            min_relays=config.min_relays,
+            host=host,
+            auto_reserve=config.enable_client,
+            discovery_interval=config.discovery_interval,
             max_relays=config.max_relays,
         )
 
