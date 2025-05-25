@@ -1,9 +1,15 @@
+from collections.abc import (
+    Sequence,
+)
 from typing import (
     NamedTuple,
 )
 
 import multiaddr
 
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
 from libp2p.pubsub import (
     floodsub,
     gossipsub,
@@ -26,11 +32,14 @@ class GossipsubParams(NamedTuple):
     degree: int = 10
     degree_low: int = 9
     degree_high: int = 11
+    direct_peers: Sequence[PeerInfo] = None
     time_to_live: int = 30
     gossip_window: int = 3
     gossip_history: int = 5
     heartbeat_initial_delay: float = 0.1
     heartbeat_interval: float = 0.5
+    direct_connect_initial_delay: float = 0.1
+    direct_connect_interval: int = 300
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()
