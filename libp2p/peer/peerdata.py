@@ -3,6 +3,7 @@ from collections.abc import (
 )
 from typing import (
     Any,
+    Optional,
 )
 
 from multiaddr import (
@@ -19,8 +20,8 @@ from libp2p.crypto.keys import (
 
 
 class PeerData(IPeerData):
-    pubkey: PublicKey
-    privkey: PrivateKey
+    pubkey: Optional[PublicKey]
+    privkey: Optional[PrivateKey]
     metadata: dict[Any, Any]
     protocols: list[str]
     addrs: list[Multiaddr]

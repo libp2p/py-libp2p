@@ -1,3 +1,5 @@
+from typing import Optional
+
 from libp2p.abc import (
     IMultiselectCommunicator,
     IMultiselectMuxer,
@@ -23,16 +25,21 @@ class Multiselect(IMultiselectMuxer):
     communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[Optional[TProtocol], Optional[StreamHandlerFn]]
 
     def __init__(
-        self, default_handlers: dict[TProtocol, StreamHandlerFn] = None
+        self,
+        default_handlers: Optional[
+            dict[Optional[TProtocol], Optional[StreamHandlerFn]]
+        ] = None,
     ) -> None:
         if not default_handlers:
             default_handlers = {}
         self.handlers = default_handlers
 
-    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
+    def add_handler(
+        self, protocol: Optional[TProtocol], handler: Optional[StreamHandlerFn]
+    ) -> None:
         """
         Store the handler with the given protocol.
 
@@ -41,9 +48,10 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
+    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[TProtocol, Optional[StreamHandlerFn]]:
         """
         Negotiate performs protocol selection.
 

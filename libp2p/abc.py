@@ -12,6 +12,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -273,7 +274,7 @@ class INetStream(ReadWriteCloser):
     muxed_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> TProtocol:
+    def get_protocol(self) -> Optional[TProtocol]:
         """
         Retrieve the protocol identifier for the stream.
 
@@ -1550,7 +1551,7 @@ class IMultiselectMuxer(ABC):
     and its corresponding handler for communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[Optional[TProtocol], Optional[StreamHandlerFn]]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -1566,7 +1567,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[TProtocol, ...]:
+    def get_protocols(self) -> tuple[Optional[TProtocol], ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1581,7 +1582,7 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[Optional[TProtocol], Optional[StreamHandlerFn]]:
         """
         Negotiate a protocol selection with a multiselect client.
 
@@ -1856,7 +1857,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notify the router that a new peer has connected.
 

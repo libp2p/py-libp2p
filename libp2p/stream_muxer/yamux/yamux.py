@@ -11,6 +11,7 @@ import inspect
 import logging
 import struct
 from typing import (
+    Any,
     Callable,
     Optional,
 )
@@ -126,7 +127,7 @@ class YamuxStream(IMuxedStream):
             )
             await self.conn.secured_conn.write(header)
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: Optional[int] = -1) -> bytes:
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -253,7 +254,7 @@ class Yamux(IMuxedConn):
         secured_conn: ISecureConn,
         peer_id: ID,
         is_initiator: Optional[bool] = None,
-        on_close: Optional[Callable[[], Awaitable[None]]] = None,
+        on_close: Optional[Callable[[], Awaitable[Any]]] = None,
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
