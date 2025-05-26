@@ -58,13 +58,13 @@ from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
-from libp2p.transport.quic.transport import (
-    QuicTransport,
-)
 from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
 )
 from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
+from libp2p.transport.quic.transport import (
+    QuicTransport,
+)
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
