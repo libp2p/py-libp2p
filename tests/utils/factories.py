@@ -98,6 +98,10 @@ from libp2p.stream_muxer.mplex.mplex import (
 from libp2p.stream_muxer.mplex.mplex_stream import (
     MplexStream,
 )
+from libp2p.stream_muxer.yamux.yamux import (
+    Yamux,
+    YamuxStream,
+)
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -197,8 +201,16 @@ def mplex_transport_factory() -> TMuxerOptions:
     return {MPLEX_PROTOCOL_ID: Mplex}
 
 
-def default_muxer_transport_factory() -> TMuxerOptions:
+def default_mplex_muxer_transport_factory() -> TMuxerOptions:
     return mplex_transport_factory()
+
+
+def yamux_transport_factory() -> TMuxerOptions:
+    return {cast(TProtocol, "/yamux/1.0.0"): Yamux}
+
+
+def default_muxer_transport_factory() -> TMuxerOptions:
+    return yamux_transport_factory()
 
 
 @asynccontextmanager
@@ -421,10 +433,13 @@ class GossipsubFactory(factory.Factory):
     degree = GOSSIPSUB_PARAMS.degree
     degree_low = GOSSIPSUB_PARAMS.degree_low
     degree_high = GOSSIPSUB_PARAMS.degree_high
+    direct_peers = GOSSIPSUB_PARAMS.direct_peers
     gossip_window = GOSSIPSUB_PARAMS.gossip_window
     gossip_history = GOSSIPSUB_PARAMS.gossip_history
     heartbeat_initial_delay = GOSSIPSUB_PARAMS.heartbeat_initial_delay
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
+    direct_connect_initial_delay = GOSSIPSUB_PARAMS.direct_connect_initial_delay
+    direct_connect_interval = GOSSIPSUB_PARAMS.direct_connect_interval
 
 
 class PubsubFactory(factory.Factory):
@@ -541,11 +556,14 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
+        direct_peers: Sequence[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
         heartbeat_interval: float = GOSSIPSUB_PARAMS.heartbeat_interval,
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
+        direct_connect_initial_delay: float = GOSSIPSUB_PARAMS.direct_connect_initial_delay,  # noqa: E501
+        direct_connect_interval: int = GOSSIPSUB_PARAMS.direct_connect_interval,
         security_protocol: TProtocol = None,
         muxer_opt: TMuxerOptions = None,
         msg_id_constructor: Callable[
@@ -559,9 +577,14 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
                 time_to_live=time_to_live,
                 gossip_window=gossip_window,
+                gossip_history=gossip_history,
+                heartbeat_initial_delay=heartbeat_initial_delay,
                 heartbeat_interval=heartbeat_interval,
+                direct_connect_initial_delay=direct_connect_initial_delay,
+                direct_connect_interval=direct_connect_interval,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -569,8 +592,13 @@ class PubsubFactory(factory.Factory):
                 degree=degree,
                 degree_low=degree_low,
                 degree_high=degree_high,
+                direct_peers=direct_peers,
+                time_to_live=time_to_live,
                 gossip_window=gossip_window,
                 heartbeat_interval=heartbeat_interval,
+                heartbeat_initial_delay=heartbeat_initial_delay,
+                direct_connect_initial_delay=direct_connect_initial_delay,
+                direct_connect_interval=direct_connect_interval,
             )
 
         async with cls._create_batch_with_router(
@@ -627,7 +655,8 @@ async def mplex_conn_pair_factory(
     security_protocol: TProtocol = None,
 ) -> AsyncIterator[tuple[Mplex, Mplex]]:
     async with swarm_conn_pair_factory(
-        security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
+        security_protocol=security_protocol,
+        muxer_opt=default_mplex_muxer_transport_factory(),
     ) as swarm_pair:
         yield (
             cast(Mplex, swarm_pair[0].muxed_conn),
@@ -650,6 +679,37 @@ async def mplex_stream_pair_factory(
             if len(mplex_conn_1.streams) != 1:
                 raise Exception("Mplex should not have any other stream")
             stream_1 = tuple(mplex_conn_1.streams.values())[0]
+        yield stream_0, stream_1
+
+
+@asynccontextmanager
+async def yamux_conn_pair_factory(
+    security_protocol: TProtocol = None,
+) -> AsyncIterator[tuple[Yamux, Yamux]]:
+    async with swarm_conn_pair_factory(
+        security_protocol=security_protocol, muxer_opt=default_muxer_transport_factory()
+    ) as swarm_pair:
+        yield (
+            cast(Yamux, swarm_pair[0].muxed_conn),
+            cast(Yamux, swarm_pair[1].muxed_conn),
+        )
+
+
+@asynccontextmanager
+async def yamux_stream_pair_factory(
+    security_protocol: TProtocol = None,
+) -> AsyncIterator[tuple[YamuxStream, YamuxStream]]:
+    async with yamux_conn_pair_factory(
+        security_protocol=security_protocol
+    ) as yamux_conn_pair_info:
+        yamux_conn_0, yamux_conn_1 = yamux_conn_pair_info
+        stream_0 = await yamux_conn_0.open_stream()
+        await trio.sleep(0.01)
+        stream_1: YamuxStream
+        async with yamux_conn_1.streams_lock:
+            if len(yamux_conn_1.streams) != 1:
+                raise Exception("Yamux should not have any other stream")
+            stream_1 = tuple(yamux_conn_1.streams.values())[0]
         yield stream_0, stream_1
 
 
