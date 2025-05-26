@@ -57,13 +57,13 @@ from .typing import (
 
 
 class FunctionTask(BaseFunctionTask):
-    _trio_task: trio.lowlevel.Task | None = None
+    _trio_task: Optional[trio.lowlevel.Task] = None
 
     def __init__(
         self,
         name: str,
         daemon: bool,
-        parent: TaskWithChildrenAPI | None,
+        parent: Optional[TaskWithChildrenAPI],
         async_fn: AsyncFn,
         async_fn_args: Sequence[Any],
     ) -> None:
@@ -134,7 +134,7 @@ class ChildServiceTask(BaseChildServiceTask):
         self,
         name: str,
         daemon: bool,
-        parent: TaskWithChildrenAPI | None,
+        parent: Optional[TaskWithChildrenAPI],
         child_service: ServiceAPI,
     ) -> None:
         super().__init__(name, daemon, parent)
@@ -280,7 +280,7 @@ class TrioManager(BaseManager):
 
     def _find_parent_task(
         self, trio_task: trio.lowlevel.Task
-    ) -> TaskWithChildrenAPI | None:
+    ) -> Optional[TaskWithChildrenAPI]:
         """
         Find the :class:`async_service.trio.FunctionTask` instance that corresponds to
         the given :class:`trio.lowlevel.Task` instance.
