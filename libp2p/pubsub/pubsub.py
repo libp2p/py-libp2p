@@ -13,7 +13,6 @@ import time
 from typing import (
     Callable,
     NamedTuple,
-    Optional,
     cast,
 )
 
@@ -124,7 +123,7 @@ class Pubsub(Service, IPubsub):
 
     # Indicate if we should enforce signature verification
     strict_signing: bool
-    sign_key: Optional[PrivateKey]
+    sign_key: PrivateKey | None
 
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
@@ -133,7 +132,7 @@ class Pubsub(Service, IPubsub):
         self,
         host: IHost,
         router: IPubsubRouter,
-        cache_size: Optional[int] = None,
+        cache_size: int | None = None,
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,
