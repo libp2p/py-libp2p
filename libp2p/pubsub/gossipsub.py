@@ -789,7 +789,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_graft(self, topic: str, to_peer: ID) -> None:
+    async def emit_graft(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
@@ -797,9 +797,9 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.graft.extend([graft_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
-    async def emit_prune(self, topic: str, to_peer: ID) -> None:
+    async def emit_prune(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
@@ -807,7 +807,7 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID

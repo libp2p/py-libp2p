@@ -2,7 +2,6 @@ from __future__ import (
     annotations,
 )
 
-from typing import Optional
 import base64
 from collections.abc import (
     KeysView,
@@ -14,6 +13,7 @@ import time
 from typing import (
     Callable,
     NamedTuple,
+    Optional,
     cast,
 )
 
@@ -54,6 +54,9 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerdata import (
+    PeerDataError,
+)
 from libp2p.tools.async_service import (
     Service,
 )
@@ -70,9 +73,6 @@ from .pb import (
 )
 from .pubsub_notifee import (
     PubsubNotifee,
-)
-from libp2p.peer.peerdata import (
-    PeerDataError,
 )
 from .subscription import (
     TrioSubscriptionAPI,
@@ -555,7 +555,7 @@ class Pubsub(Service, IPubsub):
             priv_key = self.sign_key
             if priv_key is None:
                 raise PeerDataError("private key not found")
-        
+
             signature = priv_key.sign(
                 PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
             )
