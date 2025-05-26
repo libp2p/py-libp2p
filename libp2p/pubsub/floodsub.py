@@ -3,6 +3,9 @@ from collections.abc import (
     Sequence,
 )
 import logging
+from typing import (
+    Optional,
+)
 
 import trio
 
@@ -37,7 +40,7 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 class FloodSub(IPubsubRouter):
     protocols: list[TProtocol]
 
-    pubsub: Pubsub
+    pubsub: Optional[Pubsub]
 
     def __init__(self, protocols: Sequence[TProtocol]) -> None:
         self.protocols = list(protocols)
@@ -107,7 +110,8 @@ class FloodSub(IPubsubRouter):
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
         logger.debug("publishing message %s", pubsub_msg)
-
+        if self.pubsub is None:
+            raise RuntimeError("Pubsub not attached")
         for peer_id in peers_gen:
             if peer_id not in self.pubsub.peers:
                 continue
@@ -150,6 +154,8 @@ class FloodSub(IPubsubRouter):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
+        if self.pubsub is None:
+            raise RuntimeError("Pubsub not attached")
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
                 continue
