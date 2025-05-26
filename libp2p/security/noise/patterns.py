@@ -102,6 +102,9 @@ class PatternXX(BasePattern):
         if noise_state.noise_protocol is None:
             raise NoiseStateError("noise_protocol is not initialized")
         handshake_state = noise_state.noise_protocol.handshake_state
+        if handshake_state is None:
+            raise NoiseStateError("Handshake state is not initialized")
+
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
 
         # Consume msg#1.
@@ -153,6 +156,8 @@ class PatternXX(BasePattern):
         if noise_state.noise_protocol is None:
             raise NoiseStateError("noise_protocol is not initialized")
         handshake_state = noise_state.noise_protocol.handshake_state
+        if handshake_state is None:
+            raise NoiseStateError("Handshake state is not initialized")
 
         # Send msg#1, which is *not* encrypted.
         msg_1 = b""
