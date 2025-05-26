@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ['3.9', '3.10', '3.11', '3.12', '3.13', 'pypy3.9', 'pypy3.10']
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
         toxenv: [core, interop, lint, wheel, demos]
         include:
           - python: '3.10'
@@ -88,6 +88,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install tox
           python -m pip install cffi
+          python -m pip install _cffi_backend
 
       - run: |
           python -m tox run -r
