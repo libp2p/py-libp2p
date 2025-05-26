@@ -5,12 +5,12 @@ This module provides QUIC transport functionality for libp2p, enabling
 high-performance, secure communication between peers using the QUIC protocol.
 """
 
-from libp2p.transport.quic.transport import (
-    Libp2pQuicProtocol,
+# Avoid importing Libp2pQuicProtocol to prevent circular dependencies
+
+from .transport import (
     QuicTransport,
 )
 
 __all__ = [
     "QuicTransport",
-    "Libp2pQuicProtocol",
 ]

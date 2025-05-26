@@ -50,7 +50,7 @@ except FileNotFoundError:
     long_description = description
 
 install_requires = [
-    "aioquic>=0.9.20",
+    "aioquic>=0.9.25",
     "base58>=1.0.3",
     "coincurve>=10.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
@@ -66,6 +66,8 @@ install_requires = [
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
+    "cryptography>=42.0.0",
+    "pyOpenSSL>=23.0.0",
 ]
 
 # Add platform-specific dependencies
