@@ -97,7 +97,13 @@ class PatternXX(BasePattern):
         noise_state = self.create_noise_state()
         noise_state.set_as_responder()
         noise_state.start_handshake()
+        if noise_state.noise_protocol is None:
+            raise NoiseStateError("NoiseProtocol is not initialized")
+
         handshake_state = noise_state.noise_protocol.handshake_state
+        if handshake_state is None:
+            raise NoiseStateError("Handshake state is not initialized")
+
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
 
         # Consume msg#1.
@@ -146,7 +152,12 @@ class PatternXX(BasePattern):
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
         noise_state.set_as_initiator()
         noise_state.start_handshake()
+        if noise_state.noise_protocol is None:
+            raise NoiseStateError("NoiseProtocol is not initialized")
+
         handshake_state = noise_state.noise_protocol.handshake_state
+        if handshake_state is None:
+            raise NoiseStateError("Handshake state is not initialized")
 
         # Send msg#1, which is *not* encrypted.
         msg_1 = b""
@@ -195,6 +206,8 @@ class PatternXX(BasePattern):
 
     @staticmethod
     def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
+        if key_pair.public is None:
+            raise ValueError("NoiseKeyPair's public key is None")
         # Use `Ed25519PublicKey` since 25519 is used in our pattern.
         raw_bytes = key_pair.public.public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw
