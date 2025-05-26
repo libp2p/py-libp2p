@@ -26,7 +26,7 @@ async def main():
         local_key_pair=key_pair,
         # secure_bytes_provider: Optional function to generate secure random bytes
         # (defaults to secrets.token_bytes)
-        secure_bytes_provider=None,  # Use default implementation
+        secure_bytes_provider=secrets.token_bytes,  # Use default implementation
     )
 
     # Create a security options dictionary mapping protocol ID to transport

@@ -902,7 +902,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         Start listening on one or more multiaddresses.
 
