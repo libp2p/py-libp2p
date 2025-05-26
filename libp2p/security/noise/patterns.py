@@ -206,8 +206,6 @@ class PatternXX(BasePattern):
 
     @staticmethod
     def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
-        if key_pair.public is None:
-            raise ValueError("NoiseKeyPair's public key is None")
         # Use `Ed25519PublicKey` since 25519 is used in our pattern.
         if key_pair.public is None:
             raise NoiseStateError("public key is not initialized")

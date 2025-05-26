@@ -552,10 +552,6 @@ class Pubsub(Service, IPubsub):
         )
 
         if self.strict_signing:
-            if self.sign_key is None:
-                raise ValueError(
-                    "Strict signing is enabled but no private key is available"
-                )
             priv_key = self.sign_key
             if priv_key is None:
                 raise PeerDataError("private key not found")
