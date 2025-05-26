@@ -3,10 +3,6 @@ from collections.abc import (
     Sequence,
 )
 import logging
-from typing import (
-    Optional,
-)
-
 from typing import Optional
 
 import trio
@@ -27,14 +23,14 @@ from libp2p.utils import (
     encode_varint_prefixed,
 )
 
+from .exceptions import (
+    PubsubRouterError,
+)
 from .pb import (
     rpc_pb2,
 )
 from .pubsub import (
     Pubsub,
-)
-from .exceptions import (
-    PubsubRouterError,
 )
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
@@ -115,7 +111,7 @@ class FloodSub(IPubsubRouter):
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
         logger.debug("publishing message %s", pubsub_msg)
-        
+
         if self.pubsub is None:
             raise PubsubRouterError("pubsub not attached to this instance")
 
