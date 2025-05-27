@@ -3,6 +3,7 @@ from collections.abc import (
     Sequence,
 )
 import logging
+from typing import Optional
 
 import trio
 
@@ -22,6 +23,9 @@ from libp2p.utils import (
     encode_varint_prefixed,
 )
 
+from .exceptions import (
+    PubsubRouterError,
+)
 from .pb import (
     rpc_pb2,
 )
@@ -37,7 +41,7 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 class FloodSub(IPubsubRouter):
     protocols: list[TProtocol]
 
-    pubsub: Pubsub
+    pubsub: Optional[Pubsub]
 
     def __init__(self, protocols: Sequence[TProtocol]) -> None:
         self.protocols = list(protocols)
@@ -58,7 +62,7 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -108,6 +112,9 @@ class FloodSub(IPubsubRouter):
 
         logger.debug("publishing message %s", pubsub_msg)
 
+        if self.pubsub is None:
+            raise PubsubRouterError("pubsub not attached to this instance")
+
         for peer_id in peers_gen:
             if peer_id not in self.pubsub.peers:
                 continue
@@ -150,6 +157,8 @@ class FloodSub(IPubsubRouter):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
+        if self.pubsub is None:
+            raise PubsubRouterError("pubsub not attached to this instance")
         for topic in topic_ids:
             if topic not in self.pubsub.peer_topics:
                 continue

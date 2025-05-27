@@ -173,7 +173,7 @@ class GossipSub(IPubsubRouter, Service):
 
         logger.debug("attached to pusub")
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -181,6 +181,9 @@ class GossipSub(IPubsubRouter, Service):
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
+
+        if protocol_id is None:
+            raise ValueError("Protocol cannot be None")
 
         if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
             # We should never enter here. Becuase the `protocol_id` is registered by
@@ -789,7 +792,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_graft(self, topic: str, to_peer: ID) -> None:
+    async def emit_graft(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
@@ -797,9 +800,9 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.graft.extend([graft_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
-    async def emit_prune(self, topic: str, to_peer: ID) -> None:
+    async def emit_prune(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
@@ -807,7 +810,7 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID

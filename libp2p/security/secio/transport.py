@@ -209,7 +209,8 @@ async def _response_to_msg(read_writer: SecioPacketReadWriter, msg: bytes) -> by
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
-    return multihash.digest(data, "sha2-256")
+    mh = multihash.digest(data, "sha2-256")
+    return mh.encode()
 
 
 def _mk_score(public_key: PublicKey, nonce: bytes) -> bytes:
@@ -395,7 +396,7 @@ async def create_secure_session(
     local_peer: PeerID,
     local_private_key: PrivateKey,
     conn: IRawConnection,
-    remote_peer: PeerID = None,
+    remote_peer: Optional[PeerID] = None,
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.

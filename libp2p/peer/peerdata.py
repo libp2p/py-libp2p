@@ -1,6 +1,7 @@
 from collections.abc import (
     Sequence,
 )
+
 from typing import Any, Union
 
 from multiaddr import (

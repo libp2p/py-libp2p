@@ -53,6 +53,9 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerdata import (
+    PeerDataError,
+)
 from libp2p.tools.async_service import (
     Service,
 )
@@ -120,7 +123,7 @@ class Pubsub(Service, IPubsub):
 
     # Indicate if we should enforce signature verification
     strict_signing: bool
-    sign_key: PrivateKey
+    sign_key: PrivateKey | None
 
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
@@ -129,7 +132,7 @@ class Pubsub(Service, IPubsub):
         self,
         host: IHost,
         router: IPubsubRouter,
-        cache_size: int = None,
+        cache_size: int | None = None,
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,
@@ -549,6 +552,9 @@ class Pubsub(Service, IPubsub):
 
         if self.strict_signing:
             priv_key = self.sign_key
+            if priv_key is None:
+                raise PeerDataError("private key not found")
+
             signature = priv_key.sign(
                 PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
             )

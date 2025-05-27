@@ -340,7 +340,9 @@ class Swarm(Service, INetworkService):
             if hasattr(self, "transport") and self.transport is not None:
                 # Check if transport has close method before calling it
                 if hasattr(self.transport, "close"):
-                    await self.transport.close()
+                    await self.transport.close()  # type: ignore
+                # Ignoring the type above since `transport` may not have a close method
+                # and we have already checked it with hasattr
 
         logger.debug("swarm successfully closed")
 

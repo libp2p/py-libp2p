@@ -309,7 +309,7 @@ class TrioManager(BaseManager):
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
         daemon: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> None:
         task = FunctionTask(
             name=get_task_name(async_fn, name),
@@ -322,7 +322,7 @@ class TrioManager(BaseManager):
         self._common_run_task(task)
 
     def run_child_service(
-        self, service: ServiceAPI, daemon: bool = False, name: Optional[str] = None
+        self, service: ServiceAPI, daemon: bool = False, name: str | None = None
     ) -> ManagerAPI:
         task = ChildServiceTask(
             name=get_task_name(service, name),

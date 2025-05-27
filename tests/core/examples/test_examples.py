@@ -221,6 +221,8 @@ async def pubsub_demo(host_a, host_b):
         2,
         4,
     )
+    gossipsub_a = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, None, 1, 1)
+    gossipsub_b = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, None, 1, 1)
     pubsub_a = Pubsub(host_a, gossipsub_a)
     pubsub_b = Pubsub(host_b, gossipsub_b)
     message_a_to_b = "Hello from A to B"

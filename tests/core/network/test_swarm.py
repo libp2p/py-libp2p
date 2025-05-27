@@ -7,11 +7,17 @@ from trio.testing import (
     wait_all_tasks_blocked,
 )
 
+from libp2p import (
+    new_swarm,
+)
 from libp2p.network.exceptions import (
     SwarmException,
 )
 from libp2p.tools.utils import (
     connect_swarm,
+)
+from libp2p.transport.tcp.tcp import (
+    TCP,
 )
 from tests.utils.factories import (
     SwarmFactory,
@@ -156,3 +162,20 @@ async def test_swarm_multiaddr(security_protocol):
 
         swarms[0].peerstore.add_addrs(swarms[1].get_peer_id(), addrs + addrs, 10000)
         await swarms[0].dial_peer(swarms[1].get_peer_id())
+
+
+def test_new_swarm_defaults_to_tcp():
+    swarm = new_swarm()
+    assert isinstance(swarm.transport, TCP)
+
+
+def test_new_swarm_tcp_multiaddr_supported():
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
+    swarm = new_swarm(listen_addrs=[addr])
+    assert isinstance(swarm.transport, TCP)
+
+
+def test_new_swarm_quic_multiaddr_raises():
+    addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
+    with pytest.raises(ValueError, match="QUIC not yet supported"):
+        new_swarm(listen_addrs=[addr])

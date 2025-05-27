@@ -12,6 +12,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -273,7 +274,7 @@ class INetStream(ReadWriteCloser):
     muxed_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> TProtocol:
+    def get_protocol(self) -> Optional[TProtocol]:
         """
         Retrieve the protocol identifier for the stream.
 
@@ -902,7 +903,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         Start listening on one or more multiaddresses.
 
@@ -1550,7 +1551,7 @@ class IMultiselectMuxer(ABC):
     and its corresponding handler for communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[Optional[TProtocol], Optional[StreamHandlerFn]]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -1566,7 +1567,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[TProtocol, ...]:
+    def get_protocols(self) -> tuple[Optional[TProtocol], ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1581,7 +1582,7 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[Optional[TProtocol], Optional[StreamHandlerFn]]:
         """
         Negotiate a protocol selection with a multiselect client.
 
@@ -1658,7 +1659,7 @@ class IPeerRouting(ABC):
     """
 
     @abstractmethod
-    async def find_peer(self, peer_id: ID) -> PeerInfo:
+    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
         """
         Search for a peer with the specified peer ID.
 
@@ -1826,6 +1827,11 @@ class IPubsubRouter(ABC):
 
     """
 
+    mesh: dict[str, set[ID]]
+    fanout: dict[str, set[ID]]
+    peer_protocol: dict[ID, TProtocol]
+    degree: int
+
     @abstractmethod
     def get_protocols(self) -> list[TProtocol]:
         """
@@ -1851,7 +1857,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notify the router that a new peer has connected.
 
@@ -1863,6 +1869,34 @@ class IPubsubRouter(ABC):
             The protocol the peer supports (e.g., floodsub, gossipsub).
 
         """
+
+    # @abstractmethod
+    # async def emit_graft(self, topic: str, id: ID) -> None:
+    #     """
+    #     Emit graft message sent to id for topic.
+
+    #     Parameters
+    #     ----------
+    #     topic : str
+    #         The topic to emit.
+    #     id : ID
+    #         The identifier of the peer
+
+    #     """
+
+    # @abstractmethod
+    # async def emit_prune(self, topic: str, id: ID) -> None:
+    #     """
+    #     Emit prune message to peer
+
+    #     Parameters
+    #     ----------
+    #     topic : str
+    #         The topic to emit to prune.
+    #     id : ID
+    #         The identifier of the peer
+
+    #     """
 
     @abstractmethod
     def remove_peer(self, peer_id: ID) -> None:
@@ -1927,6 +1961,32 @@ class IPubsubRouter(ABC):
             The topic to leave.
 
         """
+
+    # @abstractmethod
+    # def gossip_heartbeat(self) -> Dict[ID, Dict[str, List[str]]]:
+    #     """
+    #     Retrieve the list of peers to gossip heartbeat.
+
+    #     Returns
+    #     -------
+    #     dict[ID, dict[str, list[str]]]
+    #         A list of all peers to gossip heartbeat.
+
+    #     """
+
+    # @abstractmethod
+    # def mesh_heartbeat(self) -> Tuple[Dict[ID, List[str]], Dict[ID, List[str]]]:
+    #     """
+    #     Retrieve the list of peers to graft and prune.
+
+    #     Returns
+    #     -------
+    #     dict[ID, list[str]]
+    #         A list of all peers to graft.
+    #     dict[ID, list[str]]
+    #         A list of all peers to prune.
+
+    #     """
 
 
 class IPubsub(ServiceAPI):
