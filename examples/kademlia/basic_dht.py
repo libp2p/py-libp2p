@@ -33,9 +33,6 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.kad_dht.kad_dht import (
     KadDHT,
 )
-from libp2p.peer.peerinfo import (
-    info_from_p2p_addr,
-)
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -50,6 +47,13 @@ logger = logging.getLogger("kademlia-example")
 
 # File to store node information
 NODE_INFO_FILE = "dht_node_info.json"
+bootstrap_nodes = [
+    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+    "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+]
 
 
 def load_node_info() -> Optional[dict[str, Any]]:
@@ -89,6 +93,7 @@ async def run_provider_node(
 ) -> None:
     """Run a node that provides content in the DHT with setup inlined."""
     try:
+        bootstrap_addrs = bootstrap_nodes
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
         listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
@@ -98,18 +103,8 @@ async def run_provider_node(
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             logger.info(f"Node listening on: {addr_str}")
             logger.info("Node info saved")
-            bootstrap_peers = []
-            if bootstrap_addrs:
-                for addr in bootstrap_addrs:
-                    try:
-                        peer_info = info_from_p2p_addr(Multiaddr(addr))
-                        bootstrap_peers.append(peer_info)
-                        logger.info(f"Using bootstrap node: {addr}")
-                    except Exception as e:
-                        logger.error(f"Failed to parse bootstrap address: {e}")
-                        raise
-            print("Bootstrap peers:", bootstrap_peers)
-            dht = KadDHT(host, bootstrap_peers)
+            print("Bootstrap peers:", bootstrap_addrs)
+            dht = KadDHT(host, bootstrap_addrs)
             print("Starting DHT service...")
             logger.info("Starting DHT service...")
 
@@ -117,18 +112,6 @@ async def run_provider_node(
             async with background_trio_service(dht):
                 await trio.sleep(0.1)
                 logger.info("DHT service started")
-
-                # If we have bootstrap nodes, connect to them
-                if bootstrap_peers:
-                    for bootstrap_info in bootstrap_peers:
-                        try:
-                            await dht.host.connect(bootstrap_info)
-                            logger.info(
-                                "Connected to bootstrap node: %s",
-                                bootstrap_info.peer_id.pretty(),
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to connect to bootstrap node: {e}")
 
                 # Store a value in the DHT
                 # val_key = create_key_from_binary(b"example-key")

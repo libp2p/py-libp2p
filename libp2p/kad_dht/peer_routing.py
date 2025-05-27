@@ -10,6 +10,9 @@ from typing import (
     Optional,
 )
 
+from multiaddr import (
+    Multiaddr,
+)
 import varint
 
 from libp2p.abc import (
@@ -25,6 +28,7 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
+    info_from_p2p_addr,
 )
 
 from .pb.kademlia_pb2 import (
@@ -352,7 +356,7 @@ class PeerRouting(IPeerRouting):
         finally:
             await stream.close()
 
-    async def bootstrap(self, bootstrap_peers: list[PeerInfo]) -> None:
+    async def bootstrap(self, bootstrap_peers: list[str]) -> None:
         """
         Bootstrap the routing table with a list of known peers.
 
@@ -367,8 +371,20 @@ class PeerRouting(IPeerRouting):
         """
         logger.info(f"Bootstrapping with {len(bootstrap_peers)} peers")
 
+        peer_infos = []
+
+        if bootstrap_peers:
+            for addr in bootstrap_peers:
+                try:
+                    peer_info = info_from_p2p_addr(Multiaddr(addr))
+                    peer_infos.append(peer_info)
+                    logger.info(f"Using bootstrap node: {addr}")
+                except Exception as e:
+                    logger.error(f"Failed to parse bootstrap address: {e}")
+                    raise
+
         # Add the bootstrap peers to the routing table
-        for peer_info in bootstrap_peers:
+        for peer_info in peer_infos:
             try:
                 # Add to peerstore first
                 self.host.get_peerstore().add_addrs(

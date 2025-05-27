@@ -68,7 +68,7 @@ class KadDHT(Service):
     peer discovery, content routing, and value storage.
     """
 
-    def __init__(self, host: IHost, bootstrap_peers: list[PeerInfo] = None):
+    def __init__(self, host: IHost, bootstrap_peers: list[str] = None):
         """
         Initialize a new Kademlia DHT node.
 
