@@ -12,6 +12,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -1658,7 +1659,7 @@ class IPeerRouting(ABC):
     """
 
     @abstractmethod
-    async def find_peer(self, peer_id: ID) -> PeerInfo:
+    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
         """
         Search for a peer with the specified peer ID.
 
