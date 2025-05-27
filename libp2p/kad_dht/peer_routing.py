@@ -137,6 +137,8 @@ class PeerRouting(IPeerRouting):
         """
         Query a single peer for closest peers and append results to the shared list.
 
+        Args:
+        ----
         peer : ID
             The peer to query
         target_key : bytes
@@ -147,11 +149,15 @@ class PeerRouting(IPeerRouting):
         """
         try:
             result = await self._query_peer_for_closest(peer, target_key)
-            new_peers.extend(result)  # Append results directly to shared array
+            # Add deduplication to prevent duplicate peers
+            for peer_id in result:
+                if peer_id not in new_peers:
+                    new_peers.append(peer_id)
             logger.info(
-                "Queried peer %s for closest peers, got %d results",
+                "Queried peer %s for closest peers, got %d results (%d unique)",
                 peer,
                 len(result),
+                len([p for p in result if p not in new_peers[: -len(result)]]),
             )
         except Exception as e:
             logger.debug(f"Query to peer {peer} failed: {e}")
