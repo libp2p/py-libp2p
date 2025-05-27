@@ -1,3 +1,6 @@
+from types import (
+    TracebackType,
+)
 from typing import (
     TYPE_CHECKING,
     Optional,
@@ -257,3 +260,16 @@ class MplexStream(IMuxedStream):
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         """Delegate to the parent Mplex connection."""
         return self.muxed_conn.get_remote_address()
+
+    async def __aenter__(self) -> "MplexStream":
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Exit the async context manager and close the stream."""
+        await self.close()

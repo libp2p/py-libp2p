@@ -9,6 +9,9 @@ from collections.abc import (
 import inspect
 import logging
 import struct
+from types import (
+    TracebackType,
+)
 from typing import (
     Callable,
     Optional,
@@ -73,6 +76,19 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
+
+    async def __aenter__(self) -> "YamuxStream":
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Exit the async context manager and close the stream."""
+        await self.close()
 
     async def write(self, data: bytes) -> None:
         if self.send_closed:

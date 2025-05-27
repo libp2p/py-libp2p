@@ -8,10 +8,14 @@ from collections.abc import (
     KeysView,
     Sequence,
 )
+from types import (
+    TracebackType,
+)
 from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -215,7 +219,7 @@ class IMuxedConn(ABC):
         """
 
 
-class IMuxedStream(ReadWriteCloser):
+class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
     """
     Interface for a multiplexed stream.
 
@@ -248,6 +252,20 @@ class IMuxedStream(ReadWriteCloser):
         :return: True if the deadline was set successfully,
             otherwise False.
         """
+
+    @abstractmethod
+    async def __aenter__(self) -> "IMuxedStream":
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Exit the async context manager and close the stream."""
+        await self.close()
 
 
 # -------------------------- net_stream interface.py --------------------------
