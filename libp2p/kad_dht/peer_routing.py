@@ -13,6 +13,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
 import varint
 
 from libp2p.abc import (
@@ -130,6 +131,31 @@ class PeerRouting(IPeerRouting):
         logger.info(f"Peer {peer_id} not found")
         return None
 
+    async def _query_single_peer_for_closest(
+        self, peer: ID, target_key: bytes, new_peers: list[ID]
+    ) -> None:
+        """
+        Query a single peer for closest peers and append results to the shared list.
+
+        peer : ID
+            The peer to query
+        target_key : bytes
+            The target key to find closest peers for
+        new_peers : list[ID]
+            Shared list to append results to
+
+        """
+        try:
+            result = await self._query_peer_for_closest(peer, target_key)
+            new_peers.extend(result)  # Append results directly to shared array
+            logger.info(
+                "Queried peer %s for closest peers, got %d results",
+                peer,
+                len(result),
+            )
+        except Exception as e:
+            logger.debug(f"Query to peer {peer} failed: {e}")
+
     async def find_closest_peers_network(
         self, target_key: bytes, count: int = 20
     ) -> list[ID]:
@@ -147,7 +173,7 @@ class PeerRouting(IPeerRouting):
         # Start with closest peers from our routing table
         closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
         logger.info("local closest peers are %s", closest_peers)
-        queried_peers = set()
+        queried_peers: set[ID] = set()
 
         # Iterative lookup until convergence
         while True:
@@ -157,19 +183,16 @@ class PeerRouting(IPeerRouting):
                 break  # No more peers to query
 
             # Query these peers for their closest peers to target
-            new_peers = []
-            for peer in peers_to_query[:ALPHA]:  # Query ALPHA peers at a time
-                queried_peers.add(peer)
-                try:
-                    peer_results = await self._query_peer_for_closest(peer, target_key)
-                    logger.info(
-                        "Queried peer %s for closest peers, got %d results",
-                        peer,
-                        len(peer_results),
+            peers_batch = peers_to_query[:ALPHA]  # Limit to ALPHA peers at a time
+
+            # Run queries in parallel for this batch using trio nursery
+            new_peers: list[ID] = []  # Shared array to collect all results
+
+            async with trio.open_nursery() as nursery:
+                for peer in peers_batch:
+                    nursery.start_soon(
+                        self._query_single_peer_for_closest, peer, target_key, new_peers
                     )
-                    new_peers.extend(peer_results)
-                except Exception:
-                    continue  # Skip failed queries
 
             # Update our list of closest peers
             all_candidates = closest_peers + new_peers
