@@ -85,6 +85,52 @@ async def main() -> None:
         logger.info("Host 2 connected to Host 1")
         print("Host 2 successfully connected to Host 1")
 
+        # Run the identify protocol from host_2 to host_1
+        # (so Host 1 learns Host 2's address)
+        from libp2p.identity.identify.identify import ID as IDENTIFY_PROTOCOL_ID
+
+        stream = await host_2.new_stream(host_1.get_id(), (IDENTIFY_PROTOCOL_ID,))
+        response = await stream.read()
+        await stream.close()
+
+        # Run the identify protocol from host_1 to host_2
+        # (so Host 2 learns Host 1's address)
+        stream = await host_1.new_stream(host_2.get_id(), (IDENTIFY_PROTOCOL_ID,))
+        response = await stream.read()
+        await stream.close()
+
+        # --- NEW CODE: Update Host 1's peerstore with Host 2's addresses ---
+        from libp2p.identity.identify.pb.identify_pb2 import (
+            Identify,
+        )
+
+        identify_msg = Identify()
+        identify_msg.ParseFromString(response)
+        peerstore_1 = host_1.get_peerstore()
+        peer_id_2 = host_2.get_id()
+        for addr_bytes in identify_msg.listen_addrs:
+            maddr = multiaddr.Multiaddr(addr_bytes)
+            # TTL can be any positive int
+            peerstore_1.add_addr(
+                peer_id_2,
+                maddr,
+                ttl=3600,
+            )
+        # --- END NEW CODE ---
+
+        # Now Host 1's peerstore should have Host 2's address
+        peerstore_1 = host_1.get_peerstore()
+        peer_id_2 = host_2.get_id()
+        addrs_1_for_2 = peerstore_1.addrs(peer_id_2)
+        logger.info(
+            f"[DEBUG] Host 1 peerstore addresses for Host 2 before push: "
+            f"{addrs_1_for_2}"
+        )
+        print(
+            f"[DEBUG] Host 1 peerstore addresses for Host 2 before push: "
+            f"{addrs_1_for_2}"
+        )
+
         # Push identify information from host_1 to host_2
         logger.info("Host 1 pushing identify information to Host 2")
         print("\nHost 1 pushing identify information to Host 2...")
@@ -103,6 +149,9 @@ async def main() -> None:
         except Exception as e:
             logger.error(f"Error during identify push: {str(e)}")
             print(f"\nError during identify push: {str(e)}")
+
+        # Add this at the end of your async with block:
+        await trio.sleep(0.5)  # Give background tasks time to finish
 
 
 if __name__ == "__main__":

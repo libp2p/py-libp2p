@@ -73,10 +73,10 @@ markers = ["slow: mark test as slow"]
 xfail_strict = true
 
 [tool.towncrier]
-# Read https://github.com/ethereum/py-libp2p/blob/main/newsfragments/README.md for instructions
+# Read https://github.com/libp2p/py-libp2p/blob/main/newsfragments/README.md for instructions
 directory = "newsfragments"
 filename = "docs/release_notes.rst"
-issue_format = "`#{issue} <https://github.com/ethereum/py-libp2p/issues/{issue}>`__"
+issue_format = "`#{issue} <https://github.com/libp2p/py-libp2p/issues/{issue}>`__"
 package = "libp2p"
 title_format = "py-libp2p v{version} ({project_date})"
 underlines = ["-", "~", "^"]
@@ -127,7 +127,7 @@ name = "Removals"
 showcontent = true
 
 [tool.bumpversion]
-current_version = "0.2.5"
+current_version = "0.2.7"
 parse = """
     (?P<major>\\d+)
     \\.(?P<minor>\\d+)

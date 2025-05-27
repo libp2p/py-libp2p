@@ -96,7 +96,7 @@ async def connect(node1: IHost, node2: IHost) -> None:
 
     for attempt in range(max_retries):
         try:
-            # Use timeout from feat branch for each connection attempt
+            # Use timeout for each connection attempt
             with trio.move_on_after(5):  # 5 second timeout
                 await node1.connect(info)
 
