@@ -184,6 +184,10 @@ async def run_provider_node(
                     logger.info(
                         "connected peers are %s", dht.host.get_connected_peers()
                     )
+                    logger.info(
+                        "Number of peers in peer store are %s",
+                        len(dht.host.get_peerstore().peer_ids()),
+                    )
 
                     await trio.sleep(10)
 
