@@ -105,7 +105,7 @@ async def run_handshake(
     local_private_key: PrivateKey,
     conn: IRawConnection,
     is_initiator: bool,
-    remote_peer_id: ID,
+    remote_peer_id: Optional[ID],
 ) -> ISecureConn:
     """Raise `HandshakeFailure` when handshake failed."""
     msg = make_exchange_message(local_private_key.get_public_key())

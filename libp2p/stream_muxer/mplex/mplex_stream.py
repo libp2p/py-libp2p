@@ -38,8 +38,8 @@ class MplexStream(IMuxedStream):
     name: str
     stream_id: StreamID
     muxed_conn: "Mplex"
-    read_deadline: int
-    write_deadline: int
+    read_deadline: Optional[int]
+    write_deadline: Optional[int]
 
     # TODO: Add lock for read/write to avoid interleaving receiving messages?
     close_lock: trio.Lock
@@ -68,7 +68,10 @@ class MplexStream(IMuxedStream):
         """
         self.name = name
         self.stream_id = stream_id
-        self.muxed_conn = muxed_conn
+        # NOTE: All methods used here are part of `Mplex` which is a derived
+        # class of IMuxedConn. Ignoring this type assignment should not pose
+        # any risk.
+        self.muxed_conn = muxed_conn  # type: ignore[assignment]
         self.read_deadline = None
         self.write_deadline = None
         self.event_local_closed = trio.Event()

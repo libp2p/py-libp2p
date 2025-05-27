@@ -173,7 +173,7 @@ class GossipSub(IPubsubRouter, Service):
 
         logger.debug("attached to pusub")
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -181,6 +181,9 @@ class GossipSub(IPubsubRouter, Service):
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
+
+        if protocol_id is None:
+            raise ValueError("Protocol cannot be None")
 
         if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
             # We should never enter here. Becuase the `protocol_id` is registered by

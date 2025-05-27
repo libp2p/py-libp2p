@@ -62,7 +62,7 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notifies the router that a new peer has been connected.
 

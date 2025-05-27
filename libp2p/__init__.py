@@ -242,7 +242,7 @@ def new_host(
     peerstore_opt: Optional[IPeerStore] = None,
     disc_opt: Optional[IPeerRouting] = None,
     muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
-    listen_addrs: Sequence[multiaddr.Multiaddr] = None,
+    listen_addrs: Optional[Sequence[multiaddr.Multiaddr]] = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
