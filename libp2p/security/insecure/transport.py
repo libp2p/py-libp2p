@@ -1,8 +1,10 @@
 from typing import (
+    Callable,
     Optional,
 )
 
 from libp2p.abc import (
+    IPeerStore,
     IRawConnection,
     ISecureConn,
 )
@@ -10,6 +12,7 @@ from libp2p.crypto.exceptions import (
     MissingDeserializerError,
 )
 from libp2p.crypto.keys import (
+    KeyPair,
     PrivateKey,
     PublicKey,
 )
@@ -33,6 +36,9 @@ from libp2p.network.connection.exceptions import (
 )
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.peer.peerstore import (
+    PeerStoreError,
 )
 from libp2p.security.base_session import (
     BaseSession,
@@ -106,6 +112,7 @@ async def run_handshake(
     conn: IRawConnection,
     is_initiator: bool,
     remote_peer_id: ID,
+    peerstore: Optional[IPeerStore] = None,
 ) -> ISecureConn:
     """Raise `HandshakeFailure` when handshake failed."""
     msg = make_exchange_message(local_private_key.get_public_key())
@@ -159,7 +166,14 @@ async def run_handshake(
         conn=conn,
     )
 
-    # TODO: Store `pubkey` and `peer_id` to `PeerStore`
+    # Store `pubkey` and `peer_id` to `PeerStore`
+    if peerstore is not None:
+        try:
+            peerstore.add_pubkey(received_peer_id, received_pubkey)
+        except PeerStoreError:
+            # If peer ID and pubkey don't match, it would have already been caught above
+            # This might happen if the peer is already in the store
+            pass
 
     return secure_conn
 
@@ -170,6 +184,15 @@ class InsecureTransport(BaseSecureTransport):
     transport does not add any additional security.
     """
 
+    def __init__(
+        self,
+        local_key_pair: KeyPair,
+        secure_bytes_provider: Optional[Callable[[int], bytes]] = None,
+        peerstore: Optional[IPeerStore] = None,
+    ) -> None:
+        super().__init__(local_key_pair, secure_bytes_provider)
+        self.peerstore = peerstore
+
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
         Secure the connection, either locally or by communicating with opposing
@@ -179,7 +202,7 @@ class InsecureTransport(BaseSecureTransport):
         :return: secure connection object (that implements secure_conn_interface)
         """
         return await run_handshake(
-            self.local_peer, self.local_private_key, conn, False, None
+            self.local_peer, self.local_private_key, conn, False, None, self.peerstore
         )
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
@@ -190,7 +213,7 @@ class InsecureTransport(BaseSecureTransport):
         :return: secure connection object (that implements secure_conn_interface)
         """
         return await run_handshake(
-            self.local_peer, self.local_private_key, conn, True, peer_id
+            self.local_peer, self.local_private_key, conn, True, peer_id, self.peerstore
         )
 
 
