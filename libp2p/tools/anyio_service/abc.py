@@ -42,6 +42,8 @@ class TaskAPI(Hashable):
 
 
 class TaskWithChildrenAPI(TaskAPI):
+    children: set[TaskAPI]
+
     @abstractmethod
     def add_child(self, child: TaskAPI) -> None:
         ...
@@ -143,7 +145,7 @@ class ManagerAPI(ABC):
         ...
 
     @abstractmethod
-    def cancel(self) -> None:
+    async def cancel(self) -> None:
         """
         Trigger cancellation of the service.
         """
