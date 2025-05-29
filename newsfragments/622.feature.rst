@@ -1,0 +1,2 @@
+Feature: Support for sending `ls` command over `multistream-select` to list supported protocols from remote peer.
+This allows inspecting which protocol handlers a peer supports at runtime.

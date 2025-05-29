@@ -1,1 +1,0 @@
-added ``direct peers`` as part of gossipsub v1.1 upgrade.

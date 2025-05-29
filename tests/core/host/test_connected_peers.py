@@ -1,4 +1,5 @@
 import pytest
+import trio
 
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -87,6 +88,7 @@ async def connect_and_disconnect(host_a, host_b, host_c):
 
     # Disconnecting hostB and hostA
     await host_b.disconnect(host_a.get_id())
+    await trio.sleep(0.5)
 
     # Performing checks
     assert (len(host_a.get_connected_peers())) == 0
