@@ -5,6 +5,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+from p2pclient.libp2p_stubs.peer.id import ID as StubID
 import trio
 
 from libp2p.abc import IHost
@@ -56,7 +57,10 @@ async def connect(a: TDaemonOrHost, b: TDaemonOrHost) -> None:
 
     b_peer_info = _get_peer_info(b)
     if isinstance(a, Daemon):
-        await a.control.connect(b_peer_info.peer_id, b_peer_info.addrs)
+        # Convert internal libp2p ID to p2pclient stub ID .connect()
+        await a.control.connect(
+            StubID(b_peer_info.peer_id.to_bytes()), b_peer_info.addrs
+        )
     else:  # isinstance(b, IHost)
         await a.connect(b_peer_info)
     # Allow additional sleep for both side to establish the connection.

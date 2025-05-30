@@ -46,7 +46,10 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
         )
 
     # make sure the /p2p value parses as a peer.ID
-    peer_id_str: str = p2p_part.value_for_protocol(multiaddr.multiaddr.protocols.P_P2P)
+    peer_id_str = p2p_part.value_for_protocol(multiaddr.multiaddr.protocols.P_P2P)
+    if peer_id_str is None:
+        raise InvalidAddrError("Missing value for /p2p protocol in multiaddr")
+
     peer_id: ID = ID.from_base58(peer_id_str)
 
     # we might have received just an / p2p part, which means there's no addr.
