@@ -10,6 +10,8 @@ from typing import (
     Optional,
 )
 
+import varint
+
 from libp2p.abc import (
     IHost,
 )
@@ -100,7 +102,7 @@ class ValueStore:
                 logger.error("Host not initialized, cannot store value at peer")
                 return False
 
-            logger.info(f"Storing value for key {key.decode()} at peer {peer_id}")
+            logger.info(f"Storing value for key {key.hex()} at peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
@@ -118,23 +120,36 @@ class ValueStore:
 
             # Serialize and send the protobuf message with length prefix
             proto_bytes = message.SerializeToString()
-            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
-            logger.info("Sent PUT_VALUE protobuf message")
+            logger.info("Sent PUT_VALUE protobuf message with varint length")
+            # Read varint-prefixed response length
 
-            # Read response length (4 bytes)
-            length_bytes = await stream.read(4)
-            if len(length_bytes) < 4:
-                logger.warning("Failed to read response length")
-                return False
-
-            response_length = int.from_bytes(length_bytes, byteorder="big")
-
-            # Read response
-            response_bytes = await stream.read(response_length)
-            if len(response_bytes) < response_length:
-                logger.warning("Failed to read complete response")
-                return False
+            length_bytes = b""
+            while True:
+                logger.info("Reading varint length prefix for response...")
+                b = await stream.read(1)
+                if not b:
+                    logger.warning("Connection closed while reading varint length")
+                    return False
+                length_bytes += b
+                if b[0] & 0x80 == 0:
+                    break
+            logger.info(f"Received varint length bytes: {length_bytes.hex()}")
+            response_length = varint.decode_bytes(length_bytes)
+            logger.info("Response length: %d bytes", response_length)
+            # Read response data
+            response_bytes = b""
+            remaining = response_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.debug(
+                        f"Connection closed by peer {peer_id} while reading data"
+                    )
+                    return False
+                response_bytes += chunk
+                remaining -= len(chunk)
 
             # Parse protobuf response
             response = Message()
@@ -222,25 +237,20 @@ class ValueStore:
 
             # Serialize and send the protobuf message
             proto_bytes = message.SerializeToString()
-            await stream.write(len(proto_bytes).to_bytes(4, "big"))
+            await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
 
-            # Read response length (4 bytes)
+            # Read response length
             length_bytes = b""
-            remaining = 4
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.debug(
-                        f"Connection closed by peer {peer_id} while reading length"
-                    )
+            while True:
+                b = await stream.read(1)
+                if not b:
+                    logger.warning("Connection closed while reading length")
                     return None
-
-                length_bytes += chunk
-                remaining -= len(chunk)
-
-            response_length = int.from_bytes(length_bytes, byteorder="big")
-
+                length_bytes += b
+                if b[0] & 0x80 == 0:
+                    break
+            response_length = varint.decode_bytes(length_bytes)
             # Read response data
             response_bytes = b""
             remaining = response_length
@@ -251,7 +261,6 @@ class ValueStore:
                         f"Connection closed by peer {peer_id} while reading data"
                     )
                     return None
-
                 response_bytes += chunk
                 remaining -= len(chunk)
 
