@@ -83,8 +83,7 @@ class NetStream(INetStream):
         """
         try:
             if self.get_state != StreamState.OPEN:
-                self.set_state(StreamState.CLOSED)
-                raise StreamClosed("Stream is closed, cannot read data.")
+                raise StreamClosed("Cannot read from stream; not open")
             else:
                 return await self.muxed_stream.read(n)
         except MuxedStreamEOF as error:
@@ -100,8 +99,7 @@ class NetStream(INetStream):
         """
         try:
             if self.get_state != StreamState.OPEN:
-                self.set_state(StreamState.CLOSED)
-                raise StreamClosed("Stream is closed, cannot write data.")
+                raise StreamClosed("Cannot write to stream; not open")
             else:
                 await self.muxed_stream.write(data)
         except (MuxedStreamClosed, MuxedStreamError) as error:
@@ -114,6 +112,7 @@ class NetStream(INetStream):
         await self.muxed_stream.close()
 
     async def reset(self) -> None:
+        """Reset stream."""
         self.set_state(StreamState.RESET)
         await self.muxed_stream.reset()
 
