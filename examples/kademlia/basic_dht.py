@@ -19,6 +19,7 @@ from typing import (
     Optional,
 )
 
+import base58
 from multiaddr import (
     Multiaddr,
 )
@@ -68,11 +69,12 @@ for module in [
 # File to store node information
 NODE_INFO_FILE = "dht_node_info.json"
 bootstrap_nodes = [
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+    # "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
     # "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
     # "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     # "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
     # "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "/ip4/127.0.0.1/tcp/48233/p2p/16Uiu2HAmCrXHNdLeB4qHA5WsEtiJfH85DZZhU4mdw2BecwQk1Z6S"
 ]
 
 
@@ -132,59 +134,48 @@ async def run_provider_node(
             async with background_trio_service(dht):
                 await trio.sleep(1)
                 logger.info("DHT service started")
-                # await host.connect(peer_info)
-                # logger.info(
-                # f"Connected to bootstrap node: {peer_info.peer_id.pretty()}"
-                # )
+
                 # Store a value in the DHT
-                # val_key = create_key_from_binary(b"py-libp2p kademlia example value")
-                # Build value data
-                # msg = f"Hello message from Sumanjeet"
-                # val_data = msg.encode()
-                # logger.info(
-                #     f"Storing value with key: {base58.b58encode(val_key).decode()}"
-                # )
-                # await dht.put_value(val_key, val_data)
-                # logger.info(
-                #     f"Stored value with key: {base58.b58encode(val_key).decode()}"
-                # )
-                # logger.info("Value stored is %s", val_data.decode())
-                # trio.sleep(2)
+                val_key = create_key_from_binary(b"py-libp2p kademlia example value")
+                msg = "Hello message from Sumanjeet"
+                val_data = msg.encode()
+                logger.info(
+                    f"Storing value with key: {base58.b58encode(val_key).decode()}"
+                )
+                await dht.put_value(val_key, val_data)
+                logger.info(
+                    f"Stored value with key: {base58.b58encode(val_key).decode()}"
+                )
+                logger.info("Value stored is %s", val_data.decode())
+                trio.sleep(0.5)
+
                 # retrieve the value
-                # logger.info("Looking up key: %s", base58.b58encode(val_key).decode())
-                # val_data = await dht.get_value(val_key)
-                # if val_data:
-                #     try:
-                #         logger.info(f"Retrieved value: {val_data.hex()}")
-                #     except UnicodeDecodeError:
-                #         logger.info(f"Retrieved value (bytes): {val_data!r}")
-                # else:
-                #     logger.warning("Failed to retrieve value")
+                logger.info("Looking up key: %s", base58.b58encode(val_key).decode())
+                val_data = await dht.get_value(val_key)
+                if val_data:
+                    try:
+                        logger.info(f"Retrieved value: {val_data.hex()}")
+                    except UnicodeDecodeError:
+                        logger.info(f"Retrieved value (bytes): {val_data!r}")
+                else:
+                    logger.warning("Failed to retrieve value")
 
                 # # Create a piece of content and advertise as provider
                 content = b"Hello from python node "
                 content_key = create_key_from_binary(content)
                 logger.info(f"Generated content with ID: {content_key.hex()}")
-                content_key = content_key.hex()
-                # # Advertise that we can provide this content
-                # logger.info("Advertising as provider for content:"
-                #             f" {content_key.hex()}")
-                # success = await dht.provider_store.provide(content_key)
-                # if success:
-                #     logger.info("Successfully advertised as content provider")
-                # else:
-                #     logger.warning("Failed to advertise as content provider")
+                # Advertise that we can provide this content
+                logger.info(
+                    "Advertising as provider for content:" f" {content_key.hex()}"
+                )
+                success = await dht.provider_store.provide(content_key)
+                if success:
+                    logger.info("Successfully advertised as content provider")
+                else:
+                    logger.warning("Failed to advertise as content provider")
 
                 # # Also check if we can find providers for our own content
-                # content_key = (
-                #     "25e19514a354bac2413dc71f5f8e0b974577cd07663ca02d8715ac2a6d110460"
-                # )
-                logger.info("Looking for providers of content: %s", content_key)
-                # Convert hex content ID to bytes
-                content_key = bytes.fromhex(content_key)
-                # bytes to string
-                # content_key = content_key.decode()
-                logger.info("decoded content key is: %s", content_key)
+                logger.info("Looking for providers of content: %s", content_key.hex())
                 providers = await dht.provider_store.find_providers(content_key)
                 if providers:
                     logger.info(
