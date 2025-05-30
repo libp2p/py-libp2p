@@ -48,19 +48,19 @@ async def dht_pair(security_protocol):
         peer_b_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         peer_a_info = PeerInfo(host_a.get_id(), host_a.get_addrs())
 
-        # Create DHT nodes from the hosts with bootstrap peers
-        dht_a: KadDHT = KadDHT(host_a, bootstrap_peers=[peer_b_info])
-        dht_b: KadDHT = KadDHT(host_b, bootstrap_peers=[peer_a_info])
+        # Convert PeerInfo to multiaddr strings for bootstrap_peers
+        # Use the first address and append the peer ID
+        bootstrap_addr_b = f"{peer_b_info.addrs[0]}/p2p/{peer_b_info.peer_id}"
+        bootstrap_addr_a = f"{peer_a_info.addrs[0]}/p2p/{peer_a_info.peer_id}"
+
+        # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
+        dht_a: KadDHT = KadDHT(host_a, bootstrap_peers=[bootstrap_addr_b])
+        dht_b: KadDHT = KadDHT(host_b, bootstrap_peers=[bootstrap_addr_a])
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
-            # Allow time for services to fully start and bootstrap
+            # Allow time for bootstrap to complete and connections to establish
             await trio.sleep(0.1)
-
-            # Explicitly add each node to the other's routing table to ensure connection
-            # Use await since add_peer is a coroutine
-            await dht_a.routing_table.add_peer(peer_b_info.peer_id)
-            await dht_b.routing_table.add_peer(peer_a_info.peer_id)
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()

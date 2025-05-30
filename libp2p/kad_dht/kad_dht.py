@@ -252,7 +252,7 @@ class KadDHT(Service):
                     response.key = key
 
                     response_bytes = response.SerializeToString()
-                    await stream.write(len(response_bytes).to_bytes(4, "big"))
+                    await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.info(
                         f"Sent ADD_PROVIDER acknowledgement for key {key.hex()}"
@@ -316,7 +316,7 @@ class KadDHT(Service):
 
                     # Serialize and send response
                     response_bytes = response.SerializeToString()
-                    await stream.write(len(response_bytes).to_bytes(4, "big"))
+                    await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.info(f"Sent provider information for key {key.hex()}")
 
@@ -342,7 +342,7 @@ class KadDHT(Service):
 
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
-                        await stream.write(len(response_bytes).to_bytes(4, "big"))
+                        await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                         logger.info(f"Sent value response for key {key.hex()}")
 
@@ -364,7 +364,7 @@ class KadDHT(Service):
                         response.key = key
 
                         response_bytes = response.SerializeToString()
-                        await stream.write(len(response_bytes).to_bytes(4, "big"))
+                        await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                     else:
                         logger.error("Invalid PUT_VALUE message format")
@@ -417,21 +417,36 @@ class KadDHT(Service):
         None
 
         """
-        # 1. Find peers closest to the key
-        closest_peers = await self.peer_routing.find_closest_peers_network(key)
-        logger.info(
-            "Closest peers for key for storing %s: %s",
-            key,
-            closest_peers,
-        )
-
-        # 2. Store locally and at those peers
+        # 1. Store locally first
         self.value_store.put(key, value)
         logger.info(f"Stored value for key {key.hex()} locally")
 
+        # 2. Find peers closest to the key
+        closest_peers = self.routing_table.find_local_closest_peers(key, 3)
+        logger.info(
+            "Found %d closest peers for key %s: %s",
+            len(closest_peers),
+            key.hex(),
+            closest_peers,
+        )
+
         # 3. Store at remote peers
-        for peer in closest_peers:
-            await self.value_store._store_at_peer(peer, key, value)
+        success_count = 0
+        for peer_id in closest_peers:
+            if peer_id == self.local_peer_id:
+                continue
+
+            try:
+                success = await self.value_store._store_at_peer(peer_id, key, value)
+                if success:
+                    success_count += 1
+                    logger.info(f"Successfully stored value at peer {peer_id}")
+                else:
+                    logger.warning(f"Failed to store value at peer {peer_id}")
+            except Exception as e:
+                logger.warning(f"Error storing value at peer {peer_id}: {e}")
+
+        logger.info(f"Stored value at {success_count} remote peers")
 
     async def get_value(self, key: bytes) -> Optional[bytes]:
         """
@@ -453,24 +468,32 @@ class KadDHT(Service):
             return local_value
 
         # 2. Not found locally, search the network
-        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+        closest_peers = self.routing_table.find_local_closest_peers(key)
         logger.info(
-            "Closest peers for key for retrieving %s: %s",
-            key,
+            "Found %d closest peers for key %s: %s",
+            len(closest_peers),
+            key.hex(),
             closest_peers,
         )
+
         # 3. Query those peers
         for peer in closest_peers:
-            value = await self.value_store._get_from_peer(peer, key)
-            logger.info(
-                "Found value at peer %s: %s",
-                peer,
-                value,
-            )
-            if value:
-                # Store for future use
-                self.value_store.put(key, value)
-                return value
+            if peer == self.local_peer_id:
+                continue
+
+            try:
+                value = await self.value_store._get_from_peer(peer, key)
+                if value:
+                    logger.info(f"Found value at peer {peer}")
+                    # Store for future use
+                    self.value_store.put(key, value)
+                    return value
+                else:
+                    logger.debug(f"No value found at peer {peer}")
+            except Exception as e:
+                logger.warning(f"Error retrieving value from peer {peer}: {e}")
+
+        logger.info(f"Value not found for key {key.hex()}")
         return None
 
     # Add these methods in the Utility methods section

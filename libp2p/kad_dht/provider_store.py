@@ -14,6 +14,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+import varint
 
 from libp2p.abc import (
     IHost,
@@ -144,9 +145,12 @@ class ProviderStore:
                 success = await self._send_add_provider(peer_id, key)
                 if success:
                     success_count += 1
+                else:
+                    logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}")
             except Exception as e:
-                logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}: {e}")
+                logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
 
+        logger.info(f"Successfully advertised to {success_count} peers")
         return success_count > 0
 
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
@@ -184,20 +188,30 @@ class ProviderStore:
 
                 # Serialize and send the message
                 proto_bytes = message.SerializeToString()
-                await stream.write(len(proto_bytes).to_bytes(4, byteorder="big"))
+                await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
+                logger.info(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
+                # Read response length prefix
+                length_bytes = b""
+                while True:
+                    logger.info("Reading response length prefix in add provider")
+                    b = await stream.read(1)
+                    if not b:
+                        return False
+                    length_bytes += b
+                    if b[0] & 0x80 == 0:
+                        break
 
-                # Read response (length prefix)
-                length_bytes = await stream.read(4)
-                if len(length_bytes) < 4:
-                    return False
-
-                response_length = int.from_bytes(length_bytes, byteorder="big")
-
+                response_length = varint.decode_bytes(length_bytes)
                 # Read response data
-                response_bytes = await stream.read(response_length)
-                if len(response_bytes) < response_length:
-                    return False
+                response_bytes = b""
+                remaining = response_length
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        return False
+                    response_bytes += chunk
+                    remaining -= len(chunk)
 
                 # Parse response
                 response = Message()
@@ -264,6 +278,8 @@ class ProviderStore:
                     # Stop if we've found enough providers
                     if len(all_providers) >= count:
                         break
+                else:
+                    logger.debug(f"No providers found at peer {peer_id}")
             except Exception as e:
                 logger.warning(f"Failed to get providers from {peer_id}: {e}")
 
@@ -294,22 +310,20 @@ class ProviderStore:
 
                 # Serialize and send the message
                 proto_bytes = message.SerializeToString()
-                await stream.write(len(proto_bytes).to_bytes(4, byteorder="big"))
+                await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
 
-                # Read response (length prefix)
+                # Read response length prefix
                 length_bytes = b""
-                remaining = 4
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
+                while True:
+                    b = await stream.read(1)
+                    if not b:
                         return []
+                    length_bytes += b
+                    if b[0] & 0x80 == 0:
+                        break
 
-                    length_bytes += chunk
-                    remaining -= len(chunk)
-
-                response_length = int.from_bytes(length_bytes, byteorder="big")
-
+                response_length = varint.decode_bytes(length_bytes)
                 # Read response data
                 response_bytes = b""
                 remaining = response_length
@@ -317,7 +331,6 @@ class ProviderStore:
                     chunk = await stream.read(remaining)
                     if not chunk:
                         return []
-
                     response_bytes += chunk
                     remaining -= len(chunk)
 

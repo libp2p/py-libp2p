@@ -180,16 +180,30 @@ class PeerRouting(IPeerRouting):
         closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
         logger.info("local closest peers are %s", closest_peers)
         queried_peers: set[ID] = set()
+        rounds = 0
+
+        # Return early if we have no peers to start with
+        if not closest_peers:
+            logger.info("No local peers available for network lookup")
+            return []
 
         # Iterative lookup until convergence
-        while True:
+        while rounds < MAX_PEER_LOOKUP_ROUNDS:
+            rounds += 1
+            logger.info(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
+
             # Find peers we haven't queried yet
             peers_to_query = [p for p in closest_peers if p not in queried_peers]
             if not peers_to_query:
+                logger.info("No more unqueried peers available, ending lookup")
                 break  # No more peers to query
 
             # Query these peers for their closest peers to target
             peers_batch = peers_to_query[:ALPHA]  # Limit to ALPHA peers at a time
+
+            # Mark these peers as queried before we actually query them
+            for peer in peers_batch:
+                queried_peers.add(peer)
 
             # Run queries in parallel for this batch using trio nursery
             new_peers: list[ID] = []  # Shared array to collect all results
@@ -200,17 +214,28 @@ class PeerRouting(IPeerRouting):
                         self._query_single_peer_for_closest, peer, target_key, new_peers
                     )
 
+            # If we got no new peers, we're done
+            if not new_peers:
+                logger.info("No new peers discovered in this round, ending lookup")
+                break
+
             # Update our list of closest peers
             all_candidates = closest_peers + new_peers
+            old_closest_peers = closest_peers[:]
             closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
                 :count
             ]
             logger.info(f"Updated closest peers: {closest_peers}")
 
-            # Check if we found any closer peers in this round
-            if all(p in queried_peers for p in closest_peers[:ALPHA]):
-                break  # No improvement, we're done
+            # Check if we made any progress (found closer peers)
+            if closest_peers == old_closest_peers:
+                logger.info("No improvement in closest peers, ending lookup")
+                break
 
+        logger.info(
+            f"Network lookup completed after {rounds}"
+            " rounds, found {len(closest_peers)} peers"
+        )
         return closest_peers
 
     async def _query_peer_for_closest(self, peer: ID, target_key: bytes) -> list[ID]:
@@ -419,13 +444,16 @@ class PeerRouting(IPeerRouting):
                 self.host.get_peerstore().add_addrs(
                     peer_info.peer_id, peer_info.addrs, 3600
                 )
-
+                logger.info(f"Added bootstrap peer {peer_info.peer_id} to peerstore")
                 # Establish connection to bootstrap peer
                 await self.host.connect(peer_info)
                 logger.info(f"Connected to bootstrap peer {peer_info.peer_id}")
 
                 # Add to routing table
                 await self.routing_table.add_peer(peer_info)
+                logger.info(
+                    f"Added bootstrap peer {peer_info.peer_id} to routing table"
+                )
 
             except Exception as e:
                 logger.warning(
