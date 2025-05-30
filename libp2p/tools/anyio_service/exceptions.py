@@ -1,6 +1,3 @@
-# Copied from https://github.com/ethereum/async-service
-
-
 class ServiceException(Exception):
     """
     Base class for Service exceptions
@@ -15,7 +12,7 @@ class LifecycleError(ServiceException):
 
 class DaemonTaskExit(ServiceException):
     """
-    Raised when an action would violate the service lifecycle rules.
+    Raised when a daemon task exits unexpectedly.
     """
 
 

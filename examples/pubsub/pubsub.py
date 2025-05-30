@@ -31,8 +31,8 @@ from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
-from libp2p.tools.async_service.trio_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service.anyio_service import (
+    background_anyio_service,
 )
 
 # Configure logging
@@ -150,8 +150,8 @@ async def run(topic: str, destination: Optional[str], port: Optional[int]) -> No
         logger.info(f"Node started with peer ID: {host.get_id()}")
         logger.info(f"Listening on: {listen_addr}")
         logger.info("Initializing PubSub and GossipSub...")
-        async with background_trio_service(pubsub):
-            async with background_trio_service(gossipsub):
+        async with background_anyio_service(pubsub):
+            async with background_anyio_service(gossipsub):
                 logger.info("Pubsub and GossipSub services started.")
                 await pubsub.wait_until_ready()
                 logger.info("Pubsub ready.")
