@@ -81,10 +81,9 @@ class ValueStore:
         """
         Store a value at a specific peer.
 
-        Args:
-            peer_id: The ID of the peer to store the value at
-            key: The key to store
-            value: The value to store
+        params: peer_id: The ID of the peer to store the value at
+        params: key: The key to store
+        params: value: The value to store
 
         Returns
         -------
@@ -174,8 +173,7 @@ class ValueStore:
         """
         Retrieve a value from the DHT.
 
-        Args:
-            key: The key to look up
+        params: key: The key to look up
 
         Returns
         -------
@@ -208,9 +206,8 @@ class ValueStore:
         """
         Retrieve a value from a specific peer.
 
-        Args:
-            peer_id: The ID of the peer to retrieve the value from
-            key: The key to retrieve
+        params: peer_id: The ID of the peer to retrieve the value from
+        params: key: The key to retrieve
 
         Returns
         -------
@@ -301,8 +298,8 @@ class ValueStore:
         """
         Remove a value from the DHT.
 
-        Args:
-            key: The key to remove
+
+        params: key: The key to remove
 
         Returns
         -------
@@ -320,8 +317,7 @@ class ValueStore:
         """
         Check if a key exists in the store and hasn't expired.
 
-        Args:
-            key: The key to check
+        params: key: The key to check
 
         Returns
         -------

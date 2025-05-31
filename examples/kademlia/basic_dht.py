@@ -96,8 +96,7 @@ def calculate_content_id(content: bytes) -> bytes:
     Calculate a multihash-style content ID for a piece of content.
     This emulates the IPFS CID but much simplified for the example.
 
-    Args:
-        content: The content bytes
+    params: content: The content bytes
 
     Returns
     -------
