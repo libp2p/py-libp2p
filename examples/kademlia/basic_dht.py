@@ -2,7 +2,7 @@
 
 """
 A basic example of using the Kademlia DHT implementation, with all setup logic inlined.
-This example demonstrates both value storage/retrieval and content provider
+This example demonstrates both value storage/retrieval and content server
 advertisement/discovery.
 """
 
@@ -74,7 +74,7 @@ bootstrap_nodes = [
     # "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     # "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
     # "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/ip4/127.0.0.1/tcp/48233/p2p/16Uiu2HAmCrXHNdLeB4qHA5WsEtiJfH85DZZhU4mdw2BecwQk1Z6S"
+    # "/ip4/127.0.0.1/tcp/48233/p2p/16Uiu2HAmCrXHNdLeB4qHA5WsEtiJfH85DZZhU4mdw2BecwQk1Z6S"
 ]
 
 
@@ -110,10 +110,10 @@ def calculate_content_id(content: bytes) -> bytes:
     return content_hash
 
 
-async def run_provider_node(
-    port: int, bootstrap_addrs: Optional[list[str]] = None
+async def run_node(
+    port: int, mode: Optional[str], bootstrap_addrs: Optional[list[str]] = None
 ) -> None:
-    """Run a node that provides content in the DHT with setup inlined."""
+    """Run a node that serves content in the DHT with setup inlined."""
     try:
         bootstrap_addrs = bootstrap_nodes
         key_pair = create_new_key_pair(secrets.token_bytes(32))
@@ -126,7 +126,7 @@ async def run_provider_node(
             logger.info(f"Node listening on: {addr_str}")
             logger.info("Node info saved")
             print("Bootstrap peers:", bootstrap_addrs)
-            dht = KadDHT(host, bootstrap_addrs)
+            dht = KadDHT(host, mode="Server", bootstrap_peers=bootstrap_addrs)
             print("Starting DHT service...")
             logger.info("Starting DHT service...")
 
@@ -137,17 +137,17 @@ async def run_provider_node(
 
                 # Store a value in the DHT
                 val_key = create_key_from_binary(b"py-libp2p kademlia example value")
-                msg = "Hello message from Sumanjeet"
-                val_data = msg.encode()
-                logger.info(
-                    f"Storing value with key: {base58.b58encode(val_key).decode()}"
-                )
-                await dht.put_value(val_key, val_data)
-                logger.info(
-                    f"Stored value with key: {base58.b58encode(val_key).decode()}"
-                )
-                logger.info("Value stored is %s", val_data.decode())
-                trio.sleep(0.5)
+                # msg = "Hello message from Sumanjeet"
+                # val_data = msg.encode()
+                # logger.info(
+                #     f"Storing value with key: {base58.b58encode(val_key).decode()}"
+                # )
+                # await dht.put_value(val_key, val_data)
+                # logger.info(
+                #     f"Stored value with key: {base58.b58encode(val_key).decode()}"
+                # )
+                # logger.info("Value stored is %s", val_data.decode())
+                # trio.sleep(0.5)
 
                 # retrieve the value
                 logger.info("Looking up key: %s", base58.b58encode(val_key).decode())
@@ -160,34 +160,34 @@ async def run_provider_node(
                 else:
                     logger.warning("Failed to retrieve value")
 
-                # # Create a piece of content and advertise as provider
+                # # Create a piece of content and advertise as server
                 content = b"Hello from python node "
                 content_key = create_key_from_binary(content)
                 logger.info(f"Generated content with ID: {content_key.hex()}")
-                # Advertise that we can provide this content
-                logger.info(
-                    "Advertising as provider for content:" f" {content_key.hex()}"
-                )
-                success = await dht.provider_store.provide(content_key)
-                if success:
-                    logger.info("Successfully advertised as content provider")
-                else:
-                    logger.warning("Failed to advertise as content provider")
+                # Advertise that we can serve this content
+                # logger.info(
+                #     "Advertising as server for content:" f" {content_key.hex()}"
+                # )
+                # success = await dht.provider_store.provide(content_key)
+                # if success:
+                #     logger.info("Successfully advertised as content server")
+                # else:
+                #     logger.warning("Failed to advertise as content server")
 
-                # # Also check if we can find providers for our own content
-                logger.info("Looking for providers of content: %s", content_key.hex())
+                # # Also check if we can find servers for our own content
+                logger.info("Looking for servers of content: %s", content_key.hex())
                 providers = await dht.provider_store.find_providers(content_key)
                 if providers:
                     logger.info(
-                        "Found %d providers for our content: %s",
+                        "Found %d servers for our content: %s",
                         len(providers),
                         [p.peer_id.pretty() for p in providers],
                     )
                 else:
                     logger.warning(
-                        "No providers found for our content %s", content_key.hex()
+                        "No servers found for our content %s", content_key.hex()
                     )
-                # Print bootstrap command for consumer nodes
+                # Print bootstrap command for client nodes
                 bootstrap_cmd = f"--bootstrap {addr_str}"
                 logger.info("To connect to this node, use: %s", bootstrap_cmd)
                 print(f"\nTo connect to this node, use: {bootstrap_cmd}\n")
@@ -207,20 +207,20 @@ async def run_provider_node(
                     await trio.sleep(10)
 
     except Exception as e:
-        logger.error(f"Provider node error: {e}", exc_info=True)
+        logger.error(f"Server node error: {e}", exc_info=True)
         sys.exit(1)
 
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Kademlia DHT example with content provider functionality"
+        description="Kademlia DHT example with content server functionality"
     )
     parser.add_argument(
         "--mode",
-        choices=["provider", "consumer"],
+        default="server",
         required=True,
-        help="Run as a provider or consumer node",
+        help="Run as a server or client node",
     )
     parser.add_argument(
         "--port", type=int, default=0, help="Port to listen on (0 for random)"
@@ -232,18 +232,18 @@ def parse_args():
         help=(
             "Multiaddrs of bootstrap nodes. "
             "Provide a space-separated list of addresses. "
-            "This is required for consumer mode."
+            "This is required for client mode."
         ),
     )
     parser.add_argument(
         "--use-saved",
         action="store_true",
-        help="Use saved node info for bootstrap (consumer mode only)",
+        help="Use saved node info for bootstrap (client mode only)",
     )
     parser.add_argument(
         "--content-id",
         type=str,
-        help="Hex-encoded content ID to look for providers (consumer mode only)",
+        help="Hex-encoded content ID to look for servers (client mode only)",
     )
     # add option to use verbose logging
     parser.add_argument(
@@ -259,25 +259,6 @@ def parse_args():
         logging.getLogger().setLevel(logging.INFO)
 
     args = parser.parse_args()
-
-    # Handle using saved node info
-    if args.use_saved and args.mode == "consumer":
-        node_info = load_node_info()
-        if node_info:
-            saved_addr = (
-                f"/ip4/127.0.0.1/tcp/{node_info['port']}/p2p/{node_info['peer_id']}"
-            )
-            if args.bootstrap is None:
-                args.bootstrap = []
-            args.bootstrap.append(saved_addr)
-            logger.info("Using saved bootstrap address:")
-            logger.info(f"  - {saved_addr}")
-
-    if args.mode == "consumer" and (not args.bootstrap or len(args.bootstrap) == 0):
-        parser.error(
-            "Consumer mode requires at least one"
-            " bootstrap address (use --bootstrap or --use-saved)"
-        )
 
     # Use random port if not specified
     if args.port == 0:
@@ -296,10 +277,9 @@ if __name__ == "__main__":
             args.port,
         )
 
-        if args.mode == "provider":
-            trio.run(run_provider_node, args.port, args.bootstrap)
+        trio.run(run_node, args.port, args.mode, args.bootstrap)
         # else:
-        #     trio.run(run_consumer_node, args.port, args.bootstrap, args.content_id)
+        #     trio.run(run_client_node, args.port, args.bootstrap, args.content_id)
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
