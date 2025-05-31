@@ -54,8 +54,12 @@ async def dht_pair(security_protocol):
         bootstrap_addr_a = f"{peer_a_info.addrs[0]}/p2p/{peer_a_info.peer_id}"
 
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
-        dht_a: KadDHT = KadDHT(host_a, bootstrap_peers=[bootstrap_addr_b])
-        dht_b: KadDHT = KadDHT(host_b, bootstrap_peers=[bootstrap_addr_a])
+        dht_a: KadDHT = KadDHT(
+            host_a, mode="server", bootstrap_peers=[bootstrap_addr_b]
+        )
+        dht_b: KadDHT = KadDHT(
+            host_b, mode="server", bootstrap_peers=[bootstrap_addr_a]
+        )
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):

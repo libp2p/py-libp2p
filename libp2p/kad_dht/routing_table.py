@@ -603,3 +603,11 @@ class RoutingTable:
         for bucket in self.buckets:
             stale_peers.extend(bucket.get_stale_peers(stale_threshold_seconds))
         return stale_peers
+
+    def cleanup_routing_table(self) -> None:
+        """
+        Cleanup the routing table by removing all data.
+        This is useful for resetting the routing table during tests or reinitialization.
+        """
+        self.buckets = [KBucket(self.host, BUCKET_SIZE)]
+        logger.info("Routing table cleaned up, all data removed.")

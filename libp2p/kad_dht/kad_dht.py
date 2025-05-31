@@ -68,7 +68,7 @@ class KadDHT(Service):
     peer discovery, content routing, and value storage.
     """
 
-    def __init__(self, host: IHost, bootstrap_peers: list[str] = None):
+    def __init__(self, host: IHost, mode: str, bootstrap_peers: list[str] = None):
         """
         Initialize a new Kademlia DHT node.
 
@@ -80,6 +80,10 @@ class KadDHT(Service):
 
         self.host = host
         self.local_peer_id = host.get_id()
+
+        self.mode = mode.upper()
+        if self.mode not in ["CLIENT", "SERVER"]:
+            raise ValueError(f"Invalid mode '{mode}'. Must be 'CLIENT' or 'SERVER'.")
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
@@ -100,7 +104,13 @@ class KadDHT(Service):
         self._last_provider_republish = time.time()
 
         # Set protocol handlers
-        host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        if self.mode == "CLIENT":
+            # Client mode: do not handle incoming streams
+            host.set_stream_handler(PROTOCOL_ID, None)
+        elif self.mode == "SERVER":
+            # Server mode: handle incoming streams
+            logger.info("Setting up stream handler for DHT protocol")
+            host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     async def run(self) -> None:
         """Run the DHT service."""
@@ -126,6 +136,18 @@ class KadDHT(Service):
 
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
+
+    async def switch_mode(self, new_mode: str) -> str:
+        mode = new_mode.upper()
+        if mode not in ["CLIENT", "SERVER"]:
+            raise ValueError(f"Invalid mode '{mode}'. Must be 'CLIENT' or 'SERVER'.")
+        if mode == "CLIENT":
+            self.host.set_stream_handler(PROTOCOL_ID, None)
+            self.routing_table.cleanup_routing_table()
+        elif mode == "SERVER":
+            self.host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        self.mode = mode
+        return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
         """
