@@ -5,12 +5,20 @@ This module handles configuration for relay roles, resource limits,
 and discovery settings.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import (
+    dataclass,
+)
+from typing import (
+    Optional,
+)
 
-from libp2p.peer.peerinfo import PeerInfo
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
 
-from .resources import RelayLimits
+from .resources import (
+    RelayLimits,
+)
 
 
 @dataclass
@@ -26,7 +34,7 @@ class RelayConfig:
     limits: Optional[RelayLimits] = None
 
     # Discovery configuration
-    bootstrap_relays: List[PeerInfo] = None
+    bootstrap_relays: list[PeerInfo] = None
     min_relays: int = 3
     max_relays: int = 20
     discovery_interval: int = 300  # seconds
@@ -36,7 +44,7 @@ class RelayConfig:
     max_circuit_duration: int = 3600  # seconds
     max_circuit_bytes: int = 1024 * 1024 * 1024  # 1GB
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize default values."""
         if self.bootstrap_relays is None:
             self.bootstrap_relays = []
@@ -86,4 +94,4 @@ class ClientConfig:
 
     # Reservation management
     reservation_refresh_threshold: float = 0.8  # Refresh at 80% of TTL
-    max_concurrent_reservations: int = 2 
+    max_concurrent_reservations: int = 2

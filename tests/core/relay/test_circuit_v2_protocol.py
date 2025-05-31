@@ -106,7 +106,7 @@ async def assert_stream_response(
                         }
                     )
 
-                    # Be more flexible with response type checking - if we get any valid response with the right status, accept it
+                    # Accept any valid response with the right status
                     if (
                         expected_status is not None
                         and response.HasField("status")
@@ -114,7 +114,7 @@ async def assert_stream_response(
                     ):
                         if response.type != expected_type:
                             logger.warning(
-                                "Response type mismatch (expected %s, got %s) but status matches - accepting anyway",
+                                "Type mismatch (%s, got %s) but status ok - accepting",
                                 expected_type,
                                 response.type,
                             )
@@ -129,7 +129,10 @@ async def assert_stream_response(
                             expected_type,
                             response.type,
                         )
-                        last_error = f"Wrong response type: expected {expected_type}, got {response.type}"
+                        last_error = (
+                            f"Wrong response type: expected {expected_type}, "
+                            f"got {response.type}"
+                        )
                         if attempt < retries - 1:  # Not the last attempt
                             continue
 
@@ -141,7 +144,10 @@ async def assert_stream_response(
                                 expected_status,
                                 response.status.code,
                             )
-                            last_error = f"Wrong status code: expected {expected_status}, got {response.status.code}"
+                            last_error = (
+                                f"Wrong status code: expected {expected_status}, "
+                                f"got {response.status.code}"
+                            )
                             if attempt < retries - 1:  # Not the last attempt
                                 continue
                     elif expected_status is not None:
@@ -222,9 +228,11 @@ async def assert_stream_response(
 
     # If we've reached here, all retries failed
     all_responses_str = ", ".join([str(r) for r in all_responses])
-    raise AssertionError(
-        f"Failed to get expected response after {retries} attempts. Last error: {last_error}. All responses: {all_responses_str}"
+    error_msg = (
+        f"Failed to get expected response after {retries} attempts. "
+        f"Last error: {last_error}. All responses: {all_responses_str}"
     )
+    raise AssertionError(error_msg)
 
 
 async def close_stream(stream):
@@ -304,7 +312,7 @@ async def test_circuit_v2_reservation_basic():
         logger.info("Relay host ID: %s", relay_host.get_id())
         logger.info("Client host ID: %s", client_host.get_id())
 
-        # Setup a custom stream handler on the relay that responds directly with a valid response
+        # Custom handler that responds directly with a valid response
         # This bypasses the complex protocol implementation that might have issues
         async def mock_reserve_handler(stream):
             # Read the request
@@ -438,7 +446,7 @@ async def test_circuit_v2_reservation_limit():
         reserved_clients = set()
         max_reservations = 1  # Only allow one reservation
 
-        # Setup a custom stream handler on the relay that responds based on reservation limits
+        # Custom handler that responds based on reservation limits
         async def mock_reserve_handler(stream):
             # Read the request
             logger.info("Mock handler received stream request")
@@ -627,9 +635,10 @@ async def test_circuit_v2_reservation_limit():
                     response2.type == proto.HopMessage.RESERVE
                 ), f"Wrong response type: {response2.type}"
                 assert response2.HasField("status"), "No status field"
-                assert (
-                    response2.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED
-                ), f"Wrong status code: {response2.status.code}, expected RESOURCE_LIMIT_EXCEEDED"
+                assert response2.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED, (
+                    f"Wrong status code: {response2.status.code}, "
+                    f"expected RESOURCE_LIMIT_EXCEEDED"
+                )
                 logger.info("Verified client2 was correctly rejected")
 
                 # Verify reservation tracking is correct

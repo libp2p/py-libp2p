@@ -5,10 +5,21 @@ This package implements the Circuit Relay v2 protocol as specified in:
 https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
-from .protocol import CircuitV2Protocol, PROTOCOL_ID
-from .resources import RelayLimits, Reservation, RelayResourceManager
-from .transport import CircuitV2Transport
-from .discovery import RelayDiscovery
+from .discovery import (
+    RelayDiscovery,
+)
+from .protocol import (
+    PROTOCOL_ID,
+    CircuitV2Protocol,
+)
+from .resources import (
+    RelayLimits,
+    RelayResourceManager,
+    Reservation,
+)
+from .transport import (
+    CircuitV2Transport,
+)
 
 __all__ = [
     "CircuitV2Protocol",
@@ -18,4 +29,4 @@ __all__ = [
     "RelayResourceManager",
     "CircuitV2Transport",
     "RelayDiscovery",
-] 
+]

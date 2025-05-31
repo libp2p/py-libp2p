@@ -177,7 +177,6 @@ async def test_circuit_v2_transport_dial_through_relay():
             max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
             max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
         )
-        relay_protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
 
         # Register test handler on target
         test_protocol = "/test/echo/1.0.0"

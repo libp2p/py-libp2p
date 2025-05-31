@@ -1,19 +1,29 @@
 """
 Resource management for Circuit Relay v2.
 
-This module handles resource limits and reservations for relay operations.
+This module handles managing resources for relay operations,
+including reservations and connection limits.
 """
 
 from dataclasses import (
     dataclass,
 )
 import time
+from typing import (
+    TYPE_CHECKING,
+    Any,
+)
 
 from libp2p.peer.id import (
     ID,
 )
 
-from .pb import circuit_pb2 as proto
+# Import the protobuf definitions
+from .pb.circuit_pb2 import Reservation as PbReservation
+
+# Import for type checking only to avoid circular imports
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -33,9 +43,13 @@ class Reservation:
         """
         Initialize a new reservation.
 
-        Args:
-            peer_id: The peer ID this reservation is for
-            limits: The resource limits for this reservation
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID this reservation is for
+        limits : RelayLimits
+            The resource limits for this reservation
+
         """
         self.peer_id = peer_id
         self.limits = limits
@@ -63,9 +77,9 @@ class Reservation:
             and self.data_used < self.limits.data
         )
 
-    def to_proto(self) -> proto.Reservation:
+    def to_proto(self) -> PbReservation:
         """Convert the reservation to its protobuf representation."""
-        return proto.Reservation(
+        return PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
             # TODO: In production, this should be a proper signature
@@ -87,8 +101,11 @@ class RelayResourceManager:
         """
         Initialize the resource manager.
 
-        Args:
-            limits: The resource limits to enforce
+        Parameters
+        ----------
+        limits : RelayLimits
+            The resource limits to enforce
+
         """
         self.limits = limits
         self._reservations: dict[ID, Reservation] = {}
@@ -97,11 +114,16 @@ class RelayResourceManager:
         """
         Check if a new reservation can be accepted for the given peer.
 
-        Args:
-            peer_id: The peer ID requesting the reservation
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID requesting the reservation
 
-        Returns:
-            bool: True if the reservation can be accepted
+        Returns
+        -------
+        bool
+            True if the reservation can be accepted
+
         """
         # Clean expired reservations
         self._clean_expired()
@@ -118,26 +140,37 @@ class RelayResourceManager:
         """
         Create a new reservation for the given peer.
 
-        Args:
-            peer_id: The peer ID to create the reservation for
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to create the reservation for
 
-        Returns:
-            Reservation: The newly created reservation
+        Returns
+        -------
+        Reservation
+            The newly created reservation
+
         """
         reservation = Reservation(peer_id, self.limits)
         self._reservations[peer_id] = reservation
         return reservation
 
-    def verify_reservation(self, peer_id: ID, proto_res: proto.Reservation) -> bool:
+    def verify_reservation(self, peer_id: ID, proto_res: Any) -> bool:
         """
         Verify a reservation from a protobuf message.
 
-        Args:
-            peer_id: The peer ID the reservation is for
-            proto_res: The protobuf reservation message
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID the reservation is for
+        proto_res : Any
+            The protobuf reservation message
 
-        Returns:
-            bool: True if the reservation is valid
+        Returns
+        -------
+        bool
+            True if the reservation is valid
+
         """
         # TODO: Implement voucher and signature verification
         reservation = self._reservations.get(peer_id)
@@ -151,11 +184,16 @@ class RelayResourceManager:
         """
         Check if a new connection can be accepted for the given peer.
 
-        Args:
-            peer_id: The peer ID requesting the connection
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID requesting the connection
 
-        Returns:
-            bool: True if the connection can be accepted
+        Returns
+        -------
+        bool
+            True if the connection can be accepted
+
         """
         reservation = self._reservations.get(peer_id)
         return reservation is not None and reservation.can_accept_connection()
@@ -175,11 +213,16 @@ class RelayResourceManager:
         """
         Create or update a reservation for a peer and return the TTL.
 
-        Args:
-            peer_id: The peer ID to reserve for
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to reserve for
 
-        Returns:
-            int: The TTL of the reservation in seconds
+        Returns
+        -------
+        int
+            The TTL of the reservation in seconds
+
         """
         # Check for existing reservation
         existing = self._reservations.get(peer_id)

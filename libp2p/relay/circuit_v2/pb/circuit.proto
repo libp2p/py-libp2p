@@ -52,4 +52,4 @@ message Status {
   }
   Code code = 1;
   string message = 2;
-} 
+}

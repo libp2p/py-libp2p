@@ -8,8 +8,14 @@ https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 import logging
 import time
 from typing import (
+    Any,
     Optional,
 )
+from typing import (
+    cast,
+    runtime_checkable,
+)
+from typing import Protocol as TypingProtocol
 
 import trio
 
@@ -34,7 +40,24 @@ from libp2p.tools.async_service import (
     Service,
 )
 
-from .pb import circuit_pb2 as proto
+from .pb.circuit_pb2 import (
+    HopMessage,
+    Limit,
+    Reservation,
+)
+from .pb.circuit_pb2 import (
+    StopMessage,
+)
+from .pb.circuit_pb2 import Status as PbStatus
+from .protocol_buffer import (
+    CONNECTION_FAILED,
+    INTERNAL_ERROR,
+    MALFORMED_MESSAGE,
+    OK,
+    PERMISSION_DENIED,
+    RESOURCE_LIMIT_EXCEEDED,
+    create_status,
+)
 from .resources import (
     RelayLimits,
     RelayResourceManager,
@@ -60,6 +83,33 @@ STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 5  # Maximum number of read retries
 
 
+# Extended interfaces for type checking
+@runtime_checkable
+class IHostWithStreamHandlers(TypingProtocol):
+    """Extended host interface with stream handler methods."""
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """Remove a stream handler for a protocol."""
+        ...
+
+
+@runtime_checkable
+class INetStreamWithExtras(TypingProtocol):
+    """Extended net stream interface with additional methods."""
+
+    def get_remote_peer_id(self) -> ID:
+        """Get the remote peer ID."""
+        ...
+
+    def is_open(self) -> bool:
+        """Check if the stream is open."""
+        ...
+
+    def is_closed(self) -> bool:
+        """Check if the stream is closed."""
+        ...
+
+
 class CircuitV2Protocol(Service):
     """
     CircuitV2Protocol implements the Circuit Relay v2 protocol.
@@ -77,10 +127,15 @@ class CircuitV2Protocol(Service):
         """
         Initialize the Circuit v2 protocol.
 
-        Args:
-            host: The libp2p host this protocol is running on
-            limits: Resource limits for relay operations
-            allow_hop: Whether to allow this node to act as a relay
+        Parameters
+        ----------
+        host : IHost
+            The libp2p host this protocol is running on
+        limits : Optional[RelayLimits]
+            Resource limits for relay operations
+        allow_hop : bool
+            Whether to allow this node to act as a relay
+
         """
         super().__init__()
         self.host = host
@@ -90,7 +145,7 @@ class CircuitV2Protocol(Service):
         self._active_relays: dict[ID, tuple[INetStream, INetStream]] = {}
         self.event_started = trio.Event()
 
-    async def run(self, *, task_status=trio.TASK_STATUS_IGNORED) -> None:
+    async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
         """Run the protocol service."""
         try:
             # Register protocol handlers
@@ -106,8 +161,7 @@ class CircuitV2Protocol(Service):
             logger.debug("Protocol service started")
 
             # Wait for service to be stopped
-            with trio.CancelScope() as cancel_scope:
-                await self.manager.wait_finished()
+            await self.manager.wait_finished()
         finally:
             # Clean up any active relay connections
             for src_stream, dst_stream in self._active_relays.values():
@@ -118,8 +172,10 @@ class CircuitV2Protocol(Service):
             # Unregister protocol handlers
             if self.allow_hop:
                 try:
-                    self.host.remove_stream_handler(PROTOCOL_ID)
-                    self.host.remove_stream_handler(STOP_PROTOCOL_ID)
+                    # Cast host to extended interface with remove_stream_handler
+                    host_with_handlers = cast(IHostWithStreamHandlers, self.host)
+                    host_with_handlers.remove_stream_handler(PROTOCOL_ID)
+                    host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
@@ -142,19 +198,28 @@ class CircuitV2Protocol(Service):
         """
         Helper function to read from a stream with retries.
 
-        Args:
-            stream: The stream to read from
-            max_retries: Maximum number of read retries
+        Parameters
+        ----------
+        stream : INetStream
+            The stream to read from
+        max_retries : int
+            Maximum number of read retries
 
-        Returns:
+        Returns
+        -------
+        Optional[bytes]
             The data read from the stream, or None if the stream is closed/reset
 
-        Raises:
-            trio.TooSlowError: If read timeout occurs after all retries
-            Exception: For other unexpected errors
+        Raises
+        ------
+        trio.TooSlowError
+            If read timeout occurs after all retries
+        Exception
+            For other unexpected errors
+
         """
         retries = 0
-        last_error = None
+        last_error: Any = None
         backoff_time = 0.2  # Base backoff time in seconds
 
         while retries < max_retries:
@@ -222,7 +287,9 @@ class CircuitV2Protocol(Service):
         try:
             # Try to get peer ID first
             try:
-                remote_peer_id = stream.get_remote_peer_id()
+                # Cast to extended interface with get_remote_peer_id
+                stream_with_peer_id = cast(INetStreamWithExtras, stream)
+                remote_peer_id = stream_with_peer_id.get_remote_peer_id()
                 remote_id = str(remote_peer_id)
             except Exception:
                 # Fall back to address if peer ID not available
@@ -238,44 +305,53 @@ class CircuitV2Protocol(Service):
                 ):  # Double the timeout for reading
                     msg_bytes = await stream.read()
                     if not msg_bytes:
-                        logger.error("Empty read from stream from %s", remote_id)
-                        # Send a nice error response
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,  # Use STATUS type instead of RESERVE
-                            status=proto.Status(
-                                code=proto.Status.MALFORMED_MESSAGE,
-                                message="Empty message received",
-                            ),
+                        logger.error(
+                            "Empty read from stream from %s",
+                            remote_id,
+                        )
+                        # Create a proto Status directly
+                        pb_status = PbStatus()
+                        pb_status.code = MALFORMED_MESSAGE  # type: ignore
+                        pb_status.message = "Empty message received"  # type: ignore
+
+                        response = HopMessage(
+                            type=HopMessage.STATUS,
+                            status=pb_status,
                         )
                         await stream.write(response.SerializeToString())
-                        await trio.sleep(
-                            0.5
-                        )  # Longer wait to ensure the message is sent
+                        await trio.sleep(0.5)  # Longer wait to ensure message is sent
                         return
             except trio.TooSlowError:
-                logger.error("Timeout reading from hop stream from %s", remote_id)
-                # Send a nice error response
-                response = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Use STATUS type instead of RESERVE
-                    status=proto.Status(
-                        code=proto.Status.CONNECTION_FAILED,
-                        message="Stream read timeout",
-                    ),
+                logger.error(
+                    "Timeout reading from hop stream from %s",
+                    remote_id,
+                )
+                # Create a proto Status directly
+                pb_status = PbStatus()
+                pb_status.code = CONNECTION_FAILED  # type: ignore
+                pb_status.message = "Stream read timeout"  # type: ignore
+
+                response = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=pb_status,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                 return
             except Exception as e:
                 logger.error(
-                    "Error reading from hop stream from %s: %s", remote_id, str(e)
+                    "Error reading from hop stream from %s: %s",
+                    remote_id,
+                    str(e),
                 )
-                # Send a nice error response
-                response = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Use STATUS type instead of RESERVE
-                    status=proto.Status(
-                        code=proto.Status.MALFORMED_MESSAGE,
-                        message=f"Read error: {str(e)}",
-                    ),
+                # Create a proto Status directly
+                pb_status = PbStatus()
+                pb_status.code = MALFORMED_MESSAGE  # type: ignore
+                pb_status.message = f"Read error: {str(e)}"  # type: ignore
+
+                response = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=pb_status,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
@@ -283,29 +359,34 @@ class CircuitV2Protocol(Service):
 
             # Parse the message
             try:
-                hop_msg = proto.HopMessage()
+                hop_msg = HopMessage()
                 hop_msg.ParseFromString(msg_bytes)
             except Exception as e:
-                logger.error("Error parsing hop message from %s: %s", remote_id, str(e))
-                # Send a nice error response
-                response = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Use STATUS type instead of RESERVE
-                    status=proto.Status(
-                        code=proto.Status.MALFORMED_MESSAGE,
-                        message=f"Parse error: {str(e)}",
-                    ),
+                logger.error(
+                    "Error parsing hop message from %s: %s",
+                    remote_id,
+                    str(e),
+                )
+                # Create a proto Status directly
+                pb_status = PbStatus()
+                pb_status.code = MALFORMED_MESSAGE  # type: ignore
+                pb_status.message = f"Parse error: {str(e)}"  # type: ignore
+
+                response = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=pb_status,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                 return
 
             # Process based on message type
-            if hop_msg.type == proto.HopMessage.RESERVE:
+            if hop_msg.type == HopMessage.RESERVE:
                 logger.debug("Handling RESERVE message from %s", remote_id)
                 await self._handle_reserve(stream, hop_msg)
                 # For RESERVE requests, let the client close the stream
                 return
-            elif hop_msg.type == proto.HopMessage.CONNECT:
+            elif hop_msg.type == HopMessage.CONNECT:
                 logger.debug("Handling CONNECT message from %s", remote_id)
                 await self._handle_connect(stream, hop_msg)
             else:
@@ -313,7 +394,7 @@ class CircuitV2Protocol(Service):
                 # Send a nice error response using _send_status method
                 await self._send_status(
                     stream,
-                    proto.Status.MALFORMED_MESSAGE,
+                    MALFORMED_MESSAGE,
                     f"Invalid message type: {hop_msg.type}",
                 )
 
@@ -325,7 +406,7 @@ class CircuitV2Protocol(Service):
                 # Send a nice error response using _send_status method
                 await self._send_status(
                     stream,
-                    proto.Status.MALFORMED_MESSAGE,
+                    MALFORMED_MESSAGE,
                     f"Internal error: {str(e)}",
                 )
             except Exception as e2:
@@ -343,13 +424,14 @@ class CircuitV2Protocol(Service):
             # Read the incoming message with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 msg_bytes = await stream.read()
-                stop_msg = proto.StopMessage()
+                stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
-            if stop_msg.type != proto.StopMessage.CONNECT:
+            if stop_msg.type != StopMessage.CONNECT:
+                # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
                     stream,
-                    proto.Status.MALFORMED_MESSAGE,
+                    MALFORMED_MESSAGE,
                     "Invalid message type",
                 )
                 await self._close_stream(stream)
@@ -358,9 +440,10 @@ class CircuitV2Protocol(Service):
             # Get the source stream from active relays
             peer_id = ID(stop_msg.peer)
             if peer_id not in self._active_relays:
+                # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
                     stream,
-                    proto.Status.CONNECTION_FAILED,
+                    CONNECTION_FAILED,
                     "No pending relay connection",
                 )
                 await self._close_stream(stream)
@@ -372,12 +455,12 @@ class CircuitV2Protocol(Service):
             # Send success status to both sides
             await self._send_status(
                 src_stream,
-                proto.Status.OK,
+                OK,
                 "Connection established",
             )
             await self._send_stop_status(
                 stream,
-                proto.Status.OK,
+                OK,
                 "Connection established",
             )
 
@@ -390,7 +473,7 @@ class CircuitV2Protocol(Service):
             logger.error("Timeout reading from stop stream")
             await self._send_stop_status(
                 stream,
-                proto.Status.CONNECTION_FAILED,
+                CONNECTION_FAILED,
                 "Stream read timeout",
             )
             await self._close_stream(stream)
@@ -399,14 +482,14 @@ class CircuitV2Protocol(Service):
             try:
                 await self._send_stop_status(
                     stream,
-                    proto.Status.MALFORMED_MESSAGE,
+                    MALFORMED_MESSAGE,
                     str(e),
                 )
                 await self._close_stream(stream)
             except Exception:
                 pass
 
-    async def _handle_reserve(self, stream: INetStream, msg: proto.HopMessage) -> None:
+    async def _handle_reserve(self, stream: INetStream, msg: Any) -> None:
         """Handle a reservation request."""
         peer_id = None
         try:
@@ -417,12 +500,14 @@ class CircuitV2Protocol(Service):
             if not self.resource_manager.can_accept_reservation(peer_id):
                 logger.debug("Reservation limit exceeded for peer %s", peer_id)
                 # Send status message with STATUS type
-                status_msg = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Use STATUS type for error responses
-                    status=proto.Status(
-                        code=proto.Status.RESOURCE_LIMIT_EXCEEDED,
-                        message="Reservation limit exceeded",
-                    ),
+                status = create_status(
+                    code=RESOURCE_LIMIT_EXCEEDED,
+                    message="Reservation limit exceeded",
+                )
+
+                status_msg = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=status.to_pb(),
                 )
                 await stream.write(status_msg.SerializeToString())
                 return
@@ -433,15 +518,20 @@ class CircuitV2Protocol(Service):
 
             # Send reservation success response
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
-                response = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Use STATUS type for successful responses too
-                    status=proto.Status(
-                        code=proto.Status.OK,
-                        message="Reservation accepted",
-                    ),
-                    reservation=proto.Reservation(
+                status = create_status(code=OK, message="Reservation accepted")
+
+                response = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=status.to_pb(),
+                    reservation=Reservation(
                         expire=int(time.time() + ttl),
                         addrs=[],  # TODO: Add relay addresses
+                        voucher=b"",  # We don't use vouchers yet
+                        signature=b"",  # We don't use signatures yet
+                    ),
+                    limit=Limit(
+                        duration=self.limits.duration,
+                        data=self.limits.data,
                     ),
                 )
 
@@ -449,7 +539,7 @@ class CircuitV2Protocol(Service):
                 logger.debug(
                     "Sending reservation response: type=%s, status=%s, ttl=%d",
                     response.type,
-                    response.status.code,
+                    getattr(response.status, "code", "unknown"),
                     ttl,
                 )
 
@@ -463,26 +553,26 @@ class CircuitV2Protocol(Service):
 
         except Exception as e:
             logger.error("Error handling reservation request: %s", str(e))
-            if stream.is_open():
+            if cast(INetStreamWithExtras, stream).is_open():
                 try:
                     # Send error response
                     await self._send_status(
                         stream,
-                        proto.Status.INTERNAL_ERROR,
+                        INTERNAL_ERROR,
                         f"Failed to process reservation: {str(e)}",
                     )
                 except Exception as send_err:
                     logger.error("Failed to send error response: %s", str(send_err))
         finally:
             # Always close the stream when done with reservation
-            if stream.is_open():
+            if cast(INetStreamWithExtras, stream).is_open():
                 try:
                     with trio.fail_after(STREAM_CLOSE_TIMEOUT):
                         await stream.close()
                 except Exception as close_err:
                     logger.error("Error closing stream: %s", str(close_err))
 
-    async def _handle_connect(self, stream: INetStream, msg: proto.HopMessage) -> None:
+    async def _handle_connect(self, stream: INetStream, msg: Any) -> None:
         """Handle a connect request."""
         peer_id = ID(msg.peer)
         dst_stream = None
@@ -492,7 +582,7 @@ class CircuitV2Protocol(Service):
             if not self.resource_manager.verify_reservation(peer_id, msg.reservation):
                 await self._send_status(
                     stream,
-                    proto.Status.PERMISSION_DENIED,
+                    PERMISSION_DENIED,
                     "Invalid reservation",
                 )
                 await stream.reset()
@@ -502,7 +592,7 @@ class CircuitV2Protocol(Service):
         if not self.resource_manager.can_accept_connection(peer_id):
             await self._send_status(
                 stream,
-                proto.Status.RESOURCE_LIMIT_EXCEEDED,
+                RESOURCE_LIMIT_EXCEEDED,
                 "Connection limit exceeded",
             )
             await stream.reset()
@@ -519,20 +609,33 @@ class CircuitV2Protocol(Service):
                     raise ConnectionError("Could not connect to destination")
 
                 # Send STOP CONNECT message
-                stop_msg = proto.StopMessage(
-                    type=proto.StopMessage.CONNECT,
-                    peer=stream.get_remote_peer_id().to_bytes(),
+                stop_msg = StopMessage(
+                    type=StopMessage.CONNECT,
+                    # Cast to extended interface with get_remote_peer_id
+                    peer=cast(INetStreamWithExtras, stream)
+                    .get_remote_peer_id()
+                    .to_bytes(),
                 )
                 await dst_stream.write(stop_msg.SerializeToString())
 
                 # Wait for response from destination
                 resp_bytes = await dst_stream.read()
-                resp = proto.StopMessage()
+                resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
 
-                if resp.status.code != proto.Status.OK:
+                # Handle status attributes from the response
+                if resp.HasField("status"):
+                    # Get code and message attributes with defaults
+                    status_code = getattr(resp.status, "code", OK)
+                    # Get message with default
+                    status_msg = getattr(resp.status, "message", "Unknown error")
+                else:
+                    status_code = OK
+                    status_msg = "No status provided"
+
+                if status_code != OK:
                     raise ConnectionError(
-                        f"Destination rejected connection: {resp.status.message}"
+                        f"Destination rejected connection: {status_msg}"
                     )
 
             # Update active relays with destination stream
@@ -546,7 +649,7 @@ class CircuitV2Protocol(Service):
             # Send success status
             await self._send_status(
                 stream,
-                proto.Status.OK,
+                OK,
                 "Connection established",
             )
 
@@ -559,7 +662,7 @@ class CircuitV2Protocol(Service):
             logger.error("Error establishing relay connection: %s", str(e))
             await self._send_status(
                 stream,
-                proto.Status.CONNECTION_FAILED,
+                CONNECTION_FAILED,
                 str(e),
             )
             if peer_id in self._active_relays:
@@ -569,19 +672,19 @@ class CircuitV2Protocol(Service):
             if reservation:
                 reservation.active_connections -= 1
             await stream.reset()
-            if dst_stream and not dst_stream.is_closed():
+            if dst_stream and not cast(INetStreamWithExtras, dst_stream).is_closed():
                 await dst_stream.reset()
         except Exception as e:
             logger.error("Unexpected error in connect handler: %s", str(e))
             await self._send_status(
                 stream,
-                proto.Status.CONNECTION_FAILED,
+                CONNECTION_FAILED,
                 "Internal error",
             )
             if peer_id in self._active_relays:
                 del self._active_relays[peer_id]
             await stream.reset()
-            if dst_stream and not dst_stream.is_closed():
+            if dst_stream and not cast(INetStreamWithExtras, dst_stream).is_closed():
                 await dst_stream.reset()
 
     async def _relay_data(
@@ -593,10 +696,15 @@ class CircuitV2Protocol(Service):
         """
         Relay data between two streams.
 
-        Args:
-            src_stream: Source stream to read from
-            dst_stream: Destination stream to write to
-            peer_id: ID of the peer being relayed
+        Parameters
+        ----------
+        src_stream : INetStream
+            Source stream to read from
+        dst_stream : INetStream
+            Destination stream to write to
+        peer_id : ID
+            ID of the peer being relayed
+
         """
         try:
             while True:
@@ -637,19 +745,21 @@ class CircuitV2Protocol(Service):
     async def _send_status(
         self,
         stream: ReadWriteCloser,
-        code: proto.Status.Code,
+        code: int,
         message: str,
     ) -> None:
         """Send a status message."""
         try:
             logger.debug("Sending status message with code %s: %s", code, message)
             with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
-                status_msg = proto.HopMessage(
-                    type=proto.HopMessage.STATUS,  # Ensure we use STATUS type
-                    status=proto.Status(
-                        code=code,
-                        message=message,
-                    ),
+                # Create a proto Status directly
+                pb_status = PbStatus()
+                pb_status.code = code  # type: ignore
+                pb_status.message = message  # type: ignore
+
+                status_msg = HopMessage(
+                    type=HopMessage.STATUS,
+                    status=pb_status,
                 )
 
                 msg_bytes = status_msg.SerializeToString()
@@ -671,37 +781,23 @@ class CircuitV2Protocol(Service):
     async def _send_stop_status(
         self,
         stream: ReadWriteCloser,
-        code: proto.Status.Code,
+        code: int,
         message: str,
     ) -> None:
         """Send a status message on a STOP stream."""
         try:
             logger.debug("Sending stop status message with code %s: %s", code, message)
             with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
-                status_msg = proto.StopMessage(
-                    type=proto.StopMessage.STATUS,
-                    status=proto.Status(
-                        code=code,
-                        message=message,
-                    ),
+                # Create a proto Status directly
+                pb_status = PbStatus()
+                pb_status.code = code  # type: ignore
+                pb_status.message = message  # type: ignore
+
+                status_msg = StopMessage(
+                    type=StopMessage.STATUS,
+                    status=pb_status,
                 )
-
-                msg_bytes = status_msg.SerializeToString()
-                logger.debug(
-                    "Stop status message serialized (%d bytes)", len(msg_bytes)
-                )
-
-                await stream.write(msg_bytes)
-                logger.debug("Stop status message sent, waiting for processing")
-
-                # Wait to ensure the message is sent
-                await trio.sleep(1.5)
-                logger.debug("Stop status message sending completed")
-        except trio.TooSlowError:
-            logger.error(
-                "Timeout sending stop status message: code=%s, message=%s",
-                code,
-                message,
-            )
+                await stream.write(status_msg.SerializeToString())
+                await trio.sleep(0.5)  # Ensure message is sent
         except Exception as e:
             logger.error("Error sending stop status message: %s", str(e))
