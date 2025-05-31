@@ -15,8 +15,7 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     """
     Creates a key for the DHT by hashing binary data with SHA-256.
 
-    Args:
-        binary_data: The binary data to hash.
+    params: binary_data: The binary data to hash.
 
     Returns
     -------
@@ -30,9 +29,8 @@ def distance(key_one: bytes, key_two: bytes) -> int:
     """
     Calculate the XOR distance between two keys.
 
-    Args:
-        key_one: First key
-        key_two: Second key
+    params: key_one: First key
+    params: key_two: Second key
 
     Returns
     -------
@@ -54,8 +52,7 @@ def bytes_to_base58(data: bytes) -> str:
     """
     Convert bytes to base58 encoded string.
 
-    Args:
-        data: Input bytes
+    params: data: Input bytes
 
     Returns
     -------
@@ -69,9 +66,8 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
     """
     Sort a list of peer IDs by their distance to the target key.
 
-    Args:
-        target_key: The target key to measure distance from
-        peer_ids: List of peer IDs to sort
+    params: target_key: The target key to measure distance from
+    params: peer_ids: List of peer IDs to sort
 
     Returns
     -------
@@ -91,9 +87,8 @@ def shared_prefix_len(first: bytes, second: bytes) -> int:
     """
     Calculate the number of prefix bits shared by two byte sequences.
 
-    Args:
-        first: First byte sequence
-        second: Second byte sequence
+    params: first: First byte sequence
+    params: second: Second byte sequence
 
     Returns
     -------

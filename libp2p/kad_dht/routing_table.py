@@ -162,9 +162,8 @@ class KBucket:
         """
         Get peers that haven't been pinged recently.
 
-        Args:
-            stale_threshold_seconds: Time in seconds
-                after which a peer is considered stale
+        params: stale_threshold_seconds: Time in seconds
+        params: after which a peer is considered stale
 
         Returns
         -------
@@ -229,8 +228,7 @@ class KBucket:
         Ping a peer using protobuf message to check
         if it's still alive and update last seen time.
 
-        Args:
-            peer_id: The ID of the peer to ping
+        params: peer_id: The ID of the peer to ping
 
         Returns
         -------
@@ -325,8 +323,7 @@ class KBucket:
         """
         Update the last-seen timestamp for a peer in the bucket.
 
-        Args:
-            peer_id: The ID of the peer to refresh
+        params: peer_id: The ID of the peer to refresh
 
         Returns
         -------
@@ -349,8 +346,7 @@ class KBucket:
         """
         Check if a key is in the range of this bucket.
 
-        Args:
-            key: The key to check (bytes)
+        params: key: The key to check (bytes)
 
         Returns
         -------
@@ -589,9 +585,8 @@ class RoutingTable:
         """
         Get all stale peers from all buckets
 
-        Args:
-            stale_threshold_seconds:
-                Time in seconds after which a peer is considered stale
+        params: stale_threshold_seconds:
+            Time in seconds after which a peer is considered stale
 
         Returns
         -------

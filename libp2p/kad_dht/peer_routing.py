@@ -135,13 +135,11 @@ class PeerRouting(IPeerRouting):
         """
         Query a single peer for closest peers and append results to the shared list.
 
-        Args:
-        ----
-        peer : ID
+        params: peer : ID
             The peer to query
-        target_key : bytes
+        params: target_key : bytes
             The target key to find closest peers for
-        new_peers : list[ID]
+        params: new_peers : list[ID]
             Shared list to append results to
 
         """
@@ -340,9 +338,7 @@ class PeerRouting(IPeerRouting):
         """
         Handle incoming Kademlia protocol streams.
 
-        Args:
-        ----
-            stream: The incoming stream
+        params: stream: The incoming stream
 
         Returns
         -------
@@ -412,9 +408,7 @@ class PeerRouting(IPeerRouting):
         """
         Bootstrap the routing table with a list of known peers.
 
-        Args:
-        ----
-            bootstrap_peers: List of known peers to start with
+        params: bootstrap_peers: List of known peers to start with
 
         Returns
         -------
