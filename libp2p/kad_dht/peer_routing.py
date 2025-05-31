@@ -48,6 +48,7 @@ logger = logging.getLogger("kademlia-example.peer_routing")
 # Constants for the Kademlia algorithm
 ALPHA = 3  # Concurrency parameter
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
+PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 
 
 class PeerRouting(IPeerRouting):
@@ -68,10 +69,7 @@ class PeerRouting(IPeerRouting):
         """
         self.host = host
         self.routing_table = routing_table
-        # Use the standard Kademlia DHT protocol ID
-        self.protocol_id = TProtocol("/ipfs/kad/1.0.0")
-        # Register protocol handler for incoming requests
-        self.host.set_stream_handler(self.protocol_id, self._handle_kad_stream)
+        self.protocol_id = PROTOCOL_ID
 
     async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
         """
