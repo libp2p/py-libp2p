@@ -3,6 +3,7 @@ Yamux stream multiplexer implementation for py-libp2p.
 This is the preferred multiplexing protocol due to its performance and feature set.
 Mplex is also available for legacy compatibility but may be deprecated in the future.
 """
+
 from collections.abc import (
     Awaitable,
 )
@@ -13,6 +14,7 @@ from types import (
     TracebackType,
 )
 from typing import (
+    Any,
     Callable,
     Optional,
 )
@@ -141,7 +143,7 @@ class YamuxStream(IMuxedStream):
             )
             await self.conn.secured_conn.write(header)
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: Optional[int] = -1) -> bytes:
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -161,8 +163,7 @@ class YamuxStream(IMuxedStream):
                 if buffer and len(buffer) > 0:
                     # Wait for closure even if data is available
                     logging.debug(
-                        f"Stream {self.stream_id}:"
-                        f"Waiting for FIN before returning data"
+                        f"Stream {self.stream_id}:Waiting for FIN before returning data"
                     )
                     await self.conn.stream_events[self.stream_id].wait()
                     self.conn.stream_events[self.stream_id] = trio.Event()
@@ -269,7 +270,7 @@ class Yamux(IMuxedConn):
         secured_conn: ISecureConn,
         peer_id: ID,
         is_initiator: Optional[bool] = None,
-        on_close: Optional[Callable[[], Awaitable[None]]] = None,
+        on_close: Optional[Callable[[], Awaitable[Any]]] = None,
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
@@ -474,8 +475,7 @@ class Yamux(IMuxedConn):
                 header = await self.secured_conn.read(HEADER_SIZE)
                 if not header or len(header) < HEADER_SIZE:
                     logging.debug(
-                        f"Connection closed or"
-                        f"incomplete header for peer {self.peer_id}"
+                        f"Connection closed orincomplete header for peer {self.peer_id}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -544,8 +544,7 @@ class Yamux(IMuxedConn):
                         )
                     elif error_code == GO_AWAY_PROTOCOL_ERROR:
                         logging.error(
-                            f"Received GO_AWAY for peer"
-                            f"{self.peer_id}: Protocol error"
+                            f"Received GO_AWAY for peer{self.peer_id}: Protocol error"
                         )
                     elif error_code == GO_AWAY_INTERNAL_ERROR:
                         logging.error(

@@ -87,7 +87,7 @@ class InsecureSession(BaseSession):
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         return await self.conn.read(n)
 
     async def close(self) -> None:
@@ -105,7 +105,7 @@ async def run_handshake(
     local_private_key: PrivateKey,
     conn: IRawConnection,
     is_initiator: bool,
-    remote_peer_id: ID,
+    remote_peer_id: Optional[ID],
 ) -> ISecureConn:
     """Raise `HandshakeFailure` when handshake failed."""
     msg = make_exchange_message(local_private_key.get_public_key())

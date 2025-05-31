@@ -82,18 +82,18 @@ async def test_reject_graft():
                 await pubsubs_gsub_1[0].router.join(topic)
 
                 # Pre-Graft assertions
-                assert (
-                    topic in pubsubs_gsub_0[0].router.mesh
-                ), "topic not in mesh for gossipsub 0"
-                assert (
-                    topic in pubsubs_gsub_1[0].router.mesh
-                ), "topic not in mesh for gossipsub 1"
-                assert (
-                    host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic]
-                ), "gossipsub 1 in mesh topic for gossipsub 0"
-                assert (
-                    host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic]
-                ), "gossipsub 0 in mesh topic for gossipsub 1"
+                assert topic in pubsubs_gsub_0[0].router.mesh, (
+                    "topic not in mesh for gossipsub 0"
+                )
+                assert topic in pubsubs_gsub_1[0].router.mesh, (
+                    "topic not in mesh for gossipsub 1"
+                )
+                assert host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic], (
+                    "gossipsub 1 in mesh topic for gossipsub 0"
+                )
+                assert host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic], (
+                    "gossipsub 0 in mesh topic for gossipsub 1"
+                )
 
                 # Gossipsub 1 emits a graft request to Gossipsub 0
                 await pubsubs_gsub_0[0].router.emit_graft(topic, host_1.get_id())
@@ -101,12 +101,12 @@ async def test_reject_graft():
                 await trio.sleep(1)
 
                 # Post-Graft assertions
-                assert (
-                    host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic]
-                ), "gossipsub 1 in mesh topic for gossipsub 0"
-                assert (
-                    host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic]
-                ), "gossipsub 0 in mesh topic for gossipsub 1"
+                assert host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic], (
+                    "gossipsub 1 in mesh topic for gossipsub 0"
+                )
+                assert host_0.get_id() not in pubsubs_gsub_1[0].router.mesh[topic], (
+                    "gossipsub 0 in mesh topic for gossipsub 1"
+                )
 
             except Exception as e:
                 print(f"Test failed with error: {e}")
@@ -139,12 +139,12 @@ async def test_heartbeat_reconnect():
                 await trio.sleep(1)
 
                 # Verify initial connection
-                assert (
-                    host_1.get_id() in pubsubs_gsub_0[0].peers
-                ), "Initial connection not established for gossipsub 0"
-                assert (
-                    host_0.get_id() in pubsubs_gsub_1[0].peers
-                ), "Initial connection not established for gossipsub 0"
+                assert host_1.get_id() in pubsubs_gsub_0[0].peers, (
+                    "Initial connection not established for gossipsub 0"
+                )
+                assert host_0.get_id() in pubsubs_gsub_1[0].peers, (
+                    "Initial connection not established for gossipsub 0"
+                )
 
                 # Simulate disconnection
                 await host_0.disconnect(host_1.get_id())
@@ -153,17 +153,17 @@ async def test_heartbeat_reconnect():
                 await trio.sleep(1)
 
                 # Verify that peers are removed after disconnection
-                assert (
-                    host_0.get_id() not in pubsubs_gsub_1[0].peers
-                ), "Peer 0 still in gossipsub 1 after disconnection"
+                assert host_0.get_id() not in pubsubs_gsub_1[0].peers, (
+                    "Peer 0 still in gossipsub 1 after disconnection"
+                )
 
                 # Wait for heartbeat to reestablish connection
                 await trio.sleep(2)
 
                 # Verify connection reestablishment
-                assert (
-                    host_0.get_id() in pubsubs_gsub_1[0].peers
-                ), "Reconnection not established for gossipsub 0"
+                assert host_0.get_id() in pubsubs_gsub_1[0].peers, (
+                    "Reconnection not established for gossipsub 0"
+                )
 
             except Exception as e:
                 print(f"Test failed with error: {e}")

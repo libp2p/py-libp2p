@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import os
-import sys
-import re
 from pathlib import Path
+import re
+import sys
 
 
 def _find_files(project_root):
@@ -49,7 +49,8 @@ def main():
     rtd_name = rtd_input or pypi_name
 
     project_input = input(
-        f"What is your project name (ex: at the top of the README)? (default: {repo_name}) "
+        f"What is your project name (ex: at the top of the README)? \
+        (default: {repo_name}) "
     )
     project_name = project_input or repo_name
 

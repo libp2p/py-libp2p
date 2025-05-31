@@ -196,9 +196,9 @@ async def test_yamux_stream_close(yamux_pair):
     await trio.sleep(0.1)
 
     # Now both directions are closed, so stream should be fully closed
-    assert (
-        client_stream.closed
-    ), "Client stream should be fully closed after bidirectional close"
+    assert client_stream.closed, (
+        "Client stream should be fully closed after bidirectional close"
+    )
 
     # Writing should still fail
     with pytest.raises(MuxedStreamError):
@@ -269,9 +269,9 @@ async def test_yamux_flow_control(yamux_pair):
     await client_stream.write(large_data)
 
     # Check that window was reduced
-    assert (
-        client_stream.send_window < initial_window
-    ), "Window should be reduced after sending"
+    assert client_stream.send_window < initial_window, (
+        "Window should be reduced after sending"
+    )
 
     # Read the data on the server side
     received = b""
@@ -307,9 +307,9 @@ async def test_yamux_flow_control(yamux_pair):
         f" {client_stream.send_window},"
         f"initial half: {initial_window // 2}"
     )
-    assert (
-        client_stream.send_window > initial_window // 2
-    ), "Window should be increased after update"
+    assert client_stream.send_window > initial_window // 2, (
+        "Window should be increased after update"
+    )
 
     await client_stream.close()
     await server_stream.close()
@@ -349,17 +349,17 @@ async def test_yamux_half_close(yamux_pair):
     test_data = b"server response after client close"
 
     # The server shouldn't be marked as send_closed yet
-    assert (
-        not server_stream.send_closed
-    ), "Server stream shouldn't be marked as send_closed"
+    assert not server_stream.send_closed, (
+        "Server stream shouldn't be marked as send_closed"
+    )
 
     await server_stream.write(test_data)
 
     # Client can still read
     received = await client_stream.read(len(test_data))
-    assert (
-        received == test_data
-    ), "Client should still be able to read after sending FIN"
+    assert received == test_data, (
+        "Client should still be able to read after sending FIN"
+    )
 
     # Now server closes its sending side
     await server_stream.close()
@@ -406,9 +406,9 @@ async def test_yamux_go_away_with_error(yamux_pair):
     await trio.sleep(0.2)
 
     # Verify server recognized shutdown
-    assert (
-        server_yamux.event_shutting_down.is_set()
-    ), "Server should be shutting down after GO_AWAY"
+    assert server_yamux.event_shutting_down.is_set(), (
+        "Server should be shutting down after GO_AWAY"
+    )
 
     logging.debug("test_yamux_go_away_with_error complete")
 

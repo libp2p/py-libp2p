@@ -95,7 +95,7 @@ class MuxerMultistream:
         if protocol == PROTOCOL_ID:
             async with trio.open_nursery():
 
-                def on_close() -> None:
+                async def on_close() -> None:
                     pass
 
                 return Yamux(
