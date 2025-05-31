@@ -9,12 +9,19 @@ This module tests the core functionality of the ValueStore including:
 """
 
 import time
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import (
+    Mock,
+)
 
-from libp2p.kad_dht.value_store import ValueStore, DEFAULT_TTL
-from libp2p.peer.id import ID
-from libp2p.crypto.secp256k1 import create_new_key_pair
+import pytest
+
+from libp2p.kad_dht.value_store import (
+    DEFAULT_TTL,
+    ValueStore,
+)
+from libp2p.peer.id import (
+    ID,
+)
 
 
 class TestValueStore:
@@ -31,7 +38,7 @@ class TestValueStore:
         """Test initialization with host and local peer ID."""
         mock_host = Mock()
         peer_id = ID.from_base58("QmTest123")
-        
+
         store = ValueStore(host=mock_host, local_peer_id=peer_id)
         assert store.host == mock_host
         assert store.local_peer_id == peer_id
@@ -42,9 +49,9 @@ class TestValueStore:
         store = ValueStore()
         key = b"test_key"
         value = b"test_value"
-        
+
         store.put(key, value)
-        
+
         assert key in store.store
         stored_value, validity = store.store[key]
         assert stored_value == value
@@ -57,9 +64,9 @@ class TestValueStore:
         key = b"test_key"
         value = b"test_value"
         custom_validity = time.time() + 3600  # 1 hour from now
-        
+
         store.put(key, value, validity=custom_validity)
-        
+
         stored_value, validity = store.store[key]
         assert stored_value == value
         assert validity == custom_validity
@@ -70,10 +77,10 @@ class TestValueStore:
         key = b"test_key"
         value1 = b"value1"
         value2 = b"value2"
-        
+
         store.put(key, value1)
         store.put(key, value2)
-        
+
         assert len(store.store) == 1
         stored_value, _ = store.store[key]
         assert stored_value == value2
@@ -83,19 +90,19 @@ class TestValueStore:
         store = ValueStore()
         key = b"test_key"
         value = b"test_value"
-        
+
         store.put(key, value)
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value == value
 
     def test_get_nonexistent_key(self):
         """Test retrieving a non-existent key returns None."""
         store = ValueStore()
         key = b"nonexistent_key"
-        
+
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value is None
 
     def test_get_expired_value(self):
@@ -104,12 +111,12 @@ class TestValueStore:
         key = b"test_key"
         value = b"test_value"
         expired_validity = time.time() - 1  # 1 second ago
-        
+
         # Manually insert expired value
         store.store[key] = (value, expired_validity)
-        
+
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value is None
         assert key not in store.store  # Should be removed
 
@@ -118,10 +125,10 @@ class TestValueStore:
         store = ValueStore()
         key = b"test_key"
         value = b"test_value"
-        
+
         store.put(key, value)
         result = store.remove(key)
-        
+
         assert result is True
         assert key not in store.store
 
@@ -129,9 +136,9 @@ class TestValueStore:
         """Test removing a non-existent key returns False."""
         store = ValueStore()
         key = b"nonexistent_key"
-        
+
         result = store.remove(key)
-        
+
         assert result is False
 
     def test_has_existing_valid_key(self):
@@ -139,19 +146,19 @@ class TestValueStore:
         store = ValueStore()
         key = b"test_key"
         value = b"test_value"
-        
+
         store.put(key, value)
         result = store.has(key)
-        
+
         assert result is True
 
     def test_has_nonexistent_key(self):
         """Test has() returns False for non-existent keys."""
         store = ValueStore()
         key = b"nonexistent_key"
-        
+
         result = store.has(key)
-        
+
         assert result is False
 
     def test_has_expired_key(self):
@@ -160,12 +167,12 @@ class TestValueStore:
         key = b"test_key"
         value = b"test_value"
         expired_validity = time.time() - 1
-        
+
         # Manually insert expired value
         store.store[key] = (value, expired_validity)
-        
+
         result = store.has(key)
-        
+
         assert result is False
         assert key not in store.store  # Should be removed
 
@@ -175,12 +182,12 @@ class TestValueStore:
         key1 = b"key1"
         key2 = b"key2"
         value = b"value"
-        
+
         store.put(key1, value)
         store.put(key2, value)
-        
+
         expired_count = store.cleanup_expired()
-        
+
         assert expired_count == 0
         assert len(store.store) == 2
 
@@ -192,13 +199,13 @@ class TestValueStore:
         key3 = b"expired_key2"
         value = b"value"
         expired_validity = time.time() - 1
-        
+
         store.put(key1, value)  # Valid
         store.store[key2] = (value, expired_validity)  # Expired
         store.store[key3] = (value, expired_validity)  # Expired
-        
+
         expired_count = store.cleanup_expired()
-        
+
         assert expired_count == 2
         assert len(store.store) == 1
         assert key1 in store.store
@@ -212,16 +219,16 @@ class TestValueStore:
         key2 = b"valid_expiry"
         key3 = b"expired"
         value = b"value"
-        
+
         # No expiration (None validity)
         store.store[key1] = (value, None)
         # Valid expiration
         store.put(key2, value)
         # Expired
         store.store[key3] = (value, time.time() - 1)
-        
+
         expired_count = store.cleanup_expired()
-        
+
         assert expired_count == 1
         assert len(store.store) == 2
         assert key1 in store.store
@@ -231,9 +238,9 @@ class TestValueStore:
     def test_get_keys_empty_store(self):
         """Test get_keys() returns empty list for empty store."""
         store = ValueStore()
-        
+
         keys = store.get_keys()
-        
+
         assert keys == []
 
     def test_get_keys_with_valid_values(self):
@@ -243,13 +250,13 @@ class TestValueStore:
         key2 = b"key2"
         key3 = b"expired_key"
         value = b"value"
-        
+
         store.put(key1, value)
         store.put(key2, value)
         store.store[key3] = (value, time.time() - 1)  # Expired
-        
+
         keys = store.get_keys()
-        
+
         assert len(keys) == 2
         assert key1 in keys
         assert key2 in keys
@@ -258,9 +265,9 @@ class TestValueStore:
     def test_size_empty_store(self):
         """Test size() returns 0 for empty store."""
         store = ValueStore()
-        
+
         size = store.size()
-        
+
         assert size == 0
 
     def test_size_with_valid_values(self):
@@ -270,13 +277,13 @@ class TestValueStore:
         key2 = b"key2"
         key3 = b"expired_key"
         value = b"value"
-        
+
         store.put(key1, value)
         store.put(key2, value)
         store.store[key3] = (value, time.time() - 1)  # Expired
-        
+
         size = store.size()
-        
+
         assert size == 2
 
     def test_edge_case_empty_key(self):
@@ -284,10 +291,10 @@ class TestValueStore:
         store = ValueStore()
         key = b""
         value = b"value"
-        
+
         store.put(key, value)
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value == value
 
     def test_edge_case_empty_value(self):
@@ -295,10 +302,10 @@ class TestValueStore:
         store = ValueStore()
         key = b"key"
         value = b""
-        
+
         store.put(key, value)
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value == value
 
     def test_edge_case_large_key_value(self):
@@ -306,10 +313,10 @@ class TestValueStore:
         store = ValueStore()
         key = b"x" * 10000  # 10KB key
         value = b"y" * 100000  # 100KB value
-        
+
         store.put(key, value)
         retrieved_value = store.get(key)
-        
+
         assert retrieved_value == value
 
     def test_edge_case_zero_validity(self):
@@ -317,9 +324,9 @@ class TestValueStore:
         store = ValueStore()
         key = b"key"
         value = b"value"
-        
+
         store.put(key, value, validity=0)
-        
+
         # Should be expired immediately
         retrieved_value = store.get(key)
         assert retrieved_value is None
@@ -329,9 +336,9 @@ class TestValueStore:
         store = ValueStore()
         key = b"key"
         value = b"value"
-        
+
         store.put(key, value, validity=-1)
-        
+
         # Should be expired
         retrieved_value = store.get(key)
         assert retrieved_value is None
@@ -342,36 +349,36 @@ class TestValueStore:
         key = b"key"
         value = b"value"
         start_time = time.time()
-        
+
         store.put(key, value)
-        
+
         _, validity = store.store[key]
         expected_validity = start_time + DEFAULT_TTL
-        
+
         # Allow small time difference for execution
         assert abs(validity - expected_validity) < 1
 
     def test_concurrent_operations(self):
         """Test that multiple operations don't interfere with each other."""
         store = ValueStore()
-        
+
         # Add multiple key-value pairs
         for i in range(100):
             key = f"key_{i}".encode()
             value = f"value_{i}".encode()
             store.put(key, value)
-        
+
         # Verify all are stored
         assert store.size() == 100
-        
+
         # Remove every other key
         for i in range(0, 100, 2):
             key = f"key_{i}".encode()
             store.remove(key)
-        
+
         # Verify correct count
         assert store.size() == 50
-        
+
         # Verify remaining keys are correct
         for i in range(1, 100, 2):
             key = f"key_{i}".encode()
@@ -397,7 +404,7 @@ class TestValueStore:
         time.sleep(0.002)
 
         assert not store.has(key1)  # Should be expired
-        assert store.has(key2)      # Should be valid
+        assert store.has(key2)  # Should be valid
         assert not store.has(key3)  # Should be expired (exactly at current time)
 
     def test_store_internal_structure(self):
@@ -406,9 +413,9 @@ class TestValueStore:
         key = b"key"
         value = b"value"
         validity = time.time() + 3600
-        
+
         store.put(key, value, validity=validity)
-        
+
         # Verify internal structure
         assert isinstance(store.store, dict)
         assert key in store.store
@@ -423,14 +430,14 @@ class TestValueStore:
         store = ValueStore()
         key = b"key"
         value = b"value"
-        
+
         # Manually set None validity
         store.store[key] = (value, None)
-        
+
         # Should not be considered expired
         assert store.has(key)
         assert store.get(key) == value
-        
+
         # Should not be cleaned up
         expired_count = store.cleanup_expired()
         assert expired_count == 0
@@ -443,9 +450,9 @@ class TestValueStore:
         peer_id = ID.from_base58("QmTest123")
         key = b"key"
         value = b"value"
-        
+
         result = await store._store_at_peer(peer_id, key, value)
-        
+
         assert result is False
 
     @pytest.mark.trio
@@ -456,9 +463,9 @@ class TestValueStore:
         store = ValueStore(host=mock_host, local_peer_id=peer_id)
         key = b"key"
         value = b"value"
-        
+
         result = await store._store_at_peer(peer_id, key, value)
-        
+
         assert result is True
 
     @pytest.mark.trio
@@ -468,36 +475,36 @@ class TestValueStore:
         peer_id = ID.from_base58("QmTest123")
         store = ValueStore(host=mock_host, local_peer_id=peer_id)
         key = b"key"
-        
+
         result = await store._get_from_peer(peer_id, key)
-        
+
         assert result is None
 
     def test_memory_efficiency_large_dataset(self):
         """Test memory behavior with large datasets."""
         store = ValueStore()
-        
+
         # Add a large number of entries
         num_entries = 10000
         for i in range(num_entries):
             key = f"key_{i:05d}".encode()
             value = f"value_{i:05d}".encode()
             store.put(key, value)
-        
+
         assert store.size() == num_entries
-        
+
         # Clean up all entries
         for i in range(num_entries):
             key = f"key_{i:05d}".encode()
             store.remove(key)
-        
+
         assert store.size() == 0
         assert len(store.store) == 0
 
     def test_key_collision_resistance(self):
         """Test that similar keys don't collide."""
         store = ValueStore()
-        
+
         # Test keys that might cause collisions
         keys = [
             b"key",
@@ -505,16 +512,16 @@ class TestValueStore:
             b"key1",
             b"Key",  # Different case
             b"key ",  # With space
-            b" key", # Leading space
+            b" key",  # Leading space
         ]
-        
+
         for i, key in enumerate(keys):
             value = f"value_{i}".encode()
             store.put(key, value)
-        
+
         # Verify all keys are stored separately
         assert store.size() == len(keys)
-        
+
         for i, key in enumerate(keys):
             expected_value = f"value_{i}".encode()
             assert store.get(key) == expected_value
@@ -522,16 +529,16 @@ class TestValueStore:
     def test_unicode_key_handling(self):
         """Test handling of unicode content in keys."""
         store = ValueStore()
-        
+
         # Test various unicode keys
         unicode_keys = [
-            "hello".encode('utf-8'),
-            "héllo".encode('utf-8'),
-            "🔑".encode('utf-8'),
-            "ключ".encode('utf-8'),  # Russian
-            "键".encode('utf-8'),     # Chinese
+            b"hello",
+            "héllo".encode(),
+            "🔑".encode(),
+            "ключ".encode(),  # Russian
+            "键".encode(),  # Chinese
         ]
-        
+
         for i, key in enumerate(unicode_keys):
             value = f"value_{i}".encode()
             store.put(key, value)
