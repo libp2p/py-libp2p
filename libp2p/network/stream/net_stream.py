@@ -1,5 +1,7 @@
-from enum import Enum,auto
-
+from enum import (
+    Enum,
+    auto,
+)
 from typing import (
     Optional,
 )
@@ -59,13 +61,12 @@ class NetStream(INetStream):
         self.protocol_id = protocol_id
 
     @property
-    def get_state(self) -> StreamState:
+    def state(self) -> StreamState:
         """
         :return: current state of the stream
         """
         return self._state
 
-    @property
     def set_state(self, state: StreamState) -> None:
         """
         Set the current state of the stream.
@@ -82,7 +83,7 @@ class NetStream(INetStream):
         :return: bytes of input
         """
         try:
-            if self.get_state != StreamState.OPEN:
+            if self.state != StreamState.OPEN:
                 raise StreamClosed("Cannot read from stream; not open")
             else:
                 return await self.muxed_stream.read(n)
@@ -98,7 +99,7 @@ class NetStream(INetStream):
         :return: number of bytes written
         """
         try:
-            if self.get_state != StreamState.OPEN:
+            if self.state != StreamState.OPEN:
                 raise StreamClosed("Cannot write to stream; not open")
             else:
                 await self.muxed_stream.write(data)
@@ -108,13 +109,13 @@ class NetStream(INetStream):
 
     async def close(self) -> None:
         """Close stream."""
-        self.set_state(StreamState.CLOSED)
         await self.muxed_stream.close()
+        self.set_state(StreamState.CLOSED)
 
     async def reset(self) -> None:
         """Reset stream."""
-        self.set_state(StreamState.RESET)
         await self.muxed_stream.reset()
+        self.set_state(StreamState.RESET)
 
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         """Delegate to the underlying muxed stream."""
