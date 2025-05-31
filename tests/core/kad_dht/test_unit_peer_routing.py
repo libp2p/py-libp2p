@@ -20,6 +20,9 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+from multiaddr.exceptions import (
+    StringParseError,
+)
 import varint
 
 from libp2p.crypto.secp256k1 import (
@@ -518,11 +521,9 @@ class TestPeerRouting:
     @pytest.mark.trio
     async def test_error_handling_in_bootstrap_parsing(self, peer_routing):
         """Test error handling when bootstrap address parsing fails."""
+
         invalid_addrs = ["invalid_multiaddr_format"]
 
-        with patch(
-            "libp2p.kad_dht.peer_routing.info_from_p2p_addr",
-            side_effect=ValueError("Parse error"),
-        ):
-            with pytest.raises(ValueError, match="Parse error"):
-                await peer_routing.bootstrap(invalid_addrs)
+        # Test that the actual StringParseError is raised when parsing fails
+        with pytest.raises(StringParseError, match="Must begin with /"):
+            await peer_routing.bootstrap(invalid_addrs)
