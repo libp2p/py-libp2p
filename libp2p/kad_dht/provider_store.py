@@ -47,28 +47,60 @@ class ProviderRecord:
     """
     A record for a content provider in the DHT.
 
-    Contains the peer ID, network addresses (optional), and timestamp.
+    Contains the peer information and timestamp.
     """
 
     def __init__(
         self,
-        peer_id: ID,
-        addresses: Optional[list[Multiaddr]] = None,
+        provider_info: PeerInfo,
         timestamp: Optional[float] = None,
     ) -> None:
         """
         Initialize a new provider record.
 
-        :param peer_id: The ID of the provider peer
-        :param addresses: Optional network addresses of the provider peer
+        :param provider_info: The provider's peer information
         :param timestamp: Time this record was created/updated
                           (defaults to current time)
 
         """
-        self.peer_id = peer_id
-        self.addresses = addresses or []
+        self.provider_info = provider_info
         self.timestamp = timestamp or time.time()
-        self.addresses_expiry = self.timestamp + PROVIDER_ADDRESS_TTL
+
+    def is_expired(self) -> bool:
+        """
+        Check if this provider record has expired.
+
+        Returns
+        -------
+        bool
+            True if the record has expired
+
+        """
+        current_time = time.time()
+        return (current_time - self.timestamp) > PROVIDER_RECORD_EXPIRATION_INTERVAL
+
+    def should_republish(self) -> bool:
+        """
+        Check if this provider record should be republished.
+
+        Returns
+        -------
+        bool
+            True if the record should be republished
+
+        """
+        current_time = time.time()
+        return (current_time - self.timestamp) > PROVIDER_RECORD_REPUBLISH_INTERVAL
+
+    @property
+    def peer_id(self) -> ID:
+        """Get the provider's peer ID."""
+        return self.provider_info.peer_id
+
+    @property
+    def addresses(self) -> list[Multiaddr]:
+        """Get the provider's addresses."""
+        return self.provider_info.addrs
 
 
 class ProviderStore:
@@ -94,9 +126,22 @@ class ProviderStore:
 
     async def _republish_provider_records(self) -> None:
         """Republish all provider records for content this node is providing."""
+        # First, republish keys we're actively providing
         for key in self.providing_keys:
             logger.info(f"Republishing provider record for key {key.hex()}")
             await self.provide(key)
+
+        # Also check for any records that should be republished
+        time.time()
+        for key, providers in self.providers.items():
+            for peer_id_str, record in providers.items():
+                # Only republish records for our own peer
+                if self.local_peer_id and str(self.local_peer_id) == peer_id_str:
+                    if record.should_republish():
+                        logger.info(
+                            f"Republishing old provider record for key {key.hex()}"
+                        )
+                        await self.provide(key)
 
     async def provide(self, key: bytes) -> bool:
         """
@@ -390,7 +435,7 @@ class ProviderStore:
         # Add or update the provider record
         peer_id_str = str(provider.peer_id)  # Use string representation as dict key
         self.providers[key][peer_id_str] = ProviderRecord(
-            peer_id=provider.peer_id, addresses=provider.addrs, timestamp=time.time()
+            provider_info=provider, timestamp=time.time()
         )
         logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
 
@@ -492,12 +537,15 @@ class ProviderStore:
 
     def size(self) -> int:
         """
-        Get the number of content keys in the provider store.
+        Get the total number of provider records in the store.
 
         Returns
         -------
         int
-            Number of content keys
+            Total number of provider records across all keys
 
         """
-        return len(self.providers)
+        total = 0
+        for providers in self.providers.values():
+            total += len(providers)
+        return total

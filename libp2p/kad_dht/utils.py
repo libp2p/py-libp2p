@@ -78,9 +78,13 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
         List[ID]: Sorted list of peer IDs from closest to furthest
 
     """
-    return sorted(
-        peer_ids, key=lambda peer_id: distance(target_key, peer_id.to_bytes())
-    )
+
+    def get_distance(peer_id: ID) -> int:
+        # Hash the peer ID bytes to get a key for distance calculation
+        peer_hash = multihash.digest(peer_id.to_bytes(), "sha2-256").digest
+        return distance(target_key, peer_hash)
+
+    return sorted(peer_ids, key=get_distance)
 
 
 def shared_prefix_len(first: bytes, second: bytes) -> int:

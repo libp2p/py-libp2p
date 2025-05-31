@@ -194,7 +194,7 @@ class ValueStore:
             validity,
         )
         # Check if the value has expired
-        if validity < time.time():
+        if validity is not None and validity < time.time():
             logger.debug(
                 "Value for key %s... has expired, removing it",
                 key.hex()[:8],
