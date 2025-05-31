@@ -12,6 +12,7 @@ from libp2p.abc import (
 )
 from libp2p.network.stream.net_stream import (
     NetStream,
+    StreamState,
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
@@ -134,6 +135,10 @@ class SwarmConn(INetConn):
         await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
+        streams_open: tuple[NetStream, ...] = self.get_streams()
+        for stream in streams_open:
+            """ Set the state of the stream to OPEN """
+            stream.set_state(StreamState.OPEN)
         await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:

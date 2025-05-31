@@ -1,3 +1,7 @@
+from enum import (
+    Enum,
+    auto,
+)
 from typing import (
     Optional,
 )
@@ -26,6 +30,14 @@ from .exceptions import (
 # TODO: Handle exceptions from `muxed_stream`
 # TODO: Add stream state
 #   - Reference: https://github.com/libp2p/go-libp2p-swarm/blob/99831444e78c8f23c9335c17d8f7c700ba25ca14/swarm_stream.go  # noqa: E501
+class StreamState(Enum):
+    INIT = auto()
+    OPEN = auto()
+    RESET = auto()
+    CLOSED = auto()
+    ERROR = auto()
+
+
 class NetStream(INetStream):
     muxed_stream: IMuxedStream
     protocol_id: Optional[TProtocol]
@@ -34,6 +46,7 @@ class NetStream(INetStream):
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
+        self._state = StreamState.INIT
 
     def get_protocol(self) -> TProtocol:
         """
@@ -47,6 +60,21 @@ class NetStream(INetStream):
         """
         self.protocol_id = protocol_id
 
+    @property
+    def state(self) -> StreamState:
+        """
+        :return: current state of the stream
+        """
+        return self._state
+
+    def set_state(self, state: StreamState) -> None:
+        """
+        Set the current state of the stream.
+
+        :param state: new state of the stream
+        """
+        self._state = state
+
     async def read(self, n: int = None) -> bytes:
         """
         Read from stream.
@@ -55,7 +83,10 @@ class NetStream(INetStream):
         :return: bytes of input
         """
         try:
-            return await self.muxed_stream.read(n)
+            if self.state != StreamState.OPEN:
+                raise StreamClosed("Cannot read from stream; not open")
+            else:
+                return await self.muxed_stream.read(n)
         except MuxedStreamEOF as error:
             raise StreamEOF() from error
         except MuxedStreamReset as error:
@@ -68,16 +99,23 @@ class NetStream(INetStream):
         :return: number of bytes written
         """
         try:
-            await self.muxed_stream.write(data)
+            if self.state != StreamState.OPEN:
+                raise StreamClosed("Cannot write to stream; not open")
+            else:
+                await self.muxed_stream.write(data)
         except (MuxedStreamClosed, MuxedStreamError) as error:
+            self.set_state(StreamState.ERROR)
             raise StreamClosed() from error
 
     async def close(self) -> None:
         """Close stream."""
         await self.muxed_stream.close()
+        self.set_state(StreamState.CLOSED)
 
     async def reset(self) -> None:
+        """Reset stream."""
         await self.muxed_stream.reset()
+        self.set_state(StreamState.RESET)
 
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         """Delegate to the underlying muxed stream."""
