@@ -18,6 +18,13 @@ from libp2p.crypto.keys import (
     PublicKey,
 )
 
+"""
+Latency EWMA Smoothing governs the deacy of the EWMA (the speed at which
+is changes). This must be a normalized (0-1) value.
+1 is 100% change, 0 is no change.
+"""
+LATENCY_EWMA_SMOOTHING = 0.1
+
 
 class PeerData(IPeerData):
     pubkey: PublicKey | None
@@ -55,13 +62,82 @@ class PeerData(IPeerData):
         """
         self.protocols = list(protocols)
 
-    def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
+    def remove_protocols(self, protocols: Sequence[str]) -> None:
+        """
+        :param protocols: protocols to remove
+        """
+        for protocol in protocols:
+            if protocol in self.protocols:
+                self.protocols.remove(protocol)
+
+    def supports_protocols(self, protocols: Sequence[str]) -> list[str]:
+        """
+        :param protocols: protocols to check from
+        :return: all supported protocols in the given list
+        """
+        return [proto for proto in protocols if proto in self.protocols]
+
+    def first_supported_protocol(self, protocols: Sequence[str]) -> str:
+        """
+        :param protocols: protocols to check from
+        :return: first supported protocol in the given list
+        """
+        for protocol in protocols:
+            if protocol in self.protocols:
+                return protocol
+
+        return "None supported"
+
+    def clear_protocol_data(self) -> None:
+        """Clear all protocols"""
+        self.protocols = []
+
+    def add_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
         """
         :param addrs: multiaddresses to add
         """
+        expiry = time.time() + ttl if ttl is not None else float("inf")
         for addr in addrs:
             if addr not in self.addrs:
                 self.addrs.append(addr)
+            current_expiry = self.addrs_ttl.get(addr, 0)
+            if expiry > current_expiry:
+                self.addrs_ttl[addr] = expiry
+
+    def set_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """
+        :param addrs: multiaddresses to update
+        :param ttl: new ttl
+        """
+        now = time.time()
+
+        if ttl <= 0:
+            # Put the TTL value to -1
+            for addr in addrs:
+                # TODO! if addr in self.addrs, remove them?
+                if addr in self.addrs_ttl:
+                    del self.addrs_ttl[addr]
+            return
+
+        expiry = now + ttl
+        for addr in addrs:
+            # TODO! if addr not in self.addrs, add them?
+            self.addrs_ttl[addr] = expiry
+
+    def update_addrs(self, oldTTL: int, newTTL: int) -> None:
+        """
+        :param oldTTL: old ttl
+        :param newTTL: new ttl
+        """
+        now = time.time()
+
+        new_expiry = now + newTTL
+        old_expiry = now + oldTTL
+
+        for addr, expiry in list(self.addrs_ttl.items()):
+            # Approximate match by expiry time
+            if abs(expiry - old_expiry) < 1:
+                self.addrs_ttl[addr] = new_expiry
 
     def get_addrs(self) -> list[Multiaddr]:
         """
@@ -89,6 +165,10 @@ class PeerData(IPeerData):
         if key in self.metadata:
             return self.metadata[key]
         raise PeerDataError("key not found")
+
+    def clear_metadata(self) -> None:
+        """Clears metadata."""
+        self.metadata = {}
 
     def add_pubkey(self, pubkey: PublicKey) -> None:
         """
