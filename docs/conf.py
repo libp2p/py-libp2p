@@ -24,7 +24,7 @@ try:
     import tomllib
 except ModuleNotFoundError:
     # For Python < 3.11
-    import tomli as tomllib  # type: ignore (In case of >3.11 PyRight doesnt find tomli , which is right but a false flag)
+    import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
 # Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
 pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
