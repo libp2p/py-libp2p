@@ -179,16 +179,42 @@ class ControlPrune(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     TOPICID_FIELD_NUMBER: builtins.int
+    PEERS_FIELD_NUMBER: builtins.int
+    BACKOFF_FIELD_NUMBER: builtins.int
     topicID: builtins.str
+    backoff: builtins.int
+    @property
+    def peers(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___PeerInfo]: ...
     def __init__(
         self,
         *,
         topicID: builtins.str | None = ...,
+        peers: collections.abc.Iterable[global___PeerInfo] | None = ...,
+        backoff: builtins.int | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["topicID", b"topicID"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["topicID", b"topicID"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["backoff", b"backoff", "topicID", b"topicID"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["backoff", b"backoff", "peers", b"peers", "topicID", b"topicID"]) -> None: ...
 
 global___ControlPrune = ControlPrune
+
+@typing.final
+class PeerInfo(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    PEERID_FIELD_NUMBER: builtins.int
+    SIGNEDPEERRECORD_FIELD_NUMBER: builtins.int
+    peerID: builtins.bytes
+    signedPeerRecord: builtins.bytes
+    def __init__(
+        self,
+        *,
+        peerID: builtins.bytes | None = ...,
+        signedPeerRecord: builtins.bytes | None = ...,
+    ) -> None: ...
+    def HasField(self, field_name: typing.Literal["peerID", b"peerID", "signedPeerRecord", b"signedPeerRecord"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["peerID", b"peerID", "signedPeerRecord", b"signedPeerRecord"]) -> None: ...
+
+global___PeerInfo = PeerInfo
 
 @typing.final
 class TopicDescriptor(google.protobuf.message.Message):
