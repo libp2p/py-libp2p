@@ -70,6 +70,36 @@ class MultiselectClient(IMultiselectClient):
 
         raise MultiselectClientError("protocols not supported")
 
+    async def query_multistream_command(
+        self, communicator: IMultiselectCommunicator, command: str
+    ) -> list[str]:
+        """
+        Send a multistream-select command over the given communicator and return
+        parsed response.
+
+        :param communicator: communicator to use to communicate with counterparty
+        :param command: supported multistream-select command(e.g., ls)
+        :raise MultiselectClientError: If the communicator fails to process data.
+        :return: list of strings representing the response from peer.
+        """
+        await self.handshake(communicator)
+
+        if command == "ls":
+            try:
+                await communicator.write("ls")
+            except MultiselectCommunicatorError as error:
+                raise MultiselectClientError() from error
+        else:
+            raise ValueError("Command not supported")
+
+        try:
+            response = await communicator.read()
+            response_list = response.strip().splitlines()
+        except MultiselectCommunicatorError as error:
+            raise MultiselectClientError() from error
+
+        return response_list
+
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
     ) -> TProtocol:
