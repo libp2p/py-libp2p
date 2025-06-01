@@ -83,7 +83,9 @@ class NetStream(INetStream):
         :return: bytes of input
         """
         try:
-            if self.state != StreamState.OPEN:
+            if self.state == StreamState.RESET:
+                raise StreamReset("Cannot read from stream; stream is reset")
+            elif self.state != StreamState.OPEN:
                 raise StreamClosed("Cannot read from stream; not open")
             else:
                 return await self.muxed_stream.read(n)
