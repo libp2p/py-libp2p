@@ -19,7 +19,6 @@ from typing import (
     Callable,
     Optional,
     TypeVar,
-    cast,
 )
 import uuid
 
@@ -366,7 +365,7 @@ class BaseManager(InternalManagerAPI):
                 # Only show stacktrace if this is **not** a DaemonTaskExit error
                 exc_info=not isinstance(err, DaemonTaskExit),
             )
-            self._errors.append(cast(EXC_INFO, sys.exc_info()))
+            self._errors.append(sys.exc_info())
             self.cancel()
         else:
             if task.parent is None:

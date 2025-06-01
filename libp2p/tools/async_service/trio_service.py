@@ -51,7 +51,6 @@ from .exceptions import (
     LifecycleError,
 )
 from .typing import (
-    EXC_INFO,
     AsyncFn,
 )
 
@@ -221,7 +220,7 @@ class TrioManager(BaseManager):
                         # Exceptions from any tasks spawned by our service will be
                         # caught by trio and raised here, so we store them to report
                         # together with any others we have already captured.
-                        self._errors.append(cast(EXC_INFO, sys.exc_info()))
+                        self._errors.append(sys.exc_info())
                     finally:
                         system_nursery.cancel_scope.cancel()
 
@@ -415,9 +414,7 @@ def external_api(func: TFunc) -> TFunc:
 
         async with trio.open_nursery() as nursery:
             # mypy's type hints for start_soon break with this invocation.
-            nursery.start_soon(
-                _wait_api_fn, self, func, args, kwargs, send_channel  # type: ignore
-            )
+            nursery.start_soon(_wait_api_fn, self, func, args, kwargs, send_channel)
             nursery.start_soon(_wait_finished, self, func, send_channel)
             result, err = await receive_channel.receive()
             nursery.cancel_scope.cancel()
