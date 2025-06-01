@@ -71,6 +71,9 @@ from libp2p.transport.upgrader import (
 from libp2p.utils.logging import (
     setup_logging,
 )
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery
+)
 
 # Initialize logging configuration
 setup_logging()
@@ -236,13 +239,14 @@ def new_swarm(
 
 
 def new_host(
-    key_pair: KeyPair | None = None,
-    muxer_opt: TMuxerOptions | None = None,
-    sec_opt: TSecurityOptions | None = None,
-    peerstore_opt: IPeerStore | None = None,
-    disc_opt: IPeerRouting | None = None,
-    muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
-    listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    key_pair: Optional[KeyPair] = None,
+    muxer_opt: Optional[TMuxerOptions] = None,
+    sec_opt: Optional[TSecurityOptions] = None,
+    peerstore_opt: Optional[IPeerStore] = None,
+    disc_opt: Optional[IPeerRouting] = None,
+    muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
+    listen_addrs: Sequence[multiaddr.Multiaddr] = None,
+    enable_mDNS: bool = False,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -266,8 +270,15 @@ def new_host(
     )
 
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt)
-    return BasicHost(swarm)
+        host = RoutedHost(swarm, disc_opt)
+    else:
+        host = BasicHost(swarm)
 
+    if enable_mDNS:
+        mdns = MDNSDiscovery(swarm)
+        mdns.start()
+        host._mdns = mdns 
+        
+    return host
 
 __version__ = __version("libp2p")
