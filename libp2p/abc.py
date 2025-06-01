@@ -385,6 +385,10 @@ class IPeerMetadata(ABC):
         :raises Exception: If the operation is unsuccessful.
         """
 
+    @abstractmethod
+    def clear_metadata(self, peer_id: ID) -> None:
+        """Clears the metadata"""
+
 
 # -------------------------- addrbook interface.py --------------------------
 
@@ -475,11 +479,114 @@ class IAddrBook(ABC):
 
         """
 
+    @abstractmethod
+    def set_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+        """Set addr"""
+
+    @abstractmethod
+    def set_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """Set addrs"""
+
+    @abstractmethod
+    def update_addrs(self, peer_id: ID, oldTTL: int, newTTL: int) -> None:
+        """Update addrs"""
+
+    @abstractmethod
+    def addr_stream(self, peer_id: ID) -> None:
+        """Addr stream"""
+
+
+# -------------------------- keybook interface.py --------------------------
+
+
+class IKeyBook(ABC):
+    """IKeyBook"""
+
+    @abstractmethod
+    def pubkey(self, peer_id: ID) -> PublicKey:
+        """Pubkey"""
+
+    @abstractmethod
+    def privkey(self, peer_id: ID) -> PrivateKey:
+        """Privkey"""
+
+    @abstractmethod
+    def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
+        """add_pubkey"""
+
+    @abstractmethod
+    def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
+        """add_privkey"""
+
+    @abstractmethod
+    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
+        """add_key_pair"""
+
+    @abstractmethod
+    def peer_with_keys(self) -> list[ID]:
+        """peer_with_keys"""
+
+    @abstractmethod
+    def clear_keydata(self, peer_id: ID) -> PublicKey:
+        """clear_keydata"""
+
+
+# -------------------------- metrics interface.py --------------------------
+
+
+class IMetrics(ABC):
+    """IMetrics"""
+
+    @abstractmethod
+    def record_latency(self, peer_id: ID, RTT: float) -> None:
+        """record_latency"""
+
+    @abstractmethod
+    def latency_EWMA(self, peer_id: ID) -> float:
+        """latency_EWMA"""
+
+    @abstractmethod
+    def clear_metrics(self, peer_id: ID) -> None:
+        """clear_metrics"""
+
+
+# -------------------------- protobook interface.py --------------------------
+
+
+class IProtoBook(ABC):
+    @abstractmethod
+    def get_protocols(self, peer_id: ID) -> list[str]:
+        """get_protocols"""
+
+    @abstractmethod
+    def add_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """add_protocols"""
+
+    @abstractmethod
+    def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """set_protocols"""
+
+    @abstractmethod
+    def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """remove_protocols"""
+
+    @abstractmethod
+    def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
+        """supports_protocols"""
+
+    @abstractmethod
+    def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
+        """first_supported_protocol"""
+
+    @abstractmethod
+    def clear_protocol_data(self, peer_id: ID) -> None:
+        """clear_protocol_data"""
+
 
 # -------------------------- peerstore interface.py --------------------------
 
 
-class IPeerStore(IAddrBook, IPeerMetadata):
+class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
     """
     Interface for a peer store.
 
@@ -488,9 +595,98 @@ class IPeerStore(IAddrBook, IPeerMetadata):
     """
 
     @abstractmethod
-    def peer_info(self, peer_id: ID) -> PeerInfo:
+    def get(self, peer_id: ID, key: str) -> Any:
         """
-        Retrieve the peer information for the specified peer.
+        Retrieve the value associated with a key for a specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key : str
+            The key to look up.
+
+        Returns
+        -------
+        Any
+            The value corresponding to the specified key.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID or value is not found.
+
+        """
+
+    @abstractmethod
+    def put(self, peer_id: ID, key: str, val: Any) -> None:
+        """
+        Store a key-value pair for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key : str
+            The key for the data.
+        val : Any
+            The value to store.
+
+        """
+
+    @abstractmethod
+    def clear_metadata(self, peer_id: ID) -> None:
+        """clear_metadata"""
+
+    ##
+    @abstractmethod
+    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+        """
+        Add an address for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        addr : Multiaddr
+            The multiaddress to add.
+        ttl : int
+            The time-to-live for the record.
+
+        """
+
+    @abstractmethod
+    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """
+        Add multiple addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        addrs : Sequence[Multiaddr]
+            A sequence of multiaddresses to add.
+        ttl : int
+            The time-to-live for the record.
+
+        """
+
+    @abstractmethod
+    def set_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+        """set_addr"""
+
+    @abstractmethod
+    def set_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+        """set_addrs"""
+
+    @abstractmethod
+    def update_addrs(self, peer_id: ID, oldTTL: int, newTTL: int) -> None:
+        """update_addrs"""
+
+    @abstractmethod
+    def addrs(self, peer_id: ID) -> list[Multiaddr]:
+        """
+        Retrieve the addresses for the specified peer.
 
         Parameters
         ----------
@@ -499,11 +695,163 @@ class IPeerStore(IAddrBook, IPeerMetadata):
 
         Returns
         -------
-        PeerInfo
-            The peer information object for the given peer.
+        list[Multiaddr]
+            A list of multiaddresses.
 
         """
 
+    @abstractmethod
+    def clear_addrs(self, peer_id: ID) -> None:
+        """
+        Clear all addresses for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        """
+
+    @abstractmethod
+    def peers_with_addrs(self) -> list[ID]:
+        """
+        Retrieve all peer identifiers with stored addresses.
+
+        Returns
+        -------
+        list[ID]
+            A list of peer IDs.
+
+        """
+
+    @abstractmethod
+    def addr_stream(self, peer_id: ID) -> None:
+        """addr_stream"""
+
+    ##
+    @abstractmethod
+    def pubkey(self, peer_id: ID) -> PublicKey:
+        """
+        Retrieve the public key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PublicKey
+            The public key of the peer.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID is not found.
+
+        """
+
+    @abstractmethod
+    def privkey(self, peer_id: ID) -> PrivateKey:
+        """
+        Retrieve the private key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PrivateKey
+            The private key of the peer.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer ID is not found.
+
+        """
+
+    @abstractmethod
+    def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
+        """
+        Add a public key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        pubkey : PublicKey
+            The public key to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a public key set.
+
+        """
+
+    @abstractmethod
+    def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
+        """
+        Add a private key for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        privkey : PrivateKey
+            The private key to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a private key set.
+
+        """
+
+    @abstractmethod
+    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
+        """
+        Add a key pair for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+        key_pair : KeyPair
+            The key pair to add.
+
+        Raises
+        ------
+        PeerStoreError
+            If the peer already has a public or private key set.
+
+        """
+
+    @abstractmethod
+    def peer_with_keys(self) -> list[ID]:
+        """peer_with_keys"""
+
+    @abstractmethod
+    def clear_keydata(self, peer_id: ID) -> PublicKey:
+        """clear_keydata"""
+
+    ##
+    @abstractmethod
+    def record_latency(self, peer_id: ID, RTT: float) -> None:
+        """record_latency"""
+
+    @abstractmethod
+    def latency_EWMA(self, peer_id: ID) -> float:
+        """latency_EWMA"""
+
+    @abstractmethod
+    def clear_metrics(self, peer_id: ID) -> None:
+        """clear_metrics"""
+
+    ##
     @abstractmethod
     def get_protocols(self, peer_id: ID) -> list[str]:
         """
@@ -555,6 +903,40 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
+    def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
+        """remove_protocols"""
+
+    @abstractmethod
+    def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
+        """supports_protocols"""
+
+    @abstractmethod
+    def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
+        """first_supported_protocol"""
+
+    @abstractmethod
+    def clear_protocol_data(self, peer_id: ID) -> None:
+        """clear_protocol_data"""
+
+    ##
+    @abstractmethod
+    def peer_info(self, peer_id: ID) -> PeerInfo:
+        """
+        Retrieve the peer information for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer.
+
+        Returns
+        -------
+        PeerInfo
+            The peer information object for the given peer.
+
+        """
+
+    @abstractmethod
     def peer_ids(self) -> list[ID]:
         """
         Retrieve all peer identifiers stored in the peer store.
@@ -567,218 +949,8 @@ class IPeerStore(IAddrBook, IPeerMetadata):
         """
 
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
-        """
-        Retrieve the value associated with a key for a specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        key : str
-            The key to look up.
-
-        Returns
-        -------
-        Any
-            The value corresponding to the specified key.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer ID or value is not found.
-
-        """
-
-    @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
-        """
-        Store a key-value pair for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        key : str
-            The key for the data.
-        val : Any
-            The value to store.
-
-        """
-
-    @abstractmethod
-    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
-        """
-        Add an address for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        addr : Multiaddr
-            The multiaddress to add.
-        ttl : int
-            The time-to-live for the record.
-
-        """
-
-    @abstractmethod
-    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
-        """
-        Add multiple addresses for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        addrs : Sequence[Multiaddr]
-            A sequence of multiaddresses to add.
-        ttl : int
-            The time-to-live for the record.
-
-        """
-
-    @abstractmethod
-    def addrs(self, peer_id: ID) -> list[Multiaddr]:
-        """
-        Retrieve the addresses for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-
-        Returns
-        -------
-        list[Multiaddr]
-            A list of multiaddresses.
-
-        """
-
-    @abstractmethod
-    def clear_addrs(self, peer_id: ID) -> None:
-        """
-        Clear all addresses for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-
-        """
-
-    @abstractmethod
-    def peers_with_addrs(self) -> list[ID]:
-        """
-        Retrieve all peer identifiers with stored addresses.
-
-        Returns
-        -------
-        list[ID]
-            A list of peer IDs.
-
-        """
-
-    @abstractmethod
-    def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
-        """
-        Add a public key for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        pubkey : PublicKey
-            The public key to add.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer already has a public key set.
-
-        """
-
-    @abstractmethod
-    def pubkey(self, peer_id: ID) -> PublicKey:
-        """
-        Retrieve the public key for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-
-        Returns
-        -------
-        PublicKey
-            The public key of the peer.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer ID is not found.
-
-        """
-
-    @abstractmethod
-    def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
-        """
-        Add a private key for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        privkey : PrivateKey
-            The private key to add.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer already has a private key set.
-
-        """
-
-    @abstractmethod
-    def privkey(self, peer_id: ID) -> PrivateKey:
-        """
-        Retrieve the private key for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-
-        Returns
-        -------
-        PrivateKey
-            The private key of the peer.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer ID is not found.
-
-        """
-
-    @abstractmethod
-    def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
-        """
-        Add a key pair for the specified peer.
-
-        Parameters
-        ----------
-        peer_id : ID
-            The identifier of the peer.
-        key_pair : KeyPair
-            The key pair to add.
-
-        Raises
-        ------
-        PeerStoreError
-            If the peer already has a public or private key set.
-
-        """
+    def clear_peerdata(self, peer_id: ID) -> None:
+        """clear_peerdata"""
 
 
 # -------------------------- listener interface.py --------------------------
@@ -1316,7 +1488,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
+    def add_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
         """
         Add multiple multiaddresses to the peer's data.
 
@@ -1324,6 +1496,8 @@ class IPeerData(ABC):
         ----------
         addrs : Sequence[Multiaddr]
             A sequence of multiaddresses to add.
+        ttl: inr
+            Time to live for the peer record
 
         """
 
