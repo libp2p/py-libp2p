@@ -426,11 +426,6 @@ class Pubsub(Service, IPubsub):
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             return
-        # Check if the peer is in the blacklist. If yes, reject.
-        if self.is_peer_blacklisted(peer_id):
-            logger.debug("Rejecting blacklisted peer %s", peer_id)
-            await stream.reset()
-            return
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
