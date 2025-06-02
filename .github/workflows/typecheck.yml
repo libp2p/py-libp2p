@@ -17,19 +17,21 @@ jobs:
         with:
           python-version: "3.x"
 
-      # Runs in the repository root
-      - name: Install deps
+      - name: Install Poetry
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pre-commit
+          pip install poetry
+
+      - name: Install dependencies with Poetry
+        run: poetry install --all-extras
 
       # Runs in the repository root.
       # typecheck.log and errors_current.txt will be created at the repository root.
       - name: Run typecheck
         run: |
           set -eo pipefail
-          make typecheck 2>&1 | tee typecheck.log || true
+          # Use poetry run to ensure make uses the correct environment
+          poetry run make typecheck 2>&1 | tee typecheck.log || true
           # extract only lines starting with "ERROR "
           grep '^ERROR ' typecheck.log > errors_current.txt
 
@@ -38,7 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: typecheck-log
-          path: typecheck.log # Adjusted path
+          path: typecheck.log
 
       - name: Compare errors, comment & fail on new
         uses: actions/github-script@v6
@@ -51,7 +53,7 @@ jobs:
             const pr = context.payload.pull_request.number;
 
             // Read current errors from the repository root
-            const current = fs.readFileSync('errors_current.txt', 'utf8')  // Adjusted path
+            const current = fs.readFileSync('errors_current.txt', 'utf8')
                               .trim().split('\n').filter(Boolean);
 
             // Fetch prior bot comments
