@@ -175,6 +175,7 @@ async def test_identify_push_to_peers(security_protocol):
         host_c = new_host(key_pair=key_pair_c)
 
         # Set up the identify/push handlers
+        host_a.set_stream_handler(ID_PUSH, identify_push_handler_for(host_a))
         host_b.set_stream_handler(ID_PUSH, identify_push_handler_for(host_b))
         host_c.set_stream_handler(ID_PUSH, identify_push_handler_for(host_c))
 
@@ -203,6 +204,20 @@ async def test_identify_push_to_peers(security_protocol):
 
             # Check that the peer is in the peerstore
             assert peer_id_a in peerstore_c.peer_ids()
+            
+            # Test for push_identify to only connected peers and not all peers in peerstore
+            # Disconnect a from c.
+            await host_c.disconnect(host_a.get_id())
+            # 
+            await push_identify_to_peers(host_c)
+            
+            # Wait a bit for the push to complete
+            await trio.sleep(0.1)
+            
+            # Check that host_a's peerstore has not been updated with host_c's information
+            assert(host_c.get_id() not in host_a.get_peerstore().peer_ids())
+            # Check that host_b's peerstore has been updated with host_c's information
+            assert(host_c.get_id() in host_b.get_peerstore().peer_ids())
 
 
 @pytest.mark.trio
