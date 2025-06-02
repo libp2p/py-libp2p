@@ -13,7 +13,7 @@ from trio import (
 )
 
 from libp2p.abc import (
-    ISecureConn,
+    IRawConnection,
 )
 from libp2p.peer.id import (
     ID,
@@ -26,7 +26,7 @@ logger = logging.getLogger("webrtc")
 logging.basicConfig(level=logging.INFO)
 
 
-class WebRTCRawConnection(ISecureConn):
+class WebRTCRawConnection(IRawConnection):
     def __init__(self, peer_id: ID, channel: RTCDataChannel):
         self.peer_id = peer_id
         self.channel = channel

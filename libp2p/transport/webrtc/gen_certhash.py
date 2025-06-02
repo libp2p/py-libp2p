@@ -1,32 +1,44 @@
-import base58
+import base64
+import datetime
 import hashlib
-import ssl
 from typing import (
     Optional,
-    List,
-    Tuple,
 )
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-import hashlib
-import base64
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
-import datetime
-from multiaddr import Multiaddr
-from typing import Tuple
-from aiortc import RTCCertificate
-from multiaddr.protocols import (
-    Protocol,
-    add_protocol,
+
+from aiortc import (
+    RTCCertificate,
+)
+import base58
+from cryptography import (
+    x509,
+)
+from cryptography.hazmat.backends import (
+    default_backend,
+)
+from cryptography.hazmat.primitives import (
+    hashes,
+    serialization,
+)
+from cryptography.hazmat.primitives.asymmetric import (
+    rsa,
+)
+from cryptography.x509.oid import (
+    NameOID,
+)
+from multiaddr import (
+    Multiaddr,
+)
+
+from libp2p.peer.id import (
+    ID,
 )
 
 SIGNAL_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
 
+
 class CertificateManager(RTCCertificate):
     def __init__(self):
+        self.x509 = None
         self.private_key = None
         self.certificate = None
         self.certhash = None
@@ -35,9 +47,9 @@ class CertificateManager(RTCCertificate):
         self.private_key = rsa.generate_private_key(
             public_exponent=65537, key_size=2048
         )
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, common_name)
-        ])
+        subject = issuer = x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, common_name)]
+        )
         self.certificate = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -57,7 +69,8 @@ class CertificateManager(RTCCertificate):
         return base64.urlsafe_b64encode(sha256_hash).decode("utf-8").rstrip("=")
 
     def get_certhash(self) -> str:
-        return self.certhash
+        # return self.certhash
+        return f"uEi{self.certhash}"
 
     def get_certificate_pem(self) -> bytes:
         return self.certificate.public_bytes(serialization.Encoding.PEM)
@@ -70,55 +83,123 @@ class CertificateManager(RTCCertificate):
         )
 
 
-def parse_webrtc_maddr(maddr: Multiaddr) -> Tuple[str, int, str]:
+class SDPMunger:
+    """Handle SDP modification for direct connections"""
+
+    @staticmethod
+    def munge_offer(sdp: str, ip: str, port: int) -> str:
+        """Modify SDP offer for direct connection"""
+        lines = sdp.split("\n")
+        munged = []
+
+        for line in lines:
+            if line.startswith("a=candidate"):
+                # Modify ICE candidate to use provided IP/port
+                parts = line.split()
+                parts[4] = ip
+                parts[5] = str(port)
+                line = " ".join(parts)
+            munged.append(line)
+
+        return "\n".join(munged)
+
+    @staticmethod
+    def munge_answer(sdp: str, ip: str, port: int) -> str:
+        """Modify SDP answer for direct connection"""
+        return SDPMunger.munge_offer(sdp, ip, port)
+
+
+def create_webrtc_multiaddr(
+    ip: str, peer_id: ID, certhash: str, direct: bool = False
+) -> Multiaddr:
+    """Create WebRTC multiaddr with proper format"""
+    # For direct connections
+    if direct:
+        return Multiaddr(
+            f"/ip4/{ip}/udp/0/webrtc-direct" f"/certhash/{certhash}" f"/p2p/{peer_id}"
+        )
+
+    # For signaled connections
+    return Multiaddr(f"/ip4/{ip}/webrtc" f"/certhash/{certhash}" f"/p2p/{peer_id}")
+    # return Multiaddr(f"/ip4/{ip}/webrtc/p2p/{peer_id}")
+
+
+def verify_certhash(remote_cert: x509.Certificate, expected_hash: str) -> bool:
+    """Verify remote certificate hash matches expected"""
+    der_bytes = remote_cert.public_bytes(serialization.Encoding.DER)
+    conv_hash = base64.urlsafe_b64encode(hashlib.sha256(der_bytes).digest())
+    actual_hash = f"uEi{conv_hash.decode('utf-8').rstrip('=')}"
+    return actual_hash == expected_hash
+
+
+def create_webrtc_direct_multiaddr(ip: str, port: int, peer_id: ID) -> Multiaddr:
+    """Create a WebRTC-direct multiaddr"""
+    # Format: /ip4/<ip>/udp/<port>/webrtc-direct/p2p/<peer_id>
+    return Multiaddr(f"/ip4/{ip}/udp/{port}/webrtc-direct/p2p/{peer_id}")
+
+
+def parse_webrtc_maddr(maddr: Multiaddr) -> tuple[str, ID, str]:
     """
     Parse a WebRTC multiaddr like:
-    /ip4/127.0.0.1/udp/5000/webrtc/certhash/<hash>/p2p/<peer-id>
-    Returns (ip, port, certhash)
+    /ip4/147.28.186.157/udp/9095/webrtc-direct/certhash/uEiDFVmAomKdAbivdrcIKdXGyuij_ax8b8at0GY_MJXMlwg/p2p/12D3KooWFhXabKDwALpzqMbto94sB7rvmZ6M28hs9Y9xSopDKwQr/p2p-circuit
+    /ip6/2604:1380:4642:6600::3/tcp/9095/p2p/12D3KooWFhXabKDwALpzqMbto94sB7rvmZ6M28hs9Y9xSopDKwQr/p2p-circuit/webrtc
+    /ip4/147.28.186.157/udp/9095/webrtc-direct/certhash/uEiDFVmAomKdAbivdrcIKdXGyuij_ax8b8at0GY_MJXMlwg/p2p/12D3KooWFhXabKDwALpzqMbto94sB7rvmZ6M28hs9Y9xSopDKwQr/p2p-circuit/webrtc
+    /ip4/127.0.0.1/udp/9000/webrtc-direct/certhash/uEia...1jI/p2p/12D3KooW...6HEh
+    Returns (ip, peer_id, certhash)
     """
-    addr = Multiaddr(maddr)
-    ip = None
-    port = None
-    certhash = None
+    try:
+        if isinstance(maddr, str):
+            maddr = Multiaddr(maddr)
 
-    for c in addr.protocols():
-        if c.name == "ip4" or c.name == "ip6":
-            ip = addr.value_for_protocol(c.name)
-        elif c.name == "udp":
-            port = int(addr.value_for_protocol("udp"))
-        elif c.name == "certhash":
-            certhash = addr.value_for_protocol("certhash")
+        parts = maddr.to_string().split("/")
 
-    if not ip or not port or not certhash:
-        raise ValueError("Invalid WebRTC multiaddress")
+        # Get IP (after ip4 or ip6)
+        ip_idx = parts.index("ip4" if "ip4" in parts else "ip6") + 1
+        ip = parts[ip_idx]
 
-    return ip, port, certhash
+        # Get certhash (after certhash)
+        certhash_idx = parts.index("certhash") + 1
+        certhash = parts[certhash_idx]
+
+        # Get peer ID (after p2p)
+        peer_id_idx = parts.index("p2p") + 1
+        peer_id = parts[peer_id_idx]
+
+        if not all([ip, peer_id, certhash]):
+            raise ValueError("Missing required components in multiaddr")
+
+        return ip, peer_id, certhash
+
+    except Exception as e:
+        raise ValueError(f"Invalid WebRTC ma: {e}")
 
 
-def generate_local_certhash(cert_pem: str) -> str:
+def generate_local_certhash(cert_pem: bytes) -> bytes:
     cert = x509.load_pem_x509_certificate(cert_pem.encode(), default_backend())
-    der_bytes = cert.public_bytes(encoding=ssl.Encoding.DER)
+    der_bytes = cert.public_bytes(encoding=serialization.Encoding.DER)
     digest = hashlib.sha256(der_bytes).digest()
     certhash = base58.b58encode(digest).decode()
+    print(f"local_certhash= {certhash}")
     return f"uEi{certhash}"  # js-libp2p compatible
 
 
 def generate_webrtc_multiaddr(
     ip: str, peer_id: str, certhash: Optional[str] = None
 ) -> Multiaddr:
-    add_protocol(Protocol(291, "webrtc-direct", "webrtc-direct"))
-    add_protocol(Protocol(292, "certhash", "certhash"))
-    # certhash = generate_local_certhash()
     if not certhash:
         raise ValueError("certhash must be provided for /webrtc-direct multiaddr")
-    
-    certificate= RTCCertificate.generateCertificate()
+
+    cert_mgr = CertificateManager()
+    certhash = cert_mgr.get_certhash() if not certhash else certhash
+    if not isinstance(peer_id, ID):
+        peer_id = ID(peer_id)
+
     base = f"/ip4/{ip}/udp/9000/webrtc-direct/certhash/{certhash}/p2p/{peer_id}"
-  
+
     return Multiaddr(base)
 
 
-def filter_addresses(addrs: List[Multiaddr]) -> List[Multiaddr]:
+def filter_addresses(addrs: list[Multiaddr]) -> list[Multiaddr]:
     """
     Filters the given list of multiaddresses,
     returning only those that are valid for WebRTC transport.
