@@ -14,11 +14,14 @@ from libp2p.pubsub.pb import (
 
 
 def make_msg(
-    topic_ids: Sequence[str], seqno: bytes ,from_id: ID,
+    topic_ids: Sequence[str],
+    seqno: bytes,
+    from_id: ID,
 ) -> rpc_pb2.Message:
     return rpc_pb2.Message(
         from_id=from_id.to_bytes(), seqno=seqno, topicIDs=list(topic_ids)
     )
+
 
 def test_mcache():
     # Ported from:

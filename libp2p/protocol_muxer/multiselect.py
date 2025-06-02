@@ -68,9 +68,7 @@ class Multiselect(IMultiselectMuxer):
                 raise MultiselectError() from error
 
             if command == "ls":
-                supported_protocols = [
-                    p for p in self.handlers.keys() if p is not None
-                ]
+                supported_protocols = [p for p in self.handlers.keys() if p is not None]
                 response = "\n".join(supported_protocols) + "\n"
 
                 try:

@@ -7,8 +7,9 @@ on:
 jobs:
   typecheck_pr:
     runs-on: ubuntu-latest
-    permissions: # Add permissions for commenting if needed
-      issues: write # or pull-requests: write
+    permissions:
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -16,7 +17,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x" # Or your specific Python version
+          python-version: "3.x"
 
       - name: Install Poetry
         run: |
@@ -52,7 +53,7 @@ jobs:
         id: run_pr_typecheck
         run: |
           set -eo pipefail
-          poetry run make typecheck 2>&1 | tee pr_typecheck.log || true # Allow to proceed even if errors found
+          poetry run make typecheck 2>&1 | tee pr_typecheck.log || true
           grep '^ERROR ' pr_typecheck.log > pr_errors.txt || touch pr_errors.txt
           echo "PR typecheck log generated: pr_errors.txt"
           echo "pr_errors_path=pr_errors.txt" >> $GITHUB_OUTPUT
@@ -61,9 +62,9 @@ jobs:
         id: download_main_baseline
         uses: dawidd6/action-download-artifact@v3
         with:
-          workflow: update-main-baseline.yml # Filename of the workflow that creates the artifact
-          name: main-type-errors-baseline # Must match artifact name from the other workflow
-          path: downloaded_baseline # Directory to download the artifact into
+          workflow: update-main-baseline.yml
+          name: main-type-errors-baseline
+          path: downloaded_baseline
           if_no_artifact_found: warn
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -75,12 +76,12 @@ jobs:
             echo "Baseline 'actual_baseline_errors.txt' prepared from downloaded main artifact."
           else
             echo "::warning title=Main Baseline Not Found::Artifact 'main-type-errors-baseline' from 'update-main-baseline.yml' (main branch) not found or download failed. Proceeding with an empty baseline. All current errors will be treated as new."
-            touch actual_baseline_errors.txt # Create empty baseline if not found
+            touch actual_baseline_errors.txt
           fi
           echo "pr_baseline_path=actual_baseline_errors.txt" >> $GITHUB_OUTPUT
 
       - name: Upload PR typecheck log and current errors (for debugging)
-        if: always() # Upload even if previous steps fail, for debugging
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pr-typecheck-output
@@ -96,8 +97,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const core = require('@actions/core');
-            const github = require('@actions/github'); // Required for github.rest
             const { owner, repo } = context.repo;
             const pr_number = context.payload.pull_request.number;
 
