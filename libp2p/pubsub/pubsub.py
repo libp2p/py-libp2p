@@ -122,6 +122,9 @@ class Pubsub(Service, IPubsub):
     strict_signing: bool
     sign_key: PrivateKey
 
+    # Set of blacklisted peer IDs
+    blacklisted_peers: set[ID]
+
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
 
@@ -200,6 +203,9 @@ class Pubsub(Service, IPubsub):
         self.topic_validators = {}
 
         self.counter = int(time.time())
+
+        # Set of blacklisted peer IDs
+        self.blacklisted_peers = set()
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -320,6 +326,63 @@ class Pubsub(Service, IPubsub):
             if topic in self.topic_validators
         )
 
+    def add_to_blacklist(self, peer_id: ID) -> None:
+        """
+        Add a peer to the blacklist.
+
+        :param peer_id: the peer ID to blacklist
+        """
+        self.blacklisted_peers.add(peer_id)
+        logger.debug("Added peer %s to blacklist", peer_id)
+        self.manager.run_task(self._teardown_if_connected, peer_id)
+
+    async def _teardown_if_connected(self, peer_id: ID) -> None:
+        """Close their stream and remove them if connected"""
+        stream = self.peers.get(peer_id)
+        if stream is not None:
+            try:
+                await stream.reset()
+            except Exception:
+                pass
+            del self.peers[peer_id]
+        # Also remove from any subscription maps:
+        for _topic, peerset in self.peer_topics.items():
+            if peer_id in peerset:
+                peerset.discard(peer_id)
+
+    def remove_from_blacklist(self, peer_id: ID) -> None:
+        """
+        Remove a peer from the blacklist.
+
+        :param peer_id: the peer ID to remove from blacklist
+        """
+        self.blacklisted_peers.discard(peer_id)
+        logger.debug("Removed peer %s from blacklist", peer_id)
+
+    def is_peer_blacklisted(self, peer_id: ID) -> bool:
+        """
+        Check if a peer is blacklisted.
+
+        :param peer_id: the peer ID to check
+        :return: True if peer is blacklisted, False otherwise
+        """
+        return peer_id in self.blacklisted_peers
+
+    def clear_blacklist(self) -> None:
+        """
+        Clear all peers from the blacklist.
+        """
+        self.blacklisted_peers.clear()
+        logger.debug("Cleared all peers from blacklist")
+
+    def get_blacklisted_peers(self) -> set[ID]:
+        """
+        Get a copy of the current blacklisted peers.
+
+        :return: a set containing all blacklisted peer IDs
+        """
+        return self.blacklisted_peers.copy()
+
     async def stream_handler(self, stream: INetStream) -> None:
         """
         Stream handler for pubsub. Gets invoked whenever a new stream is
@@ -346,6 +409,10 @@ class Pubsub(Service, IPubsub):
         await self.event_handle_dead_peer_queue_started.wait()
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
+        if self.is_peer_blacklisted(peer_id):
+            logger.debug("Rejecting blacklisted peer %s", peer_id)
+            return
+
         try:
             stream: INetStream = await self.host.new_stream(peer_id, self.protocols)
         except SwarmException as error:
@@ -359,7 +426,11 @@ class Pubsub(Service, IPubsub):
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             return
-        # TODO: Check if the peer in black list.
+        # Check if the peer is in the blacklist. If yes, reject.
+        if self.is_peer_blacklisted(peer_id):
+            logger.debug("Rejecting blacklisted peer %s", peer_id)
+            await stream.reset()
+            return
         try:
             self.router.add_peer(peer_id, stream.get_protocol())
         except Exception as error:
@@ -609,9 +680,20 @@ class Pubsub(Service, IPubsub):
         """
         logger.debug("attempting to publish message %s", msg)
 
-        # TODO: Check if the `source` is in the blacklist. If yes, reject.
+        # Check if the message forwarder (source) is in the blacklist. If yes, reject.
+        if self.is_peer_blacklisted(msg_forwarder):
+            logger.debug(
+                "Rejecting message from blacklisted source peer %s", msg_forwarder
+            )
+            return
 
-        # TODO: Check if the `from` is in the blacklist. If yes, reject.
+        # Check if the message originator (from) is in the blacklist. If yes, reject.
+        msg_from_peer = ID(msg.from_id)
+        if self.is_peer_blacklisted(msg_from_peer):
+            logger.debug(
+                "Rejecting message from blacklisted originator peer %s", msg_from_peer
+            )
+            return
 
         # If the message is processed before, return(i.e., don't further process the message)  # noqa: E501
         if self._is_msg_seen(msg):
