@@ -1,0 +1,6 @@
+project_excludes = [
+  "**/.project-template/**",
+  "**/docs/conf.py",
+  "**/*pb2.py",
+  "**/*.pyi",
+]
