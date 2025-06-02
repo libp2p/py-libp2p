@@ -1,9 +1,16 @@
 import pytest
-import trio
-from multiaddr import Multiaddr
+from multiaddr import (
+    Multiaddr,
+)
 
-from libp2p.transport.webrtc.listener import WebRTCListener, SIGNAL_PROTOCOL
-from libp2p.transport.webrtc.connection import WebRTCRawConnection
+from libp2p.transport.webrtc.connection import (
+    WebRTCRawConnection,
+)
+from libp2p.transport.webrtc.listener import (
+    SIGNAL_PROTOCOL,
+    WebRTCListener,
+)
+
 
 @pytest.mark.trio
 async def test_listen_and_accept_direct_connection():
@@ -17,6 +24,7 @@ async def test_listen_and_accept_direct_connection():
             self._on_message = None
             self._on_open = None
             self.readyState = "open"
+
         def on(self, event):
             def decorator(fn):
                 if event == "message":
@@ -24,7 +32,9 @@ async def test_listen_and_accept_direct_connection():
                 elif event == "open":
                     self._on_open = fn
                 return fn
+
             return decorator
+
         def send(self, data):
             pass
 
@@ -35,7 +45,9 @@ async def test_listen_and_accept_direct_connection():
     await listener.conn_send_channel.send(conn)
     await listener.accept()
 
-    maddr = "/ip4/127.0.0.1/udp/9000/webrtc-direct/certhash/uEiqfMpAA6QOH0DT7YC5ggjBBG-c3CqLqbhQ4ovz4q6NyY/p2p/12D3KooWGiZiY9Vz2CCbbDkJATUrgZ6b6ov7f6AxZPkWR573V3Bx"
+    # maddr = "/ip4/127.0.0.1/udp/9000/webrtc-direct/
+    # certhash/uEiqfMpAA6QOH0DT7YC5ggjBBG-c3CqLqbhQ4ovz4q6NyY/
+    # p2p/12D3KooWGiZiY9Vz2CCbbDkJATUrgZ6b6ov7f6AxZPkWR573V3Bx"
     # result = await listener.listen(maddr)
     # assert result is True
     # addrs = listener.get_addrs()
@@ -43,7 +55,7 @@ async def test_listen_and_accept_direct_connection():
     # assert isinstance(addrs, tuple)
     # assert len(addrs) == 1
 
-    #Accept the connection
+    # Accept the connection
     # accepted_conn = trio.move_on_after(1)
 
     # assert isinstance(accepted_conn, WebRTCRawConnection)
@@ -56,22 +68,29 @@ class DummyNetwork:
     def __init__(self):
         self.listen_called_with = []
         self._peer_id = b"dummy_peer_id"
+
     async def listen(self, maddr):
         self.listen_called_with.append(maddr)
         return True
+
     def get_peer_id(self):
         return self._peer_id
+
 
 class DummyHost:
     def __init__(self):
         self.stream_handlers = {}
         self._network = DummyNetwork()
+
     def set_stream_handler(self, protocol_id, handler):
         self.stream_handlers[protocol_id] = handler
+
     def get_network(self):
         return self._network
+
     def get_id(self):
         return self._network.get_peer_id()
+
 
 @pytest.mark.trio
 async def test_listen_signaled_registers_stream_handler():
