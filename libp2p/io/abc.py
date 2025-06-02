@@ -2,9 +2,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import (
-    Optional,
-)
+from typing import Any, Optional
 
 
 class Closer(ABC):
@@ -70,8 +68,17 @@ class Encrypter(ABC):
 class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):
     """Read/write message with encryption/decryption."""
 
+    conn: Optional[Any]
+
+    def __init__(self, conn: Optional[Any] = None):
+        self.conn = conn
+
     def get_remote_address(self) -> Optional[tuple[str, int]]:
         """Get remote address if supported by the underlying connection."""
-        if hasattr(self, "conn") and hasattr(self.conn, "get_remote_address"):
+        if (
+            self.conn is not None
+            and hasattr(self, "conn")
+            and hasattr(self.conn, "get_remote_address")
+        ):
             return self.conn.get_remote_address()
         return None

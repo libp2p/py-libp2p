@@ -114,18 +114,20 @@ class FloodSub(IPubsubRouter):
 
         if self.pubsub is None:
             raise PubsubRouterError("pubsub not attached to this instance")
+        else:
+            pubsub = self.pubsub
 
         for peer_id in peers_gen:
-            if peer_id not in self.pubsub.peers:
+            if peer_id not in pubsub.peers:
                 continue
-            stream = self.pubsub.peers[peer_id]
+            stream = pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
             try:
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
-                self.pubsub._handle_dead_peer(peer_id)
+                pubsub._handle_dead_peer(peer_id)
 
     async def join(self, topic: str) -> None:
         """
@@ -159,12 +161,14 @@ class FloodSub(IPubsubRouter):
         """
         if self.pubsub is None:
             raise PubsubRouterError("pubsub not attached to this instance")
+        else:
+            pubsub = self.pubsub
         for topic in topic_ids:
-            if topic not in self.pubsub.peer_topics:
+            if topic not in pubsub.peer_topics:
                 continue
-            for peer_id in self.pubsub.peer_topics[topic]:
+            for peer_id in pubsub.peer_topics[topic]:
                 if peer_id in (msg_forwarder, origin):
                     continue
-                if peer_id not in self.pubsub.peers:
+                if peer_id not in pubsub.peers:
                     continue
                 yield peer_id

@@ -90,6 +90,8 @@ class Multiselect(IMultiselectMuxer):
                 except MultiselectCommunicatorError as error:
                     raise MultiselectError() from error
 
+        raise MultiselectError("Negotiation failed: no matching protocol")
+
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Perform handshake to agree on multiselect protocol.
