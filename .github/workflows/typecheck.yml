@@ -22,23 +22,39 @@ jobs:
           python -m pip install --upgrade pip
           pip install poetry
 
-      - name: Configure Poetry to create venv in project
-        run: poetry config virtualenvs.in-project true
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry config virtualenvs.create true
+
+      - name: Get Poetry version
+        id: poetry-version
+        run: echo "version=$(poetry --version | awk '{print $3}')" >> $GITHUB_OUTPUT
 
       - name: Cache Poetry virtualenv
         uses: actions/cache@v4
-        id: poetry-cache # Add an id to access cache-hit status
+        id: poetry-cache
         with:
-          path: .venv # Cache the .venv directory in the project root
-          key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+          path: |
+            .venv
+            ~/.cache/pypoetry/virtualenvs
+            ~/.cache/pypoetry/cache
+          key: ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
           restore-keys: |
+            ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-
             ${{ runner.os }}-poetry-
 
       - name: Install dependencies with Poetry
-        # Only run poetry install if cache was not hit
-        # or if the lock file changed (which invalidates the primary key)
-        if: steps.poetry-cache.outputs.cache-hit != 'true'
-        run: poetry install --all-extras --no-interaction --no-root
+        run: |
+          # Always run poetry install to ensure the environment is properly set up
+          # Poetry will skip already installed packages if cache is hit
+          poetry install --all-extras --no-interaction
+
+      - name: Verify cache usage
+        if: steps.poetry-cache.outputs.cache-hit == 'true'
+        run: |
+          echo "Cache was restored successfully"
+          poetry env info
 
       # Runs in the repository root.
       # typecheck.log and errors_current.txt will be created at the repository root.
@@ -48,7 +64,7 @@ jobs:
           # Use poetry run to ensure make uses the correct environment
           poetry run make typecheck 2>&1 | tee typecheck.log || true
           # extract only lines starting with "ERROR "
-          grep '^ERROR ' typecheck.log > errors_current.txt
+          grep '^ERROR ' typecheck.log > errors_current.txt || touch errors_current.txt
 
       # Uploads typecheck.log from the repository root
       - name: Upload raw log
@@ -71,7 +87,7 @@ jobs:
                               .trim().split('\n').filter(Boolean);
 
             // Fetch prior bot comments
-            const { data: comments } = await github.rest.issues.listComments({ // Use github.rest.issues
+            const { data: comments } = await github.rest.issues.listComments({
               owner, repo, issue_number: pr
             });
             const typeComments = comments
@@ -118,7 +134,7 @@ jobs:
             lines.push("```");
 
             // Post the comment
-            await github.rest.issues.createComment({ // Use github.rest.issues
+            await github.rest.issues.createComment({
               owner, repo, issue_number: pr,
               body: lines.join("\n")
             });
