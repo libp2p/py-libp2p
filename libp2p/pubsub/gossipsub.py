@@ -141,8 +141,6 @@ class GossipSub(IPubsubRouter, Service):
         self.direct_connect_initial_delay = direct_connect_initial_delay
 
     async def run(self) -> None:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         self.manager.run_daemon_task(self.heartbeat)
         if len(self.direct_peers) > 0:
             self.manager.run_daemon_task(self.direct_connect_heartbeat)
@@ -234,9 +232,6 @@ class GossipSub(IPubsubRouter, Service):
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
-        if self.pubsub is None:
-            raise NoPubsubAttached
-
         self.mcache.put(pubsub_msg)
 
         peers_gen = self._get_peers_to_send(
@@ -249,6 +244,8 @@ class GossipSub(IPubsubRouter, Service):
         logger.debug("publishing message %s", pubsub_msg)
 
         for peer_id in peers_gen:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
             stream = self.pubsub.peers[peer_id]
@@ -271,11 +268,10 @@ class GossipSub(IPubsubRouter, Service):
         :param origin: peer id of the peer the message originate from.
         :return: a generator of the peer ids who we send data to.
         """
-        if self.pubsub is None:
-            raise NoPubsubAttached
-
         send_to: set[ID] = set()
         for topic in topic_ids:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if topic not in self.pubsub.peer_topics:
                 continue
 
@@ -474,11 +470,11 @@ class GossipSub(IPubsubRouter, Service):
         """
         Connect to direct peers.
         """
-        if self.pubsub is None:
-            raise NoPubsubAttached
         await trio.sleep(self.direct_connect_initial_delay)
         while True:
             for direct_peer in self.direct_peers:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 if direct_peer not in self.pubsub.peers:
                     try:
                         await self.pubsub.host.connect(self.direct_peers[direct_peer])
@@ -493,11 +489,11 @@ class GossipSub(IPubsubRouter, Service):
     def mesh_heartbeat(
         self,
     ) -> tuple[DefaultDict[ID, list[str]], DefaultDict[ID, list[str]]]:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         peers_to_graft: DefaultDict[ID, list[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, list[str]] = defaultdict(list)
         for topic in self.mesh:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             # Skip if no peers have subscribed to the topic
             if topic not in self.pubsub.peer_topics:
                 continue
@@ -530,10 +526,10 @@ class GossipSub(IPubsubRouter, Service):
         return peers_to_graft, peers_to_prune
 
     def fanout_heartbeat(self) -> None:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         # Note: the comments here are the exact pseudocode from the spec
         for topic in self.fanout:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             # Delete topic entry if it's not in `pubsub.peer_topics`
             # or (TODO) if it's time-since-last-published > ttl
             if topic not in self.pubsub.peer_topics:
@@ -562,12 +558,12 @@ class GossipSub(IPubsubRouter, Service):
                     self.fanout[topic].update(selected_peers)
 
     def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 # Get all pubsub peers in a topic and only add them if they are
                 # gossipsub peers too
                 if topic in self.pubsub.peer_topics:
@@ -587,6 +583,8 @@ class GossipSub(IPubsubRouter, Service):
         for topic in self.fanout:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 # Get all pubsub peers in topic and only add if they are
                 # gossipsub peers also
                 if topic in self.pubsub.peer_topics:
@@ -678,8 +676,6 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        if self.pubsub is None:
-            raise NoPubsubAttached
         # FIXME: Update type of message ID
         # FIXME: Find a better way to parse the msg ids
         msg_ids: list[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
@@ -704,6 +700,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # 2) Serialize that packet
         rpc_msg: bytes = packet.SerializeToString()
+        if self.pubsub is None:
+            raise NoPubsubAttached
 
         # 3) Get the stream to this peer
         if sender_peer_id not in self.pubsub.peers:
