@@ -33,7 +33,7 @@ jobs:
           grep '^ERROR ' typecheck.log > errors_current.txt
 
       - name: Upload raw log
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: typecheck-log
           path: py-libp2p/typecheck.log
