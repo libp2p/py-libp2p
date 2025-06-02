@@ -17,26 +17,28 @@ jobs:
         with:
           python-version: "3.x"
 
+      # Runs in the repository root
       - name: Install deps
-        working-directory: py-libp2p
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pre-commit
 
+      # Runs in the repository root.
+      # typecheck.log and errors_current.txt will be created at the repository root.
       - name: Run typecheck
-        working-directory: py-libp2p
         run: |
           set -eo pipefail
           make typecheck 2>&1 | tee typecheck.log || true
           # extract only lines starting with "ERROR "
           grep '^ERROR ' typecheck.log > errors_current.txt
 
+      # Uploads typecheck.log from the repository root
       - name: Upload raw log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: typecheck-log
-          path: py-libp2p/typecheck.log
+          path: typecheck.log # Adjusted path
 
       - name: Compare errors, comment & fail on new
         uses: actions/github-script@v6
@@ -48,8 +50,8 @@ jobs:
             const { owner, repo } = context.repo;
             const pr = context.payload.pull_request.number;
 
-            // Read current errors
-            const current = fs.readFileSync('py-libp2p/errors_current.txt', 'utf8')
+            // Read current errors from the repository root
+            const current = fs.readFileSync('errors_current.txt', 'utf8')  // Adjusted path
                               .trim().split('\n').filter(Boolean);
 
             // Fetch prior bot comments
