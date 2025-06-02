@@ -1,0 +1,70 @@
+name: Update Main Typecheck Baseline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  generate_baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x" # Or your specific Python version
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry config virtualenvs.create true
+
+      - name: Get Poetry version
+        id: poetry-version
+        run: echo "version=$(poetry --version | awk '{print $3}')" >> $GITHUB_OUTPUT
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        id: poetry-cache
+        with:
+          path: |
+            .venv
+            ~/.cache/pypoetry/virtualenvs
+            ~/.cache/pypoetry/cache
+          key: ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies with Poetry
+        run: poetry install --all-extras --no-interaction
+
+      - name: Run typecheck and generate baseline errors for main
+        id: generate_main_errors
+        run: |
+          set -eo pipefail
+          # Run typecheck, tee output to log, allow command to proceed even if typecheck finds errors
+          poetry run make typecheck 2>&1 | tee main_typecheck.log || true
+          # Extract errors, or create an empty file if no errors
+          grep '^ERROR ' main_typecheck.log > main_errors.txt || touch main_errors.txt
+          echo "Baseline 'main_errors.txt' generated for main branch."
+          # Optional: Check if main has errors and warn/error
+          if [ -s main_errors.txt ]; then
+            echo "::warning title=Type Errors on Main::Type errors found on main branch. These will form the baseline. Check 'main_errors.txt' in the artifact."
+          fi
+          echo "baseline_file_path=main_errors.txt" >> $GITHUB_OUTPUT
+
+      - name: Upload main error baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-type-errors-baseline # Consistent artifact name
+          path: ${{ steps.generate_main_errors.outputs.baseline_file_path }}
+          retention-days: 90 # Optional: Adjust as needed
