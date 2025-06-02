@@ -35,7 +35,7 @@ jobs:
 
       # Uploads typecheck.log from the repository root
       - name: Upload raw log
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: typecheck-log
           path: typecheck.log # Adjusted path
