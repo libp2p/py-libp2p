@@ -35,7 +35,7 @@ repos:
   - repo: local
     hooks:
       - id: pyrefly-local
-        name: run prefly typecheck locally
+        name: run pyrefly typecheck locally
         entry: pyrefly check -c pyrefly.toml
         language: system
         always_run: true
