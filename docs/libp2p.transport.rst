@@ -8,7 +8,6 @@ Subpackages
    :maxdepth: 4
 
    libp2p.transport.tcp
-   libp2p.transport.webrtc
 
 Submodules
 ----------
