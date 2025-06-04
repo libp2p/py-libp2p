@@ -32,6 +32,7 @@ from libp2p.peer.peerinfo import (
 from .pb.kademlia_pb2 import (
     Message,
 )
+import trio
 
 # logger = logging.getLogger("libp2p.kademlia.provider_store")
 logger = logging.getLogger("kademlia-example.provider_store")
@@ -41,6 +42,8 @@ PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
 PROVIDER_ADDRESS_TTL = 30 * 60  # 30 minutes in seconds
 PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
+ALPHA = 3  # Number of parallel queries/advertisements
+QUERY_TIMEOUT = 10  # Timeout for each query in seconds
 
 
 class ProviderRecord:
@@ -180,20 +183,28 @@ class ProviderStore:
             key.hex(),
         )
 
-        # Send ADD_PROVIDER messages to these peers
+        # Send ADD_PROVIDER messages to these peers in batches of ALPHA, in parallel, with timeout
         success_count = 0
-        for peer_id in closest_peers:
-            if peer_id == self.local_peer_id:
-                continue
+        for i in range(0, len(closest_peers), ALPHA):
+            batch = closest_peers[i : i + ALPHA]
+            results = [False] * len(batch)
 
-            try:
-                success = await self._send_add_provider(peer_id, key)
-                if success:
-                    success_count += 1
-                else:
-                    logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}")
-            except Exception as e:
-                logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            async def send_one(idx, peer_id):
+                if peer_id == self.local_peer_id:
+                    return
+                try:
+                    with trio.move_on_after(QUERY_TIMEOUT):
+                        success = await self._send_add_provider(peer_id, key)
+                        results[idx] = success
+                        if not success:
+                            logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}")
+                except Exception as e:
+                    logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+
+            async with trio.open_nursery() as nursery:
+                for idx, peer_id in enumerate(batch):
+                    nursery.start_soon(send_one, idx, peer_id)
+            success_count += sum(results)
 
         logger.info(f"Successfully advertised to {success_count} peers")
         return success_count > 0
@@ -304,29 +315,35 @@ class ProviderStore:
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
 
-        # Query these peers for providers
+        # Query these peers for providers in batches of ALPHA, in parallel, with timeout
         all_providers = []
-        for peer_id in closest_peers:
-            if peer_id == self.local_peer_id:
-                continue
+        for i in range(0, len(closest_peers), ALPHA):
+            batch = closest_peers[i : i + ALPHA]
+            batch_results = [[] for _ in batch]
 
-            try:
-                providers = await self._get_providers_from_peer(peer_id, key)
-                if providers:
-                    # Add providers to our local store
-                    for provider in providers:
-                        self.add_provider(key, provider)
+            async def get_one(idx, peer_id):
+                if peer_id == self.local_peer_id:
+                    return
+                try:
+                    with trio.move_on_after(QUERY_TIMEOUT):
+                        providers = await self._get_providers_from_peer(peer_id, key)
+                        if providers:
+                            for provider in providers:
+                                self.add_provider(key, provider)
+                            batch_results[idx] = providers
+                        else:
+                            logger.debug(f"No providers found at peer {peer_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to get providers from {peer_id}: {e}")
 
-                    # Add to our result list
-                    all_providers.extend(providers)
+            async with trio.open_nursery() as nursery:
+                for idx, peer_id in enumerate(batch):
+                    nursery.start_soon(get_one, idx, peer_id)
 
-                    # Stop if we've found enough providers
-                    if len(all_providers) >= count:
-                        break
-                else:
-                    logger.debug(f"No providers found at peer {peer_id}")
-            except Exception as e:
-                logger.warning(f"Failed to get providers from {peer_id}: {e}")
+            for providers in batch_results:
+                all_providers.extend(providers)
+                if len(all_providers) >= count:
+                    return all_providers[:count]
 
         return all_providers[:count]
 
