@@ -58,6 +58,8 @@ logger = logging.getLogger("kademlia-example.kad_dht")
 PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60  # 1 min in seconds for testing
 TTL = 24 * 60 * 60  # 24 hours in seconds
+ALPHA = 3
+QUERY_TIMEOUT = 10  # seconds
 
 
 class KadDHT(Service):
@@ -439,79 +441,65 @@ class KadDHT(Service):
         self.value_store.put(key, value)
         logger.info(f"Stored value for key {key.hex()} locally")
 
-        # 2. Find peers closest to the key
-        closest_peers = self.routing_table.find_local_closest_peers(key, 3)
-        logger.info(
-            "Found %d closest peers for key %s: %s",
-            len(closest_peers),
-            key.hex(),
-            closest_peers,
-        )
+        # 2. Get closest peers, excluding self
+        closest_peers = [
+            peer for peer in self.routing_table.find_local_closest_peers(key)
+            if peer != self.local_peer_id
+        ]
 
-        # 3. Store at remote peers
-        success_count = 0
-        for peer_id in closest_peers:
-            if peer_id == self.local_peer_id:
-                continue
+        # 3. Store at remote peers in batches of ALPHA, in parallel
+        for i in range(0, len(closest_peers), ALPHA):
+            batch = closest_peers[i:i+ALPHA]
 
-            try:
-                success = await self.value_store._store_at_peer(peer_id, key, value)
-                if success:
-                    success_count += 1
-                    logger.info(f"Successfully stored value at peer {peer_id}")
-                else:
-                    logger.warning(f"Failed to store value at peer {peer_id}")
-            except Exception as e:
-                logger.warning(f"Error storing value at peer {peer_id}: {e}")
+            async def store_one(peer):
+                try:
+                    with trio.move_on_after(QUERY_TIMEOUT):
+                        await self.value_store._store_at_peer(peer, key, value)
+                        logger.info(f"Stored value at peer {peer}")
+                except Exception as e:
+                    logger.warning(f"Error storing value at peer {peer}: {e}")
 
-        logger.info(f"Stored value at {success_count} remote peers")
+            async with trio.open_nursery() as nursery:
+                for peer in batch:
+                    nursery.start_soon(store_one, peer)
 
     async def get_value(self, key: bytes) -> Optional[bytes]:
-        """
-        Retrieve a value from the DHT.
-
-        params: key: The key to retrieve.
-
-        Returns
-        -------
-        Optional[bytes]
-            The value if found, None otherwise.
-
-        """
         # 1. Check local store first
-        local_value = self.value_store.get(key)
-        if local_value:
-            return local_value
+        value = self.value_store.get(key)
+        if value:
+            return value
 
-        # 2. Not found locally, search the network
-        closest_peers = self.routing_table.find_local_closest_peers(key)
-        logger.info(
-            "Found %d closest peers for key %s: %s",
-            len(closest_peers),
-            key.hex(),
-            closest_peers,
-        )
+        # 2. Get closest peers, excluding self
+        closest_peers = [
+            peer for peer in self.routing_table.find_local_closest_peers(key)
+            if peer != self.local_peer_id
+        ]
 
-        # 3. Query those peers
-        for peer in closest_peers:
-            if peer == self.local_peer_id:
-                continue
+        # 3. Query ALPHA peers at a time in parallel
+        for i in range(0, len(closest_peers), ALPHA):
+            batch = closest_peers[i:i+ALPHA]
+            found_value = None
 
-            try:
-                value = await self.value_store._get_from_peer(peer, key)
-                if value:
-                    logger.info(f"Found value at peer {peer}")
-                    # Store for future use
-                    self.value_store.put(key, value)
-                    return value
-                else:
-                    logger.debug(f"No value found at peer {peer}")
-            except Exception as e:
-                logger.warning(f"Error retrieving value from peer {peer}: {e}")
+            async def query_one(peer):
+                nonlocal found_value
+                try:
+                    with trio.move_on_after(QUERY_TIMEOUT):
+                        value = await self.value_store._get_from_peer(peer, key)
+                        if value is not None and found_value is None:
+                            found_value = value
+                except Exception:
+                    pass
 
-        logger.info(f"Value not found for key {key.hex()}")
+            async with trio.open_nursery() as nursery:
+                for peer in batch:
+                    nursery.start_soon(query_one, peer)
+
+            if found_value is not None:
+                self.value_store.put(key, found_value)
+                return found_value
+
+        # 4. Not found
         return None
-
     # Add these methods in the Utility methods section
 
     # Utility methods
