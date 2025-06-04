@@ -7,7 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   libp2p.kad\_dht.pb
+   libp2p.kad_dht.pb
 
 Submodules
 ----------
