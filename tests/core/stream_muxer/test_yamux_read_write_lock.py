@@ -1,82 +1,200 @@
+import logging
+
 import pytest
 import trio
+from trio.testing import (
+    memory_stream_pair,
+)
 
+from libp2p.crypto.ed25519 import (
+    create_new_key_pair,
+)
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.security.insecure.transport import (
+    InsecureTransport,
+)
 from libp2p.stream_muxer.yamux.yamux import (
+    Yamux,
     YamuxStream,
 )
 
 
-class DummySecuredConn:
+class TrioStreamAdapter:
+    """Adapter to make trio memory streams work with libp2p."""
+
+    def __init__(self, send_stream, receive_stream):
+        self.send_stream = send_stream
+        self.receive_stream = receive_stream
+
     async def write(self, data):
-        await trio.sleep(0.01)
+        logging.debug(f"Writing {len(data)} bytes")
+        with trio.move_on_after(2):
+            await self.send_stream.send_all(data)
+
+    async def read(self, n=-1):
+        if n == -1:
+            raise ValueError("Reading unbounded not supported")
+        logging.debug(f"Attempting to read {n} bytes")
+        with trio.move_on_after(2):
+            data = await self.receive_stream.receive_some(n)
+            logging.debug(f"Read {len(data)} bytes")
+            return data
+
+    async def close(self):
+        logging.debug("Closing stream")
 
 
-class DummyYamux:
-    def __init__(self):
-        self.secured_conn = DummySecuredConn()
-        self.stream_buffers = {}
-        self.stream_events = {}
-        self.event_shutting_down = trio.Event()
-        self.streams_lock = trio.Lock()
+@pytest.fixture
+def key_pair():
+    return create_new_key_pair()
 
-    async def read_stream(self, stream_id, n=-1):
-        # Simulate reading n bytes from the buffer
-        buf = self.stream_buffers.get(stream_id, bytearray())
-        if n == -1 or n >= len(buf):
-            data = bytes(buf)
-            buf.clear()
-        else:
-            data = bytes(buf[:n])
-            del buf[:n]
-        return data
+
+@pytest.fixture
+def peer_id(key_pair):
+    return ID.from_pubkey(key_pair.public_key)
+
+
+@pytest.fixture
+async def secure_conn_pair(key_pair, peer_id):
+    """Create a pair of secure connections for testing."""
+    logging.debug("Setting up secure_conn_pair")
+    client_send, server_receive = memory_stream_pair()
+    server_send, client_receive = memory_stream_pair()
+
+    client_rw = TrioStreamAdapter(client_send, client_receive)
+    server_rw = TrioStreamAdapter(server_send, server_receive)
+
+    insecure_transport = InsecureTransport(key_pair)
+
+    async def run_outbound(nursery_results):
+        with trio.move_on_after(5):
+            client_conn = await insecure_transport.secure_outbound(client_rw, peer_id)
+            logging.debug("Outbound handshake complete")
+            nursery_results["client"] = client_conn
+
+    async def run_inbound(nursery_results):
+        with trio.move_on_after(5):
+            server_conn = await insecure_transport.secure_inbound(server_rw)
+            logging.debug("Inbound handshake complete")
+            nursery_results["server"] = server_conn
+
+    nursery_results = {}
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(run_outbound, nursery_results)
+        nursery.start_soon(run_inbound, nursery_results)
+        await trio.sleep(0.1)  # Give tasks a chance to finish
+
+    client_conn = nursery_results.get("client")
+    server_conn = nursery_results.get("server")
+
+    if client_conn is None or server_conn is None:
+        raise RuntimeError("Handshake failed: client_conn or server_conn is None")
+
+    logging.debug("secure_conn_pair setup complete")
+    return client_conn, server_conn
+
+
+@pytest.fixture
+async def yamux_pair(secure_conn_pair, peer_id):
+    """Create a pair of Yamux multiplexers for testing."""
+    logging.debug("Setting up yamux_pair")
+    client_conn, server_conn = secure_conn_pair
+    client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
+    server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
+    async with trio.open_nursery() as nursery:
+        with trio.move_on_after(5):
+            nursery.start_soon(client_yamux.start)
+            nursery.start_soon(server_yamux.start)
+            await trio.sleep(0.1)
+            logging.debug("yamux_pair started")
+        yield client_yamux, server_yamux
+    logging.debug("yamux_pair cleanup")
 
 
 @pytest.mark.trio
-async def test_concurrent_writes_are_serialized():
-    yamux = DummyYamux()
-    send_log = []
+async def test_yamux_race_condition_without_locks(yamux_pair):
+    """
+    Test for race-around/interleaving in Yamux streams when read/write
+    locks are disabled.
+    This launches concurrent writers/readers on both sides of a stream.
+    If there is no proper locking, the received data may be interleaved
+    or corrupted.
 
-    class LoggingSecuredConn(DummySecuredConn):
-        async def write(self, data):
-            send_log.append(data)
-            await trio.sleep(0.01)
+    The test creates structured messages and verifies they are received
+    intact and in order.
+    Without proper locking, concurrent read/write operations could cause
+    data corruption
+    or message interleaving, which this test will catch.
+    """
+    client_yamux, server_yamux = yamux_pair
+    client_stream: YamuxStream = await client_yamux.open_stream()
+    server_stream: YamuxStream = await server_yamux.accept_stream()
+    MSG_COUNT = 1
+    MSG_SIZE = 256 * 1024  # 256 KiB messages,increase this to view the bug
+    client_msgs = [
+        f"CLIENT-MSG-{i:03d}-".encode().ljust(MSG_SIZE, b"C") for i in range(MSG_COUNT)
+    ]
+    server_msgs = [
+        f"SERVER-MSG-{i:03d}-".encode().ljust(MSG_SIZE, b"S") for i in range(MSG_COUNT)
+    ]
+    client_received = []
+    server_received = []
 
-    yamux.secured_conn = LoggingSecuredConn()
-    stream = YamuxStream(stream_id=1, conn=yamux, is_initiator=True)
+    async def writer(stream, msgs, name):
+        """Write messages with minimal delays to encourage race conditions."""
+        for i, msg in enumerate(msgs):
+            await stream.write(msg)
+            # Yield control frequently to encourage interleaving
+            if i % 5 == 0:
+                await trio.sleep(0.005)
 
-    async def writer(data):
-        await stream.write(data)
+    async def reader(stream, received, name):
+        """Read messages and store them for verification."""
+        for i in range(MSG_COUNT):
+            data = await stream.read(MSG_SIZE)
+            received.append(data)
+            # Sending window update to ensure flow control.
+            await stream.send_window_update()
+            # Yield control to encourage interleaving
+            if i % 3 == 0:
+                await trio.sleep(0.001)
 
+    # Running all operations concurrently
     async with trio.open_nursery() as nursery:
-        for i in range(5):
-            nursery.start_soon(writer, f"msg-{i}".encode())
+        nursery.start_soon(reader, client_stream, client_received, "client")
+        nursery.start_soon(reader, server_stream, server_received, "server")
+        nursery.start_soon(writer, client_stream, client_msgs, "client")
+        nursery.start_soon(writer, server_stream, server_msgs, "server")
 
-    # All messages should be present, order may vary
-    assert len(send_log) == 5
-    payloads = [msg[12:] for msg in send_log]  # Assuming 12-byte header
-    assert sorted(payloads) == [f"msg-{i}".encode() for i in range(5)]
+    assert (
+        len(client_received) == MSG_COUNT
+    ), f"Client received {len(client_received)} messages, expected {MSG_COUNT}"
+    assert (
+        len(server_received) == MSG_COUNT
+    ), f"Server received {len(server_received)} messages, expected {MSG_COUNT}"
+    assert (
+        client_received == server_msgs
+    ), "Client did not receive server messages in order or intact!"
+    assert (
+        server_received == client_msgs
+    ), "Server did not receive client messages in order or intact!"
+    for i, msg in enumerate(client_received):
+        assert (
+            len(msg) == MSG_SIZE
+        ), f"Client message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        assert msg.startswith(
+            b"SERVER-MSG-"
+        ), f"Client message {i} doesn't start with expected prefix"
 
+    for i, msg in enumerate(server_received):
+        assert (
+            len(msg) == MSG_SIZE
+        ), f"Server message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        assert msg.startswith(
+            b"CLIENT-MSG-"
+        ), f"Server message {i} doesn't start with expected prefix"
 
-@pytest.mark.trio
-async def test_concurrent_reads_are_serialized():
-    yamux = DummyYamux()
-    stream_id = 2
-    yamux.stream_buffers[stream_id] = bytearray()
-    yamux.stream_events[stream_id] = trio.Event()
-    stream = YamuxStream(stream_id=stream_id, conn=yamux, is_initiator=True)
-
-    # Preload the buffer
-    for i in range(5):
-        yamux.stream_buffers[stream_id].extend(f"data-{i}".encode())
-
-    results = []
-
-    async def reader():
-        data = await stream.read(6)
-        results.append(data)
-
-    async with trio.open_nursery() as nursery:
-        for _ in range(5):
-            nursery.start_soon(reader)
-
-    assert sorted(results) == [f"data-{i}".encode() for i in range(5)]
+    await client_stream.close()
+    await server_stream.close()
