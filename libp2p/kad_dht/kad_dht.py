@@ -518,6 +518,18 @@ class KadDHT(Service):
         """
         return await self.routing_table.add_peer(peer_id)
 
+    async def provide(self, key: bytes) -> bool:
+        """
+        Reference to provider_store.provide for convenience.
+        """
+        return await self.provider_store.provide(key)
+
+    async def find_providers(self, key: bytes, count: int = 20) -> list:
+        """
+        Reference to provider_store.find_providers for convenience.
+        """
+        return await self.provider_store.find_providers(key, count)
+
     def get_routing_table_size(self) -> int:
         """
         Get the number of peers in the routing table.
