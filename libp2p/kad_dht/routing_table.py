@@ -191,7 +191,7 @@ class KBucket:
                     stale_threshold_seconds=STALE_PEER_THRESHOLD
                 )
                 if stale_peers:
-                    logger.info(f"Found {len(stale_peers)} stale peers to refresh")
+                    logger.debug(f"Found {len(stale_peers)} stale peers to refresh")
 
                     for peer_id in stale_peers:
                         try:

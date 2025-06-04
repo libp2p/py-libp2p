@@ -71,7 +71,7 @@ class ValueStore:
         if validity is None:
             # If no validity is provided, set a default TTL
             validity = time.time() + DEFAULT_TTL
-        logger.info(
+        logger.debug(
             "Storing value for key %s... with validity %s", key.hex()[:8], validity
         )
         self.store[key] = (value, validity)
@@ -101,11 +101,11 @@ class ValueStore:
                 logger.error("Host not initialized, cannot store value at peer")
                 return False
 
-            logger.info(f"Storing value for key {key.hex()} at peer {peer_id}")
+            logger.debug(f"Storing value for key {key.hex()} at peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-            logger.info(f"Opened stream to peer {peer_id}")
+            logger.debug(f"Opened stream to peer {peer_id}")
 
             # Create the PUT_VALUE message with protobuf
             message = Message()
@@ -121,12 +121,12 @@ class ValueStore:
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
-            logger.info("Sent PUT_VALUE protobuf message with varint length")
+            logger.debug("Sent PUT_VALUE protobuf message with varint length")
             # Read varint-prefixed response length
 
             length_bytes = b""
             while True:
-                logger.info("Reading varint length prefix for response...")
+                logger.debug("Reading varint length prefix for response...")
                 b = await stream.read(1)
                 if not b:
                     logger.warning("Connection closed while reading varint length")
@@ -134,9 +134,9 @@ class ValueStore:
                 length_bytes += b
                 if b[0] & 0x80 == 0:
                     break
-            logger.info(f"Received varint length bytes: {length_bytes.hex()}")
+            logger.debug(f"Received varint length bytes: {length_bytes.hex()}")
             response_length = varint.decode_bytes(length_bytes)
-            logger.info("Response length: %d bytes", response_length)
+            logger.debug("Response length: %d bytes", response_length)
             # Read response data
             response_bytes = b""
             remaining = response_length
@@ -181,12 +181,12 @@ class ValueStore:
             The stored value, or None if not found or expired
 
         """
-        logger.info("Retrieving value for key %s...", key.hex()[:8])
+        logger.debug("Retrieving value for key %s...", key.hex()[:8])
         if key not in self.store:
             return None
 
         value, validity = self.store[key]
-        logger.info(
+        logger.debug(
             "Found value for key %s... with validity %s",
             key.hex(),
             validity,

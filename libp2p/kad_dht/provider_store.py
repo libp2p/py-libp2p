@@ -131,7 +131,7 @@ class ProviderStore:
         """Republish all provider records for content this node is providing."""
         # First, republish keys we're actively providing
         for key in self.providing_keys:
-            logger.info(f"Republishing provider record for key {key.hex()}")
+            logger.debug(f"Republishing provider record for key {key.hex()}")
             await self.provide(key)
 
         # Also check for any records that should be republished
@@ -141,7 +141,7 @@ class ProviderStore:
                 # Only republish records for our own peer
                 if self.local_peer_id and str(self.local_peer_id) == peer_id_str:
                     if record.should_republish():
-                        logger.info(
+                        logger.debug(
                             f"Republishing old provider record for key {key.hex()}"
                         )
                         await self.provide(key)
@@ -177,7 +177,7 @@ class ProviderStore:
 
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
-        logger.info(
+        logger.debug(
             "Found %d peers close to key %s for provider advertisement",
             len(closest_peers),
             key.hex(),
@@ -208,7 +208,7 @@ class ProviderStore:
                     nursery.start_soon(send_one, idx, peer_id, results)
             success_count += sum(results)
 
-        logger.info(f"Successfully advertised to {success_count} peers")
+        logger.debug(f"Successfully advertised to {success_count} peers")
         return success_count > 0
 
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
@@ -309,11 +309,11 @@ class ProviderStore:
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
             return local_providers[:count]
-        logger.info("local providers are %s", local_providers)
+        logger.debug("local providers are %s", local_providers)
 
         # Find the closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
-        logger.info(
+        logger.debug(
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
 
