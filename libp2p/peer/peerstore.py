@@ -33,7 +33,7 @@ from .peerinfo import (
     PeerInfo,
 )
 
-PERMANENT_ADDR_TTL = 0
+PERMANENT_ADDR_TTL = sys.maxsize
 
 
 class PeerStore(IPeerStore):
@@ -86,7 +86,6 @@ class PeerStore(IPeerStore):
         """
         return list(self.peer_data_map.keys())
 
-    
     def valid_peer_ids(self) -> list[ID]:
         """
         :return: all of the valid peer IDs stored in peer store
@@ -125,6 +124,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
 
+# pass without ttl and pass with 2 sec ttl and time.sleep(2)
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """
         :param peer_id: peer ID to add address for
