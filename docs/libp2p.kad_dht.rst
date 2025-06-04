@@ -52,6 +52,14 @@ libp2p.kad\_dht.value\_store module
    :undoc-members:
    :show-inheritance:
 
+libp2p.kad\_dht.pb
+------------------
+
+.. automodule:: libp2p.kad_dht.pb
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 
