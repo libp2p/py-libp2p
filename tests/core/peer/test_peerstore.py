@@ -16,7 +16,7 @@ def test_peer_info_empty():
 
 def test_peer_info_basic():
     store = PeerStore()
-    store.add_addr("peer", "/foo", 10)
+    store.add_addr("peer", "/foo", 600)
     info = store.peer_info("peer")
 
     assert info.peer_id == "peer"
@@ -57,6 +57,6 @@ def test_peers():
     store = PeerStore()
     store.add_protocols("peer1", [])
     store.put("peer2", "key", "val")
-    store.add_addr("peer3", "/foo", 10)
+    store.add_addr("peer3", "/foo", 600)
 
     assert set(store.peer_ids()) == {"peer1", "peer2", "peer3"}
