@@ -77,7 +77,7 @@ class ProviderRecord:
 
         """
         current_time = time.time()
-        return (current_time - self.timestamp) > PROVIDER_RECORD_EXPIRATION_INTERVAL
+        return (current_time - self.timestamp) >= PROVIDER_RECORD_EXPIRATION_INTERVAL
 
     def should_republish(self) -> bool:
         """
@@ -90,7 +90,7 @@ class ProviderRecord:
 
         """
         current_time = time.time()
-        return (current_time - self.timestamp) > PROVIDER_RECORD_REPUBLISH_INTERVAL
+        return (current_time - self.timestamp) >= PROVIDER_RECORD_REPUBLISH_INTERVAL
 
     @property
     def peer_id(self) -> ID:
