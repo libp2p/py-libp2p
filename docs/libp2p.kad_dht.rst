@@ -1,6 +1,14 @@
 libp2p.kad\_dht package
 =======================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.kad\_dht.pb
+
 Submodules
 ----------
 

@@ -1,4 +1,4 @@
-libp2p.kad_dht.pb package
+libp2p.kad\_dht.pb package
 =========================
 
 Submodules
@@ -16,6 +16,7 @@ Module contents
 ---------------
 
 .. automodule:: libp2p.kad_dht.pb
+   :no-index:
    :members:
    :undoc-members:
    :show-inheritance:
