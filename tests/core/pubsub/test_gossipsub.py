@@ -22,7 +22,7 @@ from tests.utils.pubsub.utils import (
 @pytest.mark.trio
 async def test_join():
     async with PubsubFactory.create_batch_with_gossipsub(
-        4, degree=4, degree_low=3, degree_high=5
+        4, degree=4, degree_low=3, degree_high=5, time_to_live=2
     ) as pubsubs_gsub:
         gossipsubs = [pubsub.router for pubsub in pubsubs_gsub]
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
@@ -49,12 +49,18 @@ async def test_join():
         # is added to central node's fanout
         # publish from the randomly chosen host
         await pubsubs_gsub[central_node_index].publish(topic, b"data")
-
+        await trio.sleep(1)
         # Check that the gossipsub of central node has fanout for the topic
         assert topic in gossipsubs[central_node_index].fanout
         # Check that the gossipsub of central node does not have a mesh for the topic
         assert topic not in gossipsubs[central_node_index].mesh
+        # Check that the gossipsub of central node
+        # has a time_since_last_publish for the topic
+        assert topic in gossipsubs[central_node_index].time_since_last_publish
 
+        await trio.sleep(2)
+        # Check that after ttl the topic is no more in fanout of central node
+        assert topic not in gossipsubs[central_node_index].fanout
         # Central node subscribes the topic
         await pubsubs_gsub[central_node_index].subscribe(topic)
 

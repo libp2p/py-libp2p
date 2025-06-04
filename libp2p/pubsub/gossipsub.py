@@ -10,14 +10,13 @@ from collections.abc import (
 )
 import logging
 import random
+import time
 from typing import (
     Any,
     DefaultDict,
 )
 
 import trio
-
-import time
 
 from libp2p.abc import (
     IPubsubRouter,
@@ -139,6 +138,7 @@ class GossipSub(IPubsubRouter, Service):
             self.direct_peers[direct_peer.peer_id] = direct_peer
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
+        self.time_since_last_publish = {}
 
     async def run(self) -> None:
         if self.pubsub is None:
@@ -255,7 +255,7 @@ class GossipSub(IPubsubRouter, Service):
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
                 self.pubsub._handle_dead_peer(peer_id)
         for topic in pubsub_msg.topicIDs:
-                    self.time_since_last_publish[topic] = int(time.time())
+            self.time_since_last_publish[topic] = int(time.time())
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -518,11 +518,10 @@ class GossipSub(IPubsubRouter, Service):
 
     def fanout_heartbeat(self) -> None:
         # Note: the comments here are the exact pseudocode from the spec
-        for topic in self.fanout:
-            if (
-                topic not in self.pubsub.peer_topics
-                or self.time_since_last_publish.get(topic, 0) + self.time_to_live < int(time.time())
-            ):
+        for topic in list(self.fanout):
+            if topic not in self.pubsub.peer_topics or self.time_since_last_publish.get(
+                topic, 0
+            ) + self.time_to_live < int(time.time()):
                 # Remove topic from fanout
                 del self.fanout[topic]
             else:
