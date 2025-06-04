@@ -443,15 +443,16 @@ class KadDHT(Service):
 
         # 2. Get closest peers, excluding self
         closest_peers = [
-            peer for peer in self.routing_table.find_local_closest_peers(key)
+            peer
+            for peer in self.routing_table.find_local_closest_peers(key)
             if peer != self.local_peer_id
         ]
 
         # 3. Store at remote peers in batches of ALPHA, in parallel
         for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i:i+ALPHA]
+            batch = closest_peers[i : i + ALPHA]
 
-            async def store_one(peer):
+            async def store_one(peer: ID) -> None:
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         await self.value_store._store_at_peer(peer, key, value)
@@ -471,16 +472,17 @@ class KadDHT(Service):
 
         # 2. Get closest peers, excluding self
         closest_peers = [
-            peer for peer in self.routing_table.find_local_closest_peers(key)
+            peer
+            for peer in self.routing_table.find_local_closest_peers(key)
             if peer != self.local_peer_id
         ]
 
         # 3. Query ALPHA peers at a time in parallel
         for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i:i+ALPHA]
+            batch = closest_peers[i : i + ALPHA]
             found_value = None
 
-            async def query_one(peer):
+            async def query_one(peer: ID) -> None:
                 nonlocal found_value
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
@@ -500,6 +502,7 @@ class KadDHT(Service):
 
         # 4. Not found
         return None
+
     # Add these methods in the Utility methods section
 
     # Utility methods
@@ -524,7 +527,7 @@ class KadDHT(Service):
         """
         return await self.provider_store.provide(key)
 
-    async def find_providers(self, key: bytes, count: int = 20) -> list:
+    async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
         """

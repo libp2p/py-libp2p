@@ -14,6 +14,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
 import varint
 
 from libp2p.abc import (
@@ -32,7 +33,6 @@ from libp2p.peer.peerinfo import (
 from .pb.kademlia_pb2 import (
     Message,
 )
-import trio
 
 # logger = logging.getLogger("libp2p.kademlia.provider_store")
 logger = logging.getLogger("kademlia-example.provider_store")
@@ -183,13 +183,15 @@ class ProviderStore:
             key.hex(),
         )
 
-        # Send ADD_PROVIDER messages to these peers in batches of ALPHA, in parallel, with timeout
+        # Send ADD_PROVIDER messages to these ALPHA peers in parallel.
         success_count = 0
         for i in range(0, len(closest_peers), ALPHA):
             batch = closest_peers[i : i + ALPHA]
-            results = [False] * len(batch)
+            results: list[bool] = [False] * len(batch)
 
-            async def send_one(idx, peer_id):
+            async def send_one(
+                idx: int, peer_id: ID, results: list[bool] = results
+            ) -> None:
                 if peer_id == self.local_peer_id:
                     return
                 try:
@@ -203,7 +205,7 @@ class ProviderStore:
 
             async with trio.open_nursery() as nursery:
                 for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(send_one, idx, peer_id)
+                    nursery.start_soon(send_one, idx, peer_id, results)
             success_count += sum(results)
 
         logger.info(f"Successfully advertised to {success_count} peers")
@@ -319,9 +321,13 @@ class ProviderStore:
         all_providers = []
         for i in range(0, len(closest_peers), ALPHA):
             batch = closest_peers[i : i + ALPHA]
-            batch_results = [[] for _ in batch]
+            batch_results: list[list[PeerInfo]] = [[] for _ in batch]
 
-            async def get_one(idx, peer_id):
+            async def get_one(
+                idx: int,
+                peer_id: ID,
+                batch_results: list[list[PeerInfo]] = batch_results,
+            ) -> None:
                 if peer_id == self.local_peer_id:
                     return
                 try:
@@ -338,7 +344,7 @@ class ProviderStore:
 
             async with trio.open_nursery() as nursery:
                 for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(get_one, idx, peer_id)
+                    nursery.start_soon(get_one, idx, peer_id, batch_results)
 
             for providers in batch_results:
                 all_providers.extend(providers)
