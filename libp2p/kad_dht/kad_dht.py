@@ -111,7 +111,7 @@ class KadDHT(Service):
             host.set_stream_handler(PROTOCOL_ID, None)
         elif self.mode == "SERVER":
             # Server mode: handle incoming streams
-            logger.info("Setting up stream handler for DHT protocol")
+            logger.debug("Setting up stream handler for DHT protocol")
             host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     async def run(self) -> None:
@@ -158,7 +158,7 @@ class KadDHT(Service):
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
         await self.add_peer(peer_id)
-        logger.info(f"Added peer {peer_id} to routing table")
+        logger.debug(f"Added peer {peer_id} to routing table")
 
         try:
             # Read varint-prefixed length for the message
@@ -185,11 +185,11 @@ class KadDHT(Service):
                 # Parse as protobuf
                 message = Message()
                 message.ParseFromString(msg_bytes)
-                logger.info(
+                logger.debug(
                     f"Received DHT protobuf message"
                     f" from {peer_id}, type: {message.type}"
                 )
-                logger.info("complete message: %s", message)
+                logger.debug("complete message: %s", message)
 
                 # Handle FIND_NODE message
                 if message.type == Message.MessageType.FIND_NODE:
@@ -200,7 +200,7 @@ class KadDHT(Service):
                     closest_peers = self.routing_table.find_local_closest_peers(
                         target_key, 20
                     )
-                    logger.info(f"Found {len(closest_peers)} peers close to target")
+                    logger.debug(f"Found {len(closest_peers)} peers close to target")
 
                     # Build response message with protobuf
                     response = Message()
@@ -230,7 +230,7 @@ class KadDHT(Service):
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
-                    logger.info(
+                    logger.debug(
                         f"Sent protobuf response with"
                         f" {len(response.closerPeers)} peers to {peer_id}"
                     )
@@ -239,7 +239,7 @@ class KadDHT(Service):
                 elif message.type == Message.MessageType.ADD_PROVIDER:
                     # Process ADD_PROVIDER
                     key = message.key
-                    logger.info(f"Received ADD_PROVIDER for key {key.hex()}")
+                    logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
                     # Extract provider information
                     for provider_proto in message.providerPeers:
@@ -264,7 +264,7 @@ class KadDHT(Service):
                             # Add to provider store
                             provider_info = PeerInfo(provider_id, addrs)
                             self.provider_store.add_provider(key, provider_info)
-                            logger.info(
+                            logger.debug(
                                 f"Added provider {provider_id} for key {key.hex()}"
                             )
                         except Exception as e:
@@ -278,7 +278,7 @@ class KadDHT(Service):
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
-                    logger.info(
+                    logger.debug(
                         f"Sent ADD_PROVIDER acknowledgement for key {key.hex()}"
                     )
 
@@ -286,11 +286,11 @@ class KadDHT(Service):
                 elif message.type == Message.MessageType.GET_PROVIDERS:
                     # Process GET_PROVIDERS
                     key = message.key
-                    logger.info(f"Received GET_PROVIDERS request for key {key.hex()}")
+                    logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
-                    logger.info(
+                    logger.debug(
                         "Found %d providers for key %s",
                         len(providers),
                         key.hex(),
@@ -316,7 +316,7 @@ class KadDHT(Service):
                         closest_peers = self.routing_table.find_local_closest_peers(
                             key, 20
                         )
-                        logger.info(
+                        logger.debug(
                             "No providers found, including %d closest peers",
                             len(closest_peers),
                         )
@@ -342,7 +342,7 @@ class KadDHT(Service):
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
-                    logger.info(f"Sent provider information for key {key.hex()}")
+                    logger.debug(f"Sent provider information for key {key.hex()}")
 
                 # Handle GET_VALUE message
                 elif message.type == Message.MessageType.GET_VALUE:
@@ -351,7 +351,10 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
                     value = self.value_store.get(key)
-                    logger.debug(f"Retrieved value for key {key.hex()}: {value.hex()}")
+                    logger.debug(
+                        f"Retrieved value for key {key.hex()}:"
+                        " {value.hex() if value else None}"
+                    )
 
                     if value:
                         # Create response using protobuf
@@ -368,7 +371,7 @@ class KadDHT(Service):
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.info(f"Sent value response for key {key.hex()}")
+                        logger.debug(f"Sent value response for key {key.hex()}")
 
                 # Handle PUT_VALUE message
                 elif message.type == Message.MessageType.PUT_VALUE and message.HasField(
@@ -380,7 +383,7 @@ class KadDHT(Service):
 
                     if key and value:
                         self.value_store.put(key, value)
-                        logger.info(f"Stored value for key {key.hex()}")
+                        logger.debug(f"Stored value for key {key.hex()}")
 
                         # Send acknowledgement
                         response = Message()
@@ -400,7 +403,7 @@ class KadDHT(Service):
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
             await stream.close()
-            logger.info(f"Closed stream with peer {peer_id}")
+            logger.debug(f"Closed stream with peer {peer_id}")
 
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
@@ -420,7 +423,7 @@ class KadDHT(Service):
             The peer information if found, None otherwise.
 
         """
-        logger.info("find peers is called with peer_id: %s", peer_id)
+        logger.debug("find peers is called with peer_id: %s", peer_id)
         return await self.peer_routing.find_peer(peer_id)
 
     # Value storage and retrieval methods
@@ -439,7 +442,7 @@ class KadDHT(Service):
         """
         # 1. Store locally first
         self.value_store.put(key, value)
-        logger.info(f"Stored value for key {key.hex()} locally")
+        logger.debug(f"Stored value for key {key.hex()} locally")
 
         # 2. Get closest peers, excluding self
         closest_peers = [
@@ -456,7 +459,7 @@ class KadDHT(Service):
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         await self.value_store._store_at_peer(peer, key, value)
-                        logger.info(f"Stored value at peer {peer}")
+                        logger.debug(f"Stored value at peer {peer}")
                 except Exception as e:
                     logger.warning(f"Error storing value at peer {peer}: {e}")
 
