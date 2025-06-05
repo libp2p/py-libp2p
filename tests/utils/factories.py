@@ -562,7 +562,7 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
-        direct_peers: Optional[Sequence[PeerInfo]] = GOSSIPSUB_PARAMS.direct_peers,
+        direct_peers: Sequence[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
@@ -576,7 +576,6 @@ class PubsubFactory(factory.Factory):
             Callable[[rpc_pb2.Message], bytes]
         ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
-        direct_peers = direct_peers or []
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
                 number,
