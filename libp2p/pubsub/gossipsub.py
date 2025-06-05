@@ -519,9 +519,11 @@ class GossipSub(IPubsubRouter, Service):
     def fanout_heartbeat(self) -> None:
         # Note: the comments here are the exact pseudocode from the spec
         for topic in list(self.fanout):
-            if topic not in self.pubsub.peer_topics or self.time_since_last_publish.get(
-                topic, 0
-            ) + self.time_to_live < int(time.time()):
+            if (
+                topic not in self.pubsub.peer_topics
+                and self.time_since_last_publish.get(topic, 0) + self.time_to_live
+                < int(time.time())
+            ):
                 # Remove topic from fanout
                 del self.fanout[topic]
             else:
