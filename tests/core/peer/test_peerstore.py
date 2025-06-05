@@ -46,6 +46,7 @@ def test_peer_permanent_ttl():
     assert info.peer_id == ID(b"peer")
     assert info.addrs == [Multiaddr("/ip4/127.0.0.1/tcp/4001")]
 
+
 def test_add_get_protocols_basic():
     store = PeerStore()
     store.add_protocols(ID(b"peer1"), ["p1", "p2"])
