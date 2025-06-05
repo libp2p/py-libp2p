@@ -329,6 +329,12 @@ class Pubsub(Service, IPubsub):
     def add_to_blacklist(self, peer_id: ID) -> None:
         """
         Add a peer to the blacklist.
+        When a peer is blacklisted:
+        - Any existing connection to that peer is immediately closed and removed
+        - The peer is removed from all topic subscription mappings
+        - Future connection attempts from this peer will be rejected
+        - Messages forwarded by or originating from this peer will be dropped
+        - The peer will not be able to participate in pubsub communication
 
         :param peer_id: the peer ID to blacklist
         """
@@ -353,6 +359,10 @@ class Pubsub(Service, IPubsub):
     def remove_from_blacklist(self, peer_id: ID) -> None:
         """
         Remove a peer from the blacklist.
+        Once removed from the blacklist:
+        - The peer can establish new connections to this node
+        - Messages from this peer will be processed normally
+        - The peer can participate in topic subscriptions and message forwarding
 
         :param peer_id: the peer ID to remove from blacklist
         """
@@ -371,6 +381,12 @@ class Pubsub(Service, IPubsub):
     def clear_blacklist(self) -> None:
         """
         Clear all peers from the blacklist.
+        This removes all blacklist restrictions, allowing previously blacklisted
+        peers to:
+        - Establish new connections
+        - Send and forward messages
+        - Participate in topic subscriptions
+
         """
         self.blacklisted_peers.clear()
         logger.debug("Cleared all peers from blacklist")
@@ -378,6 +394,9 @@ class Pubsub(Service, IPubsub):
     def get_blacklisted_peers(self) -> set[ID]:
         """
         Get a copy of the current blacklisted peers.
+        Returns a snapshot of all currently blacklisted peer IDs. These peers
+        are completely isolated from pubsub communication - their connections
+        are rejected and their messages are dropped.
 
         :return: a set containing all blacklisted peer IDs
         """
