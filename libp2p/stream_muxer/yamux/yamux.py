@@ -76,6 +76,8 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
+        self.read_lock = trio.Lock()
+        self.write_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
@@ -91,6 +93,7 @@ class YamuxStream(IMuxedStream):
         await self.close()
 
     async def write(self, data: bytes) -> None:
+        # async with self.write_lock:
         if self.send_closed:
             raise MuxedStreamError("Stream is closed for sending")
 
@@ -142,6 +145,7 @@ class YamuxStream(IMuxedStream):
             await self.conn.secured_conn.write(header)
 
     async def read(self, n: int = -1) -> bytes:
+        # async with self.read_lock:
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -149,7 +153,8 @@ class YamuxStream(IMuxedStream):
         # If the stream is closed for receiving and the buffer is empty, raise EOF
         if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
             logging.debug(
-                f"Stream {self.stream_id}: Stream closed for receiving and buffer empty"
+                f"Stream {self.stream_id}: Stream closed for receiving "
+                f"and buffer empty"
             )
             raise MuxedStreamEOF("Stream is closed for receiving")
 
