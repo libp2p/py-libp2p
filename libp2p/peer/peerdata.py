@@ -1,6 +1,7 @@
 from collections.abc import (
     Sequence,
 )
+import time
 from typing import (
     Any,
 )
@@ -16,7 +17,7 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
-import time
+
 
 class PeerData(IPeerData):
     pubkey: PublicKey
@@ -25,15 +26,15 @@ class PeerData(IPeerData):
     protocols: list[str]
     addrs: list[Multiaddr]
     last_identified: int
-    ttl: int # Keep ttl=0 by default for always valid
-    
+    ttl: int  # Keep ttl=0 by default for always valid
+
     def __init__(self) -> None:
         self.pubkey = None
         self.privkey = None
         self.metadata = {}
         self.protocols = []
         self.addrs = []
-        self.last_identified = time.time()
+        self.last_identified = int(time.time())
         self.ttl = 0
 
     def get_protocols(self) -> list[str]:
@@ -130,19 +131,19 @@ class PeerData(IPeerData):
         :return: last identified timestamp
         """
         return self.last_identified
-    
+
     def get_ttl(self) -> int:
         """
         :return: ttl for current peer
         """
         return self.ttl
-    
+
     def set_ttl(self, ttl: int) -> None:
         """
         :param ttl: ttl to set
         """
         self.ttl = ttl
-    
+
     def is_expired(self) -> bool:
         """
         :return: true, if last_identified+ttl > current_time
@@ -152,6 +153,7 @@ class PeerData(IPeerData):
             print("reached true")
             return True
         return False
+
 
 class PeerDataError(KeyError):
     """Raised when a key is not found in peer metadata."""

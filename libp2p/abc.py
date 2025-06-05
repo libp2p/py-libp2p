@@ -1433,7 +1433,7 @@ class IPeerData(ABC):
             If the private key is not found.
 
         """
-        
+
     @abstractmethod
     def update_last_identified(self) -> None:
         """
@@ -1449,7 +1449,8 @@ class IPeerData(ABC):
         last_identified_timestamp
             The lastIdentified time of peer.
         """
-    
+
+    @abstractmethod
     def get_ttl(self) -> int:
         """
         Get ttl value for the peer for validity check
@@ -1460,7 +1461,8 @@ class IPeerData(ABC):
             The ttl for the peer.
 
         """
-    
+
+    @abstractmethod
     def set_ttl(self, ttl: int) -> None:
         """
         Set ttl value for the peer for validity check
@@ -1471,15 +1473,17 @@ class IPeerData(ABC):
             The ttl of the peer.
 
         """
-    
+
+    @abstractmethod
     def is_expired(self) -> bool:
         """
         Check if the peer is expired based on last_identified and ttl
         Returns
         -------
         bool
-            True, if last_identified + ttl > current_time 
+            True, if last_identified + ttl > current_time
         """
+
 
 # ------------------ multiselect_communicator interface.py ------------------
 

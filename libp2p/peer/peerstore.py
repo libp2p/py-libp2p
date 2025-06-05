@@ -50,7 +50,7 @@ class PeerStore(IPeerStore):
         if peer_id in self.peer_data_map:
             peer_data = self.peer_data_map[peer_id]
             if peer_data.is_expired():
-                peer_data.clear_addrs();
+                peer_data.clear_addrs()
             return PeerInfo(peer_id, peer_data.get_addrs())
         raise PeerStoreError("peer ID not found or expired")
 
@@ -90,16 +90,16 @@ class PeerStore(IPeerStore):
         """
         :return: all of the valid peer IDs stored in peer store
         """
-        valid_peer_ids: list[int] = []
+        valid_peer_ids: list[ID] = []
         peer_ids = list(self.peer_data_map.keys())
         for peer_id in peer_ids:
             peer_data = self.peer_data_map[peer_id]
             if not peer_data.is_expired():
                 valid_peer_ids.append(peer_id)
             else:
-                peer_data.clear_addrs();
+                peer_data.clear_addrs()
         return valid_peer_ids
-    
+
     def get(self, peer_id: ID, key: str) -> Any:
         """
         :param peer_id: peer ID to get peer data for
@@ -124,7 +124,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
 
-# pass without ttl and pass with 2 sec ttl and time.sleep(2)
+    # pass without ttl and pass with 2 sec ttl and time.sleep(2)
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """
         :param peer_id: peer ID to add address for
@@ -139,7 +139,6 @@ class PeerStore(IPeerStore):
         :param addrs:
         :param ttl: time-to-live for the this record
         """
-        
         peer_data = self.peer_data_map[peer_id]
         peer_data.add_addrs(list(addrs))
         peer_data.set_ttl(ttl)
@@ -156,7 +155,7 @@ class PeerStore(IPeerStore):
             if not peer_data.is_expired():
                 return peer_data.get_addrs()
             else:
-                peer_data.clear_addrs();
+                peer_data.clear_addrs()
         raise PeerStoreError("peer ID not found")
 
     def clear_addrs(self, peer_id: ID) -> None:
@@ -180,7 +179,7 @@ class PeerStore(IPeerStore):
                 if not peer_data.is_expired():
                     output.append(peer_id)
                 else:
-                    peer_data.clear_addrs();
+                    peer_data.clear_addrs()
         return output
 
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:

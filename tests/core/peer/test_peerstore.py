@@ -1,5 +1,6 @@
-import pytest
 import time
+
+import pytest
 
 from libp2p.peer.peerstore import (
     PeerStore,
@@ -18,15 +19,15 @@ def test_peer_info_empty():
 def test_peer_info_basic():
     store = PeerStore()
     store.add_addr("peer", "/foo", 2)
-    
+
     # update ttl to new value
-    store.add_addr("peer", "/foo2", 4) 
-    
+    store.add_addr("peer", "/foo2", 4)
+
     time.sleep(2)
     info = store.peer_info("peer")
     assert info.peer_id == "peer"
     assert info.addrs == ["/foo", "/foo2"]
-    
+
     # Check that addresses are cleared after ttl
     time.sleep(3)
     info = store.peer_info("peer")
@@ -34,7 +35,8 @@ def test_peer_info_basic():
     assert info.addrs == []
     assert store.peer_ids() == ["peer"]
     assert store.valid_peer_ids() == []
-    
+
+
 # Check if all the data remains valid if ttl is set to default(0)
 def test_peer_permanent_ttl():
     store = PeerStore()
@@ -43,6 +45,7 @@ def test_peer_permanent_ttl():
     info = store.peer_info("peer")
     assert info.peer_id == "peer"
     assert info.addrs == ["/foo"]
+
 
 def test_add_get_protocols_basic():
     store = PeerStore()
