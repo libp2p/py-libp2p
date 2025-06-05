@@ -1,5 +1,3 @@
-# Copied from https://github.com/ethereum/async-service
-
 from abc import (
     ABC,
     abstractmethod,
@@ -11,8 +9,6 @@ from typing import (
     Any,
     Optional,
 )
-
-import trio_typing
 
 from .stats import (
     Stats,
@@ -65,7 +61,7 @@ class ServiceAPI(ABC):
         """
         External retrieval of the manager for this service.
 
-        Will raise a :class:`~async_service.exceptions.LifecycleError` if the
+        Will raise a :class:`~anyio_service.exceptions.LifecycleError` if the
         service does not yet have a `manager` assigned to it.
         """
         ...
@@ -82,17 +78,17 @@ class ServiceAPI(ABC):
         .. code-block: python
 
             # 1. run the service in the background using a context manager
-            async with run_service(service) as manager:
+            async with background_anyio_service(service) as manager:
                 # service runs inside context block
                 ...
                 # service cancels and stops when context exits
             # service will have fully stopped
 
             # 2. run the service blocking until completion
-            await Manager.run_service(service)
+            await AnyioManager.run_service(service)
 
             # 3. create manager and then run service blocking until completion
-            manager = Manager(service)
+            manager = AnyioManager(service)
             await manager.run()
         """
         ...
@@ -125,7 +121,7 @@ class ManagerAPI(ABC):
         """
         Return boolean indicating if the underlying service has been cancelled.
 
-        This can occure externally via the `cancel()` method or internally due
+        This can occur externally via the `cancel()` method or internally due
         to a task crash or a crash of the actual :meth:`ServiceAPI.run` method.
         """
         ...
@@ -149,7 +145,7 @@ class ManagerAPI(ABC):
         ...
 
     @abstractmethod
-    def cancel(self) -> None:
+    async def cancel(self) -> None:
         """
         Trigger cancellation of the service.
         """
@@ -209,23 +205,27 @@ class InternalManagerAPI(ManagerAPI):
     functionality as it is only designed to be used internally.
     """
 
-    @trio_typing.takes_callable_and_args
     @abstractmethod
     def run_task(
-        self, async_fn: AsyncFn, *args: Any, daemon: bool = False, name: str = None
+        self,
+        async_fn: AsyncFn,
+        *args: Any,
+        daemon: bool = False,
+        name: Optional[str] = None
     ) -> None:
         """
         Run a task in the background.  If the function throws an exception it
-        will trigger the service to be cancelled and be propogated.
+        will trigger the service to be cancelled and be propagated.
 
-        If `daemon == True` then the the task is expected to run indefinitely
+        If `daemon == True` then the task is expected to run indefinitely
         and will trigger cancellation if the task finishes.
         """
         ...
 
-    @trio_typing.takes_callable_and_args
     @abstractmethod
-    def run_daemon_task(self, async_fn: AsyncFn, *args: Any, name: str = None) -> None:
+    def run_daemon_task(
+        self, async_fn: AsyncFn, *args: Any, name: Optional[str] = None
+    ) -> None:
         """
         Run a daemon task in the background.
 
@@ -235,20 +235,20 @@ class InternalManagerAPI(ManagerAPI):
 
     @abstractmethod
     def run_child_service(
-        self, service: ServiceAPI, daemon: bool = False, name: str = None
+        self, service: ServiceAPI, daemon: bool = False, name: Optional[str] = None
     ) -> "ManagerAPI":
         """
         Run a service in the background.  If the function throws an exception it
-        will trigger the parent service to be cancelled and be propogated.
+        will trigger the parent service to be cancelled and be propagated.
 
-        If `daemon == True` then the the service is expected to run indefinitely
+        If `daemon == True` then the service is expected to run indefinitely
         and will trigger cancellation if the service finishes.
         """
         ...
 
     @abstractmethod
     def run_daemon_child_service(
-        self, service: ServiceAPI, name: str = None
+        self, service: ServiceAPI, name: Optional[str] = None
     ) -> "ManagerAPI":
         """
         Run a daemon service in the background.
