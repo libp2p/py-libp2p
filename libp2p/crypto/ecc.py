@@ -1,5 +1,4 @@
 import sys
-from typing import Union
 
 from libp2p.crypto.keys import (
     KeyPair,
@@ -25,6 +24,7 @@ else:
 
 
 if sys.platform != "win32":
+
     def infer_local_type(curve: str) -> curve_types.Curve:
         """
         Convert a str representation of some elliptic curve to a
@@ -34,6 +34,7 @@ if sys.platform != "win32":
             raise NotImplementedError("Only P-256 curve is supported")
         return curve_types.P256
 else:
+
     def infer_local_type(curve: str) -> str:
         """
         Convert a str representation of some elliptic curve to a

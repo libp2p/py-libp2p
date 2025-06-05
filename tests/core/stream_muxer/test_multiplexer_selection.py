@@ -13,6 +13,7 @@ from libp2p import (
     set_default_muxer,
 )
 from libp2p.custom_types import TProtocol
+from libp2p.peer.peerinfo import PeerInfo
 
 # Enable logging for debugging
 logging.basicConfig(level=logging.DEBUG)
@@ -32,7 +33,8 @@ async def host_pair(muxer_preference=None, muxer_opt=None):
     # Connect hosts with a timeout
     listen_addrs_a = host_a.get_addrs()
     with trio.move_on_after(5):  # 5 second timeout
-        await host_b.connect(host_a.get_id(), listen_addrs_a)
+        peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+        await host_b.connect(peer_info_a)
 
     yield host_a, host_b
 
@@ -65,8 +67,8 @@ async def test_multiplexer_preference_parameter(muxer_preference):
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
-
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
             # Check if connection was established
             connections = host_b.get_network().connections
             assert len(connections) > 0, "Connection not established"
@@ -140,7 +142,8 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
 
             # Check if connection was established
             connections = host_b.get_network().connections
@@ -208,7 +211,8 @@ async def test_global_default_muxer(global_default):
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
 
             # Check if connection was established
             connections = host_b.get_network().connections
