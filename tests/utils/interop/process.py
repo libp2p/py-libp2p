@@ -32,18 +32,25 @@ class BaseInteractiveProcess(AbstractInterativeProcess):
 
     async def wait_until_ready(self) -> None:
         patterns_occurred = {pat: False for pat in self.patterns}
+        buffers = {pat: bytearray() for pat in self.patterns}
 
         async def read_from_daemon_and_check() -> None:
             async for data in self.proc.stdout:
-                # TODO: It takes O(n^2), which is quite bad.
-                # But it should succeed in a few seconds.
                 self.bytes_read.extend(data)
                 for pat, occurred in patterns_occurred.items():
                     if occurred:
                         continue
-                    if pat in self.bytes_read:
+
+                    # Check if pattern is in new data or spans across chunks
+                    buf = buffers[pat]
+                    buf.extend(data)
+                    if pat in buf:
                         patterns_occurred[pat] = True
-                if all([value for value in patterns_occurred.values()]):
+                    else:
+                        keep = min(len(pat) - 1, len(buf))
+                        buffers[pat] = buf[-keep:] if keep > 0 else bytearray()
+
+                if all(patterns_occurred.values()):
                     return
 
         with trio.fail_after(TIMEOUT_DURATION):
