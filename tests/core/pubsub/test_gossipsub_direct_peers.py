@@ -4,6 +4,9 @@ import trio
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+from libp2p.pubsub.gossipsub import (
+    GossipSub,
+)
 from libp2p.tools.utils import (
     connect,
 )
@@ -96,7 +99,9 @@ async def test_reject_graft():
                 )
 
                 # Gossipsub 1 emits a graft request to Gossipsub 0
-                await pubsubs_gsub_0[0].router.emit_graft(topic, host_1.get_id())
+                router_obj = pubsubs_gsub_0[0].router
+                assert isinstance(router_obj, GossipSub)
+                await router_obj.emit_graft(topic, host_1.get_id())
 
                 await trio.sleep(1)
 

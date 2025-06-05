@@ -137,7 +137,7 @@ class IDFactory(factory.Factory):
         model = ID
 
     peer_id_bytes = factory.LazyFunction(
-        lambda: generate_peer_id_from(default_key_pair_factory())
+        lambda: generate_peer_id_from(default_key_pair_factory()).to_bytes()
     )
 
 

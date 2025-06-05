@@ -1,6 +1,7 @@
 from contextlib import (
     contextmanager,
 )
+import inspect
 from typing import (
     NamedTuple,
 )
@@ -13,6 +14,9 @@ from libp2p.exceptions import (
 )
 from libp2p.network.stream.exceptions import (
     StreamEOF,
+)
+from libp2p.peer.id import (
+    ID,
 )
 from libp2p.pubsub.pb import (
     rpc_pb2,
@@ -121,16 +125,18 @@ async def test_set_and_remove_topic_validator():
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
         is_sync_validator_called = False
 
-        def sync_validator(peer_id, msg):
+        def sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             nonlocal is_sync_validator_called
             is_sync_validator_called = True
+            return True
 
         is_async_validator_called = False
 
-        async def async_validator(peer_id, msg):
+        async def async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             nonlocal is_async_validator_called
             is_async_validator_called = True
             await trio.lowlevel.checkpoint()
+            return True
 
         topic = "TEST_VALIDATOR"
 
@@ -144,7 +150,13 @@ async def test_set_and_remove_topic_validator():
         assert not topic_validator.is_async
 
         # Validate with sync validator
-        topic_validator.validator(peer_id=IDFactory(), msg="msg")
+        test_msg = make_pubsub_msg(
+            origin_id=IDFactory(),
+            topic_ids=[topic],
+            data=b"test",
+            seqno=b"\x00" * 8,
+        )
+        topic_validator.validator(IDFactory(), test_msg)
 
         assert is_sync_validator_called
         assert not is_async_validator_called
@@ -158,7 +170,20 @@ async def test_set_and_remove_topic_validator():
         assert topic_validator.is_async
 
         # Validate with async validator
-        await topic_validator.validator(peer_id=IDFactory(), msg="msg")
+        test_msg = make_pubsub_msg(
+            origin_id=IDFactory(),
+            topic_ids=[topic],
+            data=b"test",
+            seqno=b"\x00" * 8,
+        )
+        validator = topic_validator.validator
+        if topic_validator.is_async:
+            import inspect
+
+            if inspect.iscoroutinefunction(validator):
+                await validator(IDFactory(), test_msg)
+        else:
+            validator(IDFactory(), test_msg)
 
         assert is_async_validator_called
         assert not is_sync_validator_called
@@ -170,20 +195,18 @@ async def test_set_and_remove_topic_validator():
 
 @pytest.mark.trio
 async def test_get_msg_validators():
+    calls = [0, 0]  # [sync, async]
+
+    def sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        calls[0] += 1
+        return True
+
+    async def async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        calls[1] += 1
+        await trio.lowlevel.checkpoint()
+        return True
+
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
-        times_sync_validator_called = 0
-
-        def sync_validator(peer_id, msg):
-            nonlocal times_sync_validator_called
-            times_sync_validator_called += 1
-
-        times_async_validator_called = 0
-
-        async def async_validator(peer_id, msg):
-            nonlocal times_async_validator_called
-            times_async_validator_called += 1
-            await trio.lowlevel.checkpoint()
-
         topic_1 = "TEST_VALIDATOR_1"
         topic_2 = "TEST_VALIDATOR_2"
         topic_3 = "TEST_VALIDATOR_3"
@@ -204,13 +227,15 @@ async def test_get_msg_validators():
 
         topic_validators = pubsubs_fsub[0].get_msg_validators(msg)
         for topic_validator in topic_validators:
+            validator = topic_validator.validator
             if topic_validator.is_async:
-                await topic_validator.validator(peer_id=IDFactory(), msg="msg")
+                if inspect.iscoroutinefunction(validator):
+                    await validator(IDFactory(), msg)
             else:
-                topic_validator.validator(peer_id=IDFactory(), msg="msg")
+                validator(IDFactory(), msg)
 
-        assert times_sync_validator_called == 2
-        assert times_async_validator_called == 1
+        assert calls[0] == 2
+        assert calls[1] == 1
 
 
 @pytest.mark.parametrize(
@@ -221,17 +246,17 @@ async def test_get_msg_validators():
 async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
 
-        def passed_sync_validator(peer_id, msg):
+        def passed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             return True
 
-        def failed_sync_validator(peer_id, msg):
+        def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             return False
 
-        async def passed_async_validator(peer_id, msg):
+        async def passed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             await trio.lowlevel.checkpoint()
             return True
 
-        async def failed_async_validator(peer_id, msg):
+        async def failed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             await trio.lowlevel.checkpoint()
             return False
 
@@ -613,7 +638,7 @@ async def test_push_msg(monkeypatch):
             # Test: add a topic validator and `push_msg` the message that
             # does not pass the validation.
             # `router_publish` is not called then.
-            def failed_sync_validator(peer_id, msg):
+            def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
                 return False
 
             pubsubs_fsub[0].set_topic_validator(
@@ -661,6 +686,9 @@ async def test_strict_signing_failed_validation(monkeypatch):
             seqno=b"\x00" * 8,
         )
         priv_key = pubsubs_fsub[0].sign_key
+        assert priv_key is not None, (
+            "Private key should not be None when strict_signing=True"
+        )
         signature = priv_key.sign(
             PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
         )
