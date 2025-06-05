@@ -352,7 +352,7 @@ class HostFactory(factory.Factory):
         muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
 
     network = factory.LazyAttribute(
-        lambda o: SwarmFactory(
+        lambda o: SwarmFactory.build(
             security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
         )
     )
@@ -396,7 +396,7 @@ class RoutedHostFactory(factory.Factory):
         muxer_opt = factory.LazyFunction(default_muxer_transport_factory)
 
     network = factory.LazyAttribute(
-        lambda o: HostFactory(
+        lambda o: HostFactory.build(
             security_protocol=o.security_protocol, muxer_opt=o.muxer_opt
         ).get_network()
     )
@@ -467,7 +467,9 @@ class PubsubFactory(factory.Factory):
         strict_signing: bool,
         msg_id_constructor: Optional[Callable[[rpc_pb2.Message], bytes]] = None,
     ) -> AsyncIterator[Pubsub]:
-        pubsub = cls(
+        if msg_id_constructor is None:
+            msg_id_constructor = get_peer_and_seqno_msg_id
+        pubsub = Pubsub(
             host=host,
             router=router,
             cache_size=cache_size,
@@ -560,7 +562,7 @@ class PubsubFactory(factory.Factory):
         degree: int = GOSSIPSUB_PARAMS.degree,
         degree_low: int = GOSSIPSUB_PARAMS.degree_low,
         degree_high: int = GOSSIPSUB_PARAMS.degree_high,
-        direct_peers: Sequence[PeerInfo] = GOSSIPSUB_PARAMS.direct_peers,
+        direct_peers: Optional[Sequence[PeerInfo]] = GOSSIPSUB_PARAMS.direct_peers,
         time_to_live: int = GOSSIPSUB_PARAMS.time_to_live,
         gossip_window: int = GOSSIPSUB_PARAMS.gossip_window,
         gossip_history: int = GOSSIPSUB_PARAMS.gossip_history,
@@ -574,6 +576,7 @@ class PubsubFactory(factory.Factory):
             Callable[[rpc_pb2.Message], bytes]
         ] = get_peer_and_seqno_msg_id,
     ) -> AsyncIterator[tuple[Pubsub, ...]]:
+        direct_peers = direct_peers or []
         if protocols is not None:
             gossipsubs = GossipsubFactory.create_batch(
                 number,
