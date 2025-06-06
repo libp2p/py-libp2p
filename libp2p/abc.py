@@ -1450,6 +1450,7 @@ class IPeerData(ABC):
     def get_last_identified(self) -> int:
         """
         Fetch the last identified timestamp
+        
         Returns
         -------
         last_identified_timestamp
@@ -1484,6 +1485,7 @@ class IPeerData(ABC):
     def is_expired(self) -> bool:
         """
         Check if the peer is expired based on last_identified and ttl
+        
         Returns
         -------
         bool
