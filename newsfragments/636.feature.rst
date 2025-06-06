@@ -1,0 +1,1 @@
+feat: add method to compute time since last message published by a peer and remove fanout peers based on ttl.

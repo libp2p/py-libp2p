@@ -10,6 +10,7 @@ from collections.abc import (
 )
 import logging
 import random
+import time
 from typing import (
     Any,
     DefaultDict,
@@ -80,8 +81,7 @@ class GossipSub(IPubsubRouter, Service):
     # The protocol peer supports
     peer_protocol: dict[ID, TProtocol]
 
-    # TODO: Add `time_since_last_publish`
-    #   Create topic --> time since last publish map.
+    time_since_last_publish: dict[str, int]
 
     mcache: MessageCache
 
@@ -138,6 +138,7 @@ class GossipSub(IPubsubRouter, Service):
             self.direct_peers[direct_peer.peer_id] = direct_peer
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
+        self.time_since_last_publish = {}
 
     async def run(self) -> None:
         if self.pubsub is None:
@@ -253,6 +254,8 @@ class GossipSub(IPubsubRouter, Service):
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
                 self.pubsub._handle_dead_peer(peer_id)
+        for topic in pubsub_msg.topicIDs:
+            self.time_since_last_publish[topic] = int(time.time())
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -342,6 +345,7 @@ class GossipSub(IPubsubRouter, Service):
             await self.emit_graft(topic, peer)
 
         self.fanout.pop(topic, None)
+        self.time_since_last_publish.pop(topic, None)
 
     async def leave(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec
@@ -514,10 +518,12 @@ class GossipSub(IPubsubRouter, Service):
 
     def fanout_heartbeat(self) -> None:
         # Note: the comments here are the exact pseudocode from the spec
-        for topic in self.fanout:
-            # Delete topic entry if it's not in `pubsub.peer_topics`
-            # or (TODO) if it's time-since-last-published > ttl
-            if topic not in self.pubsub.peer_topics:
+        for topic in list(self.fanout):
+            if (
+                topic not in self.pubsub.peer_topics
+                and self.time_since_last_publish.get(topic, 0) + self.time_to_live
+                < int(time.time())
+            ):
                 # Remove topic from fanout
                 del self.fanout[topic]
             else:
