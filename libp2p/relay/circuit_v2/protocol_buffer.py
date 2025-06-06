@@ -10,7 +10,6 @@ from enum import (
 )
 from typing import (
     Any,
-    cast,
 )
 
 
@@ -50,9 +49,8 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
     # Create status object
     pb_obj = PbStatus()
 
-    # Direct attribute access - we know these exist at runtime
-    # ValueType conversion is handled by casting the int value to avoid mypy errors
-    pb_obj.code = cast(Any, int(code))
+    # Convert the integer status code to the protobuf enum value type
+    pb_obj.code = PbStatus.Code.ValueType(code)
     pb_obj.message = message
 
     return pb_obj

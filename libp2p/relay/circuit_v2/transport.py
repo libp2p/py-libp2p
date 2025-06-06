@@ -10,7 +10,6 @@ from collections.abc import (
 )
 import logging
 from typing import (
-    Any,
     Callable,
     Optional,
 )
@@ -355,15 +354,15 @@ class CircuitV2Listener(Service, IListener):
         """Run the listener service."""
         # Implementation would go here
 
-    async def listen(self, maddr: Any, nursery: Any) -> bool:
+    async def listen(self, maddr: str, nursery: trio.Nursery) -> bool:
         """
         Start listening on the given multiaddr.
 
         Parameters
         ----------
-        maddr : Any
+        maddr : str
             The multiaddr to listen on
-        nursery : Any
+        nursery : trio.Nursery
             The nursery to run tasks in
 
         Returns
@@ -377,13 +376,13 @@ class CircuitV2Listener(Service, IListener):
             self.multiaddrs.append(maddr)
         return True
 
-    def get_addrs(self) -> tuple[Any, ...]:
+    def get_addrs(self) -> tuple[str, ...]:
         """
         Get the listening addresses.
 
         Returns
         -------
-        tuple[Any, ...]
+        tuple[str, ...]
             Tuple of listening multiaddresses
 
         """

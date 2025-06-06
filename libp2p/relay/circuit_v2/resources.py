@@ -11,9 +11,6 @@ from dataclasses import (
 import hashlib
 import os
 import time
-from typing import (
-    Any,
-)
 
 from libp2p.peer.id import (
     ID,
@@ -97,9 +94,10 @@ class Reservation:
 
     def to_proto(self) -> PbReservation:
         """Convert the reservation to its protobuf representation."""
-        # The signature would normally be created by signing the voucher with the
-        # peer's private key. For now, we leave it empty but in a production
-        # environment it should be implemented
+        # TODO: For production use, implement proper signature generation
+        # The signature should be created by signing the voucher with the
+        # peer's private key. The current implementation with an empty signature
+        # is intended for development and testing only.
         return PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
@@ -175,7 +173,7 @@ class RelayResourceManager:
         self._reservations[peer_id] = reservation
         return reservation
 
-    def verify_reservation(self, peer_id: ID, proto_res: Any) -> bool:
+    def verify_reservation(self, peer_id: ID, proto_res: PbReservation) -> bool:
         """
         Verify a reservation from a protobuf message.
 
@@ -183,7 +181,7 @@ class RelayResourceManager:
         ----------
         peer_id : ID
             The peer ID the reservation is for
-        proto_res : Any
+        proto_res : PbReservation
             The protobuf reservation message
 
         Returns
