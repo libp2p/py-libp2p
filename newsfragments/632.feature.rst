@@ -1,3 +1,0 @@
-Feature: Adding of a Stream State Enum, in order to track the state of a stream.
-The Stream can be set to different states such as INIT, OPEN, RESET, CLOSED, and ERROR.
-The state of the Stream can be changed as well as queried.
