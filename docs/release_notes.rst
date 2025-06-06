@@ -3,6 +3,20 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.7 (2025-06-06)
+-----------------------------
+
+Features
+~~~~~~~~
+
+- Allow passing `listen_addrs` to `new_swarm` to customize swarm listening behavior. (`#616 <https://github.com/libp2p/py-libp2p/issues/616>`__)
+- Feature: Support for sending `ls` command over `multistream-select` to list supported protocols from remote peer.
+  This allows inspecting which protocol handlers a peer supports at runtime. (`#622 <https://github.com/libp2p/py-libp2p/issues/622>`__)
+- implement AsyncContextManager for IMuxedStream to support async with (`#629 <https://github.com/libp2p/py-libp2p/issues/629>`__)
+- Feature: The current implementation of network stream, was lacking a mechanism to track the lifecycle of a stream.
+  Adding the Stream States would allow in getting better control over the stream as well as better error handling. (`#632 <https://github.com/libp2p/py-libp2p/issues/632>`__)
+
+
 py-libp2p v0.2.7 (2025-05-22)
 -----------------------------
 
