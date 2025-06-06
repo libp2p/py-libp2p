@@ -26,7 +26,7 @@ Create a file named ``relay_node.py`` with the following content:
 
 .. code-block:: python
 
-    import asyncio
+    import trio
     import logging
 
     from libp2p import new_host
@@ -68,11 +68,11 @@ Create a file named ``relay_node.py`` with the following content:
 
             # Keep the node running
             while True:
-                await asyncio.sleep(10)
+                await trio.sleep(10)
                 print(f"Active relay connections: {len(protocol._active_relays)}")
 
     if __name__ == "__main__":
-        asyncio.run(run_relay())
+        trio.run(run_relay)
 
 Destination Node
 ----------------
@@ -81,7 +81,7 @@ Create a file named ``destination_node.py`` with the following content:
 
 .. code-block:: python
 
-    import asyncio
+    import trio
     import logging
 
     from libp2p import new_host
@@ -159,11 +159,11 @@ Create a file named ``destination_node.py`` with the following content:
 
             # Keep the node running
             while True:
-                await asyncio.sleep(10)
+                await trio.sleep(10)
                 print("Destination node still running...")
 
     if __name__ == "__main__":
-        asyncio.run(run_destination())
+        trio.run(run_destination)
 
 Source Node
 -----------
@@ -172,7 +172,7 @@ Create a file named ``source_node.py`` with the following content:
 
 .. code-block:: python
 
-    import asyncio
+    import trio
     import logging
 
     from libp2p import new_host
@@ -222,7 +222,7 @@ Create a file named ``source_node.py`` with the following content:
                 await host.get_network().nursery.start(transport.discovery.run)
 
                 # Wait for relay discovery
-                await asyncio.sleep(5)
+                await trio.sleep(5)
 
                 # Connect to destination through relay
                 destination_peer_id = "DESTINATION_PEER_ID"  # Replace with actual peer ID
@@ -246,7 +246,7 @@ Create a file named ``source_node.py`` with the following content:
                     response = await stream.read(1024)
 
                     print(f"Received: {response.decode('utf-8')}")
-                    await asyncio.sleep(1)
+                    await trio.sleep(1)
 
                 # Close the stream
                 await stream.close()
@@ -256,11 +256,11 @@ Create a file named ``source_node.py`` with the following content:
                 print(f"Error: {e}")
 
             # Keep the node running for a while
-            await asyncio.sleep(30)
+            await trio.sleep(30)
             print("Source node shutting down")
 
     if __name__ == "__main__":
-        asyncio.run(run_source())
+        trio.run(run_source)
 
 Running the Example
 -------------------

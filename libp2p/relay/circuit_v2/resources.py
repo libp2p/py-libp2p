@@ -8,9 +8,10 @@ including reservations and connection limits.
 from dataclasses import (
     dataclass,
 )
+import hashlib
+import os
 import time
 from typing import (
-    TYPE_CHECKING,
     Any,
 )
 
@@ -20,10 +21,6 @@ from libp2p.peer.id import (
 
 # Import the protobuf definitions
 from .pb.circuit_pb2 import Reservation as PbReservation
-
-# Import for type checking only to avoid circular imports
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -60,10 +57,31 @@ class Reservation:
         self.voucher = self._generate_voucher()
 
     def _generate_voucher(self) -> bytes:
-        """Generate a unique voucher for this reservation."""
-        # For now, just use a simple timestamp-based voucher
-        # In production, this should be a cryptographically secure token
-        return str(int(self.created_at * 1000000)).encode()
+        """
+        Generate a unique cryptographically secure voucher for this reservation.
+
+        Returns
+        -------
+        bytes
+            A secure voucher token
+
+        """
+        # Create a random token using a combination of:
+        # - Random bytes for unpredictability
+        # - Peer ID to bind it to the specific peer
+        # - Timestamp for uniqueness
+        # - Hash everything for a fixed size output
+        random_bytes = os.urandom(16)  # 128 bits of randomness
+        timestamp = str(int(self.created_at * 1000000)).encode()
+        peer_bytes = self.peer_id.to_bytes()
+
+        # Combine all elements and hash them
+        h = hashlib.sha256()
+        h.update(random_bytes)
+        h.update(timestamp)
+        h.update(peer_bytes)
+
+        return h.digest()
 
     def is_expired(self) -> bool:
         """Check if the reservation has expired."""
@@ -79,10 +97,12 @@ class Reservation:
 
     def to_proto(self) -> PbReservation:
         """Convert the reservation to its protobuf representation."""
+        # The signature would normally be created by signing the voucher with the
+        # peer's private key. For now, we leave it empty but in a production
+        # environment it should be implemented
         return PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
-            # TODO: In production, this should be a proper signature
             signature=b"",
         )
 

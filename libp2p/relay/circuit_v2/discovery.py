@@ -44,7 +44,7 @@ from .protocol import (
     PROTOCOL_ID,
 )
 from .protocol_buffer import (
-    OK,
+    StatusCode,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
@@ -375,9 +375,9 @@ class RelayDiscovery(Service):
                         "status"
                     ):
                         # Access status code directly from protobuf object
-                        status_code = getattr(response.status, "code", OK)
+                        status_code = getattr(response.status, "code", StatusCode.OK)
 
-                        if status_code == OK:
+                        if status_code == StatusCode.OK:
                             # Update relay info with reservation details
                             relay_info = self._discovered_relays[peer_id]
                             relay_info.has_reservation = True

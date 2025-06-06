@@ -50,12 +50,7 @@ from .pb.circuit_pb2 import (
 )
 from .pb.circuit_pb2 import Status as PbStatus
 from .protocol_buffer import (
-    CONNECTION_FAILED,
-    INTERNAL_ERROR,
-    MALFORMED_MESSAGE,
-    OK,
-    PERMISSION_DENIED,
-    RESOURCE_LIMIT_EXCEEDED,
+    StatusCode,
     create_status,
 )
 from .resources import (
@@ -311,8 +306,8 @@ class CircuitV2Protocol(Service):
                         )
                         # Create a proto Status directly
                         pb_status = PbStatus()
-                        pb_status.code = MALFORMED_MESSAGE  # type: ignore
-                        pb_status.message = "Empty message received"  # type: ignore
+                        pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
+                        pb_status.message = "Empty message received"
 
                         response = HopMessage(
                             type=HopMessage.STATUS,
@@ -328,8 +323,8 @@ class CircuitV2Protocol(Service):
                 )
                 # Create a proto Status directly
                 pb_status = PbStatus()
-                pb_status.code = CONNECTION_FAILED  # type: ignore
-                pb_status.message = "Stream read timeout"  # type: ignore
+                pb_status.code = cast(Any, int(StatusCode.CONNECTION_FAILED))
+                pb_status.message = "Stream read timeout"
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
@@ -346,8 +341,8 @@ class CircuitV2Protocol(Service):
                 )
                 # Create a proto Status directly
                 pb_status = PbStatus()
-                pb_status.code = MALFORMED_MESSAGE  # type: ignore
-                pb_status.message = f"Read error: {str(e)}"  # type: ignore
+                pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
+                pb_status.message = f"Read error: {str(e)}"
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
@@ -369,8 +364,8 @@ class CircuitV2Protocol(Service):
                 )
                 # Create a proto Status directly
                 pb_status = PbStatus()
-                pb_status.code = MALFORMED_MESSAGE  # type: ignore
-                pb_status.message = f"Parse error: {str(e)}"  # type: ignore
+                pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
+                pb_status.message = f"Parse error: {str(e)}"
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
@@ -394,7 +389,7 @@ class CircuitV2Protocol(Service):
                 # Send a nice error response using _send_status method
                 await self._send_status(
                     stream,
-                    MALFORMED_MESSAGE,
+                    StatusCode.MALFORMED_MESSAGE,
                     f"Invalid message type: {hop_msg.type}",
                 )
 
@@ -406,7 +401,7 @@ class CircuitV2Protocol(Service):
                 # Send a nice error response using _send_status method
                 await self._send_status(
                     stream,
-                    MALFORMED_MESSAGE,
+                    StatusCode.MALFORMED_MESSAGE,
                     f"Internal error: {str(e)}",
                 )
             except Exception as e2:
@@ -431,7 +426,7 @@ class CircuitV2Protocol(Service):
                 # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
                     stream,
-                    MALFORMED_MESSAGE,
+                    StatusCode.MALFORMED_MESSAGE,
                     "Invalid message type",
                 )
                 await self._close_stream(stream)
@@ -443,7 +438,7 @@ class CircuitV2Protocol(Service):
                 # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
                     stream,
-                    CONNECTION_FAILED,
+                    StatusCode.CONNECTION_FAILED,
                     "No pending relay connection",
                 )
                 await self._close_stream(stream)
@@ -455,12 +450,12 @@ class CircuitV2Protocol(Service):
             # Send success status to both sides
             await self._send_status(
                 src_stream,
-                OK,
+                StatusCode.OK,
                 "Connection established",
             )
             await self._send_stop_status(
                 stream,
-                OK,
+                StatusCode.OK,
                 "Connection established",
             )
 
@@ -473,7 +468,7 @@ class CircuitV2Protocol(Service):
             logger.error("Timeout reading from stop stream")
             await self._send_stop_status(
                 stream,
-                CONNECTION_FAILED,
+                StatusCode.CONNECTION_FAILED,
                 "Stream read timeout",
             )
             await self._close_stream(stream)
@@ -482,7 +477,7 @@ class CircuitV2Protocol(Service):
             try:
                 await self._send_stop_status(
                     stream,
-                    MALFORMED_MESSAGE,
+                    StatusCode.MALFORMED_MESSAGE,
                     str(e),
                 )
                 await self._close_stream(stream)
@@ -501,7 +496,7 @@ class CircuitV2Protocol(Service):
                 logger.debug("Reservation limit exceeded for peer %s", peer_id)
                 # Send status message with STATUS type
                 status = create_status(
-                    code=RESOURCE_LIMIT_EXCEEDED,
+                    code=StatusCode.RESOURCE_LIMIT_EXCEEDED,
                     message="Reservation limit exceeded",
                 )
 
@@ -518,14 +513,15 @@ class CircuitV2Protocol(Service):
 
             # Send reservation success response
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
-                status = create_status(code=OK, message="Reservation accepted")
+                status = create_status(
+                    code=StatusCode.OK, message="Reservation accepted"
+                )
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=status.to_pb(),
                     reservation=Reservation(
                         expire=int(time.time() + ttl),
-                        addrs=[],  # TODO: Add relay addresses
                         voucher=b"",  # We don't use vouchers yet
                         signature=b"",  # We don't use signatures yet
                     ),
@@ -558,7 +554,7 @@ class CircuitV2Protocol(Service):
                     # Send error response
                     await self._send_status(
                         stream,
-                        INTERNAL_ERROR,
+                        StatusCode.INTERNAL_ERROR,
                         f"Failed to process reservation: {str(e)}",
                     )
                 except Exception as send_err:
@@ -582,7 +578,7 @@ class CircuitV2Protocol(Service):
             if not self.resource_manager.verify_reservation(peer_id, msg.reservation):
                 await self._send_status(
                     stream,
-                    PERMISSION_DENIED,
+                    StatusCode.PERMISSION_DENIED,
                     "Invalid reservation",
                 )
                 await stream.reset()
@@ -592,7 +588,7 @@ class CircuitV2Protocol(Service):
         if not self.resource_manager.can_accept_connection(peer_id):
             await self._send_status(
                 stream,
-                RESOURCE_LIMIT_EXCEEDED,
+                StatusCode.RESOURCE_LIMIT_EXCEEDED,
                 "Connection limit exceeded",
             )
             await stream.reset()
@@ -626,14 +622,14 @@ class CircuitV2Protocol(Service):
                 # Handle status attributes from the response
                 if resp.HasField("status"):
                     # Get code and message attributes with defaults
-                    status_code = getattr(resp.status, "code", OK)
+                    status_code = getattr(resp.status, "code", StatusCode.OK)
                     # Get message with default
                     status_msg = getattr(resp.status, "message", "Unknown error")
                 else:
-                    status_code = OK
+                    status_code = StatusCode.OK
                     status_msg = "No status provided"
 
-                if status_code != OK:
+                if status_code != StatusCode.OK:
                     raise ConnectionError(
                         f"Destination rejected connection: {status_msg}"
                     )
@@ -649,7 +645,7 @@ class CircuitV2Protocol(Service):
             # Send success status
             await self._send_status(
                 stream,
-                OK,
+                StatusCode.OK,
                 "Connection established",
             )
 
@@ -662,7 +658,7 @@ class CircuitV2Protocol(Service):
             logger.error("Error establishing relay connection: %s", str(e))
             await self._send_status(
                 stream,
-                CONNECTION_FAILED,
+                StatusCode.CONNECTION_FAILED,
                 str(e),
             )
             if peer_id in self._active_relays:
@@ -678,7 +674,7 @@ class CircuitV2Protocol(Service):
             logger.error("Unexpected error in connect handler: %s", str(e))
             await self._send_status(
                 stream,
-                CONNECTION_FAILED,
+                StatusCode.CONNECTION_FAILED,
                 "Internal error",
             )
             if peer_id in self._active_relays:
@@ -754,8 +750,10 @@ class CircuitV2Protocol(Service):
             with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
                 # Create a proto Status directly
                 pb_status = PbStatus()
-                pb_status.code = code  # type: ignore
-                pb_status.message = message  # type: ignore
+                pb_status.code = cast(
+                    Any, int(code)
+                )  # Cast to Any to avoid type errors
+                pb_status.message = message
 
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
@@ -790,8 +788,10 @@ class CircuitV2Protocol(Service):
             with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
                 # Create a proto Status directly
                 pb_status = PbStatus()
-                pb_status.code = code  # type: ignore
-                pb_status.message = message  # type: ignore
+                pb_status.code = cast(
+                    Any, int(code)
+                )  # Cast to Any to avoid type errors
+                pb_status.message = message
 
                 status_msg = StopMessage(
                     type=StopMessage.STATUS,

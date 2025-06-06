@@ -55,7 +55,7 @@ from .protocol import (
     CircuitV2Protocol,
 )
 from .protocol_buffer import (
-    OK,
+    StatusCode,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
@@ -159,10 +159,10 @@ class CircuitV2Transport(ITransport):
             resp.ParseFromString(resp_bytes)
 
             # Access status attributes directly
-            status_code = getattr(resp.status, "code", OK)
+            status_code = getattr(resp.status, "code", StatusCode.OK)
             status_msg = getattr(resp.status, "message", "Unknown error")
 
-            if status_code != OK:
+            if status_code != StatusCode.OK:
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
             # Create raw connection from stream
@@ -238,10 +238,10 @@ class CircuitV2Transport(ITransport):
             resp.ParseFromString(resp_bytes)
 
             # Access status attributes directly
-            status_code = getattr(resp.status, "code", OK)
+            status_code = getattr(resp.status, "code", StatusCode.OK)
             status_msg = getattr(resp.status, "message", "Unknown error")
 
-            if status_code != OK:
+            if status_code != StatusCode.OK:
                 logger.warning(
                     "Reservation failed with relay %s: %s",
                     relay_peer_id,

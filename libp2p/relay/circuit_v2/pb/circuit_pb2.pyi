@@ -4,9 +4,7 @@ isort:skip_file
 """
 
 import builtins
-import collections.abc
 import google.protobuf.descriptor
-import google.protobuf.internal.containers
 import google.protobuf.internal.enum_type_wrapper
 import google.protobuf.message
 import sys
@@ -19,83 +17,33 @@ else:
 
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
 
-class _Status:
-    ValueType = typing.NewType("ValueType", builtins.int)
-    V: typing_extensions.TypeAlias = ValueType
-
-class _StatusEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_Status.ValueType], builtins.type):
-    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-    OK: _Status.ValueType  # 0
-    RESERVATION_REFUSED: _Status.ValueType  # 100
-    RESOURCE_LIMIT_EXCEEDED: _Status.ValueType  # 101
-    PERMISSION_DENIED: _Status.ValueType  # 102
-    CONNECTION_FAILED: _Status.ValueType  # 200
-    DIAL_REFUSED: _Status.ValueType  # 201
-    STOP_FAILED: _Status.ValueType  # 300
-    MALFORMED_MESSAGE: _Status.ValueType  # 400
-    INTERNAL_ERROR: _Status.ValueType  # 500
-
-class Status(_Status, metaclass=_StatusEnumTypeWrapper):
-    """Status codes for relay operations"""
-
-OK: Status.ValueType  # 0
-RESERVATION_REFUSED: Status.ValueType  # 100
-RESOURCE_LIMIT_EXCEEDED: Status.ValueType  # 101
-PERMISSION_DENIED: Status.ValueType  # 102
-CONNECTION_FAILED: Status.ValueType  # 200
-DIAL_REFUSED: Status.ValueType  # 201
-STOP_FAILED: Status.ValueType  # 300
-MALFORMED_MESSAGE: Status.ValueType  # 400
-INTERNAL_ERROR: Status.ValueType  # 500
-global___Status = Status
-
-# HopMessage Type enum classes
-class _HopMessageType:
-    ValueType = typing.NewType("ValueType", builtins.int)
-    V: typing_extensions.TypeAlias = ValueType
-
-class _HopMessageTypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_HopMessageType.ValueType], builtins.type):
-    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-    RESERVE: _HopMessageType.ValueType  # 0
-    CONNECT: _HopMessageType.ValueType  # 1
-    STATUS: _HopMessageType.ValueType  # 2
-
-class HopMessageType(_HopMessageType, metaclass=_HopMessageTypeEnumTypeWrapper):
-    """Message types for HopMessage"""
-    pass
-
-# StopMessage Type enum classes
-class _StopMessageType:
-    ValueType = typing.NewType("ValueType", builtins.int)
-    V: typing_extensions.TypeAlias = ValueType
-
-class _StopMessageTypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_StopMessageType.ValueType], builtins.type):
-    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-    CONNECT: _StopMessageType.ValueType  # 0
-    STATUS: _StopMessageType.ValueType  # 1
-
-class StopMessageType(_StopMessageType, metaclass=_StopMessageTypeEnumTypeWrapper):
-    """Message types for StopMessage"""
-    pass
-
 @typing.final
 class HopMessage(google.protobuf.message.Message):
-    """HopMessage is used to open relay connections."""
+    """Circuit v2 message types"""
 
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    # Use class references that are defined above
-    Type = HopMessageType
-    RESERVE: builtins.int  # 0
-    CONNECT: builtins.int  # 1
-    STATUS: builtins.int  # 2
+    class _Type:
+        ValueType = typing.NewType("ValueType", builtins.int)
+        V: typing_extensions.TypeAlias = ValueType
+
+    class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[HopMessage._Type.ValueType], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+        RESERVE: HopMessage._Type.ValueType  # 0
+        CONNECT: HopMessage._Type.ValueType  # 1
+        STATUS: HopMessage._Type.ValueType  # 2
+
+    class Type(_Type, metaclass=_TypeEnumTypeWrapper): ...
+    RESERVE: HopMessage.Type.ValueType  # 0
+    CONNECT: HopMessage.Type.ValueType  # 1
+    STATUS: HopMessage.Type.ValueType  # 2
 
     TYPE_FIELD_NUMBER: builtins.int
     PEER_FIELD_NUMBER: builtins.int
     RESERVATION_FIELD_NUMBER: builtins.int
     LIMIT_FIELD_NUMBER: builtins.int
     STATUS_FIELD_NUMBER: builtins.int
-    type: builtins.int
+    type: global___HopMessage.Type.ValueType
     peer: builtins.bytes
     @property
     def reservation(self) -> global___Reservation: ...
@@ -106,78 +54,76 @@ class HopMessage(google.protobuf.message.Message):
     def __init__(
         self,
         *,
-        type: builtins.int = ...,
+        type: global___HopMessage.Type.ValueType = ...,
         peer: builtins.bytes = ...,
         reservation: global___Reservation | None = ...,
         limit: global___Limit | None = ...,
         status: global___Status | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["limit", b"limit", "peer", b"peer", "reservation", b"reservation", "status", b"status"]) -> builtins.bool: ...
+    def HasField(self, field_name: typing.Literal["limit", b"limit", "reservation", b"reservation", "status", b"status"]) -> builtins.bool: ...
     def ClearField(self, field_name: typing.Literal["limit", b"limit", "peer", b"peer", "reservation", b"reservation", "status", b"status", "type", b"type"]) -> None: ...
 
 global___HopMessage = HopMessage
 
 @typing.final
 class StopMessage(google.protobuf.message.Message):
-    """StopMessage is used to stop relay connections."""
-
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    # Use class references that are defined above
-    Type = StopMessageType
-    CONNECT: builtins.int  # 0
-    STATUS: builtins.int  # 1
+    class _Type:
+        ValueType = typing.NewType("ValueType", builtins.int)
+        V: typing_extensions.TypeAlias = ValueType
+
+    class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[StopMessage._Type.ValueType], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+        CONNECT: StopMessage._Type.ValueType  # 0
+        STATUS: StopMessage._Type.ValueType  # 1
+
+    class Type(_Type, metaclass=_TypeEnumTypeWrapper): ...
+    CONNECT: StopMessage.Type.ValueType  # 0
+    STATUS: StopMessage.Type.ValueType  # 1
 
     TYPE_FIELD_NUMBER: builtins.int
     PEER_FIELD_NUMBER: builtins.int
     STATUS_FIELD_NUMBER: builtins.int
-    type: builtins.int
+    type: global___StopMessage.Type.ValueType
     peer: builtins.bytes
     @property
     def status(self) -> global___Status: ...
     def __init__(
         self,
         *,
-        type: builtins.int = ...,
+        type: global___StopMessage.Type.ValueType = ...,
         peer: builtins.bytes = ...,
         status: global___Status | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["peer", b"peer", "status", b"status"]) -> builtins.bool: ...
+    def HasField(self, field_name: typing.Literal["status", b"status"]) -> builtins.bool: ...
     def ClearField(self, field_name: typing.Literal["peer", b"peer", "status", b"status", "type", b"type"]) -> None: ...
 
 global___StopMessage = StopMessage
 
 @typing.final
 class Reservation(google.protobuf.message.Message):
-    """Reservation details for relay connections."""
-
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     VOUCHER_FIELD_NUMBER: builtins.int
     SIGNATURE_FIELD_NUMBER: builtins.int
     EXPIRE_FIELD_NUMBER: builtins.int
-    ADDRS_FIELD_NUMBER: builtins.int
     voucher: builtins.bytes
     signature: builtins.bytes
     expire: builtins.int
-    @property
-    def addrs(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
     def __init__(
         self,
         *,
         voucher: builtins.bytes = ...,
         signature: builtins.bytes = ...,
         expire: builtins.int = ...,
-        addrs: collections.abc.Iterable[builtins.bytes] | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["addrs", b"addrs", "expire", b"expire", "signature", b"signature", "voucher", b"voucher"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["expire", b"expire", "signature", b"signature", "voucher", b"voucher"]) -> None: ...
 
 global___Reservation = Reservation
 
 @typing.final
 class Limit(google.protobuf.message.Message):
-    """Resource limits for relay connections."""
-
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     DURATION_FIELD_NUMBER: builtins.int
@@ -192,4 +138,47 @@ class Limit(google.protobuf.message.Message):
     ) -> None: ...
     def ClearField(self, field_name: typing.Literal["data", b"data", "duration", b"duration"]) -> None: ...
 
-global___Limit = Limit 
+global___Limit = Limit
+
+@typing.final
+class Status(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class _Code:
+        ValueType = typing.NewType("ValueType", builtins.int)
+        V: typing_extensions.TypeAlias = ValueType
+
+    class _CodeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[Status._Code.ValueType], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+        OK: Status._Code.ValueType  # 0
+        RESERVATION_REFUSED: Status._Code.ValueType  # 100
+        RESOURCE_LIMIT_EXCEEDED: Status._Code.ValueType  # 101
+        PERMISSION_DENIED: Status._Code.ValueType  # 102
+        CONNECTION_FAILED: Status._Code.ValueType  # 200
+        DIAL_REFUSED: Status._Code.ValueType  # 201
+        STOP_FAILED: Status._Code.ValueType  # 300
+        MALFORMED_MESSAGE: Status._Code.ValueType  # 400
+
+    class Code(_Code, metaclass=_CodeEnumTypeWrapper): ...
+    OK: Status.Code.ValueType  # 0
+    RESERVATION_REFUSED: Status.Code.ValueType  # 100
+    RESOURCE_LIMIT_EXCEEDED: Status.Code.ValueType  # 101
+    PERMISSION_DENIED: Status.Code.ValueType  # 102
+    CONNECTION_FAILED: Status.Code.ValueType  # 200
+    DIAL_REFUSED: Status.Code.ValueType  # 201
+    STOP_FAILED: Status.Code.ValueType  # 300
+    MALFORMED_MESSAGE: Status.Code.ValueType  # 400
+
+    CODE_FIELD_NUMBER: builtins.int
+    MESSAGE_FIELD_NUMBER: builtins.int
+    code: global___Status.Code.ValueType
+    message: builtins.str
+    def __init__(
+        self,
+        *,
+        code: global___Status.Code.ValueType = ...,
+        message: builtins.str = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["code", b"code", "message", b"message"]) -> None: ...
+
+global___Status = Status
