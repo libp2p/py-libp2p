@@ -16,7 +16,6 @@ from libp2p.custom_types import (
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
-    MuxedStreamError,
     MuxedStreamReset,
 )
 
@@ -101,13 +100,18 @@ class NetStream(INetStream):
         :return: number of bytes written
         """
         try:
-            if self.state != StreamState.OPEN:
+            if self.state == StreamState.RESET:
+                raise StreamReset("Cannot write to stream; stream is reset")
+            elif self.state != StreamState.OPEN:
                 raise StreamClosed("Cannot write to stream; not open")
             else:
                 await self.muxed_stream.write(data)
-        except (MuxedStreamClosed, MuxedStreamError) as error:
-            self.set_state(StreamState.ERROR)
-            raise StreamClosed() from error
+        except MuxedStreamClosed as error:
+            self.set_state(StreamState.CLOSED)
+            raise StreamEOF() from error
+        except MuxedStreamReset as error:
+            self.set_state(StreamState.RESET)
+            raise StreamReset() from error
 
     async def close(self) -> None:
         """Close stream."""

@@ -107,6 +107,9 @@ class YamuxStream(IMuxedStream):
                     await trio.sleep(0.01)
                     await self.window_lock.acquire()
 
+                if self.reset_received:
+                    raise MuxedStreamReset("Stream was reset")
+
                 if self.closed:
                     raise MuxedStreamError("Stream is closed")
 
