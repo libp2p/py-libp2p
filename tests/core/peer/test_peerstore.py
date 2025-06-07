@@ -81,6 +81,6 @@ def test_peers():
     store = PeerStore()
     store.add_protocols(ID(b"peer1"), [])
     store.put(ID(b"peer2"), "key", "val")
-    store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 10)
+    store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 120)
 
     assert set(store.peer_ids()) == {ID(b"peer1"), ID(b"peer2"), ID(b"peer3")}

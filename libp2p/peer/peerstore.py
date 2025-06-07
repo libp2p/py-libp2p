@@ -33,7 +33,7 @@ from .peerinfo import (
     PeerInfo,
 )
 
-PERMANENT_ADDR_TTL = sys.maxsize
+PERMANENT_ADDR_TTL = 0
 
 
 class PeerStore(IPeerStore):
@@ -52,7 +52,7 @@ class PeerStore(IPeerStore):
             if peer_data.is_expired():
                 peer_data.clear_addrs()
             return PeerInfo(peer_id, peer_data.get_addrs())
-        raise PeerStoreError("peer ID not found or expired")
+        raise PeerStoreError("peer ID not found")
 
     def get_protocols(self, peer_id: ID) -> list[str]:
         """
@@ -91,9 +91,7 @@ class PeerStore(IPeerStore):
         :return: all of the valid peer IDs stored in peer store
         """
         valid_peer_ids: list[ID] = []
-        peer_ids = list(self.peer_data_map.keys())
-        for peer_id in peer_ids:
-            peer_data = self.peer_data_map[peer_id]
+        for peer_id, peer_data in self.peer_data_map.items():
             if not peer_data.is_expired():
                 valid_peer_ids.append(peer_id)
             else:
@@ -124,7 +122,6 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
 
-    # pass without ttl and pass with 2 sec ttl and time.sleep(2)
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """
         :param peer_id: peer ID to add address for
@@ -156,6 +153,7 @@ class PeerStore(IPeerStore):
                 return peer_data.get_addrs()
             else:
                 peer_data.clear_addrs()
+                raise PeerStoreError("peer ID is expired")
         raise PeerStoreError("peer ID not found")
 
     def clear_addrs(self, peer_id: ID) -> None:

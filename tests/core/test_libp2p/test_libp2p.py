@@ -39,7 +39,7 @@ async def test_simple_messages(security_protocol):
         )
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
 
         stream = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_0])
 
@@ -78,7 +78,7 @@ async def test_double_response(security_protocol):
         hosts[1].set_stream_handler(PROTOCOL_ID_0, double_response_stream_handler)
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
         stream = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_0])
 
         messages = ["hello" + str(x) for x in range(10)]
@@ -109,8 +109,8 @@ async def test_multiple_streams(security_protocol):
         )
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
-        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
+        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 120)
 
         stream_a = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_1])
         stream_b = await hosts[1].new_stream(hosts[0].get_id(), [PROTOCOL_ID_0])
@@ -148,8 +148,8 @@ async def test_multiple_streams_same_initiator_different_protocols(security_prot
         )
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
-        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
+        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 120)
 
         # Open streams to hosts[1] over echo_a1 echo_a2 echo_a3 protocols
         stream_a1 = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_0])
@@ -199,8 +199,8 @@ async def test_multiple_streams_two_initiators(security_protocol):
         )
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
-        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
+        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 120)
 
         stream_a1 = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_0])
         stream_a2 = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_1])
@@ -254,14 +254,14 @@ async def test_triangle_nodes_connection(security_protocol):
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
         # Associate all permutations
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
-        hosts[0].get_peerstore().add_addrs(hosts[2].get_id(), hosts[2].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
+        hosts[0].get_peerstore().add_addrs(hosts[2].get_id(), hosts[2].get_addrs(), 120)
 
-        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 600)
-        hosts[1].get_peerstore().add_addrs(hosts[2].get_id(), hosts[2].get_addrs(), 600)
+        hosts[1].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 120)
+        hosts[1].get_peerstore().add_addrs(hosts[2].get_id(), hosts[2].get_addrs(), 120)
 
-        hosts[2].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 600)
-        hosts[2].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
+        hosts[2].get_peerstore().add_addrs(hosts[0].get_id(), hosts[0].get_addrs(), 120)
+        hosts[2].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
 
         stream_0_to_1 = await hosts[0].new_stream(hosts[1].get_id(), [PROTOCOL_ID_0])
         stream_0_to_2 = await hosts[0].new_stream(hosts[2].get_id(), [PROTOCOL_ID_0])

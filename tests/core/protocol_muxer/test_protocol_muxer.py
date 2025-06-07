@@ -33,7 +33,7 @@ async def perform_simple_test(
             )
 
         # Associate the peer with local ip address (see default parameters of Libp2p())
-        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 600)
+        hosts[0].get_peerstore().add_addrs(hosts[1].get_id(), hosts[1].get_addrs(), 120)
         stream = await hosts[0].new_stream(hosts[1].get_id(), protocols_for_client)
         messages = ["hello" + str(x) for x in range(10)]
         for message in messages:
@@ -123,7 +123,7 @@ async def test_multistream_command(security_protocol):
             )
 
         # Ensure dialer knows how to reach the listener
-        dialer.get_peerstore().add_addrs(listener.get_id(), listener.get_addrs(), 600)
+        dialer.get_peerstore().add_addrs(listener.get_id(), listener.get_addrs(), 120)
 
         # Dialer asks peer to list the supported protocols using `ls`
         response = await dialer.send_command(listener.get_id(), "ls")
