@@ -1,8 +1,0 @@
-project_includes = ["libp2p", "examples", "tests"]
-project_excludes = [
-  "**/.project-template/**",
-  "**/docs/conf.py",
-  "**/*pb2.py",
-  "**/*.pyi",
-  ".venv/**",
-]
