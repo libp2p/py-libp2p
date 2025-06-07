@@ -41,8 +41,8 @@ class MplexStream(IMuxedStream):
     name: str
     stream_id: StreamID
     muxed_conn: "Mplex"
-    read_deadline: int
-    write_deadline: int
+    read_deadline: Optional[int]
+    write_deadline: Optional[int]
 
     # TODO: Add lock for read/write to avoid interleaving receiving messages?
     close_lock: trio.Lock
@@ -71,7 +71,10 @@ class MplexStream(IMuxedStream):
         """
         self.name = name
         self.stream_id = stream_id
-        self.muxed_conn = muxed_conn
+        # NOTE: All methods used here are part of `Mplex` which is a derived
+        # class of IMuxedConn. Ignoring this type assignment should not pose
+        # any risk.
+        self.muxed_conn = muxed_conn  # type: ignore[assignment]
         self.read_deadline = None
         self.write_deadline = None
         self.event_local_closed = trio.Event()
@@ -92,7 +95,7 @@ class MplexStream(IMuxedStream):
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
 
-    def _read_return_when_blocked(self) -> bytes:
+    def _read_return_when_blocked(self) -> bytearray:
         buf = bytearray()
         while True:
             try:
@@ -102,7 +105,7 @@ class MplexStream(IMuxedStream):
                 break
         return buf
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         """
         Read up to n bytes. Read possibly returns fewer than `n` bytes, if
         there are not enough bytes in the Mplex buffer. If `n is None`, read

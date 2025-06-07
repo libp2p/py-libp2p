@@ -5,9 +5,11 @@ from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
 )
+from typing import Optional
 
 from libp2p.abc import (
     IHost,
+    ISubscriptionAPI,
 )
 from libp2p.pubsub.pubsub import (
     Pubsub,
@@ -40,9 +42,11 @@ class DummyAccountNode(Service):
     """
 
     pubsub: Pubsub
+    subscription: Optional[ISubscriptionAPI]
 
     def __init__(self, pubsub: Pubsub) -> None:
         self.pubsub = pubsub
+        self.subscription = None
         self.balances: dict[str, int] = {}
 
     @property
@@ -74,6 +78,10 @@ class DummyAccountNode(Service):
     async def handle_incoming_msgs(self) -> None:
         """Handle all incoming messages on the CRYPTO_TOPIC from peers."""
         while True:
+            if self.subscription is None:
+                raise RuntimeError(
+                    "Subscription must be set before handling incoming messages"
+                )
             incoming = await self.subscription.get()
             msg_comps = incoming.data.decode("utf-8").split(",")
 

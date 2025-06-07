@@ -160,7 +160,11 @@ class IMuxedConn(ABC):
     event_started: trio.Event
 
     @abstractmethod
-    def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        conn: ISecureConn,
+        peer_id: ID,
+    ) -> None:
         """
         Initialize a new multiplexed connection.
 
@@ -287,7 +291,7 @@ class INetStream(ReadWriteCloser):
     muxed_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> TProtocol:
+    def get_protocol(self) -> Optional[TProtocol]:
         """
         Retrieve the protocol identifier for the stream.
 
@@ -916,7 +920,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         Start listening on one or more multiaddresses.
 
@@ -1564,7 +1568,7 @@ class IMultiselectMuxer(ABC):
     and its corresponding handler for communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[Optional[TProtocol], Optional[StreamHandlerFn]]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -1580,7 +1584,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[TProtocol, ...]:
+    def get_protocols(self) -> tuple[Optional[TProtocol], ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1595,7 +1599,7 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[Optional[TProtocol], Optional[StreamHandlerFn]]:
         """
         Negotiate a protocol selection with a multiselect client.
 
@@ -1672,7 +1676,7 @@ class IPeerRouting(ABC):
     """
 
     @abstractmethod
-    async def find_peer(self, peer_id: ID) -> PeerInfo:
+    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
         """
         Search for a peer with the specified peer ID.
 
@@ -1840,6 +1844,11 @@ class IPubsubRouter(ABC):
 
     """
 
+    mesh: dict[str, set[ID]]
+    fanout: dict[str, set[ID]]
+    peer_protocol: dict[ID, TProtocol]
+    degree: int
+
     @abstractmethod
     def get_protocols(self) -> list[TProtocol]:
         """
@@ -1865,7 +1874,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
         """
         Notify the router that a new peer has connected.
 

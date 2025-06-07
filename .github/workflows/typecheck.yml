@@ -1,0 +1,182 @@
+name: Typecheck
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  typecheck_pr:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+
+      - name: Configure Poetry
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry config virtualenvs.create true
+
+      - name: Get Poetry version
+        id: poetry-version
+        run: echo "version=$(poetry --version | awk '{print $3}')" >> $GITHUB_OUTPUT
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        id: poetry-cache
+        with:
+          path: |
+            .venv
+            ~/.cache/pypoetry/virtualenvs
+            ~/.cache/pypoetry/cache
+          key: ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-${{ hashFiles('**/poetry.lock', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-${{ steps.poetry-version.outputs.version }}-python-
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies with Poetry
+        run: poetry install --all-extras --no-interaction
+
+      - name: Run typecheck on PR and generate current errors
+        id: run_pr_typecheck
+        run: |
+          set -eo pipefail
+          poetry run make typecheck 2>&1 | tee pr_typecheck.log || true
+          grep '^ERROR ' pr_typecheck.log > pr_errors.txt || touch pr_errors.txt
+          echo "PR typecheck log generated: pr_errors.txt"
+          echo "pr_errors_path=pr_errors.txt" >> $GITHUB_OUTPUT
+
+      - name: Download main error baseline artifact
+        id: download_main_baseline
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: update-main-baseline.yml
+          name: main-type-errors-baseline
+          path: downloaded_baseline
+          if_no_artifact_found: warn
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare baseline errors file for PR comparison
+        id: prepare_pr_baseline
+        run: |
+          if [ -f downloaded_baseline/main_errors.txt ]; then
+            cp downloaded_baseline/main_errors.txt actual_baseline_errors.txt
+            echo "Baseline 'actual_baseline_errors.txt' prepared from downloaded main artifact."
+          else
+            echo "::warning title=Main Baseline Not Found::Artifact 'main-type-errors-baseline' from 'update-main-baseline.yml' (main branch) not found or download failed. Proceeding with an empty baseline. All current errors will be treated as new."
+            touch actual_baseline_errors.txt
+          fi
+          echo "pr_baseline_path=actual_baseline_errors.txt" >> $GITHUB_OUTPUT
+
+      - name: Upload PR typecheck log and current errors (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-typecheck-output
+          path: |
+            pr_typecheck.log
+            pr_errors.txt
+            downloaded_baseline/
+            actual_baseline_errors.txt
+
+      - name: Compare PR errors with main, comment & fail on new
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const pr_number = context.payload.pull_request.number;
+
+            const current_errors_file = process.env.INPUT_CURRENT_ERRORS_PATH;
+            const baseline_errors_file = process.env.INPUT_BASELINE_ERRORS_PATH;
+
+            let current_errors_content = "";
+            if (fs.existsSync(current_errors_file)) {
+              current_errors_content = fs.readFileSync(current_errors_file, 'utf8');
+            } else {
+              core.warning(`Current PR errors file '${current_errors_file}' not found.`);
+            }
+            const current = current_errors_content.trim().split('\n').filter(Boolean);
+
+            let baseline_errors_content = "";
+            if (fs.existsSync(baseline_errors_file)) {
+              baseline_errors_content = fs.readFileSync(baseline_errors_file, 'utf8');
+            } else {
+              core.warning(`Prepared baseline errors file '${baseline_errors_file}' not found. Assuming empty baseline.`);
+            }
+            const previous = baseline_errors_content.trim().split('\n').filter(Boolean);
+
+            const added = current.filter(e => !previous.includes(e));
+            const removed = previous.filter(e => !current.includes(e));
+
+            const comment_lines = [
+              "**Typecheck Report (Comparison with `main` Branch Baseline)**",
+              `*   Total errors in this PR: **${current.length}**`,
+              `*   Total errors in \`main\` branch baseline: **${previous.length}**`
+            ];
+
+            if (removed.length > 0) {
+              comment_lines.push(`\n🎉 **Fixed ${removed.length} error(s) that were in the \`main\` baseline:**`);
+              comment_lines.push("```diff");
+              removed.forEach(e => comment_lines.push(`- ${e}`));
+              comment_lines.push("```");
+            }
+
+            if (added.length > 0) {
+              comment_lines.push(`\n🚨 **Introduced ${added.length} new error(s) not present in the \`main\` baseline:**`);
+              comment_lines.push("```diff");
+              added.forEach(e => comment_lines.push(`+ ${e}`));
+              comment_lines.push("```");
+            }
+
+            if (added.length === 0 && removed.length === 0 ) {
+              if (current.length === 0) {
+                comment_lines.push(`\n✅ No type errors in this PR and \`main\` baseline is also clean (or matches)!`);
+              } else if (current.length === previous.length) {
+                 comment_lines.push(`\nNo change in type errors. This PR has **${current.length}** error(s), consistent with the \`main\` baseline.`);
+              }
+            }
+
+            comment_lines.push("\n<details><summary>Full list of errors in this PR</summary>");
+            comment_lines.push("\n```txt");
+            if (current.length > 0) {
+              current.forEach(e => comment_lines.push(e));
+            } else {
+              comment_lines.push("(No errors found in this PR)");
+            }
+            comment_lines.push("```");
+            comment_lines.push("</details>");
+
+            try {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr_number,
+                body: comment_lines.join("\n")
+              });
+            } catch (error) {
+              core.error(`Failed to create PR comment: ${error.message}. Ensure the GITHUB_TOKEN has 'issues: write' permissions.`);
+            }
+
+            if (added.length > 0) {
+              core.setFailed(`New type errors introduced relative to main: ${added.length}. See PR comment for details.`);
+            }
+        env:
+          INPUT_CURRENT_ERRORS_PATH: ${{ steps.run_pr_typecheck.outputs.pr_errors_path }}
+          INPUT_BASELINE_ERRORS_PATH: ${{ steps.prepare_pr_baseline.outputs.pr_baseline_path }}

@@ -116,15 +116,15 @@ def initialize_pair(
         EncryptionParameters(
             cipher_type,
             hash_type,
-            first_half[0:iv_size],
-            first_half[iv_size + cipher_key_size :],
-            first_half[iv_size : iv_size + cipher_key_size],
+            bytes(first_half[0:iv_size]),
+            bytes(first_half[iv_size + cipher_key_size :]),
+            bytes(first_half[iv_size : iv_size + cipher_key_size]),
         ),
         EncryptionParameters(
             cipher_type,
             hash_type,
-            second_half[0:iv_size],
-            second_half[iv_size + cipher_key_size :],
-            second_half[iv_size : iv_size + cipher_key_size],
+            bytes(second_half[0:iv_size]),
+            bytes(second_half[iv_size + cipher_key_size :]),
+            bytes(second_half[iv_size : iv_size + cipher_key_size]),
         ),
     )

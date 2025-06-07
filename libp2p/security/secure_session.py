@@ -53,7 +53,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = 0
 
-    def _drain(self, n: int) -> bytes:
+    def _drain(self, n: Optional[int]) -> bytes:
         if self.low_watermark == self.high_watermark:
             return b""
 
@@ -75,7 +75,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = len(msg)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         if n == 0:
             return b""
 
@@ -84,6 +84,10 @@ class SecureSession(BaseSession):
             return data_from_buffer
 
         msg = await self.conn.read_msg()
+
+        # FIXME: I am not very sure of this fix
+        if n is None:
+            return msg
 
         if n < len(msg):
             self._fill(msg)

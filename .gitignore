@@ -146,6 +146,9 @@ instance/
 # PyBuilder
 target/
 
+# PyRight Config
+pyrightconfig.json
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -171,3 +174,7 @@ env.bak/
 
 # mkdocs documentation
 /site
+
+#lockfiles
+uv.lock
+poetry.lock

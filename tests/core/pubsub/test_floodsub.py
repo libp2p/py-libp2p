@@ -46,7 +46,7 @@ async def test_simple_two_nodes():
 async def test_timed_cache_two_nodes():
     # Two nodes using LastSeenCache with a TTL of 120 seconds
     def get_msg_id(msg):
-        return (msg.data, msg.from_id)
+        return msg.data + msg.from_id
 
     async with PubsubFactory.create_batch_with_floodsub(
         2, seen_ttl=120, msg_id_constructor=get_msg_id

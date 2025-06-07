@@ -6,6 +6,7 @@ from collections.abc import (
     Iterable,
 )
 import subprocess
+from typing import Optional
 
 import trio
 
@@ -14,27 +15,34 @@ TIMEOUT_DURATION = 30
 
 class AbstractInterativeProcess(ABC):
     @abstractmethod
-    async def start(self) -> None:
-        ...
+    async def start(self) -> None: ...
 
     @abstractmethod
-    async def close(self) -> None:
-        ...
+    async def close(self) -> None: ...
 
 
 class BaseInteractiveProcess(AbstractInterativeProcess):
-    proc: trio.Process = None
+    proc: Optional[trio.Process] = None
     cmd: str
     args: list[str]
     bytes_read: bytearray
-    patterns: Iterable[bytes] = None
+    patterns: Optional[Iterable[bytes]] = None
     event_ready: trio.Event
 
     async def wait_until_ready(self) -> None:
+        if self.proc is None:
+            raise Exception("process is not defined")
+        if self.patterns is None:
+            raise Exception("patterns is not defined")
         patterns_occurred = {pat: False for pat in self.patterns}
         buffers = {pat: bytearray() for pat in self.patterns}
 
         async def read_from_daemon_and_check() -> None:
+            if self.proc is None:
+                raise Exception("process is not defined")
+            if self.proc.stdout is None:
+                raise Exception("process stdout is None, cannot read output")
+
             async for data in self.proc.stdout:
                 self.bytes_read.extend(data)
                 for pat, occurred in patterns_occurred.items():

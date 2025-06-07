@@ -6,15 +6,11 @@ import multihash
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
-import libp2p.peer.id as PeerID
 from libp2p.peer.id import (
     ID,
 )
 
 ALPHABETS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-# ensure we are not in "debug" mode for the following tests
-PeerID.FRIENDLY_IDS = False
 
 
 def test_eq_impl_for_bytes():
@@ -70,8 +66,8 @@ def test_eq_true():
 
 
 def test_eq_false():
-    peer_id = ID("efgh")
-    other = ID("abcd")
+    peer_id = ID(b"efgh")
+    other = ID(b"abcd")
 
     assert peer_id != other
 
@@ -91,7 +87,7 @@ def test_id_from_base58():
     for _ in range(10):
         random_id_string += random.choice(ALPHABETS)
     expected = ID(base58.b58decode(random_id_string))
-    actual = ID.from_base58(random_id_string.encode())
+    actual = ID.from_base58(random_id_string)
 
     assert actual == expected
 

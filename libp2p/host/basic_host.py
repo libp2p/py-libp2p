@@ -88,14 +88,14 @@ class BasicHost(IHost):
     def __init__(
         self,
         network: INetworkService,
-        default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
+        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
-        self.multiselect = Multiselect(default_protocols)
+        self.multiselect = Multiselect(dict(default_protocols.items()))
         self.multiselect_client = MultiselectClient()
 
     def get_id(self) -> ID:
@@ -258,6 +258,15 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
         net_stream.set_protocol(protocol)
+        if handler is None:
+            logger.debug(
+                "no handler for protocol %s, closing stream from peer %s",
+                protocol,
+                net_stream.muxed_conn.peer_id,
+            )
+            await net_stream.reset()
+            return
+
         await handler(net_stream)
 
     def get_live_peers(self) -> list[ID]:

@@ -9,29 +9,40 @@ from libp2p.crypto.keys import (
 
 if sys.platform != "win32":
     from fastecdsa import (
+        curve as curve_types,
         keys,
         point,
     )
-    from fastecdsa import curve as curve_types
     from fastecdsa.encoding.sec1 import (
         SEC1Encoder,
     )
 else:
-    from coincurve import PrivateKey as CPrivateKey
-    from coincurve import PublicKey as CPublicKey
+    from coincurve import (
+        PrivateKey as CPrivateKey,
+        PublicKey as CPublicKey,
+    )
 
 
-def infer_local_type(curve: str) -> object:
-    """
-    Convert a str representation of some elliptic curve to a
-    representation understood by the backend of this module.
-    """
-    if curve != "P-256":
-        raise NotImplementedError("Only P-256 curve is supported")
+if sys.platform != "win32":
 
-    if sys.platform != "win32":
+    def infer_local_type(curve: str) -> curve_types.Curve:
+        """
+        Convert a str representation of some elliptic curve to a
+        representation understood by the backend of this module.
+        """
+        if curve != "P-256":
+            raise NotImplementedError("Only P-256 curve is supported")
         return curve_types.P256
-    return "P-256"  # coincurve only supports P-256
+else:
+
+    def infer_local_type(curve: str) -> str:
+        """
+        Convert a str representation of some elliptic curve to a
+        representation understood by the backend of this module.
+        """
+        if curve != "P-256":
+            raise NotImplementedError("Only P-256 curve is supported")
+        return "P-256"  # coincurve only supports P-256
 
 
 if sys.platform != "win32":
@@ -68,7 +79,10 @@ if sys.platform != "win32":
             return cls(private_key_impl, curve_type)
 
         def to_bytes(self) -> bytes:
-            return keys.export_key(self.impl, self.curve)
+            key_str = keys.export_key(self.impl, self.curve)
+            if key_str is None:
+                raise Exception("Key not found")
+            return key_str.encode()
 
         def get_type(self) -> KeyType:
             return KeyType.ECC_P256

@@ -9,8 +9,10 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
-from libp2p.security.secio.transport import Transport as SecioTransport
+from libp2p.security.secio.transport import (
+    ID as SECIO_PROTOCOL_ID,
+    Transport as SecioTransport,
+)
 
 
 async def main():
@@ -24,7 +26,6 @@ async def main():
         local_key_pair=key_pair,
         # secure_bytes_provider: Optional function to generate secure random bytes
         # (defaults to secrets.token_bytes)
-        secure_bytes_provider=None,  # Use default implementation
     )
 
     # Create a security options dictionary mapping protocol ID to transport

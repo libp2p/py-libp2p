@@ -40,7 +40,7 @@ def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
 
 
 def _remote_address_to_multiaddr(
-    remote_address: Optional[tuple[str, int]]
+    remote_address: Optional[tuple[str, int]],
 ) -> Optional[Multiaddr]:
     """Convert a (host, port) tuple to a Multiaddr."""
     if remote_address is None:
@@ -81,15 +81,14 @@ def identify_handler_for(host: IHost) -> StreamHandlerFn:
         peer_id = (
             stream.muxed_conn.peer_id
         )  # remote peer_id is in class Mplex (mplex.py )
-
+        observed_multiaddr: Optional[Multiaddr] = None
         # Get the remote address
         try:
             remote_address = stream.get_remote_address()
             # Convert to multiaddr
             if remote_address:
                 observed_multiaddr = _remote_address_to_multiaddr(remote_address)
-            else:
-                observed_multiaddr = None
+
             logger.debug(
                 "Connection from remote peer %s, address: %s, multiaddr: %s",
                 peer_id,

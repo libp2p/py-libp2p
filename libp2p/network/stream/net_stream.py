@@ -35,7 +35,7 @@ class NetStream(INetStream):
         self.muxed_conn = muxed_stream.muxed_conn
         self.protocol_id = None
 
-    def get_protocol(self) -> TProtocol:
+    def get_protocol(self) -> Optional[TProtocol]:
         """
         :return: protocol id that stream runs on
         """
@@ -47,7 +47,7 @@ class NetStream(INetStream):
         """
         self.protocol_id = protocol_id
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         """
         Read from stream.
 

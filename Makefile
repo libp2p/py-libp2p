@@ -7,6 +7,7 @@ help:
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "clean - run clean-build and clean-pyc"
 	@echo "dist - build package and cat contents of the dist directory"
+	@echo "fix - fix formatting & linting issues with ruff"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
 	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
@@ -37,8 +38,14 @@ lint:
 		&& pre-commit run --all-files --show-diff-on-failure \
 	)
 
+fix:
+	python -m ruff check --fix
+
+typecheck:
+	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
+
 test:
-	python -m pytest tests
+	python -m pytest tests -n auto
 
 # protobufs management
 

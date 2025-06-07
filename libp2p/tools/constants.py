@@ -32,7 +32,7 @@ class GossipsubParams(NamedTuple):
     degree: int = 10
     degree_low: int = 9
     degree_high: int = 11
-    direct_peers: Sequence[PeerInfo] = None
+    direct_peers: Sequence[PeerInfo] = []
     time_to_live: int = 30
     gossip_window: int = 3
     gossip_history: int = 5

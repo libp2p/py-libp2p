@@ -9,5 +9,5 @@ def test_multierror_str_and_storage():
     # Check for storage
     assert multi_error.errors == errors
     # Check for representation
-    expected = "Error 1: bad value\n" "Error 2: 'missing key'\n" "Error 3: custom error"
+    expected = "Error 1: bad value\nError 2: 'missing key'\nError 3: custom error"
     assert str(multi_error) == expected
