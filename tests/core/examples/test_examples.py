@@ -23,8 +23,8 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
-from libp2p.tools.async_service.trio_service import (
-    background_trio_service,
+from libp2p.tools.anyio_service.anyio_service import (
+    background_anyio_service,
 )
 from libp2p.tools.utils import (
     MAX_READ_LEN,
@@ -224,10 +224,10 @@ async def pubsub_demo(host_a, host_b):
         print(f"Host B received: {received_by_b}")
         b_received.set()
 
-    async with background_trio_service(pubsub_a):
-        async with background_trio_service(pubsub_b):
-            async with background_trio_service(gossipsub_a):
-                async with background_trio_service(gossipsub_b):
+    async with background_anyio_service(pubsub_a):
+        async with background_anyio_service(pubsub_b):
+            async with background_anyio_service(gossipsub_a):
+                async with background_anyio_service(gossipsub_b):
                     await pubsub_a.wait_until_ready()
                     await pubsub_b.wait_until_ready()
 

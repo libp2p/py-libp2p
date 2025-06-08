@@ -12,9 +12,9 @@ from libp2p.abc import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
-    background_trio_service,
+    background_anyio_service,
 )
 from tests.utils.factories import (
     PubsubFactory,
@@ -68,7 +68,7 @@ class DummyAccountNode(Service):
             async with AsyncExitStack() as stack:
                 dummy_acount_nodes = tuple(cls(pubsub) for pubsub in pubsubs)
                 for node in dummy_acount_nodes:
-                    await stack.enter_async_context(background_trio_service(node))
+                    await stack.enter_async_context(background_anyio_service(node))
                 yield dummy_acount_nodes
 
     async def handle_incoming_msgs(self) -> None:

@@ -1,16 +1,12 @@
-# Copied from https://github.com/ethereum/async-service
-
 from abc import (
     abstractmethod,
 )
-import asyncio
 from collections import (
     Counter,
 )
 from collections.abc import (
     Awaitable,
     Iterable,
-    Sequence,
 )
 import logging
 import sys
@@ -23,9 +19,9 @@ from typing import (
 )
 import uuid
 
-from ._utils import (
-    is_verbose_logging_enabled,
-)
+import anyio
+import anyio.exceptions
+
 from .abc import (
     InternalManagerAPI,
     ManagerAPI,
@@ -44,10 +40,11 @@ from .stats import (
 )
 from .typing import (
     EXC_INFO,
-    AsyncFn,
 )
 
 MAX_CHILDREN_TASKS = 1000
+
+LogicFnType = Callable[..., Awaitable[Any]]
 
 
 class Service(ServiceAPI):
@@ -57,11 +54,11 @@ class Service(ServiceAPI):
     @property
     def manager(self) -> "InternalManagerAPI":
         """
-        Expose the manager as a property here intead of
-        :class:`async_service.abc.ServiceAPI` to ensure that anyone using
+        Expose the manager as a property here instead of
+        :class:`anyio_service.abc.ServiceAPI` to ensure that anyone using
         proper type hints will not have access to this property since it isn't
         part of that API, while still allowing all subclasses of the
-        :class:`async_service.base.Service` to access this property directly.
+        :class:`anyio_service.base.Service` to access this property directly.
         """
         return self._manager
 
@@ -70,12 +67,9 @@ class Service(ServiceAPI):
             return self._manager
         except AttributeError:
             raise LifecycleError(
-                "Service does not have a manager assigned to it.  Are you sure "
+                "Service does not have a manager assigned to it. Are you sure "
                 "it is running?"
             )
-
-
-LogicFnType = Callable[..., Awaitable[Any]]
 
 
 def as_service(service_fn: LogicFnType) -> type[ServiceAPI]:
@@ -98,17 +92,19 @@ def as_service(service_fn: LogicFnType) -> type[ServiceAPI]:
 
 class BaseTask(TaskAPI):
     def __init__(
-        self, name: str, daemon: bool, parent: Optional[TaskWithChildrenAPI]
+        self,
+        name: str,
+        daemon: bool,
+        parent: Optional[TaskWithChildrenAPI],
     ) -> None:
-        # meta
         self.name = name
         self.daemon = daemon
-
-        # parent task
         self.parent = parent
 
-        # For hashable interface.
         self._id = uuid.uuid4()
+
+    def __str__(self) -> str:
+        return f"{self.name}[daemon={self.daemon}]"
 
     def __hash__(self) -> int:
         return hash(self._id)
@@ -119,16 +115,13 @@ class BaseTask(TaskAPI):
         else:
             return False
 
-    def __str__(self) -> str:
-        return f"{self.name}[daemon={self.daemon}]"
-
 
 class BaseTaskWithChildren(BaseTask, TaskWithChildrenAPI):
     def __init__(
         self, name: str, daemon: bool, parent: Optional[TaskWithChildrenAPI]
     ) -> None:
         super().__init__(name, daemon, parent)
-        self.children = set()
+        self.children: set[TaskAPI] = set()
 
     def add_child(self, child: TaskAPI) -> None:
         self.children.add(child)
@@ -162,13 +155,8 @@ class BaseFunctionTask(BaseTaskWithChildren):
         name: str,
         daemon: bool,
         parent: Optional[TaskWithChildrenAPI],
-        async_fn: AsyncFn,
-        async_fn_args: Sequence[Any],
     ) -> None:
         super().__init__(name, daemon, parent)
-
-        self._async_fn = async_fn
-        self._async_fn_args = async_fn_args
 
 
 class BaseChildServiceTask(BaseTask):
@@ -200,8 +188,7 @@ class BaseChildServiceTask(BaseTask):
 
 
 class BaseManager(InternalManagerAPI):
-    logger = logging.getLogger("async_service.Manager")
-    _verbose = is_verbose_logging_enabled()
+    logger = logging.getLogger("anyio_service.Manager")
 
     _service: ServiceAPI
 
@@ -252,7 +239,7 @@ class BaseManager(InternalManagerAPI):
     # Control API
     #
     async def stop(self) -> None:
-        self.cancel()
+        await self.cancel()
         await self.wait_finished()
 
     #
@@ -322,17 +309,14 @@ class BaseManager(InternalManagerAPI):
             )
 
         if parent is None:
-            if self._verbose:
-                self.logger.debug("%s: running root task %s", self, task)
+            self.logger.debug("%s: running root task %s", self, task)
             self._root_tasks.add(task)
         else:
-            if self._verbose:
-                self.logger.debug("%s: %s running child task %s", self, parent, task)
+            self.logger.debug("%s: %s running child task %s", self, parent, task)
             parent.add_child(task)
 
     async def _run_and_manage_task(self, task: TaskAPI) -> None:
-        if self._verbose:
-            self.logger.debug("%s: task %s running", self, task)
+        self.logger.debug("%s: task %s running", self, task)
 
         try:
             try:
@@ -354,8 +338,8 @@ class BaseManager(InternalManagerAPI):
                             child,
                             new_parent or "root",
                         )
-        except asyncio.CancelledError:
-            self.logger.debug("%s: task %s raised CancelledError.", self, task)
+        except anyio.exceptions.ClosedResourceError:
+            self.logger.debug("%s: task %s raised ClosedResourceError.", self, task)
             raise
         except Exception as err:
             self.logger.error(
@@ -363,15 +347,13 @@ class BaseManager(InternalManagerAPI):
                 self,
                 task,
                 err,
-                # Only show stacktrace if this is **not** a DaemonTaskExit error
                 exc_info=not isinstance(err, DaemonTaskExit),
             )
             self._errors.append(cast(EXC_INFO, sys.exc_info()))
-            self.cancel()
+            await self.cancel()
         else:
             if task.parent is None:
                 self._root_tasks.remove(task)
-            if self._verbose:
-                self.logger.debug("%s: task %s exited cleanly.", self, task)
+            self.logger.debug("%s: task %s exited cleanly.", self, task)
         finally:
             self._done_task_count += 1
