@@ -40,7 +40,10 @@ class MplexStream(IMuxedStream):
 
     name: str
     stream_id: StreamID
-    muxed_conn: "Mplex"
+    # NOTE: All methods used here are part of `Mplex` which is a derived
+    # class of IMuxedConn. Ignoring this type assignment should not pose
+    # any risk.
+    muxed_conn: "Mplex" # type: ignore[assignment]
     read_deadline: Optional[int]
     write_deadline: Optional[int]
 
@@ -71,10 +74,7 @@ class MplexStream(IMuxedStream):
         """
         self.name = name
         self.stream_id = stream_id
-        # NOTE: All methods used here are part of `Mplex` which is a derived
-        # class of IMuxedConn. Ignoring this type assignment should not pose
-        # any risk.
-        self.muxed_conn = muxed_conn  # type: ignore[assignment]
+        self.muxed_conn = muxed_conn
         self.read_deadline = None
         self.write_deadline = None
         self.event_local_closed = trio.Event()
