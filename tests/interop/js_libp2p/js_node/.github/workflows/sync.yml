@@ -1,0 +1,19 @@
+name: pull
+
+on:
+  workflow_dispatch
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Pull from another repository
+        uses: ipfs-examples/actions-pull-directory-from-repo@main
+        with:
+          source-repo: libp2p/js-libp2p-examples
+          source-folder-path: examples/${{ github.event.repository.name }}
+          source-branch: main
+          target-branch: main
+          git-username: github-actions
+          git-email: github-actions@github.com
