@@ -87,6 +87,8 @@ class SecioPacketReadWriter(FixedSizeLenMsgReadWriter):
 
 class SecioMsgReadWriter(EncryptedMsgReadWriter):
     read_writer: SecioPacketReadWriter
+    local_encrypter: Encrypter
+    remote_encrypter: Encrypter
 
     def __init__(
         self,

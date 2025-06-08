@@ -7,6 +7,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Coroutine,
+    Iterable,
     Sequence,
 )
 from contextlib import (
@@ -58,6 +59,16 @@ from .typing import (
 
 class FunctionTask(BaseFunctionTask):
     _trio_task: trio.lowlevel.Task | None = None
+
+    @classmethod
+    def iterate_tasks(cls, *tasks: TaskAPI) -> Iterable[FunctionTask]:
+        """Iterate over all FunctionTask instances and their children recursively."""
+        for task in tasks:
+            if isinstance(task, FunctionTask):
+                yield task
+
+            if isinstance(task, TaskWithChildrenAPI):
+                yield from cls.iterate_tasks(*task.children)
 
     def __init__(
         self,

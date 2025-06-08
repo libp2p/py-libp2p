@@ -4,7 +4,11 @@ from libp2p.exceptions import (
 
 
 def test_multierror_str_and_storage():
-    errors = [ValueError("bad value"), KeyError("missing key"), "custom error"]
+    errors = [
+        ValueError("bad value"),
+        KeyError("missing key"),
+        RuntimeError("custom error"),
+    ]
     multi_error = MultiError(errors)
     # Check for storage
     assert multi_error.errors == errors

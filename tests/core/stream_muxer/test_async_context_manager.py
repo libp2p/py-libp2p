@@ -26,6 +26,9 @@ DUMMY_PEER_ID = ID(b"dummy_peer_id")
 
 
 class DummySecuredConn(ISecureConn):
+    def __init__(self, is_initiator: bool = False):
+        self.is_initiator = is_initiator
+
     async def write(self, data: bytes) -> None:
         pass
 

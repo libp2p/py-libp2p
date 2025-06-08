@@ -284,7 +284,7 @@ class Yamux(IMuxedConn):
         self.is_initiator_value = (
             is_initiator if is_initiator is not None else secured_conn.is_initiator
         )
-        self.next_stream_id = 1 if self.is_initiator_value else 2
+        self.next_stream_id: int = 1 if self.is_initiator_value else 2
         self.streams: dict[int, YamuxStream] = {}
         self.streams_lock = trio.Lock()
         self.new_stream_send_channel: MemorySendChannel[YamuxStream]
@@ -466,8 +466,14 @@ class Yamux(IMuxedConn):
 
             # Wait for data if stream is still open
             logging.debug(f"Waiting for data on stream {self.peer_id}:{stream_id}")
-            await self.stream_events[stream_id].wait()
-            self.stream_events[stream_id] = trio.Event()
+            try:
+                await self.stream_events[stream_id].wait()
+                self.stream_events[stream_id] = trio.Event()
+            except KeyError:
+                raise MuxedStreamEOF("Stream was removed")
+
+        # This line should never be reached, but satisfies the type checker
+        raise MuxedStreamEOF("Unexpected end of read_stream")
 
     async def handle_incoming(self) -> None:
         while not self.event_shutting_down.is_set():
