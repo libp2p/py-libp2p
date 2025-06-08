@@ -43,7 +43,7 @@ class MplexStream(IMuxedStream):
     # NOTE: All methods used here are part of `Mplex` which is a derived
     # class of IMuxedConn. Ignoring this type assignment should not pose
     # any risk.
-    muxed_conn: "Mplex" # type: ignore[assignment]
+    muxed_conn: "Mplex"  # type: ignore[assignment]
     read_deadline: Optional[int]
     write_deadline: Optional[int]
 

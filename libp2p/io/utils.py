@@ -14,7 +14,7 @@ async def read_exactly(
     """
     NOTE: relying on exceptions to break out on erroneous conditions, like EOF
     """
-    buffer= bytearray()
+    buffer = bytearray()
     buffer.extend(await reader.read(n))
 
     for _ in range(retry_count):
