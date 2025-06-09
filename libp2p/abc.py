@@ -1463,10 +1463,10 @@ class IPeerData(ABC):
         """
         Get ttl value for the peer for validity check
 
-        Parameters
-        ----------
-        ttl : int
-            The ttl for the peer.
+        Returns
+        -------
+        int
+            The ttl of the peer.
 
         """
 
@@ -1475,10 +1475,10 @@ class IPeerData(ABC):
         """
         Set ttl value for the peer for validity check
 
-        Returns
-        -------
-        TTL
-            The ttl of the peer.
+        Parameters
+        ----------
+        ttl : int
+            The ttl for the peer.
 
         """
 

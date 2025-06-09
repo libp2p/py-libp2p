@@ -121,9 +121,6 @@ class PeerData(IPeerData):
         return self.privkey
 
     def update_last_identified(self) -> None:
-        """
-        :param timestamp: timestamp to set
-        """
         self.last_identified = int(time.time())
 
     def get_last_identified(self) -> int:
