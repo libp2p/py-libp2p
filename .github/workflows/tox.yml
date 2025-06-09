@@ -67,3 +67,26 @@ jobs:
           else
             python -m tox run -e py311-${{ matrix.toxenv }}
           fi
+  tox-pypy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['pypy3.9', 'pypy3.10']
+        toxenv: [core, wheel]
+      fail-fast: false
+    steps:
+      - env:
+          python: ${{ matrix.python }}
+          toxenv: ${{ matrix.toxenv }}
+        run: |
+          echo "TOXENV=${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install tox
+
+      - run: |
+          python -m tox run -r
