@@ -40,7 +40,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     """
 
     read_writer: NoisePacketReadWriter
-    noise_state: NoiseState
+    noise_state: Optional[NoiseState]
 
     # FIXME: This prefix is added in msg#3 in Go. Check whether it's a desired behavior.
     prefix: bytes = b"\x00" * 32
