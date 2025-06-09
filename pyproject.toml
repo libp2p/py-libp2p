@@ -8,7 +8,7 @@ name = "libp2p"
 version = "0.2.7"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
-requires-python = ">=3.9, <4.0"
+requires-python = ">=3.10, <4.0"
 license = { text = "MIT AND Apache-2.0" }
 keywords = ["libp2p", "p2p"]
 authors = [
@@ -37,7 +37,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Natural Language :: English",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -279,9 +278,9 @@ force-to-top = ["pytest"]
 [tool.pyrefly]
 project_includes = ["libp2p", "examples", "tests"]
 project_excludes = [
-  "**/.project-template/**",
-  "**/docs/conf.py",
-  "**/*pb2.py",
-  "**/*.pyi",
-  ".venv/**",
+    "**/.project-template/**",
+    "**/docs/conf.py",
+    "**/*pb2.py",
+    "**/*.pyi",
+    ".venv/**",
 ]
