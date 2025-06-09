@@ -13,6 +13,7 @@ import time
 from typing import (
     Callable,
     NamedTuple,
+    Optional,
     cast,
 )
 
@@ -123,7 +124,7 @@ class Pubsub(Service, IPubsub):
 
     # Indicate if we should enforce signature verification
     strict_signing: bool
-    sign_key: PrivateKey | None
+    sign_key: Optional[PrivateKey]
 
     # Set of blacklisted peer IDs
     blacklisted_peers: set[ID]
@@ -135,7 +136,7 @@ class Pubsub(Service, IPubsub):
         self,
         host: IHost,
         router: IPubsubRouter,
-        cache_size: int | None = None,
+        cache_size: Optional[int] = None,
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,

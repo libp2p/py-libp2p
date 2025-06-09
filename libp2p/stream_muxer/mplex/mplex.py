@@ -138,7 +138,7 @@ class Mplex(IMuxedConn):
         send_channel, receive_channel = trio.open_memory_channel[bytes](
             MPLEX_MESSAGE_CHANNEL_SIZE
         )
-        stream = MplexStream(name, stream_id, self, receive_channel)  # type: ignore
+        stream = MplexStream(name, stream_id, self, receive_channel)
         async with self.streams_lock:
             self.streams[stream_id] = stream
             self.streams_msg_channels[stream_id] = send_channel

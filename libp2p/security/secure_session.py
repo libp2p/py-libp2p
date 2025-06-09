@@ -85,7 +85,6 @@ class SecureSession(BaseSession):
 
         msg = await self.conn.read_msg()
 
-        # FIXME: I am not very sure of this fix
         if n is None:
             return msg
 
