@@ -24,8 +24,6 @@ async def main():
     secio_transport = SecioTransport(
         # local_key_pair: The key pair used for libp2p identity and authentication
         local_key_pair=key_pair,
-        # secure_bytes_provider: Optional function to generate secure random bytes
-        # (defaults to secrets.token_bytes)
     )
 
     # Create a security options dictionary mapping protocol ID to transport
