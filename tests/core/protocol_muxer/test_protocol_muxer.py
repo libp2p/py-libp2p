@@ -116,3 +116,35 @@ async def test_multiple_protocol_fails(security_protocol):
         await perform_simple_test(
             "", protocols_for_client, protocols_for_listener, security_protocol
         )
+
+
+@pytest.mark.trio
+async def test_multistream_command(security_protocol):
+    supported_protocols = [PROTOCOL_ECHO, PROTOCOL_FOO, PROTOCOL_POTATO, PROTOCOL_ROCK]
+
+    async with HostFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as hosts:
+        listener, dialer = hosts[1], hosts[0]
+
+        for protocol in supported_protocols:
+            listener.set_stream_handler(
+                protocol, create_echo_stream_handler(ACK_PREFIX)
+            )
+
+        # Ensure dialer knows how to reach the listener
+        dialer.get_peerstore().add_addrs(listener.get_id(), listener.get_addrs(), 10)
+
+        # Dialer asks peer to list the supported protocols using `ls`
+        response = await dialer.send_command(listener.get_id(), "ls")
+
+        # We expect all supported protocols to show up
+        for protocol in supported_protocols:
+            assert protocol in response
+
+        assert "/does/not/exist" not in response
+        assert "/foo/bar/1.2.3" not in response
+
+        # Dialer asks for unspoorted command
+        with pytest.raises(ValueError, match="Command not supported"):
+            await dialer.send_command(listener.get_id(), "random")
