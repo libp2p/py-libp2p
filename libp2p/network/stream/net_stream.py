@@ -39,7 +39,67 @@ class StreamState(Enum):
 
 
 class NetStream(INetStream):
-    """Class representing NetStream Handler"""
+    """
+    Summary
+    _______
+    A Network stream implementation.
+
+    NetStream wraps a muxed stream and provides proper state tracking, resource cleanup,
+    and event notification capabilities.
+
+    State Machine
+    _____________
+
+    .. code:: markdown
+
+        [CREATED] → OPEN → CLOSE_READ → CLOSE_BOTH → [CLEANUP]
+                      ↓         ↗           ↗
+                 CLOSE_WRITE → ←          ↗
+                      ↓                   ↗
+                    RESET → → → → → → → →
+
+    State Transitions
+    _________________
+        - OPEN → CLOSE_READ: EOF encountered during read()
+        - OPEN → CLOSE_WRITE: Explicit close() call
+        - OPEN → RESET: reset() call or critical stream error
+        - CLOSE_READ → CLOSE_BOTH: Explicit close() call
+        - CLOSE_WRITE → CLOSE_BOTH: EOF encountered during read()
+        - Any state → RESET: reset() call
+
+    Terminal States (trigger cleanup)
+    _________________________________
+        - CLOSE_BOTH: Stream fully closed, triggers resource cleanup
+        - RESET: Stream reset/terminated, triggers resource cleanup
+
+    Operation Validity by State
+    ___________________________
+        OPEN:        read() ✓  write() ✓  close() ✓  reset() ✓
+        CLOSE_READ:  read() ✗  write() ✓  close() ✓  reset() ✓
+        CLOSE_WRITE: read() ✓  write() ✗  close() ✓  reset() ✓
+        CLOSE_BOTH:  read() ✗  write() ✗  close() ✓  reset() ✓
+        RESET:       read() ✗  write() ✗  close() ✓  reset() ✓
+
+    Cleanup Process (triggered by CLOSE_BOTH or RESET)
+    __________________________________________________
+        1. Remove stream from SwarmConn
+        2. Notify all listeners with ClosedStream event
+        3. Decrement reference counter
+        4. Background cleanup via nursery (if provided)
+
+    Thread Safety
+    _____________
+        All state operations are protected by trio.Lock() for safe concurrent access.
+        State checks and modifications are atomic operations.
+
+    Example: See :file:`examples/doc-examples/example_net_stream.py`
+
+    :param muxed_stream (IMuxedStream): The underlying muxed stream
+    :param nursery (Optional[trio.Nursery]): Nursery for background cleanup tasks
+    :raises StreamClosed: When attempting invalid operations on closed streams
+    :raises StreamEOF: When EOF is encountered during read operations
+    :raises StreamReset: When the underlying stream has been reset
+    """
 
     muxed_stream: IMuxedStream
     protocol_id: Optional[TProtocol]
@@ -87,7 +147,10 @@ class NetStream(INetStream):
         Read from stream.
 
         :param n: number of bytes to read
-        :return: bytes of input
+        :raises StreamClosed: If `NetStream` is closed for reading
+        :raises StreamReset: If `NetStream` is reset
+        :raises StreamEOF: If trying to read after reaching end of file
+        :return: Bytes read from the stream
         """
         async with self._state_lock:
             if self.__stream_state in [
@@ -126,6 +189,8 @@ class NetStream(INetStream):
         Write to stream.
 
         :param data: bytes to write
+        :raises StreamClosed: If `NetStream` is closed for writing or reset
+        :raises StreamClosed: If `StreamError` occurred while writing
         """
         async with self._state_lock:
             if self.__stream_state in [
@@ -218,21 +283,24 @@ class NetStream(INetStream):
         """Delegate to the underlying muxed stream."""
         return self.muxed_stream.get_remote_address()
 
-    def is_closed(self) -> bool:
+    async def is_closed(self) -> bool:
         """Check if stream is closed."""
-        return self.__stream_state in [StreamState.CLOSE_BOTH, StreamState.RESET]
+        current_state = await self.state
+        return current_state in [StreamState.CLOSE_BOTH, StreamState.RESET]
 
-    def is_readable(self) -> bool:
+    async def is_readable(self) -> bool:
         """Check if stream is readable."""
-        return self.__stream_state not in [
+        current_state = await self.state
+        return current_state not in [
             StreamState.CLOSE_READ,
             StreamState.CLOSE_BOTH,
             StreamState.RESET,
         ]
 
-    def is_writable(self) -> bool:
+    async def is_writable(self) -> bool:
         """Check if stream is writable."""
-        return self.__stream_state not in [
+        current_state = await self.state
+        return current_state not in [
             StreamState.CLOSE_WRITE,
             StreamState.CLOSE_BOTH,
             StreamState.RESET,

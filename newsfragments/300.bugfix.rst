@@ -1,0 +1,1 @@
+Added proper state management and resource cleanup to `NetStream`, fixing memory leaks and improved error handling.
