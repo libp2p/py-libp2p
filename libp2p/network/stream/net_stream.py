@@ -1,9 +1,6 @@
 from enum import (
     Enum,
 )
-from typing import (
-    Optional,
-)
 
 import trio
 
@@ -102,11 +99,11 @@ class NetStream(INetStream):
     """
 
     muxed_stream: IMuxedStream
-    protocol_id: Optional[TProtocol]
+    protocol_id: TProtocol | None
     __stream_state: StreamState
 
     def __init__(
-        self, muxed_stream: IMuxedStream, nursery: Optional[trio.Nursery] = None
+        self, muxed_stream: IMuxedStream, nursery: trio.Nursery | None = None
     ) -> None:
         super().__init__()
 
@@ -142,7 +139,7 @@ class NetStream(INetStream):
         async with self._state_lock:
             return self.__stream_state
 
-    async def read(self, n: Optional[int] = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         """
         Read from stream.
 
@@ -279,7 +276,7 @@ class NetStream(INetStream):
                 if hasattr(swarm, "refs") and hasattr(swarm.refs, "done"):
                     swarm.refs.done()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying muxed stream."""
         return self.muxed_stream.get_remote_address()
 

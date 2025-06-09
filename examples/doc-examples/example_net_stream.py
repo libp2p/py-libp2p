@@ -193,7 +193,7 @@ async def run_enhanced_demo(
             print("🖥️  ENHANCED ECHO SERVER MODE")
             print("=" * 60)
 
-            # Set the enhanced stream handler
+            # type: ignore: Stream is type of NetStream
             host.set_stream_handler(PROTOCOL_ID, enhanced_echo_handler)
 
             print(
@@ -217,7 +217,8 @@ async def run_enhanced_demo(
 
             # Create stream and run enhanced demo
             stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
-            await enhanced_client_demo(stream)
+            if isinstance(stream, NetStream):
+                await enhanced_client_demo(stream)
 
             print("\n" + "=" * 60)
             print("CLIENT DEMO COMPLETE")
