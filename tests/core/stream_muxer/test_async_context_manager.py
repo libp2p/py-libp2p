@@ -1,5 +1,3 @@
-from typing import Optional
-
 import pytest
 import trio
 
@@ -32,7 +30,7 @@ class DummySecuredConn(ISecureConn):
     async def write(self, data: bytes) -> None:
         pass
 
-    async def read(self, n: Optional[int] = -1) -> bytes:
+    async def read(self, n: int | None = -1) -> bytes:
         return b""
 
     async def close(self) -> None:

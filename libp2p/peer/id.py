@@ -1,8 +1,4 @@
 import hashlib
-from typing import (
-    Optional,
-    Union,
-)
 
 import base58
 import multihash
@@ -40,8 +36,8 @@ if ENABLE_INLINING:
 
 class ID:
     _bytes: bytes
-    _xor_id: Optional[int] = None
-    _b58_str: Optional[str] = None
+    _xor_id: int | None = None
+    _b58_str: str | None = None
 
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes
@@ -94,7 +90,7 @@ class ID:
         return cls(mh_digest.encode())
 
 
-def sha256_digest(data: Union[str, bytes]) -> bytes:
+def sha256_digest(data: str | bytes) -> bytes:
     if isinstance(data, str):
         data = data.encode("utf8")
     return hashlib.sha256(data).digest()

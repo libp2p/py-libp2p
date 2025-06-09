@@ -6,6 +6,7 @@ from __future__ import (
 from collections.abc import (
     AsyncIterator,
     Awaitable,
+    Callable,
     Coroutine,
     Iterable,
     Sequence,
@@ -17,7 +18,6 @@ import functools
 import sys
 from typing import (
     Any,
-    Callable,
     Optional,
     TypeVar,
     cast,
@@ -58,7 +58,7 @@ from .typing import (
 
 
 class FunctionTask(BaseFunctionTask):
-    _trio_task: Optional[trio.lowlevel.Task] = None
+    _trio_task: trio.lowlevel.Task | None = None
 
     @classmethod
     def iterate_tasks(cls, *tasks: TaskAPI) -> Iterable[FunctionTask]:
@@ -74,7 +74,7 @@ class FunctionTask(BaseFunctionTask):
         self,
         name: str,
         daemon: bool,
-        parent: Optional[TaskWithChildrenAPI],
+        parent: TaskWithChildrenAPI | None,
         async_fn: AsyncFn,
         async_fn_args: Sequence[Any],
     ) -> None:
@@ -145,7 +145,7 @@ class ChildServiceTask(BaseChildServiceTask):
         self,
         name: str,
         daemon: bool,
-        parent: Optional[TaskWithChildrenAPI],
+        parent: TaskWithChildrenAPI | None,
         child_service: ServiceAPI,
     ) -> None:
         super().__init__(name, daemon, parent)
@@ -291,7 +291,7 @@ class TrioManager(BaseManager):
 
     def _find_parent_task(
         self, trio_task: trio.lowlevel.Task
-    ) -> Optional[TaskWithChildrenAPI]:
+    ) -> TaskWithChildrenAPI | None:
         """
         Find the :class:`async_service.trio.FunctionTask` instance that corresponds to
         the given :class:`trio.lowlevel.Task` instance.
@@ -320,7 +320,7 @@ class TrioManager(BaseManager):
         async_fn: Callable[..., Awaitable[Any]],
         *args: Any,
         daemon: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> None:
         task = FunctionTask(
             name=get_task_name(async_fn, name),
@@ -333,7 +333,7 @@ class TrioManager(BaseManager):
         self._common_run_task(task)
 
     def run_child_service(
-        self, service: ServiceAPI, daemon: bool = False, name: Optional[str] = None
+        self, service: ServiceAPI, daemon: bool = False, name: str | None = None
     ) -> ManagerAPI:
         task = ChildServiceTask(
             name=get_task_name(service, name),

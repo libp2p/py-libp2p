@@ -2,7 +2,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import Any, Optional
+from typing import Any
 
 
 class Closer(ABC):
@@ -12,7 +12,7 @@ class Closer(ABC):
 
 class Reader(ABC):
     @abstractmethod
-    async def read(self, n: Optional[int] = None) -> bytes: ...
+    async def read(self, n: int | None = None) -> bytes: ...
 
 
 class Writer(ABC):
@@ -34,7 +34,7 @@ class ReadWriter(Reader, Writer):
 
 class ReadWriteCloser(Reader, Writer, Closer):
     @abstractmethod
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """
         Return the remote address of the connected peer.
 
@@ -68,12 +68,12 @@ class Encrypter(ABC):
 class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):
     """Read/write message with encryption/decryption."""
 
-    conn: Optional[Any]
+    conn: Any | None
 
-    def __init__(self, conn: Optional[Any] = None):
+    def __init__(self, conn: Any | None = None):
         self.conn = conn
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Get remote address if supported by the underlying connection."""
         if (
             self.conn is not None

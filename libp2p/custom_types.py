@@ -1,8 +1,9 @@
 from collections.abc import (
     Awaitable,
+    Callable,
     Mapping,
 )
-from typing import TYPE_CHECKING, Callable, NewType, Union, cast
+from typing import TYPE_CHECKING, NewType, Union, cast
 
 if TYPE_CHECKING:
     from libp2p.abc import (

@@ -1,5 +1,3 @@
-from typing import Optional
-
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
@@ -28,7 +26,7 @@ class Transport(ISecureTransport):
     libp2p_privkey: PrivateKey
     noise_privkey: PrivateKey
     local_peer: ID
-    early_data: Optional[bytes]
+    early_data: bytes | None
     with_noise_pipes: bool
 
     # NOTE: Implementations that support Noise Pipes must decide whether to use
@@ -40,7 +38,7 @@ class Transport(ISecureTransport):
         self,
         libp2p_keypair: KeyPair,
         noise_privkey: PrivateKey,
-        early_data: Optional[bytes] = None,
+        early_data: bytes | None = None,
         with_noise_pipes: bool = False,
     ) -> None:
         self.libp2p_privkey = libp2p_keypair.private_key

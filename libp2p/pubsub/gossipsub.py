@@ -14,7 +14,6 @@ import time
 from typing import (
     Any,
     DefaultDict,
-    Optional,
 )
 
 import trio
@@ -68,7 +67,7 @@ logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
-    pubsub: Optional[Pubsub]
+    pubsub: Pubsub | None
 
     degree: int
     degree_high: int
@@ -99,7 +98,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        direct_peers: Optional[Sequence[PeerInfo]] = None,
+        direct_peers: Sequence[PeerInfo] | None = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
@@ -172,7 +171,7 @@ class GossipSub(IPubsubRouter, Service):
 
         logger.debug("attached to pusub")
 
-    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -690,7 +689,7 @@ class GossipSub(IPubsubRouter, Service):
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            msg: Optional[rpc_pb2.Message] = self.mcache.get(msg_id_iwant)
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
 
             # Cache hit
             if msg:
@@ -764,9 +763,9 @@ class GossipSub(IPubsubRouter, Service):
 
     def pack_control_msgs(
         self,
-        ihave_msgs: Optional[list[rpc_pb2.ControlIHave]],
-        graft_msgs: Optional[list[rpc_pb2.ControlGraft]],
-        prune_msgs: Optional[list[rpc_pb2.ControlPrune]],
+        ihave_msgs: list[rpc_pb2.ControlIHave] | None,
+        graft_msgs: list[rpc_pb2.ControlGraft] | None,
+        prune_msgs: list[rpc_pb2.ControlPrune] | None,
     ) -> rpc_pb2.ControlMessage:
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:

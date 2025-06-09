@@ -1,5 +1,4 @@
 import argparse
-from typing import Optional
 
 import multiaddr
 import trio
@@ -30,7 +29,7 @@ async def _echo_stream_handler(stream: INetStream) -> None:
     await stream.close()
 
 
-async def run(port: int, destination: str, seed: Optional[int] = None) -> None:
+async def run(port: int, destination: str, seed: int | None = None) -> None:
     localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 

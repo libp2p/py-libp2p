@@ -1,10 +1,8 @@
 from collections.abc import (
     Awaitable,
-)
-import logging
-from typing import (
     Callable,
 )
+import logging
 
 import trio
 

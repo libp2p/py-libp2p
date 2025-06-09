@@ -1,11 +1,9 @@
 from collections.abc import (
     Awaitable,
+    Callable,
     Sequence,
 )
 import logging
-from typing import (
-    Callable,
-)
 
 from multiaddr import (
     Multiaddr,

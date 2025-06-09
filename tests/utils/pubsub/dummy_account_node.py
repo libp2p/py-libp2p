@@ -5,7 +5,6 @@ from contextlib import (
     AsyncExitStack,
     asynccontextmanager,
 )
-from typing import Optional
 
 from libp2p.abc import (
     IHost,
@@ -42,7 +41,7 @@ class DummyAccountNode(Service):
     """
 
     pubsub: Pubsub
-    subscription: Optional[ISubscriptionAPI]
+    subscription: ISubscriptionAPI | None
 
     def __init__(self, pubsub: Pubsub) -> None:
         self.pubsub = pubsub

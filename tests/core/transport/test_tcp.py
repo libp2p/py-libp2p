@@ -1,5 +1,3 @@
-from typing import Optional
-
 import pytest
 from multiaddr import (
     Multiaddr,
@@ -38,7 +36,7 @@ async def test_tcp_listener(nursery):
 @pytest.mark.trio
 async def test_tcp_dial(nursery):
     transport = TCP()
-    raw_conn_other_side: Optional[RawConnection] = None
+    raw_conn_other_side: RawConnection | None = None
     event = trio.Event()
 
     async def handler(tcp_stream):

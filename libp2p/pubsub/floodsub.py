@@ -3,7 +3,6 @@ from collections.abc import (
     Sequence,
 )
 import logging
-from typing import Optional
 
 import trio
 
@@ -41,7 +40,7 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 class FloodSub(IPubsubRouter):
     protocols: list[TProtocol]
 
-    pubsub: Optional[Pubsub]
+    pubsub: Pubsub | None
 
     def __init__(self, protocols: Sequence[TProtocol]) -> None:
         self.protocols = list(protocols)
@@ -62,7 +61,7 @@ class FloodSub(IPubsubRouter):
         """
         self.pubsub = pubsub
 
-    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notifies the router that a new peer has been connected.
 

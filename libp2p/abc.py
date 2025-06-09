@@ -16,7 +16,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
-    Optional,
 )
 
 from multiaddr import (
@@ -265,9 +264,9 @@ class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and close the stream."""
         await self.close()
@@ -292,7 +291,7 @@ class INetStream(ReadWriteCloser):
     muxed_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> Optional[TProtocol]:
+    def get_protocol(self) -> TProtocol | None:
         """
         Retrieve the protocol identifier for the stream.
 
@@ -1571,7 +1570,7 @@ class IMultiselectMuxer(ABC):
     and its corresponding handler for communication.
     """
 
-    handlers: dict[Optional[TProtocol], Optional[StreamHandlerFn]]
+    handlers: dict[TProtocol | None, StreamHandlerFn | None]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -1587,7 +1586,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[Optional[TProtocol], ...]:
+    def get_protocols(self) -> tuple[TProtocol | None, ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1602,7 +1601,7 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[Optional[TProtocol], Optional[StreamHandlerFn]]:
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
         """
         Negotiate a protocol selection with a multiselect client.
 
@@ -1679,7 +1678,7 @@ class IPeerRouting(ABC):
     """
 
     @abstractmethod
-    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
+    async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
         Search for a peer with the specified peer ID.
 
@@ -1877,7 +1876,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id: ID, protocol_id: Optional[TProtocol]) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notify the router that a new peer has connected.
 

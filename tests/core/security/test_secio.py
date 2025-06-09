@@ -1,5 +1,3 @@
-from typing import Optional
-
 import pytest
 import trio
 
@@ -35,8 +33,8 @@ async def test_create_secure_session(nursery):
     async with raw_conn_factory(nursery) as conns:
         local_conn, remote_conn = conns
 
-        local_secure_conn: Optional[ISecureConn] = None
-        remote_secure_conn: Optional[ISecureConn] = None
+        local_secure_conn: ISecureConn | None = None
+        remote_secure_conn: ISecureConn | None = None
 
         async def local_create_secure_session():
             nonlocal local_secure_conn

@@ -4,6 +4,7 @@ from __future__ import (
 
 import base64
 from collections.abc import (
+    Callable,
     KeysView,
 )
 import functools
@@ -11,9 +12,7 @@ import hashlib
 import logging
 import time
 from typing import (
-    Callable,
     NamedTuple,
-    Optional,
     cast,
 )
 
@@ -124,7 +123,7 @@ class Pubsub(Service, IPubsub):
 
     # Indicate if we should enforce signature verification
     strict_signing: bool
-    sign_key: Optional[PrivateKey]
+    sign_key: PrivateKey | None
 
     # Set of blacklisted peer IDs
     blacklisted_peers: set[ID]
@@ -136,7 +135,7 @@ class Pubsub(Service, IPubsub):
         self,
         host: IHost,
         router: IPubsubRouter,
-        cache_size: Optional[int] = None,
+        cache_size: int | None = None,
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,

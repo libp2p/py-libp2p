@@ -84,13 +84,13 @@ class AutoNAT:
         request: Any,
         target: str,
         options: tuple[Any, ...] = (),
-        channel_credentials: Optional[Any] = None,
-        call_credentials: Optional[Any] = None,
+        channel_credentials: Any | None = None,
+        call_credentials: Any | None = None,
         insecure: bool = False,
-        compression: Optional[Any] = None,
-        wait_for_ready: Optional[bool] = None,
-        timeout: Optional[float] = None,
-        metadata: Optional[list[tuple[str, str]]] = None,
+        compression: Any | None = None,
+        wait_for_ready: bool | None = None,
+        timeout: float | None = None,
+        metadata: list[tuple[str, str]] | None = None,
     ) -> Any:
         channel = grpc.secure_channel(target, channel_credentials) if channel_credentials else grpc.insecure_channel(target)
         return channel.unary_unary(

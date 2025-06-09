@@ -2,7 +2,6 @@ from abc import (
     ABC,
     abstractmethod,
 )
-from typing import Optional
 
 from cryptography.hazmat.primitives import (
     serialization,
@@ -63,7 +62,7 @@ class BasePattern(IPattern):
     noise_static_key: PrivateKey
     local_peer: ID
     libp2p_privkey: PrivateKey
-    early_data: Optional[bytes]
+    early_data: bytes | None
 
     def create_noise_state(self) -> NoiseState:
         noise_state = NoiseState.from_name(self.protocol_name)
@@ -87,7 +86,7 @@ class PatternXX(BasePattern):
         local_peer: ID,
         libp2p_privkey: PrivateKey,
         noise_static_key: PrivateKey,
-        early_data: Optional[bytes] = None,
+        early_data: bytes | None = None,
     ) -> None:
         self.protocol_name = b"Noise_XX_25519_ChaChaPoly_SHA256"
         self.local_peer = local_peer

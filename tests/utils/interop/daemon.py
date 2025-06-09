@@ -4,7 +4,6 @@ from collections.abc import (
 from contextlib import (
     asynccontextmanager,
 )
-from typing import Optional
 
 import multiaddr
 from multiaddr import (
@@ -132,7 +131,7 @@ async def make_p2pd(
 
     async with p2pc.listen():
         peer_id, maddrs = await p2pc.identify()
-        listen_maddr: Optional[Multiaddr] = None
+        listen_maddr: Multiaddr | None = None
         for maddr in maddrs:
             try:
                 ip = maddr.value_for_protocol(multiaddr.multiaddr.protocols.P_IP4)

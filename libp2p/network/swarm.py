@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -75,7 +72,7 @@ class Swarm(Service, INetworkService):
     connections: dict[ID, INetConn]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
-    listener_nursery: Optional[trio.Nursery]
+    listener_nursery: trio.Nursery | None
     event_listener_nursery_created: trio.Event
 
     notifees: list[INotifee]

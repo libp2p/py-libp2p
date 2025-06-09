@@ -2,9 +2,6 @@ from dataclasses import (
     dataclass,
 )
 import itertools
-from typing import (
-    Optional,
-)
 
 import multihash
 
@@ -269,7 +266,7 @@ def _select_encryption_parameters(
 async def _establish_session_parameters(
     local_peer: PeerID,
     local_private_key: PrivateKey,
-    remote_peer: Optional[PeerID],
+    remote_peer: PeerID | None,
     conn: SecioPacketReadWriter,
     nonce: bytes,
 ) -> tuple[SessionParameters, bytes]:
@@ -398,7 +395,7 @@ async def create_secure_session(
     local_peer: PeerID,
     local_private_key: PrivateKey,
     conn: IRawConnection,
-    remote_peer: Optional[PeerID] = None,
+    remote_peer: PeerID | None = None,
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.

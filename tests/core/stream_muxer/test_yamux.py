@@ -1,8 +1,5 @@
 import logging
 import struct
-from typing import (
-    Optional,
-)
 
 import pytest
 import trio
@@ -46,7 +43,7 @@ class TrioStreamAdapter(IRawConnection):
         with trio.move_on_after(2):
             await self.send_stream.send_all(data)
 
-    async def read(self, n: Optional[int] = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
             raise ValueError("Reading unbounded not supported")
         logging.debug(f"Attempting to read {n} bytes")
@@ -58,7 +55,7 @@ class TrioStreamAdapter(IRawConnection):
     async def close(self) -> None:
         logging.debug("Closing stream")
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
         return None
 

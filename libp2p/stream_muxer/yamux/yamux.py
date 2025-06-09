@@ -6,6 +6,7 @@ Mplex is also available for legacy compatibility but may be deprecated in the fu
 
 from collections.abc import (
     Awaitable,
+    Callable,
 )
 import inspect
 import logging
@@ -15,8 +16,6 @@ from types import (
 )
 from typing import (
     Any,
-    Callable,
-    Optional,
 )
 
 import trio
@@ -85,9 +84,9 @@ class YamuxStream(IMuxedStream):
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and close the stream."""
         await self.close()
@@ -128,7 +127,7 @@ class YamuxStream(IMuxedStream):
         if self.send_window < DEFAULT_WINDOW_SIZE // 2:
             await self.send_window_update()
 
-    async def send_window_update(self, increment: Optional[int] = None) -> None:
+    async def send_window_update(self, increment: int | None = None) -> None:
         """Send a window update to peer."""
         if increment is None:
             increment = DEFAULT_WINDOW_SIZE - self.recv_window
@@ -143,7 +142,7 @@ class YamuxStream(IMuxedStream):
             )
             await self.conn.secured_conn.write(header)
 
-    async def read(self, n: Optional[int] = -1) -> bytes:
+    async def read(self, n: int | None = -1) -> bytes:
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -241,7 +240,7 @@ class YamuxStream(IMuxedStream):
         """
         raise NotImplementedError("Yamux does not support setting read deadlines")
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """
         Returns the remote address of the underlying connection.
         """
@@ -269,8 +268,8 @@ class Yamux(IMuxedConn):
         self,
         secured_conn: ISecureConn,
         peer_id: ID,
-        is_initiator: Optional[bool] = None,
-        on_close: Optional[Callable[[], Awaitable[Any]]] = None,
+        is_initiator: bool | None = None,
+        on_close: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
@@ -298,7 +297,7 @@ class Yamux(IMuxedConn):
         self.event_started = trio.Event()
         self.stream_buffers: dict[int, bytearray] = {}
         self.stream_events: dict[int, trio.Event] = {}
-        self._nursery: Optional[Nursery] = None
+        self._nursery: Nursery | None = None
 
     async def start(self) -> None:
         logging.debug(f"Starting Yamux for {self.peer_id}")

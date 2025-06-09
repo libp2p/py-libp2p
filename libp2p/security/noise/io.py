@@ -1,5 +1,4 @@
 from typing import (
-    Optional,
     cast,
 )
 
@@ -66,7 +65,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     async def close(self) -> None:
         await self.read_writer.close()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         # Delegate to the underlying connection if possible
         if hasattr(self.read_writer, "read_write_closer") and hasattr(
             self.read_writer.read_write_closer,

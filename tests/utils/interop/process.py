@@ -6,7 +6,6 @@ from collections.abc import (
     Iterable,
 )
 import subprocess
-from typing import Optional
 
 import trio
 
@@ -22,11 +21,11 @@ class AbstractInterativeProcess(ABC):
 
 
 class BaseInteractiveProcess(AbstractInterativeProcess):
-    proc: Optional[trio.Process] = None
+    proc: trio.Process | None = None
     cmd: str
     args: list[str]
     bytes_read: bytearray
-    patterns: Optional[Iterable[bytes]] = None
+    patterns: Iterable[bytes] | None = None
     event_ready: trio.Event
 
     async def wait_until_ready(self) -> None:
