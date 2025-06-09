@@ -11,9 +11,8 @@ It also provides NAT traversal capabilities via Direct Connection Upgrade throug
 """
 
 from libp2p.relay.circuit_v2 import (
-
-    DCUtRProtocol,
     DCUTR_PROTOCOL_ID,
+    DCUtRProtocol,
     ReachabilityChecker,
     is_private_ip,
 )

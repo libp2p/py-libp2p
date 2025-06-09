@@ -11,14 +11,12 @@ using hole punching techniques.
 import logging
 from typing import (
     Any,
-    Dict,
-    List,
-    Optional,
-    Set,
 )
 
+from multiaddr import (
+    Multiaddr,
+)
 import trio
-from multiaddr import Multiaddr
 
 from libp2p.abc import (
     IHost,
@@ -71,9 +69,9 @@ class DCUtRProtocol(Service):
         super().__init__()
         self.host = host
         self.event_started = trio.Event()
-        self._hole_punch_attempts: Dict[ID, int] = {}
-        self._direct_connections: Set[ID] = set()
-        self._in_progress: Set[ID] = set()
+        self._hole_punch_attempts: dict[ID, int] = {}
+        self._direct_connections: set[ID] = set()
+        self._in_progress: set[ID] = set()
 
     async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
         """Run the protocol service."""
@@ -82,7 +80,6 @@ class DCUtRProtocol(Service):
         # 2. Sets the started event
         # 3. Waits for the service to be stopped
         # 4. Unregisters the protocol handler on shutdown
-        pass
 
     async def _handle_dcutr_stream(self, stream: INetStream) -> None:
         """
@@ -102,7 +99,6 @@ class DCUtRProtocol(Service):
         # 6. Sends our CONNECT message with our observed addresses
         # 7. Handles the SYNC message for hole punching coordination
         # 8. Performs the hole punch attempt
-        pass
 
     async def initiate_hole_punch(self, peer_id: ID) -> bool:
         """
@@ -145,7 +141,6 @@ class DCUtRProtocol(Service):
         # 1. Attempts to connect to the peer at the given address
         # 2. Handles timeouts and connection errors
         # 3. Updates connection tracking if successful
-        pass
 
     async def _have_direct_connection(self, peer_id: ID) -> bool:
         """
@@ -168,7 +163,7 @@ class DCUtRProtocol(Service):
         # 4. Updates our direct connections set if needed
         return False
 
-    async def _get_observed_addrs(self) -> List[bytes]:
+    async def _get_observed_addrs(self) -> list[bytes]:
         """
         Get our observed addresses to share with the peer.
 
@@ -183,7 +178,7 @@ class DCUtRProtocol(Service):
         # 3. Converts addresses to the required format
         return []
 
-    def _decode_observed_addrs(self, addr_bytes: List[bytes]) -> List[Multiaddr]:
+    def _decode_observed_addrs(self, addr_bytes: list[bytes]) -> list[Multiaddr]:
         """
         Decode observed addresses received from a peer.
 
@@ -201,4 +196,4 @@ class DCUtRProtocol(Service):
         # 1. Converts bytes to Multiaddr objects
         # 2. Filters invalid addresses
         # 3. Returns the valid addresses
-        return [] 
+        return []

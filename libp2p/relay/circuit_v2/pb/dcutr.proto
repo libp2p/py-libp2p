@@ -11,4 +11,4 @@ message HolePunch {
   required Type type = 1;
 
   repeated bytes ObsAddrs = 2;
-} 
+}
