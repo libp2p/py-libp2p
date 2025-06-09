@@ -56,9 +56,6 @@ from libp2p.peer.peerinfo import (
 # Configure logging
 logger = logging.getLogger("libp2p.identity.identify-push-example")
 
-# Default port configuration
-DEFAULT_PORT = 8888
-
 
 def custom_identify_push_handler_for(host):
     """
@@ -241,25 +238,16 @@ def main() -> None:
     """Parse arguments and start the appropriate mode."""
     description = """
     This program demonstrates the libp2p identify/push protocol.
-    Without arguments, it runs as a listener on port 8888.
-    With -d parameter, it runs as a dialer on port 8889.
+    Without arguments, it runs as a listener on random port.
+    With -d parameter, it runs as a dialer on random port.
     """
 
     example = (
-        f"/ip4/127.0.0.1/tcp/{DEFAULT_PORT}/p2p/"
-        "QmQn4SwGkDZkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
 
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "-p",
-        "--port",
-        type=int,
-        help=(
-            f"port to listen on (default: {DEFAULT_PORT} for listener, "
-            f"{DEFAULT_PORT + 1} for dialer)"
-        ),
-    )
+    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
     parser.add_argument(
         "-d",
         "--destination",
@@ -270,13 +258,11 @@ def main() -> None:
 
     try:
         if args.destination:
-            # Run in dialer mode with default port DEFAULT_PORT + 1 if not specified
-            port = args.port if args.port is not None else DEFAULT_PORT + 1
-            trio.run(run_dialer, port, args.destination)
+            # Run in dialer mode with random available port if not specified
+            trio.run(run_dialer, args.port, args.destination)
         else:
-            # Run in listener mode with default port DEFAULT_PORT if not specified
-            port = args.port if args.port is not None else DEFAULT_PORT
-            trio.run(run_listener, port)
+            # Run in listener mode with random available port if not specified
+            trio.run(run_listener, args.port)
     except KeyboardInterrupt:
         print("\nInterrupted by user")
         logger.info("Interrupted by user")
