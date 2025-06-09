@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from multiaddr import Multiaddr
 
@@ -18,9 +20,34 @@ def test_peer_info_empty():
 
 def test_peer_info_basic():
     store = PeerStore()
-    store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 10)
-    info = store.peer_info(ID(b"peer"))
+    store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 1)
 
+    # update ttl to new value
+    store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4002"), 2)
+
+    time.sleep(1)
+    info = store.peer_info(ID(b"peer"))
+    assert info.peer_id == ID(b"peer")
+    assert info.addrs == [
+        Multiaddr("/ip4/127.0.0.1/tcp/4001"),
+        Multiaddr("/ip4/127.0.0.1/tcp/4002"),
+    ]
+
+    # Check that addresses are cleared after ttl
+    time.sleep(2)
+    info = store.peer_info(ID(b"peer"))
+    assert info.peer_id == ID(b"peer")
+    assert info.addrs == []
+    assert store.peer_ids() == [ID(b"peer")]
+    assert store.valid_peer_ids() == []
+
+
+# Check if all the data remains valid if ttl is set to default(0)
+def test_peer_permanent_ttl():
+    store = PeerStore()
+    store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+    time.sleep(1)
+    info = store.peer_info(ID(b"peer"))
     assert info.peer_id == ID(b"peer")
     assert info.addrs == [Multiaddr("/ip4/127.0.0.1/tcp/4001")]
 

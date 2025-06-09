@@ -1440,6 +1440,60 @@ class IPeerData(ABC):
 
         """
 
+    @abstractmethod
+    def update_last_identified(self) -> None:
+        """
+        Updates timestamp to current time.
+        """
+
+    @abstractmethod
+    def get_last_identified(self) -> int:
+        """
+        Fetch the last identified timestamp
+
+        Returns
+        -------
+        last_identified_timestamp
+            The lastIdentified time of peer.
+
+        """
+
+    @abstractmethod
+    def get_ttl(self) -> int:
+        """
+        Get ttl value for the peer for validity check
+
+        Returns
+        -------
+        int
+            The ttl of the peer.
+
+        """
+
+    @abstractmethod
+    def set_ttl(self, ttl: int) -> None:
+        """
+        Set ttl value for the peer for validity check
+
+        Parameters
+        ----------
+        ttl : int
+            The ttl for the peer.
+
+        """
+
+    @abstractmethod
+    def is_expired(self) -> bool:
+        """
+        Check if the peer is expired based on last_identified and ttl
+
+        Returns
+        -------
+        bool
+            True, if last_identified + ttl > current_time
+
+        """
+
 
 # ------------------ multiselect_communicator interface.py ------------------
 

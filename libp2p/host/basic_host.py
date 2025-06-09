@@ -234,7 +234,7 @@ class BasicHost(IHost):
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
-        self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+        self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 120)
 
         # there is already a connection to this peer
         if peer_info.peer_id in self._network.connections:

@@ -4,7 +4,6 @@ from collections import (
 from collections.abc import (
     Sequence,
 )
-import sys
 from typing import (
     Any,
 )
@@ -33,7 +32,7 @@ from .peerinfo import (
     PeerInfo,
 )
 
-PERMANENT_ADDR_TTL = sys.maxsize
+PERMANENT_ADDR_TTL = 0
 
 
 class PeerStore(IPeerStore):
@@ -49,6 +48,8 @@ class PeerStore(IPeerStore):
         """
         if peer_id in self.peer_data_map:
             peer_data = self.peer_data_map[peer_id]
+            if peer_data.is_expired():
+                peer_data.clear_addrs()
             return PeerInfo(peer_id, peer_data.get_addrs())
         raise PeerStoreError("peer ID not found")
 
@@ -84,6 +85,18 @@ class PeerStore(IPeerStore):
         """
         return list(self.peer_data_map.keys())
 
+    def valid_peer_ids(self) -> list[ID]:
+        """
+        :return: all of the valid peer IDs stored in peer store
+        """
+        valid_peer_ids: list[ID] = []
+        for peer_id, peer_data in self.peer_data_map.items():
+            if not peer_data.is_expired():
+                valid_peer_ids.append(peer_id)
+            else:
+                peer_data.clear_addrs()
+        return valid_peer_ids
+
     def get(self, peer_id: ID, key: str) -> Any:
         """
         :param peer_id: peer ID to get peer data for
@@ -108,7 +121,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
 
-    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
+    def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """
         :param peer_id: peer ID to add address for
         :param addr:
@@ -116,24 +129,30 @@ class PeerStore(IPeerStore):
         """
         self.add_addrs(peer_id, [addr], ttl)
 
-    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+    def add_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int = 0) -> None:
         """
         :param peer_id: peer ID to add address for
         :param addrs:
         :param ttl: time-to-live for the this record
         """
-        # Ignore ttl for now
         peer_data = self.peer_data_map[peer_id]
         peer_data.add_addrs(list(addrs))
+        peer_data.set_ttl(ttl)
+        peer_data.update_last_identified()
 
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
         :param peer_id: peer ID to get addrs for
-        :return: list of addrs
+        :return: list of addrs of a valid peer.
         :raise PeerStoreError: if peer ID not found
         """
         if peer_id in self.peer_data_map:
-            return self.peer_data_map[peer_id].get_addrs()
+            peer_data = self.peer_data_map[peer_id]
+            if not peer_data.is_expired():
+                return peer_data.get_addrs()
+            else:
+                peer_data.clear_addrs()
+                raise PeerStoreError("peer ID is expired")
         raise PeerStoreError("peer ID not found")
 
     def clear_addrs(self, peer_id: ID) -> None:
@@ -153,7 +172,11 @@ class PeerStore(IPeerStore):
 
         for peer_id in self.peer_data_map:
             if len(self.peer_data_map[peer_id].get_addrs()) >= 1:
-                output.append(peer_id)
+                peer_data = self.peer_data_map[peer_id]
+                if not peer_data.is_expired():
+                    output.append(peer_id)
+                else:
+                    peer_data.clear_addrs()
         return output
 
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
