@@ -1,7 +1,3 @@
-from typing import (
-    Optional,
-)
-
 from libp2p.abc import (
     ISecureConn,
 )
@@ -49,5 +45,5 @@ class BaseSession(ISecureConn):
     def get_remote_peer(self) -> ID:
         return self.remote_peer
 
-    def get_remote_public_key(self) -> Optional[PublicKey]:
+    def get_remote_public_key(self) -> PublicKey:
         return self.remote_permanent_pubkey

@@ -5,6 +5,7 @@ import trio
 
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
+    GossipSub,
 )
 from libp2p.tools.utils import (
     connect,
@@ -24,7 +25,10 @@ async def test_join():
     async with PubsubFactory.create_batch_with_gossipsub(
         4, degree=4, degree_low=3, degree_high=5, heartbeat_interval=1, time_to_live=1
     ) as pubsubs_gsub:
-        gossipsubs = [pubsub.router for pubsub in pubsubs_gsub]
+        gossipsubs = []
+        for pubsub in pubsubs_gsub:
+            if isinstance(pubsub.router, GossipSub):
+                gossipsubs.append(pubsub.router)
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         hosts_indices = list(range(len(pubsubs_gsub)))
 
@@ -86,7 +90,9 @@ async def test_join():
 @pytest.mark.trio
 async def test_leave():
     async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_gsub:
-        gossipsub = pubsubs_gsub[0].router
+        router = pubsubs_gsub[0].router
+        assert isinstance(router, GossipSub)
+        gossipsub = router
         topic = "test_leave"
 
         assert topic not in gossipsub.mesh
@@ -104,7 +110,11 @@ async def test_leave():
 @pytest.mark.trio
 async def test_handle_graft(monkeypatch):
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
-        gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
+        gossipsub_routers = []
+        for pubsub in pubsubs_gsub:
+            if isinstance(pubsub.router, GossipSub):
+                gossipsub_routers.append(pubsub.router)
+        gossipsubs = tuple(gossipsub_routers)
 
         index_alice = 0
         id_alice = pubsubs_gsub[index_alice].my_id
@@ -156,7 +166,11 @@ async def test_handle_prune():
     async with PubsubFactory.create_batch_with_gossipsub(
         2, heartbeat_interval=3
     ) as pubsubs_gsub:
-        gossipsubs = tuple(pubsub.router for pubsub in pubsubs_gsub)
+        gossipsub_routers = []
+        for pubsub in pubsubs_gsub:
+            if isinstance(pubsub.router, GossipSub):
+                gossipsub_routers.append(pubsub.router)
+        gossipsubs = tuple(gossipsub_routers)
 
         index_alice = 0
         id_alice = pubsubs_gsub[index_alice].my_id
@@ -382,7 +396,9 @@ async def test_mesh_heartbeat(initial_mesh_peer_count, monkeypatch):
 
         fake_peer_ids = [IDFactory() for _ in range(total_peer_count)]
         peer_protocol = {peer_id: PROTOCOL_ID for peer_id in fake_peer_ids}
-        monkeypatch.setattr(pubsubs_gsub[0].router, "peer_protocol", peer_protocol)
+        router = pubsubs_gsub[0].router
+        assert isinstance(router, GossipSub)
+        monkeypatch.setattr(router, "peer_protocol", peer_protocol)
 
         peer_topics = {topic: set(fake_peer_ids)}
         # Monkeypatch the peer subscriptions
@@ -394,27 +410,21 @@ async def test_mesh_heartbeat(initial_mesh_peer_count, monkeypatch):
         mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
         router_mesh = {topic: set(mesh_peers)}
         # Monkeypatch our mesh peers
-        monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
+        monkeypatch.setattr(router, "mesh", router_mesh)
 
-        peers_to_graft, peers_to_prune = pubsubs_gsub[0].router.mesh_heartbeat()
-        if initial_mesh_peer_count > pubsubs_gsub[0].router.degree:
+        peers_to_graft, peers_to_prune = router.mesh_heartbeat()
+        if initial_mesh_peer_count > router.degree:
             # If number of initial mesh peers is more than `GossipSubDegree`,
             # we should PRUNE mesh peers
             assert len(peers_to_graft) == 0
-            assert (
-                len(peers_to_prune)
-                == initial_mesh_peer_count - pubsubs_gsub[0].router.degree
-            )
+            assert len(peers_to_prune) == initial_mesh_peer_count - router.degree
             for peer in peers_to_prune:
                 assert peer in mesh_peers
-        elif initial_mesh_peer_count < pubsubs_gsub[0].router.degree:
+        elif initial_mesh_peer_count < router.degree:
             # If number of initial mesh peers is less than `GossipSubDegree`,
             # we should GRAFT more peers
             assert len(peers_to_prune) == 0
-            assert (
-                len(peers_to_graft)
-                == pubsubs_gsub[0].router.degree - initial_mesh_peer_count
-            )
+            assert len(peers_to_graft) == router.degree - initial_mesh_peer_count
             for peer in peers_to_graft:
                 assert peer not in mesh_peers
         else:
@@ -436,7 +446,10 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
 
         fake_peer_ids = [IDFactory() for _ in range(total_peer_count)]
         peer_protocol = {peer_id: PROTOCOL_ID for peer_id in fake_peer_ids}
-        monkeypatch.setattr(pubsubs_gsub[0].router, "peer_protocol", peer_protocol)
+        router_obj = pubsubs_gsub[0].router
+        assert isinstance(router_obj, GossipSub)
+        router = router_obj
+        monkeypatch.setattr(router, "peer_protocol", peer_protocol)
 
         topic_mesh_peer_count = 14
         # Split into mesh peers and fanout peers
@@ -453,14 +466,14 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         mesh_peers = [fake_peer_ids[i] for i in mesh_peer_indices]
         router_mesh = {topic_mesh: set(mesh_peers)}
         # Monkeypatch our mesh peers
-        monkeypatch.setattr(pubsubs_gsub[0].router, "mesh", router_mesh)
+        monkeypatch.setattr(router, "mesh", router_mesh)
         fanout_peer_indices = random.sample(
             range(topic_mesh_peer_count, total_peer_count), initial_peer_count
         )
         fanout_peers = [fake_peer_ids[i] for i in fanout_peer_indices]
         router_fanout = {topic_fanout: set(fanout_peers)}
         # Monkeypatch our fanout peers
-        monkeypatch.setattr(pubsubs_gsub[0].router, "fanout", router_fanout)
+        monkeypatch.setattr(router, "fanout", router_fanout)
 
         def window(topic):
             if topic == topic_mesh:
@@ -471,20 +484,18 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
                 return []
 
         # Monkeypatch the memory cache messages
-        monkeypatch.setattr(pubsubs_gsub[0].router.mcache, "window", window)
+        monkeypatch.setattr(router.mcache, "window", window)
 
-        peers_to_gossip = pubsubs_gsub[0].router.gossip_heartbeat()
+        peers_to_gossip = router.gossip_heartbeat()
         # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up
         # to `GossipSubDegree` peers (exclude mesh peers).
-        if topic_mesh_peer_count - initial_peer_count < pubsubs_gsub[0].router.degree:
+        if topic_mesh_peer_count - initial_peer_count < router.degree:
             # The same goes for fanout so it's two times the number of peers to gossip.
             assert len(peers_to_gossip) == 2 * (
                 topic_mesh_peer_count - initial_peer_count
             )
-        elif (
-            topic_mesh_peer_count - initial_peer_count >= pubsubs_gsub[0].router.degree
-        ):
-            assert len(peers_to_gossip) == 2 * (pubsubs_gsub[0].router.degree)
+        elif topic_mesh_peer_count - initial_peer_count >= router.degree:
+            assert len(peers_to_gossip) == 2 * (router.degree)
 
         for peer in peers_to_gossip:
             if peer in peer_topics[topic_mesh]:
