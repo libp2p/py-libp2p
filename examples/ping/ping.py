@@ -155,15 +155,14 @@ async def send_ping_sequence(stream: INetStream, count: int = 5) -> None:
         success_count = len(rtts)
         loss_rate = ((count - success_count) / count) * 100
 
-        print(f"\n[STATS] Ping Statistics:")
+        print("\n[STATS] Ping Statistics:")
         print(
             f"   Packets: Sent={count}, Received={success_count},"
             f" Lost={count - success_count}"
         )
         print(f"   Loss rate: {loss_rate:.1f}%")
         print(
-            f"   RTT: min={min_rtt:.2f}ms, avg={avg_rtt:.2f}ms," 
-            f" max={max_rtt:.2f}ms"
+            f"   RTT: min={min_rtt:.2f}ms, avg={avg_rtt:.2f}ms," f" max={max_rtt:.2f}ms"
         )
     else:
         print(f"\n[STATS] All pings failed ({count} attempts)")
@@ -242,8 +241,8 @@ async def run_server(port: int) -> None:
         print(f"[INFO] Peer ID: {host.get_id()}")
         print(f"[INFO] Listening: /ip4/0.0.0.0/tcp/{port}")
         print(f"[INFO] Primary Protocol: {PING_PROTOCOL_ID}")
-        print(f"[INFO] Security: Noise encryption")
-        print(f"[INFO] Muxer: Yamux stream multiplexing")
+        print("[INFO] Security: Noise encryption")
+        print("[INFO] Muxer: Yamux stream multiplexing")
 
         print("\n[INFO] Registered protocols:")
         print(f"   - {PING_PROTOCOL_ID}")
@@ -341,6 +340,7 @@ async def run_client(destination: str, count: int = 5) -> None:
             print(f"[ERROR] Client error: {e}")
             logging.exception("Client error")
             import traceback
+
             traceback.print_exc()
             return 1
 
@@ -356,7 +356,7 @@ def main() -> None:
 
     Server mode: Listens for ping requests from rust-libp2p or py-libp2p clients.
     Client mode: Sends ping requests to rust-libp2p or py-libp2p servers.
-    
+
     The tool implements the standard libp2p ping protocol (/ipfs/ping/1.0.0)
     which exchanges 32-byte random payloads and measures round-trip time.
     """
@@ -417,6 +417,7 @@ Protocols supported:
         print(f"[ERROR] Fatal error: {e}")
         logging.exception("Fatal error")
         import traceback
+
         traceback.print_exc()
         return 1
 
