@@ -30,7 +30,7 @@ dependencies = [
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
-    "fastecdsa==1.7.5; sys_platform != 'win32'",
+    "fastecdsa==2.3.2; sys_platform != 'win32'",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
