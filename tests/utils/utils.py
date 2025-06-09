@@ -1,4 +1,7 @@
-from unittest.mock import MagicMock
+from unittest.mock import (
+    MagicMock,
+)
+
 
 def create_mock_connections() -> dict:
     connections = {}
