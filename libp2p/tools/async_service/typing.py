@@ -2,13 +2,13 @@
 
 from collections.abc import (
     Awaitable,
+    Callable,
 )
 from types import (
     TracebackType,
 )
 from typing import (
     Any,
-    Callable,
 )
 
 EXC_INFO = tuple[type[BaseException], BaseException, TracebackType]

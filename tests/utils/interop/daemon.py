@@ -131,13 +131,13 @@ async def make_p2pd(
 
     async with p2pc.listen():
         peer_id, maddrs = await p2pc.identify()
-        listen_maddr: Multiaddr = None
+        listen_maddr: Multiaddr | None = None
         for maddr in maddrs:
             try:
-                ip = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
+                ip = maddr.value_for_protocol(multiaddr.multiaddr.protocols.P_IP4)
                 # NOTE: Check if this `maddr` uses `tcp`.
-                maddr.value_for_protocol(multiaddr.protocols.P_TCP)
-            except multiaddr.exceptions.ProtocolLookupError:
+                maddr.value_for_protocol(multiaddr.multiaddr.protocols.P_TCP)
+            except multiaddr.multiaddr.exceptions.ProtocolLookupError:
                 continue
             if ip == LOCALHOST_IP:
                 listen_maddr = maddr

@@ -67,7 +67,7 @@ logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
-    pubsub: Pubsub
+    pubsub: Pubsub | None
 
     degree: int
     degree_high: int
@@ -98,7 +98,7 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
-        direct_peers: Sequence[PeerInfo] = None,
+        direct_peers: Sequence[PeerInfo] | None = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
@@ -141,8 +141,6 @@ class GossipSub(IPubsubRouter, Service):
         self.time_since_last_publish = {}
 
     async def run(self) -> None:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         self.manager.run_daemon_task(self.heartbeat)
         if len(self.direct_peers) > 0:
             self.manager.run_daemon_task(self.direct_connect_heartbeat)
@@ -173,7 +171,7 @@ class GossipSub(IPubsubRouter, Service):
 
         logger.debug("attached to pusub")
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -181,6 +179,9 @@ class GossipSub(IPubsubRouter, Service):
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
+
+        if protocol_id is None:
+            raise ValueError("Protocol cannot be None")
 
         if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
             # We should never enter here. Becuase the `protocol_id` is registered by
@@ -243,6 +244,8 @@ class GossipSub(IPubsubRouter, Service):
         logger.debug("publishing message %s", pubsub_msg)
 
         for peer_id in peers_gen:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
             stream = self.pubsub.peers[peer_id]
@@ -269,6 +272,8 @@ class GossipSub(IPubsubRouter, Service):
         """
         send_to: set[ID] = set()
         for topic in topic_ids:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if topic not in self.pubsub.peer_topics:
                 continue
 
@@ -318,6 +323,9 @@ class GossipSub(IPubsubRouter, Service):
 
         :param topic: topic to join
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
         logger.debug("joining topic %s", topic)
 
         if topic in self.mesh:
@@ -468,6 +476,8 @@ class GossipSub(IPubsubRouter, Service):
         await trio.sleep(self.direct_connect_initial_delay)
         while True:
             for direct_peer in self.direct_peers:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 if direct_peer not in self.pubsub.peers:
                     try:
                         await self.pubsub.host.connect(self.direct_peers[direct_peer])
@@ -485,6 +495,8 @@ class GossipSub(IPubsubRouter, Service):
         peers_to_graft: DefaultDict[ID, list[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, list[str]] = defaultdict(list)
         for topic in self.mesh:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             # Skip if no peers have subscribed to the topic
             if topic not in self.pubsub.peer_topics:
                 continue
@@ -520,7 +532,8 @@ class GossipSub(IPubsubRouter, Service):
         # Note: the comments here are the exact pseudocode from the spec
         for topic in list(self.fanout):
             if (
-                topic not in self.pubsub.peer_topics
+                self.pubsub is not None
+                and topic not in self.pubsub.peer_topics
                 and self.time_since_last_publish.get(topic, 0) + self.time_to_live
                 < int(time.time())
             ):
@@ -529,11 +542,14 @@ class GossipSub(IPubsubRouter, Service):
             else:
                 # Check if fanout peers are still in the topic and remove the ones that are not  # noqa: E501
                 # ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L498-L504  # noqa: E501
-                in_topic_fanout_peers = [
-                    peer
-                    for peer in self.fanout[topic]
-                    if peer in self.pubsub.peer_topics[topic]
-                ]
+
+                in_topic_fanout_peers: list[ID] = []
+                if self.pubsub is not None:
+                    in_topic_fanout_peers = [
+                        peer
+                        for peer in self.fanout[topic]
+                        if peer in self.pubsub.peer_topics[topic]
+                    ]
                 self.fanout[topic] = set(in_topic_fanout_peers)
                 num_fanout_peers_in_topic = len(self.fanout[topic])
 
@@ -553,6 +569,8 @@ class GossipSub(IPubsubRouter, Service):
         for topic in self.mesh:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 # Get all pubsub peers in a topic and only add them if they are
                 # gossipsub peers too
                 if topic in self.pubsub.peer_topics:
@@ -572,6 +590,8 @@ class GossipSub(IPubsubRouter, Service):
         for topic in self.fanout:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
                 # Get all pubsub peers in topic and only add if they are
                 # gossipsub peers also
                 if topic in self.pubsub.peer_topics:
@@ -620,6 +640,8 @@ class GossipSub(IPubsubRouter, Service):
     def _get_in_topic_gossipsub_peers_from_minus(
         self, topic: str, num_to_select: int, minus: Iterable[ID]
     ) -> list[ID]:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
@@ -633,6 +655,8 @@ class GossipSub(IPubsubRouter, Service):
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
         """Checks the seen set and requests unknown messages with an IWANT message."""
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
@@ -665,7 +689,7 @@ class GossipSub(IPubsubRouter, Service):
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            msg: rpc_pb2.Message = self.mcache.get(msg_id_iwant)
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
 
             # Cache hit
             if msg:
@@ -683,6 +707,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # 2) Serialize that packet
         rpc_msg: bytes = packet.SerializeToString()
+        if self.pubsub is None:
+            raise NoPubsubAttached
 
         # 3) Get the stream to this peer
         if sender_peer_id not in self.pubsub.peers:
@@ -737,9 +763,9 @@ class GossipSub(IPubsubRouter, Service):
 
     def pack_control_msgs(
         self,
-        ihave_msgs: list[rpc_pb2.ControlIHave],
-        graft_msgs: list[rpc_pb2.ControlGraft],
-        prune_msgs: list[rpc_pb2.ControlPrune],
+        ihave_msgs: list[rpc_pb2.ControlIHave] | None,
+        graft_msgs: list[rpc_pb2.ControlGraft] | None,
+        prune_msgs: list[rpc_pb2.ControlPrune] | None,
     ) -> rpc_pb2.ControlMessage:
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:
@@ -771,7 +797,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_graft(self, topic: str, to_peer: ID) -> None:
+    async def emit_graft(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
@@ -779,9 +805,9 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.graft.extend([graft_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
-    async def emit_prune(self, topic: str, to_peer: ID) -> None:
+    async def emit_prune(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
@@ -789,11 +815,13 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)

@@ -36,7 +36,7 @@ async def test_tcp_listener(nursery):
 @pytest.mark.trio
 async def test_tcp_dial(nursery):
     transport = TCP()
-    raw_conn_other_side = None
+    raw_conn_other_side: RawConnection | None = None
     event = trio.Event()
 
     async def handler(tcp_stream):
@@ -59,5 +59,6 @@ async def test_tcp_dial(nursery):
     await event.wait()
 
     data = b"123"
+    assert raw_conn_other_side is not None
     await raw_conn_other_side.write(data)
     assert (await raw_conn.read(len(data))) == data

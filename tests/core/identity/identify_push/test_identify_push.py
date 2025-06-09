@@ -218,7 +218,6 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
 
     This test ensures all parameters of push_identify_to_peers are properly tested.
     """
-
     # Create four hosts to thoroughly test selective pushing
     async with host_pair_factory(security_protocol=security_protocol) as (
         host_a,

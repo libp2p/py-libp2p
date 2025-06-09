@@ -1,9 +1,6 @@
 from collections.abc import (
     Sequence,
 )
-from typing import (
-    Optional,
-)
 
 from .pb import (
     rpc_pb2,
@@ -66,7 +63,7 @@ class MessageCache:
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
-    def get(self, mid: tuple[bytes, bytes]) -> Optional[rpc_pb2.Message]:
+    def get(self, mid: tuple[bytes, bytes]) -> rpc_pb2.Message | None:
         """
         Get a message from the mcache.
 

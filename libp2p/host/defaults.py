@@ -9,13 +9,13 @@ from libp2p.abc import (
     IHost,
 )
 from libp2p.host.ping import (
+    ID as PingID,
     handle_ping,
 )
-from libp2p.host.ping import ID as PingID
 from libp2p.identity.identify.identify import (
+    ID as IdentifyID,
     identify_handler_for,
 )
-from libp2p.identity.identify.identify import ID as IdentifyID
 
 if TYPE_CHECKING:
     from libp2p.custom_types import (

@@ -76,18 +76,18 @@ async def test_update_status():
 
         # Less than 2 successful dials should result in PRIVATE status
         service.dial_results = {
-            ID("peer1"): True,
-            ID("peer2"): False,
-            ID("peer3"): False,
+            ID(b"peer1"): True,
+            ID(b"peer2"): False,
+            ID(b"peer3"): False,
         }
         service.update_status()
         assert service.status == AutoNATStatus.PRIVATE
 
         # 2 or more successful dials should result in PUBLIC status
         service.dial_results = {
-            ID("peer1"): True,
-            ID("peer2"): True,
-            ID("peer3"): False,
+            ID(b"peer1"): True,
+            ID(b"peer2"): True,
+            ID(b"peer3"): False,
         }
         service.update_status()
         assert service.status == AutoNATStatus.PUBLIC

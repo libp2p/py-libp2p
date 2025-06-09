@@ -20,7 +20,6 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
     such as send crypto and set crypto
     :param assertion_func: assertions for testing the results of the actions are correct
     """
-
     async with DummyAccountNode.create(num_nodes) as dummy_nodes:
         # Create connections between nodes according to `adjacency_map`
         async with trio.open_nursery() as nursery:
