@@ -1,11 +1,9 @@
 from collections.abc import (
     Awaitable,
+    Callable,
     Sequence,
 )
 import logging
-from typing import (
-    Callable,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -44,7 +42,7 @@ class TCPListener(IListener):
         self.handler = handler_function
 
     # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
         Put listener in listening mode and wait for incoming connections.
 
@@ -56,7 +54,7 @@ class TCPListener(IListener):
             handler: Callable[[trio.SocketStream], Awaitable[None]],
             port: int,
             host: str,
-            task_status: TaskStatus[Sequence[trio.SocketListener]] = None,
+            task_status: TaskStatus[Sequence[trio.SocketListener]],
         ) -> None:
             """Just a proxy function to add logging here."""
             logger.debug("serve_tcp %s %s", host, port)
@@ -67,18 +65,53 @@ class TCPListener(IListener):
             remote_port: int = 0
             try:
                 tcp_stream = TrioTCPStream(stream)
-                remote_host, remote_port = tcp_stream.get_remote_address()
+                remote_tuple = tcp_stream.get_remote_address()
+
+                if remote_tuple is not None:
+                    remote_host, remote_port = remote_tuple
+
                 await self.handler(tcp_stream)
             except Exception:
                 logger.debug(f"Connection from {remote_host}:{remote_port} failed.")
 
-        listeners = await nursery.start(
+        tcp_port_str = maddr.value_for_protocol("tcp")
+        if tcp_port_str is None:
+            logger.error(f"Cannot listen: TCP port is missing in multiaddress {maddr}")
+            return False
+
+        try:
+            tcp_port = int(tcp_port_str)
+        except ValueError:
+            logger.error(
+                f"Cannot listen: Invalid TCP port '{tcp_port_str}' "
+                f"in multiaddress {maddr}"
+            )
+            return False
+
+        ip4_host_str = maddr.value_for_protocol("ip4")
+        # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
+        # which typically means listen on all available interfaces.
+
+        started_listeners = await nursery.start(
             serve_tcp,
             handler,
-            int(maddr.value_for_protocol("tcp")),
-            maddr.value_for_protocol("ip4"),
+            tcp_port,
+            ip4_host_str,
         )
-        self.listeners.extend(listeners)
+
+        if started_listeners is None:
+            # This implies that task_status.started() was not called within serve_tcp,
+            # likely because trio.serve_tcp itself failed to start (e.g., port in use).
+            logger.error(
+                f"Failed to start TCP listener for {maddr}: "
+                f"`nursery.start` returned None. "
+                "This might be due to issues like the port already "
+                "being in use or invalid host."
+            )
+            return False
+
+        self.listeners.extend(started_listeners)
+        return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
@@ -105,15 +138,42 @@ class TCP(ITransport):
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
-        self.host = maddr.value_for_protocol("ip4")
-        self.port = int(maddr.value_for_protocol("tcp"))
+        host_str = maddr.value_for_protocol("ip4")
+        port_str = maddr.value_for_protocol("tcp")
+
+        if host_str is None:
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: IP address not found in multiaddr."
+            )
+
+        if port_str is None:
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: TCP port not found in multiaddr."
+            )
 
         try:
-            stream = await trio.open_tcp_stream(self.host, self.port)
-        except OSError as error:
-            raise OpenConnectionError from error
-        read_write_closer = TrioTCPStream(stream)
+            port_int = int(port_str)
+        except ValueError:
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: Invalid TCP port '{port_str}'."
+            )
 
+        try:
+            # trio.open_tcp_stream requires host to be str or bytes, not None.
+            stream = await trio.open_tcp_stream(host_str, port_int)
+        except OSError as error:
+            # OSError is common for network issues like "Connection refused"
+            # or "Host unreachable".
+            raise OpenConnectionError(
+                f"Failed to open TCP stream to {maddr}: {error}"
+            ) from error
+        except Exception as error:
+            # Catch other potential errors from trio.open_tcp_stream and wrap them.
+            raise OpenConnectionError(
+                f"An unexpected error occurred when dialing {maddr}: {error}"
+            ) from error
+
+        read_write_closer = TrioTCPStream(stream)
         return RawConnection(read_write_closer, True)
 
     def create_listener(self, handler_function: THandler) -> TCPListener:

@@ -19,7 +19,7 @@ SIGNED_DATA_PREFIX = "noise-libp2p-static-key:"
 class NoiseHandshakePayload:
     id_pubkey: PublicKey
     id_sig: bytes
-    early_data: bytes = None
+    early_data: bytes | None = None
 
     def serialize(self) -> bytes:
         msg = noise_pb.NoiseHandshakePayload(

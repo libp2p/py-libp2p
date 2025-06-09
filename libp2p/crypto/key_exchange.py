@@ -1,6 +1,6 @@
+from collections.abc import Callable
 import sys
 from typing import (
-    Callable,
     cast,
 )
 

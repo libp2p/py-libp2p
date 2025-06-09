@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -135,7 +132,7 @@ async def _update_peerstore_from_identify(
 
 
 async def push_identify_to_peer(
-    host: IHost, peer_id: ID, observed_multiaddr: Optional[Multiaddr] = None
+    host: IHost, peer_id: ID, observed_multiaddr: Multiaddr | None = None
 ) -> bool:
     """
     Push an identify message to a specific peer.
@@ -172,8 +169,8 @@ async def push_identify_to_peer(
 
 async def push_identify_to_peers(
     host: IHost,
-    peer_ids: Optional[set[ID]] = None,
-    observed_multiaddr: Optional[Multiaddr] = None,
+    peer_ids: set[ID] | None = None,
+    observed_multiaddr: Multiaddr | None = None,
 ) -> None:
     """
     Push an identify message to multiple peers in parallel.

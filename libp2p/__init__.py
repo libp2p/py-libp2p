@@ -152,12 +152,12 @@ def get_default_muxer_options() -> TMuxerOptions:
 
 
 def new_swarm(
-    key_pair: Optional[KeyPair] = None,
-    muxer_opt: Optional[TMuxerOptions] = None,
-    sec_opt: Optional[TSecurityOptions] = None,
-    peerstore_opt: Optional[IPeerStore] = None,
-    muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
-    listen_addrs: Optional[Sequence[multiaddr.Multiaddr]] = None,
+    key_pair: KeyPair | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+    sec_opt: TSecurityOptions | None = None,
+    peerstore_opt: IPeerStore | None = None,
+    muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
+    listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -236,13 +236,13 @@ def new_swarm(
 
 
 def new_host(
-    key_pair: Optional[KeyPair] = None,
-    muxer_opt: Optional[TMuxerOptions] = None,
-    sec_opt: Optional[TSecurityOptions] = None,
-    peerstore_opt: Optional[IPeerStore] = None,
-    disc_opt: Optional[IPeerRouting] = None,
-    muxer_preference: Optional[Literal["YAMUX", "MPLEX"]] = None,
-    listen_addrs: Sequence[multiaddr.Multiaddr] = None,
+    key_pair: KeyPair | None = None,
+    muxer_opt: TMuxerOptions | None = None,
+    sec_opt: TSecurityOptions | None = None,
+    peerstore_opt: IPeerStore | None = None,
+    disc_opt: IPeerRouting | None = None,
+    muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
+    listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.

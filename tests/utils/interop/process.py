@@ -14,36 +14,50 @@ TIMEOUT_DURATION = 30
 
 class AbstractInterativeProcess(ABC):
     @abstractmethod
-    async def start(self) -> None:
-        ...
+    async def start(self) -> None: ...
 
     @abstractmethod
-    async def close(self) -> None:
-        ...
+    async def close(self) -> None: ...
 
 
 class BaseInteractiveProcess(AbstractInterativeProcess):
-    proc: trio.Process = None
+    proc: trio.Process | None = None
     cmd: str
     args: list[str]
     bytes_read: bytearray
-    patterns: Iterable[bytes] = None
+    patterns: Iterable[bytes] | None = None
     event_ready: trio.Event
 
     async def wait_until_ready(self) -> None:
+        if self.proc is None:
+            raise Exception("process is not defined")
+        if self.patterns is None:
+            raise Exception("patterns is not defined")
         patterns_occurred = {pat: False for pat in self.patterns}
+        buffers = {pat: bytearray() for pat in self.patterns}
 
         async def read_from_daemon_and_check() -> None:
+            if self.proc is None:
+                raise Exception("process is not defined")
+            if self.proc.stdout is None:
+                raise Exception("process stdout is None, cannot read output")
+
             async for data in self.proc.stdout:
-                # TODO: It takes O(n^2), which is quite bad.
-                # But it should succeed in a few seconds.
                 self.bytes_read.extend(data)
                 for pat, occurred in patterns_occurred.items():
                     if occurred:
                         continue
-                    if pat in self.bytes_read:
+
+                    # Check if pattern is in new data or spans across chunks
+                    buf = buffers[pat]
+                    buf.extend(data)
+                    if pat in buf:
                         patterns_occurred[pat] = True
-                if all([value for value in patterns_occurred.values()]):
+                    else:
+                        keep = min(len(pat) - 1, len(buf))
+                        buffers[pat] = buf[-keep:] if keep > 0 else bytearray()
+
+                if all(patterns_occurred.values()):
                     return
 
         with trio.fail_after(TIMEOUT_DURATION):

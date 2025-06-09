@@ -1,59 +1,49 @@
 exclude: '.project-template|docs/conf.py|.*pb2\..*'
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-    -   id: check-yaml
-    -   id: check-toml
-    -   id: end-of-file-fixer
-    -   id: trailing-whitespace
--   repo: https://github.com/asottile/pyupgrade
-    rev: v3.15.0
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.20.0
     hooks:
-    -   id: pyupgrade
-        args: [--py39-plus]
--   repo: https://github.com/psf/black
-    rev: 23.9.1
+      - id: pyupgrade
+        args: [--py310-plus]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.10
     hooks:
-    -   id: black
--   repo: https://github.com/PyCQA/flake8
-    rev: 6.1.0
-    hooks:
-    -   id: flake8
-        additional_dependencies:
-        -   flake8-bugbear==23.9.16
-        exclude: setup.py
--   repo: https://github.com/PyCQA/autoflake
-    rev: v2.2.1
-    hooks:
-    -   id: autoflake
--   repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-    -   id: isort
--   repo: https://github.com/pycqa/pydocstyle
-    rev: 6.3.0
-    hooks:
-    -   id: pydocstyle
-        additional_dependencies:
-        -   tomli  # required until >= python311
--   repo: https://github.com/executablebooks/mdformat
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+  - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.22
     hooks:
-    -   id: mdformat
+      - id: mdformat
         additional_dependencies:
-        -   mdformat-gfm
--   repo: local
+          - mdformat-gfm
+  - repo: local
     hooks:
-    -   id: mypy-local
+      - id: mypy-local
         name: run mypy with all dev dependencies present
-        entry: python -m mypy -p libp2p
+        entry: mypy -p libp2p
         language: system
         always_run: true
         pass_filenames: false
--   repo: local
+  - repo: local
     hooks:
-    -   id: check-rst-files
+      - id: pyrefly-local
+        name: run pyrefly typecheck locally
+        entry: pyrefly check
+        language: system
+        always_run: true
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: check-rst-files
         name: Check for .rst files in the top-level directory
         entry: python -c "import glob, sys; rst_files = glob.glob('*.rst'); sys.exit(1) if rst_files else sys.exit(0)"
         language: system

@@ -1,15 +1,26 @@
+from collections.abc import (
+    Sequence,
+)
+
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.pubsub.mcache import (
     MessageCache,
 )
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+)
 
 
-class Msg:
-    __slots__ = ["topicIDs", "seqno", "from_id"]
-
-    def __init__(self, topicIDs, seqno, from_id):
-        self.topicIDs = topicIDs
-        self.seqno = seqno
-        self.from_id = from_id
+def make_msg(
+    topic_ids: Sequence[str],
+    seqno: bytes,
+    from_id: ID,
+) -> rpc_pb2.Message:
+    return rpc_pb2.Message(
+        from_id=from_id.to_bytes(), seqno=seqno, topicIDs=list(topic_ids)
+    )
 
 
 def test_mcache():
@@ -19,7 +30,7 @@ def test_mcache():
     msgs = []
 
     for i in range(60):
-        msgs.append(Msg(["test"], i, "test"))
+        msgs.append(make_msg(["test"], i.to_bytes(1, "big"), ID(b"test")))
 
     for i in range(10):
         mcache.put(msgs[i])

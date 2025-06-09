@@ -1,20 +1,105 @@
-[tool.autoflake]
-exclude = "__init__.py"
-remove_all_unused_imports = true
 
-[tool.isort]
-combine_as_imports = false
-extra_standard_library = "pytest"
-force_grid_wrap = 1
-force_sort_within_sections = true
-force_to_top = "pytest"
-honor_noqa = true
-known_first_party = "libp2p"
-known_third_party = "anyio,factory,lru,p2pclient,pytest,noise"
-multi_line_output = 3
-profile = "black"
-skip_glob= "*_pb2*.py, *.pyi"
-use_parentheses = true
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libp2p"
+version = "0.2.7"
+description = "libp2p: The Python implementation of the libp2p networking stack"
+readme = "README.md"
+requires-python = ">=3.10, <4.0"
+license = { text = "MIT AND Apache-2.0" }
+keywords = ["libp2p", "p2p"]
+authors = [
+    { name = "The Ethereum Foundation", email = "snakecharmers@ethereum.org" },
+]
+dependencies = [
+    "base58>=1.0.3",
+    "coincurve>=10.0.0",
+    "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "grpcio>=1.41.0",
+    "lru-dict>=1.1.6",
+    "multiaddr>=0.0.9",
+    "mypy-protobuf>=3.0.0",
+    "noiseprotocol>=0.3.0",
+    "protobuf>=3.20.1,<4.0.0",
+    "pycryptodome>=3.9.2",
+    "pymultihash>=0.8.2",
+    "pynacl>=1.3.0",
+    "rpcudp>=3.0.0",
+    "trio-typing>=0.0.4",
+    "trio>=0.26.0",
+    "fastecdsa==2.3.2; sys_platform != 'win32'",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/libp2p/py-libp2p"
+
+[project.scripts]
+chat-demo = "examples.chat.chat:main"
+echo-demo = "examples.echo.echo:main"
+ping-demo = "examples.ping.ping:main"
+identify-demo = "examples.identify.identify:main"
+identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
+identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
+pubsub-demo = "examples.pubsub.pubsub:main"
+
+[project.optional-dependencies]
+dev = [
+    "build>=0.9.0",
+    "bump_my_version>=0.19.0",
+    "ipython",
+    "mypy>=1.15.0",
+    "pre-commit>=3.4.0",
+    "tox>=4.0.0",
+    "twine",
+    "wheel",
+    "setuptools>=42",
+    "sphinx>=6.0.0",
+    "sphinx_rtd_theme>=1.0.0",
+    "towncrier>=24,<25",
+    "p2pclient==0.2.0",
+    "pytest>=7.0.0",
+    "pytest-xdist>=2.4.0",
+    "pytest-trio>=0.5.2",
+    "factory-boy>=2.12.0,<3.0.0",
+    "ruff>=0.11.10",
+    "pyrefly (>=0.17.1,<0.18.0)",
+]
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx_rtd_theme>=1.0.0",
+    "towncrier>=24,<25",
+    "tomli; python_version < '3.11'",
+]
+test = [
+    "p2pclient==0.2.0",
+    "pytest>=7.0.0",
+    "pytest-xdist>=2.4.0",
+    "pytest-trio>=0.5.2",
+    "factory-boy>=2.12.0,<3.0.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+exclude = ["scripts*", "tests*"]
+
+[tool.setuptools.package-data]
+libp2p = ["py.typed"]
+
 
 [tool.mypy]
 check_untyped_defs = true
@@ -27,37 +112,12 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 incremental = false
 strict_equality = true
-strict_optional = false
+strict_optional = true
 warn_redundant_casts = true
 warn_return_any = false
 warn_unused_configs = true
-warn_unused_ignores = true
+warn_unused_ignores = false
 
-[tool.pydocstyle]
-# All error codes found here:
-# http://www.pydocstyle.org/en/3.0.0/error_codes.html
-#
-# Ignored:
-# D1 - Missing docstring error codes
-#
-# Selected:
-# D2 - Whitespace error codes
-# D3 - Quote error codes
-# D4 - Content related error codes
-select = "D2,D3,D4"
-
-# Extra ignores:
-# D200 - One-line docstring should fit on one line with quotes
-# D203 - 1 blank line required before class docstring
-# D204 - 1 blank line required after class docstring
-# D205 - 1 blank line required between summary line and description
-# D212 - Multi-line docstring summary should start at the first line
-# D302 - Use u""" for Unicode docstrings
-# D400 - First line should end with a period
-# D401 - First line should be in imperative mood
-# D412 - No blank lines allowed between a section header and its content
-# D415 - First line should end with a period, question mark, or exclamation point
-add-ignore = "D200,D203,D204,D205,D212,D302,D400,D401,D412,D415"
 
 # Explanation:
 # D400 - Enabling this error code seems to make it a requirement that the first
@@ -138,8 +198,8 @@ parse = """
 		)?
 """
 serialize = [
-	"{major}.{minor}.{patch}-{stage}.{devnum}",
-	"{major}.{minor}.{patch}",
+    "{major}.{minor}.{patch}-{stage}.{devnum}",
+    "{major}.{minor}.{patch}",
 ]
 search = "{current_version}"
 replace = "{new_version}"
@@ -156,11 +216,7 @@ message = "Bump version: {current_version} → {new_version}"
 [tool.bumpversion.parts.stage]
 optional_value = "stable"
 first_value = "stable"
-values = [
-	"alpha",
-	"beta",
-	"stable",
-]
+values = ["alpha", "beta", "stable"]
 
 [tool.bumpversion.part.devnum]
 
@@ -168,3 +224,63 @@ values = [
 filename = "setup.py"
 search = "version=\"{current_version}\""
 replace = "version=\"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"              # Keep pyproject.toml version in sync
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[tool.ruff]
+line-length = 88
+exclude = ["__init__.py", "*_pb2*.py", "*.pyi"]
+
+[tool.ruff.lint]
+select = [
+    "F", # Pyflakes
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "I", # isort
+    "D", # pydocstyle
+]
+# Ignores from pydocstyle and any other desired ones
+ignore = [
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D105",
+    "D106",
+    "D107",
+    "D200",
+    "D203",
+    "D204",
+    "D205",
+    "D212",
+    "D400",
+    "D401",
+    "D412",
+    "D415",
+]
+
+[tool.ruff.lint.isort]
+force-wrap-aliases = true
+combine-as-imports = true
+extra-standard-library = []
+force-sort-within-sections = true
+known-first-party = ["libp2p", "tests"]
+known-third-party = ["anyio", "factory", "lru", "p2pclient", "pytest", "noise"]
+force-to-top = ["pytest"]
+
+[tool.ruff.format]
+# Using Ruff's Black-compatible formatter.
+# Options like quote-style = "double" or indent-style = "space" can be set here if needed.
+
+[tool.pyrefly]
+project_includes = ["libp2p", "examples", "tests"]
+project_excludes = [
+    "**/.project-template/**",
+    "**/docs/conf.py",
+    "**/*pb2.py",
+    "**/*.pyi",
+    ".venv/**",
+]

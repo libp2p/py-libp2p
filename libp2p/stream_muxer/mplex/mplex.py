@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 import trio
 
@@ -168,7 +165,7 @@ class Mplex(IMuxedConn):
             raise MplexUnavailable
 
     async def send_message(
-        self, flag: HeaderTags, data: Optional[bytes], stream_id: StreamID
+        self, flag: HeaderTags, data: bytes | None, stream_id: StreamID
     ) -> int:
         """
         Send a message over the connection.
@@ -366,6 +363,6 @@ class Mplex(IMuxedConn):
         self.event_closed.set()
         await self.new_stream_send_channel.aclose()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""
         return self.secured_conn.get_remote_address()

@@ -9,6 +9,7 @@ from collections import (
 )
 from collections.abc import (
     Awaitable,
+    Callable,
     Iterable,
     Sequence,
 )
@@ -16,8 +17,6 @@ import logging
 import sys
 from typing import (
     Any,
-    Callable,
-    Optional,
     TypeVar,
     cast,
 )
@@ -98,7 +97,7 @@ def as_service(service_fn: LogicFnType) -> type[ServiceAPI]:
 
 class BaseTask(TaskAPI):
     def __init__(
-        self, name: str, daemon: bool, parent: Optional[TaskWithChildrenAPI]
+        self, name: str, daemon: bool, parent: TaskWithChildrenAPI | None
     ) -> None:
         # meta
         self.name = name
@@ -125,7 +124,7 @@ class BaseTask(TaskAPI):
 
 class BaseTaskWithChildren(BaseTask, TaskWithChildrenAPI):
     def __init__(
-        self, name: str, daemon: bool, parent: Optional[TaskWithChildrenAPI]
+        self, name: str, daemon: bool, parent: TaskWithChildrenAPI | None
     ) -> None:
         super().__init__(name, daemon, parent)
         self.children = set()
@@ -142,26 +141,20 @@ T = TypeVar("T", bound="BaseFunctionTask")
 
 class BaseFunctionTask(BaseTaskWithChildren):
     @classmethod
-    def iterate_tasks(cls: type[T], *tasks: TaskAPI) -> Iterable[T]:
+    def iterate_tasks(cls, *tasks: TaskAPI) -> Iterable["BaseFunctionTask"]:
+        """Iterate over all tasks of this class type and their children recursively."""
         for task in tasks:
-            if isinstance(task, cls):
+            if isinstance(task, BaseFunctionTask):
                 yield task
-            else:
-                continue
 
-            yield from cls.iterate_tasks(
-                *(
-                    child_task
-                    for child_task in task.children
-                    if isinstance(child_task, cls)
-                )
-            )
+            if isinstance(task, TaskWithChildrenAPI):
+                yield from cls.iterate_tasks(*task.children)
 
     def __init__(
         self,
         name: str,
         daemon: bool,
-        parent: Optional[TaskWithChildrenAPI],
+        parent: TaskWithChildrenAPI | None,
         async_fn: AsyncFn,
         async_fn_args: Sequence[Any],
     ) -> None:
@@ -259,12 +252,15 @@ class BaseManager(InternalManagerAPI):
     # Wait API
     #
     def run_daemon_task(
-        self, async_fn: Callable[..., Awaitable[Any]], *args: Any, name: str = None
+        self,
+        async_fn: Callable[..., Awaitable[Any]],
+        *args: Any,
+        name: str | None = None,
     ) -> None:
         self.run_task(async_fn, *args, daemon=True, name=name)
 
     def run_daemon_child_service(
-        self, service: ServiceAPI, name: str = None
+        self, service: ServiceAPI, name: str | None = None
     ) -> ManagerAPI:
         return self.run_child_service(service, daemon=True, name=name)
 
@@ -286,8 +282,7 @@ class BaseManager(InternalManagerAPI):
     # Task Management
     #
     @abstractmethod
-    def _schedule_task(self, task: TaskAPI) -> None:
-        ...
+    def _schedule_task(self, task: TaskAPI) -> None: ...
 
     def _common_run_task(self, task: TaskAPI) -> None:
         if not self.is_running:
@@ -307,7 +302,7 @@ class BaseManager(InternalManagerAPI):
         self._schedule_task(task)
 
     def _add_child_task(
-        self, parent: Optional[TaskWithChildrenAPI], task: TaskAPI
+        self, parent: TaskWithChildrenAPI | None, task: TaskAPI
     ) -> None:
         if parent is None:
             all_children = self._root_tasks
