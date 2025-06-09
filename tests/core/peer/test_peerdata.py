@@ -1,4 +1,7 @@
+from collections.abc import Sequence
+
 import pytest
+from multiaddr import Multiaddr
 
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
@@ -8,7 +11,7 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 
-MOCK_ADDR = "/peer"
+MOCK_ADDR = Multiaddr("/ip4/127.0.0.1/tcp/4001")
 MOCK_KEYPAIR = create_new_key_pair()
 MOCK_PUBKEY = MOCK_KEYPAIR.public_key
 MOCK_PRIVKEY = MOCK_KEYPAIR.private_key
@@ -23,7 +26,7 @@ def test_get_protocols_empty():
 # Test case when adding protocols
 def test_add_protocols():
     peer_data = PeerData()
-    protocols = ["protocol1", "protocol2"]
+    protocols: Sequence[str] = ["protocol1", "protocol2"]
     peer_data.add_protocols(protocols)
     assert peer_data.get_protocols() == protocols
 
@@ -31,7 +34,7 @@ def test_add_protocols():
 # Test case when setting protocols
 def test_set_protocols():
     peer_data = PeerData()
-    protocols = ["protocolA", "protocolB"]
+    protocols: Sequence[str] = ["protocol1", "protocol2"]
     peer_data.set_protocols(protocols)
     assert peer_data.get_protocols() == protocols
 
@@ -39,7 +42,7 @@ def test_set_protocols():
 # Test case when adding addresses
 def test_add_addrs():
     peer_data = PeerData()
-    addresses = [MOCK_ADDR]
+    addresses: Sequence[Multiaddr] = [MOCK_ADDR]
     peer_data.add_addrs(addresses)
     assert peer_data.get_addrs() == addresses
 
@@ -47,7 +50,7 @@ def test_add_addrs():
 # Test case when adding same address more than once
 def test_add_dup_addrs():
     peer_data = PeerData()
-    addresses = [MOCK_ADDR, MOCK_ADDR]
+    addresses: Sequence[Multiaddr] = [MOCK_ADDR, MOCK_ADDR]
     peer_data.add_addrs(addresses)
     peer_data.add_addrs(addresses)
     assert peer_data.get_addrs() == [MOCK_ADDR]
@@ -56,7 +59,7 @@ def test_add_dup_addrs():
 # Test case for clearing addresses
 def test_clear_addrs():
     peer_data = PeerData()
-    addresses = [MOCK_ADDR]
+    addresses: Sequence[Multiaddr] = [MOCK_ADDR]
     peer_data.add_addrs(addresses)
     peer_data.clear_addrs()
     assert peer_data.get_addrs() == []

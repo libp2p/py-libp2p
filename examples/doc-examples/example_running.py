@@ -9,10 +9,9 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_PROTOCOL_ID,
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
 )
 
 
@@ -37,14 +36,8 @@ async def main():
     # Create a security options dictionary mapping protocol ID to transport
     security_options = {NOISE_PROTOCOL_ID: noise_transport}
 
-    # Create a muxer options dictionary mapping protocol ID to muxer class
-    # We don't need to instantiate the muxer here, the host will do that for us
-    muxer_options = {MPLEX_PROTOCOL_ID: None}
-
     # Create a host with the key pair, Noise security, and mplex multiplexer
-    host = new_host(
-        key_pair=key_pair, sec_opt=security_options, muxer_opt=muxer_options
-    )
+    host = new_host(key_pair=key_pair, sec_opt=security_options)
 
     # Configure the listening address
     port = 8000

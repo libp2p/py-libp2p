@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -75,7 +72,7 @@ class Swarm(Service, INetworkService):
     connections: dict[ID, INetConn]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
-    listener_nursery: Optional[trio.Nursery]
+    listener_nursery: trio.Nursery | None
     event_listener_nursery_created: trio.Event
 
     notifees: list[INotifee]
@@ -340,7 +337,9 @@ class Swarm(Service, INetworkService):
             if hasattr(self, "transport") and self.transport is not None:
                 # Check if transport has close method before calling it
                 if hasattr(self.transport, "close"):
-                    await self.transport.close()
+                    await self.transport.close()  # type: ignore
+                # Ignoring the type above since `transport` may not have a close method
+                # and we have already checked it with hasattr
 
         logger.debug("swarm successfully closed")
 
@@ -360,7 +359,11 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
-        swarm_conn = SwarmConn(muxed_conn, self)
+        swarm_conn = SwarmConn(
+            muxed_conn,
+            self,
+        )
+
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
         self.manager.run_task(swarm_conn.start)

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 """
-Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go  # noqa: E501
+Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
 """
 
 
@@ -32,7 +32,11 @@ class SwarmConn(INetConn):
     streams: set[NetStream]
     event_closed: trio.Event
 
-    def __init__(self, muxed_conn: IMuxedConn, swarm: "Swarm") -> None:
+    def __init__(
+        self,
+        muxed_conn: IMuxedConn,
+        swarm: "Swarm",
+    ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
@@ -40,7 +44,7 @@ class SwarmConn(INetConn):
         self.event_started = trio.Event()
         if hasattr(muxed_conn, "on_close"):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
-            muxed_conn.on_close = self._on_muxed_conn_closed
+            setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
         else:
             logging.error(
                 f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute"

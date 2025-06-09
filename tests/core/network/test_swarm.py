@@ -13,6 +13,9 @@ from libp2p import (
 from libp2p.network.exceptions import (
     SwarmException,
 )
+from libp2p.network.swarm import (
+    Swarm,
+)
 from libp2p.tools.utils import (
     connect_swarm,
 )
@@ -166,12 +169,14 @@ async def test_swarm_multiaddr(security_protocol):
 
 def test_new_swarm_defaults_to_tcp():
     swarm = new_swarm()
+    assert isinstance(swarm, Swarm)
     assert isinstance(swarm.transport, TCP)
 
 
 def test_new_swarm_tcp_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
     swarm = new_swarm(listen_addrs=[addr])
+    assert isinstance(swarm, Swarm)
     assert isinstance(swarm.transport, TCP)
 
 

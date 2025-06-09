@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+from multiaddr.multiaddr import Multiaddr
 import trio
 
 from libp2p import (
@@ -11,6 +12,8 @@ from libp2p import (
     new_host,
     set_default_muxer,
 )
+from libp2p.custom_types import TProtocol
+from libp2p.peer.peerinfo import PeerInfo
 
 # Enable logging for debugging
 logging.basicConfig(level=logging.DEBUG)
@@ -24,13 +27,14 @@ async def host_pair(muxer_preference=None, muxer_opt=None):
     host_b = new_host(muxer_preference=muxer_preference, muxer_opt=muxer_opt)
 
     # Start both hosts
-    await host_a.get_network().listen("/ip4/127.0.0.1/tcp/0")
-    await host_b.get_network().listen("/ip4/127.0.0.1/tcp/0")
+    await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+    await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
     # Connect hosts with a timeout
     listen_addrs_a = host_a.get_addrs()
     with trio.move_on_after(5):  # 5 second timeout
-        await host_b.connect(host_a.get_id(), listen_addrs_a)
+        peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+        await host_b.connect(peer_info_a)
 
     yield host_a, host_b
 
@@ -57,14 +61,14 @@ async def test_multiplexer_preference_parameter(muxer_preference):
 
         try:
             # Start both hosts
-            await host_a.get_network().listen("/ip4/127.0.0.1/tcp/0")
-            await host_b.get_network().listen("/ip4/127.0.0.1/tcp/0")
+            await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
-
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
             # Check if connection was established
             connections = host_b.get_network().connections
             assert len(connections) > 0, "Connection not established"
@@ -74,7 +78,7 @@ async def test_multiplexer_preference_parameter(muxer_preference):
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
-            ECHO_PROTOCOL = "/echo/1.0.0"
+            ECHO_PROTOCOL = TProtocol("/echo/1.0.0")
 
             # Setup echo handler on host_a
             async def echo_handler(stream):
@@ -89,7 +93,7 @@ async def test_multiplexer_preference_parameter(muxer_preference):
 
             # Open a stream with timeout
             with trio.move_on_after(5):
-                stream = await muxed_conn.open_stream(ECHO_PROTOCOL)
+                stream = await muxed_conn.open_stream()
 
             # Check stream type
             if muxer_preference == MUXER_YAMUX:
@@ -132,13 +136,14 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
 
         try:
             # Start both hosts
-            await host_a.get_network().listen("/ip4/127.0.0.1/tcp/0")
-            await host_b.get_network().listen("/ip4/127.0.0.1/tcp/0")
+            await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
 
             # Check if connection was established
             connections = host_b.get_network().connections
@@ -149,7 +154,7 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
-            ECHO_PROTOCOL = "/echo/1.0.0"
+            ECHO_PROTOCOL = TProtocol("/echo/1.0.0")
 
             # Setup echo handler on host_a
             async def echo_handler(stream):
@@ -164,7 +169,7 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
 
             # Open a stream with timeout
             with trio.move_on_after(5):
-                stream = await muxed_conn.open_stream(ECHO_PROTOCOL)
+                stream = await muxed_conn.open_stream()
 
             # Check stream type
             assert expected_stream_class in stream.__class__.__name__
@@ -200,13 +205,14 @@ async def test_global_default_muxer(global_default):
 
         try:
             # Start both hosts
-            await host_a.get_network().listen("/ip4/127.0.0.1/tcp/0")
-            await host_b.get_network().listen("/ip4/127.0.0.1/tcp/0")
+            await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
             # Connect hosts with timeout
             listen_addrs_a = host_a.get_addrs()
             with trio.move_on_after(5):  # 5 second timeout
-                await host_b.connect(host_a.get_id(), listen_addrs_a)
+                peer_info_a = PeerInfo(host_a.get_id(), listen_addrs_a)
+                await host_b.connect(peer_info_a)
 
             # Check if connection was established
             connections = host_b.get_network().connections
@@ -217,7 +223,7 @@ async def test_global_default_muxer(global_default):
             muxed_conn = conn.muxed_conn
 
             # Define a simple echo protocol
-            ECHO_PROTOCOL = "/echo/1.0.0"
+            ECHO_PROTOCOL = TProtocol("/echo/1.0.0")
 
             # Setup echo handler on host_a
             async def echo_handler(stream):
@@ -232,7 +238,7 @@ async def test_global_default_muxer(global_default):
 
             # Open a stream with timeout
             with trio.move_on_after(5):
-                stream = await muxed_conn.open_stream(ECHO_PROTOCOL)
+                stream = await muxed_conn.open_stream()
 
             # Check stream type based on global default
             if global_default == MUXER_YAMUX:

@@ -1,6 +1,0 @@
-libp2p
-libp2p
-py-libp2p
-py-libp2p
-py-libp2p
-The Python implementation of the libp2p networking stack
