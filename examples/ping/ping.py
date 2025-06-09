@@ -1,6 +1,4 @@
 import argparse
-import random
-import socket
 
 import multiaddr
 import trio
@@ -57,7 +55,6 @@ async def send_ping(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
     host = new_host(listen_addrs=[listen_addr])
 
@@ -68,7 +65,7 @@ async def run(port: int, destination: str) -> None:
             print(
                 "Run this from the same folder in another console:\n\n"
                 f"ping-demo "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
+                f"-d {host.get_addrs()[0]}\n"
             )
             print("Waiting for incoming connection...")
 
@@ -98,8 +95,8 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
 
-    parser.add_argument("-p", "--port", type=int, help="source port number (optional)")
     parser.add_argument(
         "-d",
         "--destination",
@@ -107,29 +104,11 @@ def main() -> None:
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
     args = parser.parse_args()
-    port = args.port if args.port is not None else get_random_available_port()
 
     try:
-        trio.run(run, *(port, args.destination))
+        trio.run(run, *(args.port, args.destination))
     except KeyboardInterrupt:
         pass
-
-
-def is_port_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind(("", port))
-            return True
-        except OSError:
-            return False
-
-
-def get_random_available_port(start: int = 10000, end: int = 20000) -> int:
-    for _ in range(50):  # try up to 50 random ports
-        port = random.randint(start, end)
-        if is_port_available(port):
-            return port
-    raise RuntimeError("Could not find an available port in the given range.")
 
 
 if __name__ == "__main__":
