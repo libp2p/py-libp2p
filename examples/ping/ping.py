@@ -1,7 +1,5 @@
 import argparse
 import logging
-import os
-import struct
 
 from cryptography.hazmat.primitives.asymmetric import (
     x25519,
@@ -19,10 +17,12 @@ from libp2p.custom_types import (
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
+from libp2p.peer.peerinfo import (
+    info_from_p2p_addr,
+)
 from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
-    YamuxStream,
 )
 from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 
@@ -36,356 +36,141 @@ logging.basicConfig(
     ],
 )
 
-# Protocol constants - must match rust-libp2p exactly
+# Standard libp2p ping protocol - this is what rust-libp2p uses by default
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
-RESP_TIMEOUT = 30
-MAX_FRAME_SIZE = 1024 * 1024  # 1MB max frame size
-
-
-class InteropYamux(Yamux):
-    """Enhanced Yamux with proper rust-libp2p interoperability"""
-
-    def __init__(self, *args, **kwargs):
-        logging.info("InteropYamux.__init__ called")
-        super().__init__(*args, **kwargs)
-        self.frame_count = 0
-        self.debug_frames = True
-
-    async def _read_exact_bytes(self, n):
-        """Read exactly n bytes from the connection with proper error handling"""
-        if n == 0:
-            return b""
-
-        if n > MAX_FRAME_SIZE:
-            logging.error(f"Requested read size {n} exceeds maximum {MAX_FRAME_SIZE}")
-            return None
-
-        data = b""
-        while len(data) < n:
-            try:
-                remaining = n - len(data)
-                chunk = await self.secured_conn.read(remaining)
-            except (trio.ClosedResourceError, trio.BrokenResourceError):
-                logging.debug(
-                    f"Connection closed while reading {n}"
-                    f"bytes (got {len(data)}) for peer {self.peer_id}"
-                )
-                return None
-            except Exception as e:
-                logging.error(f"Error reading {n} bytes: {e}")
-                return None
-
-            if not chunk:
-                logging.debug(
-                    f"Connection closed while reading {n}"
-                    f"bytes (got {len(data)}) for peer {self.peer_id}"
-                )
-                return None
-            data += chunk
-        return data
-
-    async def handle_incoming(self):
-        """Enhanced incoming frame handler with better error recovery"""
-        logging.info(f"Starting Yamux for {self.peer_id}")
-
-        consecutive_errors = 0
-        max_consecutive_errors = 3
-
-        while not self.event_shutting_down.is_set():
-            try:
-                # Read frame header (12 bytes)
-                header_data = await self._read_exact_bytes(12)
-                if header_data is None:
-                    logging.debug(
-                        f"Connection closed or incomplete"
-                        f"header for peer {self.peer_id}"
-                    )
-                    break
-
-                # Quick sanity check for protocol data leakage
-                if (
-                    b"/ipfs" in header_data
-                    or b"multi" in header_data
-                    or b"noise" in header_data
-                ):
-                    logging.error(
-                        f"Protocol data in header position: {header_data.hex()}"
-                    )
-                    break
-
-                try:
-                    # Unpack header: version, type, flags, stream_id, length
-                    version, msg_type, flags, stream_id, length = struct.unpack(
-                        ">BBHII", header_data
-                    )
-
-                    # Validate header values strictly
-                    if version != 0:
-                        logging.error(f"Invalid yamux version {version}, expected 0")
-                        break
-
-                    if msg_type not in [0, 1, 2, 3]:
-                        logging.error(f"Invalid message type {msg_type}, expected 0-3")
-                        break
-
-                    if length > MAX_FRAME_SIZE:
-                        logging.error(f"Frame too large: {length} > {MAX_FRAME_SIZE}")
-                        break
-
-                    # Additional validation for ping frames
-                    if msg_type == 2 and length != 4:
-                        logging.error(
-                            f"Invalid ping frame length: {length}, expected 4"
-                        )
-                        break
-
-                    # Log frame details
-                    logging.debug(
-                        f"Received header for peer {self.peer_id}"
-                        f": type={msg_type}, flags={flags},"
-                        f"stream_id={stream_id}, length={length}"
-                    )
-
-                    consecutive_errors = 0  # Reset error counter on successful parse
-
-                except struct.error as e:
-                    consecutive_errors += 1
-                    logging.error(
-                        f"Header parse error #{consecutive_errors}"
-                        f": {e}, data: {header_data.hex()}"
-                    )
-                    if consecutive_errors >= max_consecutive_errors:
-                        logging.error("Too many consecutive header parse errors")
-                        break
-                    continue
-
-                # Read payload if present
-                payload = b""
-                if length > 0:
-                    payload = await self._read_exact_bytes(length)
-                    if payload is None:
-                        logging.debug(
-                            f"Failed to read payload of"
-                            f"{length} bytes for peer {self.peer_id}"
-                        )
-                        break
-                    if len(payload) != length:
-                        logging.error(
-                            f"Payload length mismatch:"
-                            f"got {len(payload)}, expected {length}"
-                        )
-                        break
-
-                # Process frame by type
-                if msg_type == 0:  # Data frame
-                    await self._handle_data_frame(stream_id, flags, payload)
-
-                elif msg_type == 1:  # Window update
-                    await self._handle_window_update(stream_id, payload)
-
-                elif msg_type == 2:  # Ping frame
-                    await self._handle_ping_frame(stream_id, flags, payload)
-
-                elif msg_type == 3:  # GoAway frame
-                    await self._handle_goaway_frame(payload)
-                    break
-
-            except (trio.ClosedResourceError, trio.BrokenResourceError):
-                logging.debug(
-                    f"Connection closed during frame processing for peer {self.peer_id}"
-                )
-                break
-            except Exception as e:
-                consecutive_errors += 1
-                logging.error(f"Frame processing error #{consecutive_errors}: {e}")
-                if consecutive_errors >= max_consecutive_errors:
-                    logging.error("Too many consecutive frame processing errors")
-                    break
-
-        await self._cleanup_on_error()
-
-    async def _handle_data_frame(self, stream_id, flags, payload):
-        """Handle data frames with proper stream lifecycle"""
-        if stream_id == 0:
-            logging.warning("Received data frame for stream 0 (control stream)")
-            return
-
-        # Handle SYN flag - new stream creation
-        if flags & 0x1:  # SYN flag
-            if stream_id in self.streams:
-                logging.warning(f"SYN received for existing stream {stream_id}")
-            else:
-                logging.debug(
-                    f"Creating new stream {stream_id} for peer {self.peer_id}"
-                )
-                stream = YamuxStream(self, stream_id, is_outbound=False)
-                async with self.streams_lock:
-                    self.streams[stream_id] = stream
-
-                # Send the new stream to the handler
-                await self.new_stream_send_channel.send(stream)
-                logging.debug(f"Sent stream {stream_id} to handler")
-
-        # Add data to stream buffer if stream exists
-        if stream_id in self.streams:
-            stream = self.streams[stream_id]
-            if payload:
-                # Add to stream's receive buffer
-                async with self.streams_lock:
-                    if not hasattr(stream, "_receive_buffer"):
-                        stream._receive_buffer = bytearray()
-                    if not hasattr(stream, "_receive_event"):
-                        stream._receive_event = trio.Event()
-                    stream._receive_buffer.extend(payload)
-                    stream._receive_event.set()
-
-            # Handle stream closure flags
-            if flags & 0x2:  # FIN flag
-                stream.recv_closed = True
-                logging.debug(f"Stream {stream_id} received FIN")
-            if flags & 0x4:  # RST flag
-                stream.reset_received = True
-                logging.debug(f"Stream {stream_id} received RST")
-        else:
-            if payload:
-                logging.warning(f"Received data for unknown stream {stream_id}")
-
-    async def _handle_window_update(self, stream_id, payload):
-        """Handle window update frames"""
-        if len(payload) != 4:
-            logging.warning(f"Invalid window update payload length: {len(payload)}")
-            return
-
-        delta = struct.unpack(">I", payload)[0]
-        logging.debug(f"Window update: stream={stream_id}, delta={delta}")
-
-        async with self.streams_lock:
-            if stream_id in self.streams:
-                if not hasattr(self.streams[stream_id], "send_window"):
-                    self.streams[stream_id].send_window = 256 * 1024  # Default window
-                self.streams[stream_id].send_window += delta
-
-    async def _handle_ping_frame(self, stream_id, flags, payload):
-        """Handle ping/pong frames with proper validation"""
-        if len(payload) != 4:
-            logging.warning(f"Invalid ping payload length: {len(payload)} (expected 4)")
-            return
-
-        ping_value = struct.unpack(">I", payload)[0]
-
-        if flags & 0x1:  # SYN flag - ping request
-            logging.debug(
-                f"Received ping request with value {ping_value} for peer {self.peer_id}"
-            )
-            # Send pong response (ACK flag = 0x2)
-            try:
-                pong_header = struct.pack(
-                    ">BBHII", 0, 2, 0x2, 0, 4
-                )  # Version=0, Type=2, Flags=ACK, StreamID=0, Length=4
-                pong_payload = struct.pack(">I", ping_value)
-                await self.secured_conn.write(pong_header + pong_payload)
-                logging.debug(f"Sent pong response with value {ping_value}")
-            except Exception as e:
-                logging.error(f"Failed to send pong response: {e}")
-        else:
-            # Pong response
-            logging.debug(f"Received pong response with value {ping_value}")
-
-    async def _handle_goaway_frame(self, payload):
-        """Handle GoAway frames"""
-        if len(payload) != 4:
-            logging.warning(f"Invalid GoAway payload length: {len(payload)}")
-            return
-
-        code = struct.unpack(">I", payload)[0]
-        logging.info(f"Received GoAway frame with code {code}")
-        self.event_shutting_down.set()
+RESP_TIMEOUT = 60
 
 
 async def handle_ping(stream: INetStream) -> None:
+    """Handle incoming ping requests from rust-libp2p clients"""
     peer_id = stream.muxed_conn.peer_id
-    logging.info(f"Handling ping stream from {peer_id}")
+    print(f"[INFO] New ping stream opened by {peer_id}")
+    logging.info(f"Ping handler called for peer {peer_id}")
+
+    ping_count = 0
 
     try:
-        with trio.fail_after(RESP_TIMEOUT):
-            # Read initial protocol negotiation
-            initial_data = await stream.read(1024)
-            logging.debug(
-                f"Received initial stream data from {peer_id}"
-                f": {initial_data.hex()} (length={len(initial_data)})"
-            )
-            if initial_data == b"/ipfs/ping/1.0.0\n":
-                logging.debug(
-                    f"Confirmed /ipfs/ping/1.0.0 protocol negotiation from {peer_id}"
+        while True:
+            try:
+                print(f"[INFO] Waiting for ping data from {peer_id}...")
+                logging.debug(f"Stream state: {stream}")
+                data = await stream.read(PING_LENGTH)
+
+                if not data:
+                    print(
+                        f"[INFO] No data received,"
+                        f" connection likely closed by {peer_id}"
+                    )
+                    logging.debug("No data received, stream closed")
+                    break
+
+                if len(data) == 0:
+                    print(f"[INFO] Empty data received, connection closed by {peer_id}")
+                    logging.debug("Empty data received")
+                    break
+
+                ping_count += 1
+                print(
+                    f"[PING {ping_count}] Received ping from {peer_id}:"
+                    f" {len(data)} bytes"
                 )
+                logging.debug(f"Ping data: {data.hex()}")
+
+                # Echo the data back (this is what ping protocol does)
+                await stream.write(data)
+                print(f"[PING {ping_count}] Echoed ping back to {peer_id}")
+
+            except Exception as e:
+                print(f"[ERROR] Error in ping loop with {peer_id}: {e}")
+                logging.exception("Ping loop error")
+                break
+
+    except Exception as e:
+        print(f"[ERROR] Error handling ping from {peer_id}: {e}")
+        logging.exception("Ping handler error")
+    finally:
+        try:
+            print(f"[INFO] Closing ping stream with {peer_id}")
+            await stream.close()
+        except Exception as e:
+            logging.debug(f"Error closing stream: {e}")
+
+    print(f"[INFO] Ping session completed with {peer_id} ({ping_count} pings)")
+
+
+async def send_ping_sequence(stream: INetStream, count: int = 5) -> None:
+    """Send a sequence of pings compatible with rust-libp2p."""
+    peer_id = stream.muxed_conn.peer_id
+    print(f"[INFO] Starting ping sequence to {peer_id} ({count} pings)")
+
+    import os
+    import time
+
+    rtts = []
+
+    for i in range(1, count + 1):
+        try:
+            # Generate random 32-byte payload as per ping protocol spec
+            payload = os.urandom(PING_LENGTH)
+            print(f"[PING {i}/{count}] Sending ping to {peer_id}")
+            logging.debug(f"Sending payload: {payload.hex()}")
+            start_time = time.time()
+
+            await stream.write(payload)
+
+            with trio.fail_after(RESP_TIMEOUT):
+                response = await stream.read(PING_LENGTH)
+
+            end_time = time.time()
+            rtt = (end_time - start_time) * 1000
+
+            if (
+                response
+                and len(response) >= PING_LENGTH
+                and response[:PING_LENGTH] == payload
+            ):
+                rtts.append(rtt)
+                print(f"[PING {i}] Successful! RTT: {rtt:.2f}ms")
             else:
-                logging.warning(f"Unexpected initial data: {initial_data!r}")
+                print(f"[ERROR] Ping {i} failed: response mismatch or incomplete")
+                if response:
+                    logging.debug(f"Expected: {payload.hex()}")
+                    logging.debug(f"Received: {response.hex()}")
 
-            # Read ping payload
-            payload = await stream.read(PING_LENGTH)
-            if not payload:
-                logging.info(f"Stream closed by {peer_id}")
-                return
-            if len(payload) != PING_LENGTH:
-                logging.warning(
-                    f"Unexpected payload length"
-                    f" {len(payload)} from {peer_id}: {payload.hex()}"
-                )
-                return
-            logging.info(
-                f"Received ping from {peer_id}:"
-                f" {payload[:8].hex()}... (length={len(payload)})"
-            )
-            await stream.write(payload)
-            logging.info(f"Sent pong to {peer_id}: {payload[:8].hex()}...")
+            if i < count:
+                await trio.sleep(1)
 
-    except trio.TooSlowError:
-        logging.warning(f"Ping timeout with {peer_id}")
-    except trio.BrokenResourceError:
-        logging.info(f"Connection broken with {peer_id}")
-    except Exception as e:
-        logging.error(f"Error handling ping from {peer_id}: {e}")
-    finally:
-        try:
-            await stream.close()
-            logging.debug(f"Closed ping stream with {peer_id}")
-        except Exception:
-            pass
+        except trio.TooSlowError:
+            print(f"[ERROR] Ping {i} timed out after {RESP_TIMEOUT}s")
+        except Exception as e:
+            print(f"[ERROR] Ping {i} failed: {e}")
+            logging.exception(f"Ping {i} error")
 
+    # Print statistics
+    if rtts:
+        avg_rtt = sum(rtts) / len(rtts)
+        min_rtt = min(rtts)
+        max_rtt = max(rtts)  # Fixed typo: was max_rtts
+        success_count = len(rtts)
+        loss_rate = ((count - success_count) / count) * 100
 
-async def send_ping(stream: INetStream) -> None:
-    peer_id = stream.muxed_conn.peer_id
-    try:
-        payload = os.urandom(PING_LENGTH)
-        logging.info(f"Sending ping to {peer_id}: {payload[:8].hex()}...")
-        with trio.fail_after(RESP_TIMEOUT):
-            await stream.write(payload)
-            logging.debug(f"Ping sent to {peer_id}")
-            response = await stream.read(PING_LENGTH)
-        if not response:
-            logging.error(f"No pong response from {peer_id}")
-            return
-        if len(response) != PING_LENGTH:
-            logging.warning(
-                f"Pong length mismatch: got {len(response)}, expected {PING_LENGTH}"
-            )
-        if response == payload:
-            logging.info(f"Ping successful! Pong matches from {peer_id}")
-        else:
-            logging.warning(f"Pong mismatch from {peer_id}")
-    except trio.TooSlowError:
-        logging.error(f"Ping timeout to {peer_id}")
-    except Exception as e:
-        logging.error(f"Error sending ping to {peer_id}: {e}")
-    finally:
-        try:
-            await stream.close()
-        except Exception:
-            pass
+        print(f"\n[STATS] Ping Statistics:")
+        print(
+            f"   Packets: Sent={count}, Received={success_count},"
+            f" Lost={count - success_count}"
+        )
+        print(f"   Loss rate: {loss_rate:.1f}%")
+        print(
+            f"   RTT: min={min_rtt:.2f}ms, avg={avg_rtt:.2f}ms," 
+            f" max={max_rtt:.2f}ms"
+        )
+    else:
+        print(f"\n[STATS] All pings failed ({count} attempts)")
 
 
 def create_noise_keypair():
+    """Create a Noise protocol keypair for secure communication"""
     try:
         x25519_private_key = x25519.X25519PrivateKey.generate()
 
@@ -415,101 +200,228 @@ def create_noise_keypair():
         return None
 
 
-def info_from_p2p_addr(addr):
-    """Extract peer info from multiaddr - you'll need to implement this"""
-    # This is a placeholder - you need to implement the actual parsing
-    # based on your libp2p implementation
-
-
-async def run(port: int, destination: str) -> None:
+async def run_server(port: int) -> None:
+    """Run ping server that accepts connections from rust-libp2p clients."""
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-    try:
-        key_pair = generate_new_rsa_identity()
-        logging.debug("Generated RSA keypair")
+    key_pair = generate_new_rsa_identity()
+    logging.debug("Generated RSA keypair")
 
-        noise_privkey = create_noise_keypair()
-        logging.debug("Generated Noise keypair")
-    except Exception as e:
-        logging.error(f"Key generation failed: {e}")
-        raise
+    noise_privkey = create_noise_keypair()
+    if not noise_privkey:
+        print("[ERROR] Failed to create Noise keypair")
+        return
+    logging.debug("Generated Noise keypair")
 
     noise_transport = NoiseTransport(key_pair, noise_privkey=noise_privkey)
     logging.debug(f"Noise transport initialized: {noise_transport}")
     sec_opt = {TProtocol("/noise"): noise_transport}
-    muxer_opt = {TProtocol(YAMUX_PROTOCOL_ID): InteropYamux}
+    muxer_opt = {TProtocol(YAMUX_PROTOCOL_ID): Yamux}
 
     logging.info(f"Using muxer: {muxer_opt}")
 
     host = new_host(key_pair=key_pair, sec_opt=sec_opt, muxer_opt=muxer_opt)
 
-    peer_id = host.get_id().pretty()
-    logging.info(f"Host peer ID: {peer_id}")
+    print("[INFO] Starting py-libp2p ping server...")
 
-    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery():
-        if not destination:
-            host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
+    async with host.run(listen_addrs=[listen_addr]):
+        print(f"[INFO] Registering ping handler for protocol: {PING_PROTOCOL_ID}")
+        host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
-            logging.info(f"Server listening on {listen_addr}")
-            logging.info(f"Full address: {listen_addr}/p2p/{peer_id}")
-            logging.info("Waiting for connections...")
+        # Also register alternative protocol IDs for better compatibility
+        alt_protocols = [
+            TProtocol("/ping/1.0.0"),
+            TProtocol("/libp2p/ping/1.0.0"),
+        ]
 
-            await trio.sleep_forever()
-        else:
+        for alt_proto in alt_protocols:
+            print(f"[INFO] Also registering handler for: {alt_proto}")
+            host.set_stream_handler(alt_proto, handle_ping)
+
+        print("[INFO] Server started successfully!")
+        print(f"[INFO] Peer ID: {host.get_id()}")
+        print(f"[INFO] Listening: /ip4/0.0.0.0/tcp/{port}")
+        print(f"[INFO] Primary Protocol: {PING_PROTOCOL_ID}")
+        print(f"[INFO] Security: Noise encryption")
+        print(f"[INFO] Muxer: Yamux stream multiplexing")
+
+        print("\n[INFO] Registered protocols:")
+        print(f"   - {PING_PROTOCOL_ID}")
+        for proto in alt_protocols:
+            print(f"   - {proto}")
+
+        peer_id = host.get_id()
+        print("\n[TEST] Test with rust-libp2p:")
+        print(f"   cargo run -- /ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}")
+
+        print("\n[TEST] Test with py-libp2p:")
+        print(f"   python ping.py client /ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}")
+
+        print("\n[INFO] Waiting for connections...")
+        print("Press Ctrl+C to exit")
+
+        await trio.sleep_forever()
+
+
+async def run_client(destination: str, count: int = 5) -> None:
+    """Run ping client to test connectivity with another peer."""
+    listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
+
+    key_pair = generate_new_rsa_identity()
+    logging.debug("Generated RSA keypair")
+
+    noise_privkey = create_noise_keypair()
+    if not noise_privkey:
+        print("[ERROR] Failed to create Noise keypair")
+        return 1
+    logging.debug("Generated Noise keypair")
+
+    noise_transport = NoiseTransport(key_pair, noise_privkey=noise_privkey)
+    logging.debug(f"Noise transport initialized: {noise_transport}")
+    sec_opt = {TProtocol("/noise"): noise_transport}
+    muxer_opt = {TProtocol(YAMUX_PROTOCOL_ID): Yamux}
+
+    logging.info(f"Using muxer: {muxer_opt}")
+
+    host = new_host(key_pair=key_pair, sec_opt=sec_opt, muxer_opt=muxer_opt)
+
+    print("[INFO] Starting py-libp2p ping client...")
+
+    async with host.run(listen_addrs=[listen_addr]):
+        print(f"[INFO] Our Peer ID: {host.get_id()}")
+        print(f"[INFO] Target: {destination}")
+        print("[INFO] Security: Noise encryption")
+        print("[INFO] Muxer: Yamux stream multiplexing")
+
+        try:
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
+            target_peer_id = info.peer_id
 
-            logging.info(f"Connecting to {info.peer_id}")
+            print(f"[INFO] Target Peer ID: {target_peer_id}")
+            print("[INFO] Connecting to peer...")
 
-            try:
-                with trio.fail_after(30):
-                    await host.connect(info)
-                    logging.info(f"Connected to {info.peer_id}")
+            await host.connect(info)
+            print("[INFO] Connection established!")
 
-                    await trio.sleep(2.0)
+            # Try protocols in order of preference
+            # Start with the standard libp2p ping protocol
+            protocols_to_try = [
+                PING_PROTOCOL_ID,  # /ipfs/ping/1.0.0 - standard protocol
+                TProtocol("/ping/1.0.0"),  # Alternative
+                TProtocol("/libp2p/ping/1.0.0"),  # Another alternative
+            ]
 
-                    logging.info(f"Opening ping stream to {info.peer_id}")
-                    stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
-                    logging.info(f"Opened ping stream to {info.peer_id}")
+            stream = None
 
-                    await trio.sleep(0.5)
+            for proto in protocols_to_try:
+                try:
+                    print(f"[INFO] Trying to open stream with protocol: {proto}")
+                    stream = await host.new_stream(target_peer_id, [proto])
+                    print(f"[INFO] Stream opened with protocol: {proto}")
+                    break
+                except Exception as e:
+                    print(f"[ERROR] Failed to open stream with {proto}: {e}")
+                    logging.debug(f"Protocol {proto} failed: {e}")
+                    continue
 
-                    await send_ping(stream)
+            if not stream:
+                print("[ERROR] Failed to open stream with any ping protocol")
+                print("[ERROR] Ensure the target peer supports one of these protocols:")
+                for proto in protocols_to_try:
+                    print(f"[ERROR]   - {proto}")
+                return 1
 
-                    logging.info("Ping completed successfully")
+            await send_ping_sequence(stream, count)
 
-                    logging.info("Keeping connection alive for 5 seconds...")
-                    await trio.sleep(5.0)
-            except trio.TooSlowError:
-                logging.error(f"Connection timeout to {info.peer_id}")
-                raise
-            except Exception as e:
-                logging.error(f"Connection failed to {info.peer_id}: {e}")
-                import traceback
+            await stream.close()
+            print("[INFO] Stream closed successfully")
 
-                traceback.print_exc()
-                raise
+        except Exception as e:
+            print(f"[ERROR] Client error: {e}")
+            logging.exception("Client error")
+            import traceback
+            traceback.print_exc()
+            return 1
+
+    print("\n[INFO] Client stopped")
+    return 0
 
 
-def main():
+def main() -> None:
+    """Main function with argument parsing."""
+    description = """
+    py-libp2p ping tool for interoperability testing with rust-libp2p.
+    Uses Noise encryption and Yamux multiplexing for compatibility.
+
+    Server mode: Listens for ping requests from rust-libp2p or py-libp2p clients.
+    Client mode: Sends ping requests to rust-libp2p or py-libp2p servers.
+    
+    The tool implements the standard libp2p ping protocol (/ipfs/ping/1.0.0)
+    which exchanges 32-byte random payloads and measures round-trip time.
+    """
+
+    example_maddr = (
+        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+    )
+
     parser = argparse.ArgumentParser(
-        description="libp2p ping with Rust interoperability"
+        description=description,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Examples:
+  python ping.py server                    # Start server on port 8000
+  python ping.py server --port 9000        # Start server on port 9000
+  python ping.py client {example_maddr}
+  python ping.py client {example_maddr} --count 10
+
+Protocols supported:
+  - /ipfs/ping/1.0.0 (primary, rust-libp2p default)
+  - /ping/1.0.0 (alternative)
+  - /libp2p/ping/1.0.0 (alternative)
+        """,
     )
-    parser.add_argument(
-        "-p", "--port", default=8000, type=int, help="Port to listen on"
+
+    subparsers = parser.add_subparsers(dest="mode", help="Operation mode")
+
+    server_parser = subparsers.add_parser("server", help="Run as ping server")
+    server_parser.add_argument(
+        "--port", "-p", type=int, default=8000, help="Port to listen on (default: 8000)"
     )
-    parser.add_argument("-d", "--destination", type=str, help="Destination multiaddr")
+
+    client_parser = subparsers.add_parser("client", help="Run as ping client")
+    client_parser.add_argument("destination", help="Target peer multiaddr")
+    client_parser.add_argument(
+        "--count",
+        "-c",
+        type=int,
+        default=5,
+        help="Number of pings to send (default: 5)",
+    )
 
     args = parser.parse_args()
 
+    if not args.mode:
+        parser.print_help()
+        return 1
+
     try:
-        trio.run(run, args.port, args.destination)
+        if args.mode == "server":
+            trio.run(run_server, args.port)
+        elif args.mode == "client":
+            return trio.run(run_client, args.destination, args.count)
     except KeyboardInterrupt:
-        logging.info("Terminated by user")
+        print("\n[INFO] Goodbye!")
+        return 0
     except Exception as e:
-        logging.error(f"Fatal error: {e}")
-        raise
+        print(f"[ERROR] Fatal error: {e}")
+        logging.exception("Fatal error")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())
