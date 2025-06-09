@@ -147,7 +147,6 @@ class PeerData(IPeerData):
         """
         # for ttl = 0; peer_data is always valid
         if self.ttl > 0 and self.last_identified + self.ttl < int(time.time()):
-            print("reached true")
             return True
         return False
 
