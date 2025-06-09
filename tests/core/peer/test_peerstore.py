@@ -24,13 +24,13 @@ def test_peer_info_basic():
     # update ttl to new value
     store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4002"), 2) 
 
-    time.sleep(2)
+    time.sleep(1)
     info = store.peer_info(ID(b"peer"))
     assert info.peer_id == ID(b"peer")
     assert info.addrs == [Multiaddr("/ip4/127.0.0.1/tcp/4002")]
 
     # Check that addresses are cleared after ttl
-    time.sleep(3)
+    time.sleep(2)
     info = store.peer_info(ID(b"peer"))
     assert info.peer_id == ID(b"peer")
     assert info.addrs == []
@@ -41,7 +41,7 @@ def test_peer_info_basic():
 def test_peer_permanent_ttl():
     store = PeerStore()
     store.add_addr(ID(b"peer"), Multiaddr("/ip4/127.0.0.1/tcp/4001"))
-    time.sleep(2)
+    time.sleep(1)
     info = store.peer_info(ID(b"peer"))
     assert info.peer_id == ID(b"peer")
     assert info.addrs == [Multiaddr("/ip4/127.0.0.1/tcp/4001")]
@@ -81,6 +81,6 @@ def test_peers():
     store = PeerStore()
     store.add_protocols(ID(b"peer1"), [])
     store.put(ID(b"peer2"), "key", "val")
-    store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 120)
+    store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 10)
 
     assert set(store.peer_ids()) == {ID(b"peer1"), ID(b"peer2"), ID(b"peer3")}

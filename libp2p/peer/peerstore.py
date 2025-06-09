@@ -4,7 +4,6 @@ from collections import (
 from collections.abc import (
     Sequence,
 )
-import sys
 from typing import (
     Any,
 )
