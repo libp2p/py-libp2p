@@ -8,6 +8,7 @@ from collections.abc import (
     KeysView,
     Sequence,
 )
+from contextlib import AbstractAsyncContextManager
 from types import (
     TracebackType,
 )
@@ -1178,7 +1179,9 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def run(self, listen_addrs: Sequence[Multiaddr]) -> AsyncContextManager[None]:
+    def run(
+        self, listen_addrs: Sequence[Multiaddr]
+    ) -> AbstractAsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
 

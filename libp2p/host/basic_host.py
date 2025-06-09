@@ -3,6 +3,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import (
+    AbstractAsyncContextManager,
     asynccontextmanager,
 )
 import logging
@@ -147,19 +148,23 @@ class BasicHost(IHost):
         """
         return list(self._network.connections.keys())
 
-    @asynccontextmanager
-    async def run(
+    def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
-    ) -> AsyncIterator[None]:
+    ) -> AbstractAsyncContextManager[None]:
         """
         Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
-        network = self.get_network()
-        async with background_trio_service(network):
-            await network.listen(*listen_addrs)
-            yield
+
+        @asynccontextmanager
+        async def _run() -> AsyncIterator[None]:
+            network = self.get_network()
+            async with background_trio_service(network):
+                await network.listen(*listen_addrs)
+                yield
+
+        return _run()
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn

@@ -92,18 +92,15 @@ class AutoNAT:
         timeout: Optional[float] = None,
         metadata: Optional[list[tuple[str, str]]] = None,
     ) -> Any:
-        return grpc.experimental.unary_unary(
-            request,
-            target,
+        channel = grpc.secure_channel(target, channel_credentials) if channel_credentials else grpc.insecure_channel(target)
+        return channel.unary_unary(
             "/autonat.pb.AutoNAT/Dial",
-            autonat__pb2.Message.SerializeToString,
-            autonat__pb2.Message.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
+            request_serializer=autonat__pb2.Message.SerializeToString,
+            response_deserializer=autonat__pb2.Message.FromString,
+            _registered_method=True,
+        )(
+            request,
+            timeout=timeout,
+            metadata=metadata,
+            wait_for_ready=wait_for_ready,
         )
