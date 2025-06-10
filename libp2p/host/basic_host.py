@@ -220,17 +220,13 @@ class BasicHost(IHost):
         :return: stream: new stream created
         """
         net_stream = await self._network.new_stream(peer_id)
-        logger.info("INETSTREAM CHECKING IN")
-        logger.info(protocol_ids)
         # Perform protocol muxing to determine protocol to use
         try:
-            logger.debug("PROTOCOLS TRYING TO GET SENT")
             selected_protocol = await self.multiselect_client.select_one_of(
                 list(protocol_ids),
                 MultiselectCommunicator(net_stream),
                 self.negotiate_timeout,
             )
-            logger.info("PROTOCOLS GOT SENT")
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
             await net_stream.reset()
