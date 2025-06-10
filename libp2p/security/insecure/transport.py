@@ -93,13 +93,13 @@ class InsecureSession(BaseSession):
     async def write(self, data: bytes) -> None:
         await self.conn.write(data)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         return await self.conn.read(n)
 
     async def close(self) -> None:
         await self.conn.close()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """
         Delegate to the underlying connection's get_remote_address method.
         """
@@ -130,6 +130,15 @@ async def run_handshake(
     remote_msg = plaintext_pb2.Exchange()
     remote_msg.ParseFromString(remote_msg_bytes)
     received_peer_id = ID(remote_msg.id)
+
+    # Verify that `remote_peer_id` isn't `None`
+    # That is the only condition that `remote_peer_id` would not need to be checked
+    # against the `recieved_peer_id` gotten from the outbound/recieved `msg`.
+    # The check against `received_peer_id` happens in the next if-block
+    if is_initiator and remote_peer_id is None:
+        raise HandshakeFailure(
+            "remote peer ID cannot be None if `is_initiator` is set to `True`"
+        )
 
     # Verify if the receive `ID` matches the one we originally initialize the session.
     # We only need to check it when we are the initiator, because only in that condition

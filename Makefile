@@ -7,12 +7,14 @@ help:
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "clean - run clean-build and clean-pyc"
 	@echo "dist - build package and cat contents of the dist directory"
+	@echo "fix - fix formatting & linting issues with ruff"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
 	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
+	@echo "pr - run clean, fix, lint, typecheck, and test i.e basically everything you need to do before creating a PR"
 
 clean-build:
 	rm -fr build/
@@ -37,8 +39,16 @@ lint:
 		&& pre-commit run --all-files --show-diff-on-failure \
 	)
 
+fix:
+	python -m ruff check --fix
+
+typecheck:
+	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
+
 test:
-	python -m pytest tests
+	python -m pytest tests -n auto
+
+pr: clean fix lint typecheck test
 
 # protobufs management
 

@@ -2,9 +2,6 @@ from dataclasses import (
     dataclass,
 )
 import itertools
-from typing import (
-    Optional,
-)
 
 import multihash
 
@@ -14,14 +11,10 @@ from libp2p.abc import (
 )
 from libp2p.crypto.authenticated_encryption import (
     EncryptionParameters as AuthenticatedEncryptionParameters,
-)
-from libp2p.crypto.authenticated_encryption import (
     InvalidMACException,
-)
-from libp2p.crypto.authenticated_encryption import (
+    MacAndCipher as Encrypter,
     initialize_pair as initialize_pair_for_encryption,
 )
-from libp2p.crypto.authenticated_encryption import MacAndCipher as Encrypter
 from libp2p.crypto.ecc import (
     ECCPublicKey,
 )
@@ -91,6 +84,8 @@ class SecioPacketReadWriter(FixedSizeLenMsgReadWriter):
 
 class SecioMsgReadWriter(EncryptedMsgReadWriter):
     read_writer: SecioPacketReadWriter
+    local_encrypter: Encrypter
+    remote_encrypter: Encrypter
 
     def __init__(
         self,
@@ -213,7 +208,8 @@ async def _response_to_msg(read_writer: SecioPacketReadWriter, msg: bytes) -> by
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
-    return multihash.digest(data, "sha2-256")
+    mh = multihash.digest(data, "sha2-256")
+    return mh.encode()
 
 
 def _mk_score(public_key: PublicKey, nonce: bytes) -> bytes:
@@ -270,7 +266,7 @@ def _select_encryption_parameters(
 async def _establish_session_parameters(
     local_peer: PeerID,
     local_private_key: PrivateKey,
-    remote_peer: Optional[PeerID],
+    remote_peer: PeerID | None,
     conn: SecioPacketReadWriter,
     nonce: bytes,
 ) -> tuple[SessionParameters, bytes]:
@@ -399,7 +395,7 @@ async def create_secure_session(
     local_peer: PeerID,
     local_private_key: PrivateKey,
     conn: IRawConnection,
-    remote_peer: PeerID = None,
+    remote_peer: PeerID | None = None,
 ) -> ISecureConn:
     """
     Attempt the initial `secio` handshake with the remote peer.

@@ -3,15 +3,19 @@ Yamux stream multiplexer implementation for py-libp2p.
 This is the preferred multiplexing protocol due to its performance and feature set.
 Mplex is also available for legacy compatibility but may be deprecated in the future.
 """
+
 from collections.abc import (
     Awaitable,
+    Callable,
 )
 import inspect
 import logging
 import struct
+from types import (
+    TracebackType,
+)
 from typing import (
-    Callable,
-    Optional,
+    Any,
 )
 
 import trio
@@ -74,6 +78,19 @@ class YamuxStream(IMuxedStream):
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
 
+    async def __aenter__(self) -> "YamuxStream":
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit the async context manager and close the stream."""
+        await self.close()
+
     async def write(self, data: bytes) -> None:
         if self.send_closed:
             raise MuxedStreamError("Stream is closed for sending")
@@ -110,7 +127,7 @@ class YamuxStream(IMuxedStream):
         if self.send_window < DEFAULT_WINDOW_SIZE // 2:
             await self.send_window_update()
 
-    async def send_window_update(self, increment: Optional[int] = None) -> None:
+    async def send_window_update(self, increment: int | None = None) -> None:
         """Send a window update to peer."""
         if increment is None:
             increment = DEFAULT_WINDOW_SIZE - self.recv_window
@@ -125,7 +142,7 @@ class YamuxStream(IMuxedStream):
             )
             await self.conn.secured_conn.write(header)
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int | None = -1) -> bytes:
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -145,8 +162,7 @@ class YamuxStream(IMuxedStream):
                 if buffer and len(buffer) > 0:
                     # Wait for closure even if data is available
                     logging.debug(
-                        f"Stream {self.stream_id}:"
-                        f"Waiting for FIN before returning data"
+                        f"Stream {self.stream_id}:Waiting for FIN before returning data"
                     )
                     await self.conn.stream_events[self.stream_id].wait()
                     self.conn.stream_events[self.stream_id] = trio.Event()
@@ -224,7 +240,7 @@ class YamuxStream(IMuxedStream):
         """
         raise NotImplementedError("Yamux does not support setting read deadlines")
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """
         Returns the remote address of the underlying connection.
         """
@@ -252,8 +268,8 @@ class Yamux(IMuxedConn):
         self,
         secured_conn: ISecureConn,
         peer_id: ID,
-        is_initiator: Optional[bool] = None,
-        on_close: Optional[Callable[[], Awaitable[None]]] = None,
+        is_initiator: bool | None = None,
+        on_close: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         self.secured_conn = secured_conn
         self.peer_id = peer_id
@@ -267,7 +283,7 @@ class Yamux(IMuxedConn):
         self.is_initiator_value = (
             is_initiator if is_initiator is not None else secured_conn.is_initiator
         )
-        self.next_stream_id = 1 if self.is_initiator_value else 2
+        self.next_stream_id: int = 1 if self.is_initiator_value else 2
         self.streams: dict[int, YamuxStream] = {}
         self.streams_lock = trio.Lock()
         self.new_stream_send_channel: MemorySendChannel[YamuxStream]
@@ -281,7 +297,7 @@ class Yamux(IMuxedConn):
         self.event_started = trio.Event()
         self.stream_buffers: dict[int, bytearray] = {}
         self.stream_events: dict[int, trio.Event] = {}
-        self._nursery: Optional[Nursery] = None
+        self._nursery: Nursery | None = None
 
     async def start(self) -> None:
         logging.debug(f"Starting Yamux for {self.peer_id}")
@@ -449,8 +465,14 @@ class Yamux(IMuxedConn):
 
             # Wait for data if stream is still open
             logging.debug(f"Waiting for data on stream {self.peer_id}:{stream_id}")
-            await self.stream_events[stream_id].wait()
-            self.stream_events[stream_id] = trio.Event()
+            try:
+                await self.stream_events[stream_id].wait()
+                self.stream_events[stream_id] = trio.Event()
+            except KeyError:
+                raise MuxedStreamEOF("Stream was removed")
+
+        # This line should never be reached, but satisfies the type checker
+        raise MuxedStreamEOF("Unexpected end of read_stream")
 
     async def handle_incoming(self) -> None:
         while not self.event_shutting_down.is_set():
@@ -458,8 +480,7 @@ class Yamux(IMuxedConn):
                 header = await self.secured_conn.read(HEADER_SIZE)
                 if not header or len(header) < HEADER_SIZE:
                     logging.debug(
-                        f"Connection closed or"
-                        f"incomplete header for peer {self.peer_id}"
+                        f"Connection closed orincomplete header for peer {self.peer_id}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -528,8 +549,7 @@ class Yamux(IMuxedConn):
                         )
                     elif error_code == GO_AWAY_PROTOCOL_ERROR:
                         logging.error(
-                            f"Received GO_AWAY for peer"
-                            f"{self.peer_id}: Protocol error"
+                            f"Received GO_AWAY for peer{self.peer_id}: Protocol error"
                         )
                     elif error_code == GO_AWAY_INTERNAL_ERROR:
                         logging.error(

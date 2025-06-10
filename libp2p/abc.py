@@ -8,6 +8,10 @@ from collections.abc import (
     KeysView,
     Sequence,
 )
+from contextlib import AbstractAsyncContextManager
+from types import (
+    TracebackType,
+)
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -156,7 +160,11 @@ class IMuxedConn(ABC):
     event_started: trio.Event
 
     @abstractmethod
-    def __init__(self, conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        conn: ISecureConn,
+        peer_id: ID,
+    ) -> None:
         """
         Initialize a new multiplexed connection.
 
@@ -215,7 +223,7 @@ class IMuxedConn(ABC):
         """
 
 
-class IMuxedStream(ReadWriteCloser):
+class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
     """
     Interface for a multiplexed stream.
 
@@ -249,6 +257,20 @@ class IMuxedStream(ReadWriteCloser):
             otherwise False.
         """
 
+    @abstractmethod
+    async def __aenter__(self) -> "IMuxedStream":
+        """Enter the async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit the async context manager and close the stream."""
+        await self.close()
+
 
 # -------------------------- net_stream interface.py --------------------------
 
@@ -269,7 +291,7 @@ class INetStream(ReadWriteCloser):
     muxed_conn: IMuxedConn
 
     @abstractmethod
-    def get_protocol(self) -> TProtocol:
+    def get_protocol(self) -> TProtocol | None:
         """
         Retrieve the protocol identifier for the stream.
 
@@ -898,7 +920,7 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def listen(self, *multiaddrs: Sequence[Multiaddr]) -> bool:
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         Start listening on one or more multiaddresses.
 
@@ -1156,7 +1178,9 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def run(self, listen_addrs: Sequence[Multiaddr]) -> AsyncContextManager[None]:
+    def run(
+        self, listen_addrs: Sequence[Multiaddr]
+    ) -> AbstractAsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
 
@@ -1416,6 +1440,60 @@ class IPeerData(ABC):
 
         """
 
+    @abstractmethod
+    def update_last_identified(self) -> None:
+        """
+        Updates timestamp to current time.
+        """
+
+    @abstractmethod
+    def get_last_identified(self) -> int:
+        """
+        Fetch the last identified timestamp
+
+        Returns
+        -------
+        last_identified_timestamp
+            The lastIdentified time of peer.
+
+        """
+
+    @abstractmethod
+    def get_ttl(self) -> int:
+        """
+        Get ttl value for the peer for validity check
+
+        Returns
+        -------
+        int
+            The ttl of the peer.
+
+        """
+
+    @abstractmethod
+    def set_ttl(self, ttl: int) -> None:
+        """
+        Set ttl value for the peer for validity check
+
+        Parameters
+        ----------
+        ttl : int
+            The ttl for the peer.
+
+        """
+
+    @abstractmethod
+    def is_expired(self) -> bool:
+        """
+        Check if the peer is expired based on last_identified and ttl
+
+        Returns
+        -------
+        bool
+            True, if last_identified + ttl > current_time
+
+        """
+
 
 # ------------------ multiselect_communicator interface.py ------------------
 
@@ -1546,7 +1624,7 @@ class IMultiselectMuxer(ABC):
     and its corresponding handler for communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[TProtocol | None, StreamHandlerFn | None]
 
     @abstractmethod
     def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
@@ -1562,7 +1640,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[TProtocol, ...]:
+    def get_protocols(self) -> tuple[TProtocol | None, ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1577,7 +1655,7 @@ class IMultiselectMuxer(ABC):
     @abstractmethod
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
         """
         Negotiate a protocol selection with a multiselect client.
 
@@ -1654,7 +1732,7 @@ class IPeerRouting(ABC):
     """
 
     @abstractmethod
-    async def find_peer(self, peer_id: ID) -> PeerInfo:
+    async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
         Search for a peer with the specified peer ID.
 
@@ -1822,6 +1900,11 @@ class IPubsubRouter(ABC):
 
     """
 
+    mesh: dict[str, set[ID]]
+    fanout: dict[str, set[ID]]
+    peer_protocol: dict[ID, TProtocol]
+    degree: int
+
     @abstractmethod
     def get_protocols(self) -> list[TProtocol]:
         """
@@ -1847,7 +1930,7 @@ class IPubsubRouter(ABC):
         """
 
     @abstractmethod
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notify the router that a new peer has connected.
 

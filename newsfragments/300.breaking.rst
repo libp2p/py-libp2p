@@ -1,0 +1,1 @@
+The `NetStream.state` property is now async and requires `await`. Update any direct state access to use `await stream.state`.

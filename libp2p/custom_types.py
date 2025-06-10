@@ -1,13 +1,9 @@
 from collections.abc import (
     Awaitable,
+    Callable,
     Mapping,
 )
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    NewType,
-    Union,
-)
+from typing import TYPE_CHECKING, NewType, Union, cast
 
 if TYPE_CHECKING:
     from libp2p.abc import (
@@ -16,15 +12,9 @@ if TYPE_CHECKING:
         ISecureTransport,
     )
 else:
-
-    class INetStream:
-        pass
-
-    class IMuxedConn:
-        pass
-
-    class ISecureTransport:
-        pass
+    IMuxedConn = cast(type, object)
+    INetStream = cast(type, object)
+    ISecureTransport = cast(type, object)
 
 
 from libp2p.io.abc import (
@@ -38,10 +28,10 @@ from libp2p.pubsub.pb import (
 )
 
 TProtocol = NewType("TProtocol", str)
-StreamHandlerFn = Callable[["INetStream"], Awaitable[None]]
+StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 THandler = Callable[[ReadWriteCloser], Awaitable[None]]
-TSecurityOptions = Mapping[TProtocol, "ISecureTransport"]
-TMuxerClass = type["IMuxedConn"]
+TSecurityOptions = Mapping[TProtocol, ISecureTransport]
+TMuxerClass = type[IMuxedConn]
 TMuxerOptions = Mapping[TProtocol, TMuxerClass]
 SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
 AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]

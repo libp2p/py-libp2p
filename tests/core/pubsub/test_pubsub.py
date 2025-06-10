@@ -1,6 +1,7 @@
 from contextlib import (
     contextmanager,
 )
+import inspect
 from typing import (
     NamedTuple,
 )
@@ -13,6 +14,9 @@ from libp2p.exceptions import (
 )
 from libp2p.network.stream.exceptions import (
     StreamEOF,
+)
+from libp2p.peer.id import (
+    ID,
 )
 from libp2p.pubsub.pb import (
     rpc_pb2,
@@ -121,16 +125,18 @@ async def test_set_and_remove_topic_validator():
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
         is_sync_validator_called = False
 
-        def sync_validator(peer_id, msg):
+        def sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             nonlocal is_sync_validator_called
             is_sync_validator_called = True
+            return True
 
         is_async_validator_called = False
 
-        async def async_validator(peer_id, msg):
+        async def async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             nonlocal is_async_validator_called
             is_async_validator_called = True
             await trio.lowlevel.checkpoint()
+            return True
 
         topic = "TEST_VALIDATOR"
 
@@ -144,7 +150,13 @@ async def test_set_and_remove_topic_validator():
         assert not topic_validator.is_async
 
         # Validate with sync validator
-        topic_validator.validator(peer_id=IDFactory(), msg="msg")
+        test_msg = make_pubsub_msg(
+            origin_id=IDFactory(),
+            topic_ids=[topic],
+            data=b"test",
+            seqno=b"\x00" * 8,
+        )
+        topic_validator.validator(IDFactory(), test_msg)
 
         assert is_sync_validator_called
         assert not is_async_validator_called
@@ -158,7 +170,20 @@ async def test_set_and_remove_topic_validator():
         assert topic_validator.is_async
 
         # Validate with async validator
-        await topic_validator.validator(peer_id=IDFactory(), msg="msg")
+        test_msg = make_pubsub_msg(
+            origin_id=IDFactory(),
+            topic_ids=[topic],
+            data=b"test",
+            seqno=b"\x00" * 8,
+        )
+        validator = topic_validator.validator
+        if topic_validator.is_async:
+            import inspect
+
+            if inspect.iscoroutinefunction(validator):
+                await validator(IDFactory(), test_msg)
+        else:
+            validator(IDFactory(), test_msg)
 
         assert is_async_validator_called
         assert not is_sync_validator_called
@@ -170,20 +195,18 @@ async def test_set_and_remove_topic_validator():
 
 @pytest.mark.trio
 async def test_get_msg_validators():
+    calls = [0, 0]  # [sync, async]
+
+    def sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        calls[0] += 1
+        return True
+
+    async def async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        calls[1] += 1
+        await trio.lowlevel.checkpoint()
+        return True
+
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
-        times_sync_validator_called = 0
-
-        def sync_validator(peer_id, msg):
-            nonlocal times_sync_validator_called
-            times_sync_validator_called += 1
-
-        times_async_validator_called = 0
-
-        async def async_validator(peer_id, msg):
-            nonlocal times_async_validator_called
-            times_async_validator_called += 1
-            await trio.lowlevel.checkpoint()
-
         topic_1 = "TEST_VALIDATOR_1"
         topic_2 = "TEST_VALIDATOR_2"
         topic_3 = "TEST_VALIDATOR_3"
@@ -204,13 +227,15 @@ async def test_get_msg_validators():
 
         topic_validators = pubsubs_fsub[0].get_msg_validators(msg)
         for topic_validator in topic_validators:
+            validator = topic_validator.validator
             if topic_validator.is_async:
-                await topic_validator.validator(peer_id=IDFactory(), msg="msg")
+                if inspect.iscoroutinefunction(validator):
+                    await validator(IDFactory(), msg)
             else:
-                topic_validator.validator(peer_id=IDFactory(), msg="msg")
+                validator(IDFactory(), msg)
 
-        assert times_sync_validator_called == 2
-        assert times_async_validator_called == 1
+        assert calls[0] == 2
+        assert calls[1] == 1
 
 
 @pytest.mark.parametrize(
@@ -221,17 +246,17 @@ async def test_get_msg_validators():
 async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
     async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
 
-        def passed_sync_validator(peer_id, msg):
+        def passed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             return True
 
-        def failed_sync_validator(peer_id, msg):
+        def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             return False
 
-        async def passed_async_validator(peer_id, msg):
+        async def passed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             await trio.lowlevel.checkpoint()
             return True
 
-        async def failed_async_validator(peer_id, msg):
+        async def failed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
             await trio.lowlevel.checkpoint()
             return False
 
@@ -297,11 +322,12 @@ async def test_continuously_read_stream(monkeypatch, nursery, security_protocol)
             m.setattr(pubsubs_fsub[0].router, "handle_rpc", mock_handle_rpc)
             yield Events(event_push_msg, event_handle_subscription, event_handle_rpc)
 
-    async with PubsubFactory.create_batch_with_floodsub(
-        1, security_protocol=security_protocol
-    ) as pubsubs_fsub, net_stream_pair_factory(
-        security_protocol=security_protocol
-    ) as stream_pair:
+    async with (
+        PubsubFactory.create_batch_with_floodsub(
+            1, security_protocol=security_protocol
+        ) as pubsubs_fsub,
+        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
+    ):
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         # Kick off the task `continuously_read_stream`
         nursery.start_soon(pubsubs_fsub[0].continuously_read_stream, stream_pair[0])
@@ -429,11 +455,12 @@ async def test_handle_talk():
 
 @pytest.mark.trio
 async def test_message_all_peers(monkeypatch, security_protocol):
-    async with PubsubFactory.create_batch_with_floodsub(
-        1, security_protocol=security_protocol
-    ) as pubsubs_fsub, net_stream_pair_factory(
-        security_protocol=security_protocol
-    ) as stream_pair:
+    async with (
+        PubsubFactory.create_batch_with_floodsub(
+            1, security_protocol=security_protocol
+        ) as pubsubs_fsub,
+        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
+    ):
         peer_id = IDFactory()
         mock_peers = {peer_id: stream_pair[0]}
         with monkeypatch.context() as m:
@@ -530,15 +557,15 @@ async def test_publish_push_msg_is_called(monkeypatch):
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
 
-            assert (
-                len(msgs) == 2
-            ), "`push_msg` should be called every time `publish` is called"
+            assert len(msgs) == 2, (
+                "`push_msg` should be called every time `publish` is called"
+            )
             assert (msg_forwarders[0] == msg_forwarders[1]) and (
                 msg_forwarders[1] == pubsubs_fsub[0].my_id
             )
-            assert (
-                msgs[0].seqno != msgs[1].seqno
-            ), "`seqno` should be different every time"
+            assert msgs[0].seqno != msgs[1].seqno, (
+                "`seqno` should be different every time"
+            )
 
 
 @pytest.mark.trio
@@ -611,7 +638,7 @@ async def test_push_msg(monkeypatch):
             # Test: add a topic validator and `push_msg` the message that
             # does not pass the validation.
             # `router_publish` is not called then.
-            def failed_sync_validator(peer_id, msg):
+            def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
                 return False
 
             pubsubs_fsub[0].set_topic_validator(
@@ -659,6 +686,9 @@ async def test_strict_signing_failed_validation(monkeypatch):
             seqno=b"\x00" * 8,
         )
         priv_key = pubsubs_fsub[0].sign_key
+        assert priv_key is not None, (
+            "Private key should not be None when strict_signing=True"
+        )
         signature = priv_key.sign(
             PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
         )
@@ -702,3 +732,369 @@ async def test_strict_signing_failed_validation(monkeypatch):
         await pubsubs_fsub[0].push_msg(pubsubs_fsub[0].my_id, msg)
         await trio.sleep(0.01)
         assert event.is_set()
+
+
+@pytest.mark.trio
+async def test_blacklist_basic_operations():
+    """Test basic blacklist operations: add, remove, check, clear."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        # Create test peer IDs
+        peer1 = IDFactory()
+        peer2 = IDFactory()
+        peer3 = IDFactory()
+
+        # Initially no peers should be blacklisted
+        assert len(pubsub.get_blacklisted_peers()) == 0
+        assert not pubsub.is_peer_blacklisted(peer1)
+        assert not pubsub.is_peer_blacklisted(peer2)
+        assert not pubsub.is_peer_blacklisted(peer3)
+
+        # Add peers to blacklist
+        pubsub.add_to_blacklist(peer1)
+        pubsub.add_to_blacklist(peer2)
+
+        # Check blacklist state
+        assert len(pubsub.get_blacklisted_peers()) == 2
+        assert pubsub.is_peer_blacklisted(peer1)
+        assert pubsub.is_peer_blacklisted(peer2)
+        assert not pubsub.is_peer_blacklisted(peer3)
+
+        # Remove one peer from blacklist
+        pubsub.remove_from_blacklist(peer1)
+
+        # Check state after removal
+        assert len(pubsub.get_blacklisted_peers()) == 1
+        assert not pubsub.is_peer_blacklisted(peer1)
+        assert pubsub.is_peer_blacklisted(peer2)
+        assert not pubsub.is_peer_blacklisted(peer3)
+
+        # Add peer3 and then clear all
+        pubsub.add_to_blacklist(peer3)
+        assert len(pubsub.get_blacklisted_peers()) == 2
+
+        pubsub.clear_blacklist()
+        assert len(pubsub.get_blacklisted_peers()) == 0
+        assert not pubsub.is_peer_blacklisted(peer1)
+        assert not pubsub.is_peer_blacklisted(peer2)
+        assert not pubsub.is_peer_blacklisted(peer3)
+
+        # Test duplicate additions (should not increase size)
+        pubsub.add_to_blacklist(peer1)
+        pubsub.add_to_blacklist(peer1)
+        assert len(pubsub.get_blacklisted_peers()) == 1
+
+        # Test removing non-blacklisted peer (should not cause errors)
+        pubsub.remove_from_blacklist(peer2)
+        assert len(pubsub.get_blacklisted_peers()) == 1
+
+
+@pytest.mark.trio
+async def test_blacklist_blocks_new_peer_connections(monkeypatch):
+    """Test that blacklisted peers are rejected when trying to connect."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        # Create a blacklisted peer ID
+        blacklisted_peer = IDFactory()
+
+        # Add peer to blacklist
+        pubsub.add_to_blacklist(blacklisted_peer)
+
+        new_stream_called = False
+
+        async def mock_new_stream(*args, **kwargs):
+            nonlocal new_stream_called
+            new_stream_called = True
+            # Create a mock stream
+            from unittest.mock import (
+                AsyncMock,
+                Mock,
+            )
+
+            mock_stream = Mock()
+            mock_stream.write = AsyncMock()
+            mock_stream.reset = AsyncMock()
+            mock_stream.get_protocol = Mock(return_value="test_protocol")
+            return mock_stream
+
+        router_add_peer_called = False
+
+        def mock_add_peer(*args, **kwargs):
+            nonlocal router_add_peer_called
+            router_add_peer_called = True
+
+        with monkeypatch.context() as m:
+            m.setattr(pubsub.host, "new_stream", mock_new_stream)
+            m.setattr(pubsub.router, "add_peer", mock_add_peer)
+
+            # Attempt to handle the blacklisted peer
+            await pubsub._handle_new_peer(blacklisted_peer)
+
+            # Verify that both new_stream and router.add_peer was not called
+            assert not new_stream_called, (
+                "new_stream should be not be called to get hello packet"
+            )
+            assert not router_add_peer_called, (
+                "Router.add_peer should not be called for blacklisted peer"
+            )
+            assert blacklisted_peer not in pubsub.peers, (
+                "Blacklisted peer should not be in peers dict"
+            )
+
+
+@pytest.mark.trio
+async def test_blacklist_blocks_messages_from_blacklisted_originator():
+    """Test that messages from blacklisted originator (from field) are rejected."""
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        blacklisted_originator = pubsubs_fsub[1].my_id  # Use existing peer ID
+
+        # Add the originator to blacklist
+        pubsub.add_to_blacklist(blacklisted_originator)
+
+        # Create a message with blacklisted originator
+        msg = make_pubsub_msg(
+            origin_id=blacklisted_originator,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00" * 8,
+        )
+
+        # Subscribe to the topic
+        await pubsub.subscribe(TESTING_TOPIC)
+
+        # Track if router.publish is called
+        router_publish_called = False
+
+        async def mock_router_publish(msg_forwarder: ID, pubsub_msg: rpc_pb2.Message):
+            nonlocal router_publish_called
+            router_publish_called = True
+            await trio.lowlevel.checkpoint()
+
+        original_router_publish = pubsub.router.publish
+        pubsub.router.publish = mock_router_publish
+
+        try:
+            # Attempt to push message from blacklisted originator
+            await pubsub.push_msg(blacklisted_originator, msg)
+
+            # Verify message was rejected
+            assert not router_publish_called, (
+                "Router.publish should not be called for blacklisted originator"
+            )
+            assert not pubsub._is_msg_seen(msg), (
+                "Message from blacklisted originator should not be marked as seen"
+            )
+
+        finally:
+            pubsub.router.publish = original_router_publish
+
+
+@pytest.mark.trio
+async def test_blacklist_allows_non_blacklisted_peers():
+    """Test that non-blacklisted peers can send messages normally."""
+    async with PubsubFactory.create_batch_with_floodsub(3) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        allowed_peer = pubsubs_fsub[1].my_id
+        blacklisted_peer = pubsubs_fsub[2].my_id
+
+        # Blacklist one peer but not the other
+        pubsub.add_to_blacklist(blacklisted_peer)
+
+        # Create messages from both peers
+        msg_from_allowed = make_pubsub_msg(
+            origin_id=allowed_peer,
+            topic_ids=[TESTING_TOPIC],
+            data=b"allowed_data",
+            seqno=b"\x00" * 8,
+        )
+
+        msg_from_blacklisted = make_pubsub_msg(
+            origin_id=blacklisted_peer,
+            topic_ids=[TESTING_TOPIC],
+            data=b"blacklisted_data",
+            seqno=b"\x11" * 8,
+        )
+
+        # Subscribe to the topic
+        sub = await pubsub.subscribe(TESTING_TOPIC)
+
+        # Track router.publish calls
+        router_publish_calls = []
+
+        async def mock_router_publish(msg_forwarder: ID, pubsub_msg: rpc_pb2.Message):
+            router_publish_calls.append((msg_forwarder, pubsub_msg))
+            await trio.lowlevel.checkpoint()
+
+        original_router_publish = pubsub.router.publish
+        pubsub.router.publish = mock_router_publish
+
+        try:
+            # Send message from allowed peer (should succeed)
+            await pubsub.push_msg(allowed_peer, msg_from_allowed)
+
+            # Send message from blacklisted peer (should be rejected)
+            await pubsub.push_msg(allowed_peer, msg_from_blacklisted)
+
+            # Verify only allowed message was processed
+            assert len(router_publish_calls) == 1, (
+                "Only one message should be processed"
+            )
+            assert pubsub._is_msg_seen(msg_from_allowed), (
+                "Allowed message should be marked as seen"
+            )
+            assert not pubsub._is_msg_seen(msg_from_blacklisted), (
+                "Blacklisted message should not be marked as seen"
+            )
+
+            # Verify subscription received the allowed message
+            received_msg = await sub.get()
+            assert received_msg.data == b"allowed_data"
+
+        finally:
+            pubsub.router.publish = original_router_publish
+
+
+@pytest.mark.trio
+async def test_blacklist_integration_with_existing_functionality():
+    """Test that blacklisting works correctly with existing pubsub functionality."""
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        other_peer = pubsubs_fsub[1].my_id
+
+        # Test that seen messages cache still works with blacklisting
+        pubsub.add_to_blacklist(other_peer)
+
+        msg = make_pubsub_msg(
+            origin_id=other_peer,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00" * 8,
+        )
+
+        # First attempt - should be rejected due to blacklist
+        await pubsub.push_msg(other_peer, msg)
+        assert not pubsub._is_msg_seen(msg)
+
+        # Remove from blacklist
+        pubsub.remove_from_blacklist(other_peer)
+
+        # Now the message should be processed
+        await pubsub.subscribe(TESTING_TOPIC)
+        await pubsub.push_msg(other_peer, msg)
+        assert pubsub._is_msg_seen(msg)
+
+        # If we try to send the same message again, it should be rejected
+        # due to seen cache (not blacklist)
+        router_publish_called = False
+
+        async def mock_router_publish(msg_forwarder: ID, pubsub_msg: rpc_pb2.Message):
+            nonlocal router_publish_called
+            router_publish_called = True
+            await trio.lowlevel.checkpoint()
+
+        original_router_publish = pubsub.router.publish
+        pubsub.router.publish = mock_router_publish
+
+        try:
+            await pubsub.push_msg(other_peer, msg)
+            assert not router_publish_called, (
+                "Duplicate message should be rejected by seen cache"
+            )
+        finally:
+            pubsub.router.publish = original_router_publish
+
+
+@pytest.mark.trio
+async def test_blacklist_blocks_messages_from_blacklisted_source():
+    """Test that messages from blacklisted source (forwarder) are rejected."""
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        blacklisted_forwarder = pubsubs_fsub[1].my_id
+
+        # Add the forwarder to blacklist
+        pubsub.add_to_blacklist(blacklisted_forwarder)
+
+        # Create a message
+        msg = make_pubsub_msg(
+            origin_id=pubsubs_fsub[1].my_id,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00" * 8,
+        )
+
+        # Subscribe to the topic so we can check if message is processed
+        await pubsub.subscribe(TESTING_TOPIC)
+
+        # Track if router.publish is called (it shouldn't be for blacklisted forwarder)
+        router_publish_called = False
+
+        async def mock_router_publish(msg_forwarder: ID, pubsub_msg: rpc_pb2.Message):
+            nonlocal router_publish_called
+            router_publish_called = True
+            await trio.lowlevel.checkpoint()
+
+        original_router_publish = pubsub.router.publish
+        pubsub.router.publish = mock_router_publish
+
+        try:
+            # Attempt to push message from blacklisted forwarder
+            await pubsub.push_msg(blacklisted_forwarder, msg)
+
+            # Verify message was rejected
+            assert not router_publish_called, (
+                "Router.publish should not be called for blacklisted forwarder"
+            )
+            assert not pubsub._is_msg_seen(msg), (
+                "Message from blacklisted forwarder should not be marked as seen"
+            )
+
+        finally:
+            pubsub.router.publish = original_router_publish
+
+
+@pytest.mark.trio
+async def test_blacklist_tears_down_existing_connection():
+    """
+    Verify that if a peer is already in pubsub.peers and pubsub.peer_topics,
+    calling add_to_blacklist(peer_id) immediately resets its stream and
+    removes it from both places.
+    """
+    # Create two pubsub instances (floodsub), so they can connect to each other
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        pubsub0, pubsub1 = pubsubs_fsub
+
+        # 1) Connect peer1 to peer0
+        await connect(pubsub0.host, pubsub1.host)
+        # Give handle_peer_queue some time to run
+        await trio.sleep(0.1)
+
+        # After connect, pubsub0.peers should contain pubsub1.my_id
+        assert pubsub1.my_id in pubsub0.peers
+
+        # 2) Manually record a subscription from peer1 under TESTING_TOPIC,
+        #    so that peer1 shows up in pubsub0.peer_topics[TESTING_TOPIC].
+        sub_msg = rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+        pubsub0.handle_subscription(pubsub1.my_id, sub_msg)
+
+        assert TESTING_TOPIC in pubsub0.peer_topics
+        assert pubsub1.my_id in pubsub0.peer_topics[TESTING_TOPIC]
+
+        # 3) Now blacklist peer1
+        pubsub0.add_to_blacklist(pubsub1.my_id)
+
+        # Allow the asynchronous teardown task (_teardown_if_connected) to run
+        await trio.sleep(0.1)
+
+        # 4a) pubsub0.peers should no longer contain peer1
+        assert pubsub1.my_id not in pubsub0.peers
+
+        # 4b) pubsub0.peer_topics[TESTING_TOPIC] should no longer contain peer1
+        #     (or TESTING_TOPIC may have been removed entirely if no other peers remain)
+        if TESTING_TOPIC in pubsub0.peer_topics:
+            assert pubsub1.my_id not in pubsub0.peer_topics[TESTING_TOPIC]
+        else:
+            # It’s also fine if the entire topic entry was pruned
+            assert TESTING_TOPIC not in pubsub0.peer_topics

@@ -37,7 +37,7 @@ class Secp256k1PrivateKey(PrivateKey):
         self.impl = impl
 
     @classmethod
-    def new(cls, secret: bytes = None) -> "Secp256k1PrivateKey":
+    def new(cls, secret: bytes | None = None) -> "Secp256k1PrivateKey":
         private_key_impl = coincurve.PrivateKey(secret)
         return cls(private_key_impl)
 
@@ -65,7 +65,7 @@ class Secp256k1PrivateKey(PrivateKey):
         return Secp256k1PublicKey(public_key_impl)
 
 
-def create_new_key_pair(secret: bytes = None) -> KeyPair:
+def create_new_key_pair(secret: bytes | None = None) -> KeyPair:
     """
     Returns a new Secp256k1 keypair derived from the provided ``secret``, a
     sequence of bytes corresponding to some integer between 0 and the group
