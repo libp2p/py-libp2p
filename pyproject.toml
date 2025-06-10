@@ -221,12 +221,7 @@ values = ["alpha", "beta", "stable"]
 [tool.bumpversion.part.devnum]
 
 [[tool.bumpversion.files]]
-filename = "setup.py"
-search = "version=\"{current_version}\""
-replace = "version=\"{new_version}\""
-
-[[tool.bumpversion.files]]
-filename = "pyproject.toml"              # Keep pyproject.toml version in sync
+filename = "pyproject.toml"
 search = 'version = "{current_version}"'
 replace = 'version = "{new_version}"'
 
