@@ -6,6 +6,7 @@ from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
 )
+import logging
 from typing import (
     TYPE_CHECKING,
     Optional,
@@ -71,11 +72,8 @@ if TYPE_CHECKING:
 # telling it to listen on the given listen addresses.
 
 
-# logger = logging.getLogger("libp2p.network.basic_host")
+logger = logging.getLogger("libp2p.network.basic_host")
 DEFAULT_NEGOTIATE_TIMEOUT = 5
-from loguru import (
-    logger,
-)
 
 
 class BasicHost(IHost):
