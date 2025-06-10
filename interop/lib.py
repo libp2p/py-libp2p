@@ -2,11 +2,8 @@ from dataclasses import (
     dataclass,
 )
 import json
-import time
+import logging
 
-from loguru import (
-    logger,
-)
 import multiaddr
 import redis
 import trio
@@ -23,6 +20,16 @@ from libp2p.network.stream.net_stream import (
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
+)
+
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("ping_debug.log", mode="w", encoding="utf-8"),
+    ],
 )
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
@@ -66,13 +73,15 @@ async def send_ping(stream: INetStream) -> None:
 async def run_test(
     transport, ip, port, is_dialer, test_timeout, redis_addr, sec_protocol, muxer
 ):
-    logger.info("Starting run_test")
+    import time
+
+    logging.info("Starting run_test")
 
     redis_client = RedisClient(
         redis.Redis(host="localhost", port=int(redis_addr), db=0)
     )
     (host, listen_addr) = await build_host(transport, ip, port, sec_protocol, muxer)
-    logger.info(f"Running ping test local_peer={host.get_id()}")
+    logging.info(f"Running ping test local_peer={host.get_id()}")
 
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         if not is_dialer:
@@ -80,7 +89,7 @@ async def run_test(
             ma = f"{listen_addr}/p2p/{host.get_id().pretty()}"
             redis_client.rpush("listenerAddr", ma)
 
-            logger.info(f"Test instance, listening: {ma}")
+            logging.info(f"Test instance, listening: {ma}")
         else:
             redis_addr = redis_client.brpop("listenerAddr", timeout=5)
             destination = redis_addr[0].decode()
@@ -89,23 +98,23 @@ async def run_test(
 
             handshake_start = time.perf_counter()
 
-            logger.info("GETTING READY FOR CONNECTION")
+            logging.info("GETTING READY FOR CONNECTION")
             await host.connect(info)
-            logger.info("HOST CONNECTED")
+            logging.info("HOST CONNECTED")
 
             # TILL HERE EVERYTHING IS FINE
 
             stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
-            logger.info("CREATED NEW STREAM")
+            logging.info("CREATED NEW STREAM")
 
             # DOES NOT MORE FORWARD FROM THIS
-            logger.info("Remote conection established")
+            logging.info("Remote conection established")
 
             nursery.start_soon(send_ping, stream)
 
             handshake_plus_ping = (time.perf_counter() - handshake_start) * 1000.0
 
-            logger.info(f"handshake time: {handshake_plus_ping:.2f}ms")
+            logging.info(f"handshake time: {handshake_plus_ping:.2f}ms")
             return
 
         await trio.sleep_forever()
