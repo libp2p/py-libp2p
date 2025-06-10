@@ -2,9 +2,6 @@ from dataclasses import (
     dataclass,
 )
 import os
-from typing import (
-    Optional,
-)
 
 
 def str_to_bool(val: str) -> bool:
@@ -18,8 +15,8 @@ class ConfigError(Exception):
 @dataclass
 class Config:
     transport: str
-    sec_protocol: Optional[str]
-    muxer: Optional[str]
+    sec_protocol: str | None
+    muxer: str | None
     ip: str
     is_dialer: bool
     test_timeout: int

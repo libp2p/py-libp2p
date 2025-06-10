@@ -1,9 +1,5 @@
 import logging
 
-# logger = logging.getLogger("libp2p.network.swarm")
-from loguru import (
-    logger,
-)
 from multiaddr import (
     Multiaddr,
 )
@@ -55,6 +51,8 @@ from .connection.swarm_connection import (
 from .exceptions import (
     SwarmException,
 )
+
+logger = logging.getLogger("libp2p.network.swarm")
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:

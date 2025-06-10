@@ -2,10 +2,6 @@ from collections.abc import (
     Sequence,
 )
 
-from loguru import (
-    logger,
-)
-
 from libp2p.abc import (
     IMultiselectClient,
     IMultiselectCommunicator,
@@ -40,15 +36,11 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
-            logger.error("WROTE FAIL")
             raise MultiselectClientError() from error
 
-        logger.info(f"WROTE SUC, {MULTISELECT_PROTOCOL_ID}")
         try:
             handshake_contents = await communicator.read()
-            logger.info(f"READ SUC, {handshake_contents}")
         except MultiselectCommunicatorError as error:
-            logger.error(f"READ FAIL, {error}")
             raise MultiselectClientError() from error
 
         if not is_valid_handshake(handshake_contents):
@@ -67,12 +59,9 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
-        logger.info("TRYING TO GET THE HANDSHAKE HAPPENED")
         await self.handshake(communicator)
-        logger.info("HANDSHAKE HAPPENED")
 
         for protocol in protocols:
-            logger.info(protocol)
             try:
                 selected_protocol = await self.try_select(communicator, protocol)
                 return selected_protocol
@@ -124,17 +113,12 @@ class MultiselectClient(IMultiselectClient):
         """
         try:
             await communicator.write(protocol)
-            from loguru import (
-                logger,
-            )
 
-            logger.info(protocol)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
         try:
             response = await communicator.read()
-            logger.info("Response: ", response)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
