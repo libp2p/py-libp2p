@@ -11,13 +11,9 @@ import logging
 import time
 from typing import (
     Any,
-    Optional,
-)
-from typing import (
-    cast,
+    Protocol as TypingProtocol,
     runtime_checkable,
 )
-from typing import Protocol as TypingProtocol
 
 import trio
 
@@ -29,9 +25,6 @@ from libp2p.custom_types import (
 )
 from libp2p.peer.id import (
     ID,
-)
-from libp2p.peer.peerstore import (
-    PeerStoreError,
 )
 from libp2p.tools.async_service import (
     Service,
@@ -74,8 +67,8 @@ class RelayInfo:
     discovered_at: float
     last_seen: float
     has_reservation: bool = False
-    reservation_expires_at: Optional[float] = None
-    reservation_data_limit: Optional[int] = None
+    reservation_expires_at: float | None = None
+    reservation_data_limit: int | None = None
 
 
 class RelayDiscovery(Service):
@@ -197,7 +190,7 @@ class RelayDiscovery(Service):
 
     async def _supports_relay_protocol(self, peer_id: ID) -> bool:
         """
-        Check if a peer supports the Circuit Relay v2 protocol.
+        Check if a peer supports the relay protocol.
 
         Parameters
         ----------
@@ -210,88 +203,125 @@ class RelayDiscovery(Service):
             True if the peer supports the relay protocol, False otherwise
 
         """
-        # First check if we already know the protocols
+        # Check cache first
         if peer_id in self._protocol_cache:
             return PROTOCOL_ID in self._protocol_cache[peer_id]
 
+        # Method 1: Try peerstore
+        result = await self._check_via_peerstore(peer_id)
+        if result is not None:
+            return result
+
+        # Method 2: Try direct stream connection
+        result = await self._check_via_direct_connection(peer_id)
+        if result is not None:
+            return result
+
+        # Method 3: Try protocols from mux
+        result = await self._check_via_mux(peer_id)
+        if result is not None:
+            return result
+
+        # Default: Cannot determine, assume false
+        return False
+
+    async def _check_via_peerstore(self, peer_id: ID) -> bool | None:
+        """Check protocol support via peerstore."""
         try:
-            # Try different methods to get protocols
-            try:
-                # Method 1: Using peerstore directly
-                protocols = set()
-                peerstore = self.host.get_peerstore()
-                try:
-                    # Handle both sync and async get_protocols implementations
-                    proto_getter = peerstore.get_protocols
-                    if callable(proto_getter):
-                        proto_result = proto_getter(peer_id)
-                        if hasattr(proto_result, "__await__"):
-                            # It's awaitable
-                            protocols_list = await proto_result
-                        else:
-                            # It's synchronous
-                            protocols_list = proto_result
+            peerstore = self.host.get_peerstore()
+            proto_getter = peerstore.get_protocols
 
-                        protocols = set(protocols_list)
-                        self._protocol_cache[peer_id] = protocols
-                        return PROTOCOL_ID in protocols
-                except Exception:
-                    pass
-            except (PeerStoreError, Exception) as e:
-                logger.debug("Error getting protocols from peerstore: %s", str(e))
+            if not callable(proto_getter):
+                return None
 
-            # Method 2: Try to open a stream directly with timeout
             try:
-                with trio.fail_after(STREAM_TIMEOUT):
-                    stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-                    if stream:
-                        await stream.close()
-                        self._protocol_cache[peer_id] = {PROTOCOL_ID}
-                        return True
+                # Try to get protocols
+                proto_result = proto_getter(peer_id)
+
+                # Get protocols list
+                protocols_list = []
+                if hasattr(proto_result, "__await__"):
+                    # For mypy/pyrefly typechecking workaround
+                    from typing import Any, cast
+
+                    protocols_list = await cast(Any, proto_result)
+                else:
+                    protocols_list = proto_result
+
+                # Check result
+                if protocols_list is not None:
+                    protocols = set(protocols_list)
+                    self._protocol_cache[peer_id] = protocols
+                    return PROTOCOL_ID in protocols
+
+                return False
             except Exception as e:
-                logger.debug(
-                    "Failed to open relay protocol stream to %s: %s", peer_id, str(e)
-                )
+                logger.debug("Error getting protocols: %s", str(e))
+                return None
+        except Exception as e:
+            logger.debug("Error accessing peerstore: %s", str(e))
+            return None
 
-            # Method 3: Check if the peer has the relay protocols registered
-            # This is a fallback method and may not be accurate
-            try:
-                if hasattr(self.host, "multiselect") and hasattr(
-                    self.host.multiselect, "protocols"
-                ):
-                    peer_protocols = set()
-                    # Access the protocols from multiselect using proper typing
-                    host_with_multiselect = cast(IHostWithMultiselect, self.host)
-                    multiselect_protocols: list[str] = list(
-                        host_with_multiselect.multiselect.protocols
-                    )
-                    for protocol in multiselect_protocols:
-                        try:
-                            with trio.fail_after(2):  # Quick check
-                                # Convert string to TProtocol before using in new_stream
-                                protocol_obj = TProtocol(protocol)
-                                stream = await self.host.new_stream(
-                                    peer_id, [protocol_obj]
-                                )
-                                if stream:
-                                    peer_protocols.add(protocol)
-                                    await stream.close()
-                        except Exception:
-                            pass
-
-                    self._protocol_cache[peer_id] = peer_protocols
-                    return PROTOCOL_ID in peer_protocols
-            except Exception as e:
-                logger.debug("Error checking protocols via multiselect: %s", str(e))
-
-            # If we got here, we couldn't determine if the peer supports the protocol
-            return False
-
+    async def _check_via_direct_connection(self, peer_id: ID) -> bool | None:
+        """Check protocol support via direct connection."""
+        try:
+            with trio.fail_after(STREAM_TIMEOUT):
+                stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
+                if stream:
+                    await stream.close()
+                    self._protocol_cache[peer_id] = {PROTOCOL_ID}
+                    return True
+                return False
         except Exception as e:
             logger.debug(
-                "Error checking relay protocol support for %s: %s", peer_id, str(e)
+                "Failed to open relay protocol stream to %s: %s", peer_id, str(e)
             )
+            return None
+
+    async def _check_via_mux(self, peer_id: ID) -> bool | None:
+        """Check protocol support via mux protocols."""
+        try:
+            if not (hasattr(self.host, "get_mux") and self.host.get_mux() is not None):
+                return None
+
+            mux = self.host.get_mux()
+            if not hasattr(mux, "protocols"):
+                return None
+
+            peer_protocols = set()
+            # Get protocols from mux with proper type safety
+            available_protocols = []
+            if hasattr(mux, "get_protocols"):
+                # Get protocols with proper typing
+                mux_protocols = mux.get_protocols()
+                if isinstance(mux_protocols, (list, tuple)):
+                    available_protocols = list(mux_protocols)
+
+            for protocol in available_protocols:
+                try:
+                    with trio.fail_after(2):  # Quick check
+                        # Ensure we have a proper protocol object
+                        # Use string representation since we can't use isinstance
+                        is_tprotocol = str(type(protocol)) == str(type(TProtocol))
+                        protocol_obj = (
+                            protocol if is_tprotocol else TProtocol(str(protocol))
+                        )
+                        stream = await self.host.new_stream(peer_id, [protocol_obj])
+                        if stream:
+                            peer_protocols.add(str(protocol_obj))
+                            await stream.close()
+                except Exception:
+                    pass  # Ignore errors when closing the stream
+
+            self._protocol_cache[peer_id] = peer_protocols
+            protocol_str = str(PROTOCOL_ID)
+            for protocol in peer_protocols:
+                if protocol == protocol_str:
+                    return True
             return False
+        except Exception as e:
+            logger.debug("Error checking protocols via mux: %s", str(e))
+            return None
 
     async def _add_relay(self, peer_id: ID) -> None:
         """
@@ -335,11 +365,11 @@ class RelayDiscovery(Service):
             logger.error("Cannot make reservation with unknown relay %s", peer_id)
             return False
 
+        stream = None
         try:
             logger.debug("Making reservation with relay %s", peer_id)
 
             # Open a stream to the relay with timeout
-            stream = None
             try:
                 with trio.fail_after(STREAM_TIMEOUT):
                     stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
@@ -414,14 +444,18 @@ class RelayDiscovery(Service):
                 )
                 return False
 
-            finally:
-                # Always close the stream
-                if stream:
-                    await stream.close()
-
         except Exception as e:
             logger.error("Error making reservation with relay %s: %s", peer_id, str(e))
             return False
+        finally:
+            # Always close the stream
+            if stream:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass  # Ignore errors when closing the stream
+
+        return False
 
     async def _cleanup_expired(self) -> None:
         """Clean up expired relays and reservations."""
@@ -466,7 +500,7 @@ class RelayDiscovery(Service):
         """
         return list(self._discovered_relays.keys())
 
-    def get_relay_info(self, peer_id: ID) -> Optional[RelayInfo]:
+    def get_relay_info(self, peer_id: ID) -> RelayInfo | None:
         """
         Get information about a specific relay.
 
@@ -482,3 +516,24 @@ class RelayDiscovery(Service):
 
         """
         return self._discovered_relays.get(peer_id)
+
+    def get_relay(self) -> ID | None:
+        """
+        Get a single relay peer ID for connection purposes.
+        Prioritizes relays with active reservations.
+
+        Returns
+        -------
+        Optional[ID]
+            ID of a discovered relay, or None if no relays found
+
+        """
+        if not self._discovered_relays:
+            return None
+
+        # First try to find a relay with an active reservation
+        for peer_id, relay_info in self._discovered_relays.items():
+            if relay_info and relay_info.has_reservation:
+                return peer_id
+
+        return next(iter(self._discovered_relays.keys()), None)

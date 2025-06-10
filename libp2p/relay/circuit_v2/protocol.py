@@ -9,13 +9,10 @@ import logging
 import time
 from typing import (
     Any,
-    Optional,
-)
-from typing import (
+    Protocol as TypingProtocol,
     cast,
     runtime_checkable,
 )
-from typing import Protocol as TypingProtocol
 
 import trio
 
@@ -44,11 +41,9 @@ from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
     Reservation,
-)
-from .pb.circuit_pb2 import (
+    Status as PbStatus,
     StopMessage,
 )
-from .pb.circuit_pb2 import Status as PbStatus
 from .protocol_buffer import (
     StatusCode,
     create_status,
@@ -116,28 +111,27 @@ class CircuitV2Protocol(Service):
     def __init__(
         self,
         host: IHost,
-        limits: Optional[RelayLimits] = None,
+        limits: RelayLimits | None = None,
         allow_hop: bool = False,
     ) -> None:
         """
-        Initialize the Circuit v2 protocol.
+        Initialize a Circuit Relay v2 protocol instance.
 
         Parameters
         ----------
         host : IHost
-            The libp2p host this protocol is running on
-        limits : Optional[RelayLimits]
-            Resource limits for relay operations
+            The libp2p host instance
+        limits : RelayLimits | None
+            Resource limits for the relay
         allow_hop : bool
             Whether to allow this node to act as a relay
 
         """
-        super().__init__()
         self.host = host
         self.limits = limits or DEFAULT_RELAY_LIMITS
         self.allow_hop = allow_hop
         self.resource_manager = RelayResourceManager(self.limits)
-        self._active_relays: dict[ID, tuple[INetStream, INetStream]] = {}
+        self._active_relays: dict[ID, tuple[INetStream, INetStream | None]] = {}
         self.event_started = trio.Event()
 
     async def run(self, *, task_status: Any = trio.TASK_STATUS_IGNORED) -> None:
@@ -174,8 +168,11 @@ class CircuitV2Protocol(Service):
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
-    async def _close_stream(self, stream: INetStream) -> None:
+    async def _close_stream(self, stream: INetStream | None) -> None:
         """Helper function to safely close a stream."""
+        if stream is None:
+            return
+
         try:
             with trio.fail_after(STREAM_CLOSE_TIMEOUT):
                 await stream.close()
@@ -189,7 +186,7 @@ class CircuitV2Protocol(Service):
         self,
         stream: INetStream,
         max_retries: int = MAX_READ_RETRIES,
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         """
         Helper function to read from a stream with retries.
 
@@ -571,7 +568,7 @@ class CircuitV2Protocol(Service):
     async def _handle_connect(self, stream: INetStream, msg: Any) -> None:
         """Handle a connect request."""
         peer_id = ID(msg.peer)
-        dst_stream = None
+        dst_stream: INetStream | None = None
 
         # Verify reservation if provided
         if msg.HasField("reservation"):
@@ -595,7 +592,7 @@ class CircuitV2Protocol(Service):
             return
 
         try:
-            # Store the source stream
+            # Store the source stream with properly typed None
             self._active_relays[peer_id] = (stream, None)
 
             # Try to connect to the destination with timeout

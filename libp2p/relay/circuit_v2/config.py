@@ -7,9 +7,7 @@ and discovery settings.
 
 from dataclasses import (
     dataclass,
-)
-from typing import (
-    Optional,
+    field,
 )
 
 from libp2p.peer.peerinfo import (
@@ -31,10 +29,10 @@ class RelayConfig:
     enable_client: bool = True  # Whether to use relays for dialing
 
     # Resource limits
-    limits: Optional[RelayLimits] = None
+    limits: RelayLimits | None = None
 
     # Discovery configuration
-    bootstrap_relays: list[PeerInfo] = None
+    bootstrap_relays: list[PeerInfo] = field(default_factory=list)
     min_relays: int = 3
     max_relays: int = 20
     discovery_interval: int = 300  # seconds
@@ -46,9 +44,6 @@ class RelayConfig:
 
     def __post_init__(self) -> None:
         """Initialize default values."""
-        if self.bootstrap_relays is None:
-            self.bootstrap_relays = []
-
         if self.limits is None:
             self.limits = RelayLimits(
                 duration=self.max_circuit_duration,

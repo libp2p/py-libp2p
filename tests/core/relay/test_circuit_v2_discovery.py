@@ -99,9 +99,9 @@ async def test_relay_discovery_initialization():
             # Verify discovery is initialized correctly
             assert discovery.host == host, "Host not set correctly"
             assert discovery.is_running, "Discovery service should be running"
-            assert hasattr(
-                discovery, "_discovered_relays"
-            ), "Discovery should track discovered relays"
+            assert hasattr(discovery, "_discovered_relays"), (
+                "Discovery should track discovered relays"
+            )
 
 
 @pytest.mark.trio
@@ -133,9 +133,9 @@ async def test_relay_discovery_find_relay():
             with trio.fail_after(CONNECT_TIMEOUT):
                 logger.info("Connecting client host to relay host")
                 await connect(client_host, relay_host)
-                assert relay_host.get_network().connections[
-                    client_host.get_id()
-                ], "Peers not connected"
+                assert relay_host.get_network().connections[client_host.get_id()], (
+                    "Peers not connected"
+                )
                 logger.info("Connection established between peers")
         except Exception as e:
             logger.error("Failed to connect peers: %s", str(e))
@@ -167,9 +167,9 @@ async def test_relay_discovery_find_relay():
                     pytest.fail("Failed to discover relay node within timeout")
 
             # Verify that relay was found and is valid
-            assert (
-                relay_host.get_id() in client_discovery._discovered_relays
-            ), "Relay should be discovered"
+            assert relay_host.get_id() in client_discovery._discovered_relays, (
+                "Relay should be discovered"
+            )
             relay_info = client_discovery._discovered_relays[relay_host.get_id()]
             assert relay_info.peer_id == relay_host.get_id(), "Peer ID should match"
 
@@ -202,9 +202,9 @@ async def test_relay_discovery_auto_reservation():
             with trio.fail_after(CONNECT_TIMEOUT):
                 logger.info("Connecting client host to relay host")
                 await connect(client_host, relay_host)
-                assert relay_host.get_network().connections[
-                    client_host.get_id()
-                ], "Peers not connected"
+                assert relay_host.get_network().connections[client_host.get_id()], (
+                    "Peers not connected"
+                )
                 logger.info("Connection established between peers")
         except Exception as e:
             logger.error("Failed to connect peers: %s", str(e))
@@ -250,14 +250,14 @@ async def test_relay_discovery_auto_reservation():
                     )
 
             # Verify that relay was found and reservation was made
-            assert (
-                relay_host.get_id() in client_discovery._discovered_relays
-            ), "Relay should be discovered"
+            assert relay_host.get_id() in client_discovery._discovered_relays, (
+                "Relay should be discovered"
+            )
             relay_info = client_discovery._discovered_relays[relay_host.get_id()]
             assert relay_info.has_reservation, "Reservation should be made"
-            assert (
-                relay_info.reservation_expires_at is not None
-            ), "Reservation should have expiry time"
-            assert (
-                relay_info.reservation_data_limit is not None
-            ), "Reservation should have data limit"
+            assert relay_info.reservation_expires_at is not None, (
+                "Reservation should have expiry time"
+            )
+            assert relay_info.reservation_data_limit is not None, (
+                "Reservation should have data limit"
+            )
