@@ -14,9 +14,6 @@ from aioquic.quic.connection import (
     QuicConnection,
 )
 import multiaddr
-from multiaddr import (
-    Multiaddr,
-)
 import trio
 
 from libp2p.abc import (
@@ -27,8 +24,14 @@ from libp2p.abc import (
 from libp2p.crypto.keys import (
     PrivateKey,
 )
+from libp2p.custom_types import THandler, TProtocol
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.transport.quic.utils import (
+    is_quic_multiaddr,
+    multiaddr_to_quic_version,
+    quic_multiaddr_to_endpoint,
 )
 
 from .config import (
@@ -41,19 +44,14 @@ from .exceptions import (
     QUICDialError,
     QUICListenError,
 )
+from .listener import (
+    QUICListener,
+)
+
+QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
+QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 
 logger = logging.getLogger(__name__)
-
-
-class QUICListener(IListener):
-    async def close(self):
-        pass
-
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
-        return False
-
-    def get_addrs(self) -> tuple[Multiaddr, ...]:
-        return ()
 
 
 class QUICTransport(ITransport):
@@ -64,10 +62,6 @@ class QUICTransport(ITransport):
     Supports both QUIC v1 (RFC 9000) and draft-29 for compatibility with
     go-libp2p and js-libp2p implementations.
     """
-
-    # Protocol identifiers matching go-libp2p
-    PROTOCOL_QUIC_V1 = "/quic-v1"  # RFC 9000
-    PROTOCOL_QUIC_DRAFT29 = "/quic"  # draft-29
 
     def __init__(
         self, private_key: PrivateKey, config: QUICTransportConfig | None = None
@@ -89,7 +83,7 @@ class QUICTransport(ITransport):
         self._listeners: list[QUICListener] = []
 
         # QUIC configurations for different versions
-        self._quic_configs: dict[str, QuicConfiguration] = {}
+        self._quic_configs: dict[TProtocol, QuicConfiguration] = {}
         self._setup_quic_configurations()
 
         # Resource management
@@ -110,35 +104,36 @@ class QUICTransport(ITransport):
         )
 
         # Add TLS certificate generated from libp2p private key
-        self._setup_tls_configuration(base_config)
+        # self._setup_tls_configuration(base_config)
 
         # QUIC v1 (RFC 9000) configuration
         quic_v1_config = copy.deepcopy(base_config)
         quic_v1_config.supported_versions = [0x00000001]  # QUIC v1
-        self._quic_configs[self.PROTOCOL_QUIC_V1] = quic_v1_config
+        self._quic_configs[QUIC_V1_PROTOCOL] = quic_v1_config
 
         # QUIC draft-29 configuration for compatibility
         if self._config.enable_draft29:
             draft29_config = copy.deepcopy(base_config)
             draft29_config.supported_versions = [0xFF00001D]  # draft-29
-            self._quic_configs[self.PROTOCOL_QUIC_DRAFT29] = draft29_config
+            self._quic_configs[QUIC_DRAFT29_PROTOCOL] = draft29_config
 
-    def _setup_tls_configuration(self, config: QuicConfiguration) -> None:
-        """
-        Setup TLS configuration with libp2p identity integration.
-        Similar to go-libp2p's certificate generation approach.
-        """
-        from .security import (
-            generate_libp2p_tls_config,
-        )
+    # TODO: SETUP TLS LISTENER
+    # def _setup_tls_configuration(self, config: QuicConfiguration) -> None:
+    #     """
+    #     Setup TLS configuration with libp2p identity integration.
+    #     Similar to go-libp2p's certificate generation approach.
+    #     """
+    #     from .security import (
+    #         generate_libp2p_tls_config,
+    #     )
 
-        # Generate TLS certificate with embedded libp2p peer ID
-        # This follows the libp2p TLS spec for peer identity verification
-        tls_config = generate_libp2p_tls_config(self._private_key, self._peer_id)
+    #     # Generate TLS certificate with embedded libp2p peer ID
+    #     # This follows the libp2p TLS spec for peer identity verification
+    #     tls_config = generate_libp2p_tls_config(self._private_key, self._peer_id)
 
-        config.load_cert_chain(tls_config.cert_file, tls_config.key_file)
-        if tls_config.ca_file:
-            config.load_verify_locations(tls_config.ca_file)
+    #     config.load_cert_chain(certfile=tls_config.cert_file, keyfile=tls_config.key_file)
+    #     if tls_config.ca_file:
+    #         config.load_verify_locations(tls_config.ca_file)
 
     async def dial(
         self, maddr: multiaddr.Multiaddr, peer_id: ID | None = None
@@ -196,14 +191,17 @@ class QUICTransport(ITransport):
             )
 
             # Establish connection using trio
-            await connection.connect()
+            # We need a nursery for this - in real usage, this would be provided
+            # by the caller or we'd use a transport-level nursery
+            async with trio.open_nursery() as nursery:
+                await connection.connect(nursery)
 
             # Store connection for management
             conn_id = f"{host}:{port}:{peer_id}"
             self._connections[conn_id] = connection
 
             # Perform libp2p handshake verification
-            await connection.verify_peer_identity()
+            # await connection.verify_peer_identity()
 
             logger.info(f"Successfully dialed QUIC connection to {peer_id}")
             return connection
@@ -212,9 +210,7 @@ class QUICTransport(ITransport):
             logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
             raise QUICDialError(f"Dial failed: {e}") from e
 
-    def create_listener(
-        self, handler_function: Callable[[ReadWriteCloser], None]
-    ) -> IListener:
+    def create_listener(self, handler_function: THandler) -> IListener:
         """
         Create a QUIC listener.
 
@@ -224,20 +220,22 @@ class QUICTransport(ITransport):
         Returns:
             QUIC listener instance
 
+        Raises:
+            QUICListenError: If transport is closed
+
         """
         if self._closed:
             raise QUICListenError("Transport is closed")
 
-        # TODO: Create QUIC Listener
-        # listener = QUICListener(
-        #     transport=self,
-        #     handler_function=handler_function,
-        #     quic_configs=self._quic_configs,
-        #     config=self._config,
-        # )
-        listener = QUICListener()
+        listener = QUICListener(
+            transport=self,
+            handler_function=handler_function,
+            quic_configs=self._quic_configs,
+            config=self._config,
+        )
 
         self._listeners.append(listener)
+        logger.debug("Created QUIC listener")
         return listener
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
@@ -253,7 +251,7 @@ class QUICTransport(ITransport):
         """
         return is_quic_multiaddr(maddr)
 
-    def protocols(self) -> list[str]:
+    def protocols(self) -> list[TProtocol]:
         """
         Get supported protocol identifiers.
 
@@ -261,9 +259,9 @@ class QUICTransport(ITransport):
             List of supported protocol strings
 
         """
-        protocols = [self.PROTOCOL_QUIC_V1]
+        protocols = [QUIC_V1_PROTOCOL]
         if self._config.enable_draft29:
-            protocols.append(self.PROTOCOL_QUIC_DRAFT29)
+            protocols.append(QUIC_DRAFT29_PROTOCOL)
         return protocols
 
     def listen_order(self) -> int:
@@ -299,6 +297,26 @@ class QUICTransport(ITransport):
         self._listeners.clear()
 
         logger.info("QUIC transport closed")
+
+    def get_stats(self) -> dict:
+        """Get transport statistics."""
+        stats = {
+            "active_connections": len(self._connections),
+            "active_listeners": len(self._listeners),
+            "supported_protocols": self.protocols(),
+        }
+
+        # Aggregate listener stats
+        listener_stats = {}
+        for i, listener in enumerate(self._listeners):
+            listener_stats[f"listener_{i}"] = listener.get_stats()
+
+        if listener_stats:
+            # TODO: Fix type of listener_stats
+            # type: ignore
+            stats["listeners"] = listener_stats
+
+        return stats
 
     def __str__(self) -> str:
         """String representation of the transport."""

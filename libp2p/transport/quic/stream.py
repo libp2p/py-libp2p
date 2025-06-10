@@ -5,16 +5,17 @@ QUIC Stream implementation
 from types import (
     TracebackType,
 )
+from typing import TYPE_CHECKING, cast
 
 import trio
 
-from libp2p.abc import (
-    IMuxedStream,
-)
+if TYPE_CHECKING:
+    from libp2p.abc import IMuxedStream
 
-from .connection import (
-    QUICConnection,
-)
+    from .connection import QUICConnection
+else:
+    IMuxedStream = cast(type, object)
+
 from .exceptions import (
     QUICStreamError,
 )
@@ -41,7 +42,7 @@ class QUICStream(IMuxedStream):
         self._receive_event = trio.Event()
         self._close_event = trio.Event()
 
-    async def read(self, n: int = -1) -> bytes:
+    async def read(self, n: int | None = -1) -> bytes:
         """Read data from the stream."""
         if self._closed:
             raise QUICStreamError("Stream is closed")
