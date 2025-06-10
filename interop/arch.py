@@ -23,17 +23,19 @@ from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
+)
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    PROTOCOL_ID as YAMUX_PROTOCOL_ID,
     Yamux,
 )
-from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 
 
 def generate_new_rsa_identity() -> KeyPair:
