@@ -145,7 +145,6 @@ class GossipSub(IPubsubRouter, Service):
             self.direct_peers[direct_peer.peer_id] = direct_peer
         self.direct_connect_interval = direct_connect_interval
         self.direct_connect_initial_delay = direct_connect_initial_delay
-        self.time_since_last_publish = {}
 
         self.do_px = do_px
         self.back_off = back_off
@@ -826,9 +825,8 @@ class GossipSub(IPubsubRouter, Service):
         await self.emit_control_message(control_msg, id)
 
     async def emit_prune(
-        self, topic: str, to_peer: ID, do_px: bool, is_unsubscribe: bool
+        self, topic: str, to_peer: ID, do_px: bool = False, is_unsubscribe: bool = False
     ) -> None:
-    async def emit_prune(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
@@ -845,7 +843,7 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
-        await self.emit_control_message(control_msg, id)
+        await self.emit_control_message(control_msg, to_peer)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
