@@ -77,6 +77,8 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
+        self.read_lock = trio.Lock()
+        self.write_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
@@ -98,15 +100,31 @@ class YamuxStream(IMuxedStream):
         # Flow control: Check if we have enough send window
         total_len = len(data)
         sent = 0
-
+        logging.debug(f"Stream {self.stream_id}: Starts writing {total_len} bytes ")
         while sent < total_len:
+            # Wait for available window with timeout
+            timeout = False
             async with self.window_lock:
-                # Wait for available window
-                while self.send_window == 0 and not self.closed:
-                    # Release lock while waiting
+                if self.send_window == 0:
+                    logging.debug(
+                        f"Stream {self.stream_id}: Window is zero, waiting for update"
+                    )
+                    # Release lock and wait with timeout
                     self.window_lock.release()
-                    await trio.sleep(0.01)
+                    # To avoid re-acquiring the lock immediately,
+                    with trio.move_on_after(5.0) as cancel_scope:
+                        while self.send_window == 0 and not self.closed:
+                            await trio.sleep(0.01)
+                        # If we timed out, cancel the scope
+                        timeout = cancel_scope.cancelled_caught
+                    # Re-acquire lock
                     await self.window_lock.acquire()
+
+                # If we timed out waiting for window update, raise an error
+                if timeout:
+                    raise MuxedStreamError(
+                        "Timed out waiting for window update after 5 seconds."
+                    )
 
                 if self.closed:
                     raise MuxedStreamError("Stream is closed")
@@ -123,24 +141,52 @@ class YamuxStream(IMuxedStream):
                 await self.conn.secured_conn.write(header + chunk)
                 sent += to_send
 
-        # If window is getting low, consider updating
-        if self.send_window < DEFAULT_WINDOW_SIZE // 2:
-            await self.send_window_update()
+    async def send_window_update(
+        self, increment: int | None, skip_lock: bool = False
+    ) -> None:
+        """
+        Send a window update to peer.
 
-    async def send_window_update(self, increment: int | None = None) -> None:
-        """Send a window update to peer."""
+        param:increment: The amount to increment the window size by.
+        If None, uses the difference between DEFAULT_WINDOW_SIZE
+        and current receive window.
+        param:skip_lock (bool): If True, skips acquiring window_lock.
+        This should only be used when calling from a context
+        that already holds the lock.
+        """
+        increment_value = 0
         if increment is None:
-            increment = DEFAULT_WINDOW_SIZE - self.recv_window
-
-        if increment <= 0:
+            increment_value = DEFAULT_WINDOW_SIZE - self.recv_window
+        else:
+            increment_value = increment
+        if increment_value <= 0:
+            # If increment is zero or negative, skip sending update
+            logging.debug(
+                f"Stream {self.stream_id}: Skipping window update"
+                f"(increment={increment})"
+            )
             return
+        logging.debug(
+            f"Stream {self.stream_id}: Sending window update with increment={increment}"
+        )
 
-        async with self.window_lock:
-            self.recv_window += increment
+        async def _do_window_update() -> None:
+            self.recv_window += increment_value
             header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_WINDOW_UPDATE, 0, self.stream_id, increment
+                YAMUX_HEADER_FORMAT,
+                0,
+                TYPE_WINDOW_UPDATE,
+                0,
+                self.stream_id,
+                increment_value,
             )
             await self.conn.secured_conn.write(header)
+
+        if skip_lock:
+            await _do_window_update()
+        else:
+            async with self.window_lock:
+                await _do_window_update()
 
     async def read(self, n: int | None = -1) -> bytes:
         # Handle None value for n by converting it to -1
@@ -198,11 +244,19 @@ class YamuxStream(IMuxedStream):
                 # Return all buffered data
                 data = bytes(buffer)
                 buffer.clear()
-                logging.debug(f"Stream {self.stream_id}: Returning {len(data)} bytes")
                 return data
 
-        # For specific size read (n > 0), return available data immediately
-        return await self.conn.read_stream(self.stream_id, n)
+        data = await self.conn.read_stream(self.stream_id, n)
+        async with self.window_lock:
+            self.recv_window -= len(data)
+            # Automatically send a window update if recv_window is low
+            if self.recv_window <= DEFAULT_WINDOW_SIZE // 2:
+                logging.debug(
+                    f"Stream {self.stream_id}: "
+                    f"Low recv_window ({self.recv_window}), sending update"
+                )
+                await self.send_window_update(None, skip_lock=True)
+        return data
 
     async def close(self) -> None:
         if not self.send_closed:
