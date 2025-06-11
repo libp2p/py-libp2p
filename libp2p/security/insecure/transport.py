@@ -1,7 +1,4 @@
-from typing import (
-    Callable,
-    Optional,
-)
+from collections.abc import Callable
 
 from libp2p.abc import (
     IPeerStore,
@@ -45,6 +42,7 @@ from libp2p.security.base_session import (
 )
 from libp2p.security.base_transport import (
     BaseSecureTransport,
+    default_secure_bytes_provider,
 )
 from libp2p.security.exceptions import (
     HandshakeFailure,
@@ -111,8 +109,8 @@ async def run_handshake(
     local_private_key: PrivateKey,
     conn: IRawConnection,
     is_initiator: bool,
-    remote_peer_id: ID,
-    peerstore: Optional[IPeerStore] = None,
+    remote_peer_id: ID | None,
+    peerstore: IPeerStore | None = None,
 ) -> ISecureConn:
     """Raise `HandshakeFailure` when handshake failed."""
     msg = make_exchange_message(local_private_key.get_public_key())
@@ -196,9 +194,12 @@ class InsecureTransport(BaseSecureTransport):
     def __init__(
         self,
         local_key_pair: KeyPair,
-        secure_bytes_provider: Optional[Callable[[int], bytes]] = None,
-        peerstore: Optional[IPeerStore] = None,
+        secure_bytes_provider: Callable[[int], bytes] | None = None,
+        peerstore: IPeerStore | None = None,
     ) -> None:
+        # If secure_bytes_provider is None, use the default one
+        if secure_bytes_provider is None:
+            secure_bytes_provider = default_secure_bytes_provider
         super().__init__(local_key_pair, secure_bytes_provider)
         self.peerstore = peerstore
 
@@ -210,6 +211,7 @@ class InsecureTransport(BaseSecureTransport):
 
         :return: secure connection object (that implements secure_conn_interface)
         """
+        # For inbound connections, we don't know the remote peer ID yet
         return await run_handshake(
             self.local_peer, self.local_private_key, conn, False, None, self.peerstore
         )
