@@ -14,6 +14,7 @@ help:
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
+	@echo "pr - run clean, fix, lint, typecheck, and test i.e basically everything you need to do before creating a PR"
 
 clean-build:
 	rm -fr build/
@@ -46,6 +47,8 @@ typecheck:
 
 test:
 	python -m pytest tests -n auto
+
+pr: clean fix lint typecheck test
 
 # protobufs management
 
@@ -88,7 +91,7 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . setup.py "*conftest*" tests/
+	sphinx-apidoc -o docs/ . "*conftest*" tests/
 	$(MAKE) -C docs clean
 	$(MAKE) -C docs html
 	$(MAKE) -C docs doctest
