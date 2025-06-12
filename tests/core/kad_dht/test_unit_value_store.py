@@ -201,7 +201,7 @@ class TestValueStore:
         value = b"value"
         expired_validity = time.time() - 1
 
-        # store.put(key1, value)  # Valid
+        store.put(key1, value)  # Valid
         store.store[key2] = (value, expired_validity)  # Expired
         store.store[key3] = (value, expired_validity)  # Expired
 
