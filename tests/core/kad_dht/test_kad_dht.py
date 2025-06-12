@@ -156,13 +156,13 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Verify that we found the first node as a provider
     assert providers, "No providers found"
-    assert any(
-        p.peer_id == dht_a.local_peer_id for p in providers
-    ), "Expected provider not found"
+    assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
+        "Expected provider not found"
+    )
 
     # Retrieve the content using the provider information
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(content_id)
-        assert (
-            retrieved_value == content
-        ), "Retrieved content does not match the original"
+        assert retrieved_value == content, (
+            "Retrieved content does not match the original"
+        )

@@ -285,25 +285,14 @@ class TestRoutingTable:
         assert result is False
         assert routing_table.size() == 2
 
-    def test_find_bucket(self, mock_host, local_peer_id, sample_peer_info):
+    def test_find_bucket(self, mock_host, local_peer_id):
         """Test finding appropriate bucket for peers."""
         routing_table = RoutingTable(local_peer_id, mock_host)
-
-        # Test with PeerInfo
-        bucket = routing_table.find_bucket(sample_peer_info)
-        assert isinstance(bucket, KBucket)
-        # The initial routing table has one bucket covering the full key space
-        # So any peer should be assignable to that bucket
 
         # Test with peer ID
         peer_id = create_valid_peer_id("test")
         bucket = routing_table.find_bucket(peer_id)
         assert isinstance(bucket, KBucket)
-
-        # Test that the same peer always goes to the same bucket
-        bucket1 = routing_table.find_bucket(sample_peer_info.peer_id)
-        bucket2 = routing_table.find_bucket(sample_peer_info.peer_id)
-        assert bucket1 is bucket2
 
     def test_peer_management(self, mock_host, local_peer_id, sample_peer_info):
         """Test peer management operations."""

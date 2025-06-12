@@ -521,7 +521,6 @@ class TestPeerRouting:
     @pytest.mark.trio
     async def test_error_handling_in_bootstrap_parsing(self, peer_routing):
         """Test error handling when bootstrap address parsing fails."""
-
         invalid_addrs = ["invalid_multiaddr_format"]
 
         # Test that the actual StringParseError is raised when parsing fails

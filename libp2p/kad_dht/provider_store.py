@@ -8,7 +8,6 @@ import logging
 import time
 from typing import (
     Any,
-    Optional,
 )
 
 from multiaddr import (
@@ -56,7 +55,7 @@ class ProviderRecord:
     def __init__(
         self,
         provider_info: PeerInfo,
-        timestamp: Optional[float] = None,
+        timestamp: float | None = None,
     ) -> None:
         """
         Initialize a new provider record.
@@ -113,7 +112,7 @@ class ProviderStore:
     Maps content keys to provider records, with support for expiration.
     """
 
-    def __init__(self, host: IHost = None, peer_routing: Any = None) -> None:
+    def __init__(self, host: IHost, peer_routing: Any = None) -> None:
         """
         Initialize a new provider store.
 
@@ -125,7 +124,7 @@ class ProviderStore:
         self.host = host
         self.peer_routing = peer_routing
         self.providing_keys: set[bytes] = set()
-        self.local_peer_id = host.get_id() if host else None
+        self.local_peer_id = host.get_id()
 
     async def _republish_provider_records(self) -> None:
         """Republish all provider records for content this node is providing."""
@@ -225,65 +224,67 @@ class ProviderStore:
 
         """
         try:
+            result = False
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
 
-            try:
-                # Get our addresses to include in the message
-                addrs = []
-                for addr in self.host.get_addrs():
-                    addrs.append(addr.to_bytes())
+            # Get our addresses to include in the message
+            addrs = []
+            for addr in self.host.get_addrs():
+                addrs.append(addr.to_bytes())
 
-                # Create the ADD_PROVIDER message
-                message = Message()
-                message.type = Message.MessageType.ADD_PROVIDER
-                message.key = key
+            # Create the ADD_PROVIDER message
+            message = Message()
+            message.type = Message.MessageType.ADD_PROVIDER
+            message.key = key
 
-                # Add our provider info
-                provider = message.providerPeers.add()
-                provider.id = self.local_peer_id.to_bytes()
-                provider.addrs.extend(addrs)
+            # Add our provider info
+            provider = message.providerPeers.add()
+            provider.id = self.local_peer_id.to_bytes()
+            provider.addrs.extend(addrs)
 
-                # Serialize and send the message
-                proto_bytes = message.SerializeToString()
-                await stream.write(varint.encode(len(proto_bytes)))
-                await stream.write(proto_bytes)
-                logger.info(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
-                # Read response length prefix
-                length_bytes = b""
-                while True:
-                    logger.info("Reading response length prefix in add provider")
-                    b = await stream.read(1)
-                    if not b:
-                        return False
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
+            # Serialize and send the message
+            proto_bytes = message.SerializeToString()
+            await stream.write(varint.encode(len(proto_bytes)))
+            await stream.write(proto_bytes)
+            logger.info(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
+            # Read response length prefix
+            length_bytes = b""
+            while True:
+                logger.info("Reading response length prefix in add provider")
+                b = await stream.read(1)
+                if not b:
+                    return False
+                length_bytes += b
+                if b[0] & 0x80 == 0:
+                    break
 
-                response_length = varint.decode_bytes(length_bytes)
-                # Read response data
-                response_bytes = b""
-                remaining = response_length
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        return False
-                    response_bytes += chunk
-                    remaining -= len(chunk)
+            response_length = varint.decode_bytes(length_bytes)
+            # Read response data
+            response_bytes = b""
+            remaining = response_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    return False
+                response_bytes += chunk
+                remaining -= len(chunk)
 
-                # Parse response
-                response = Message()
-                response.ParseFromString(response_bytes)
+            # Parse response
+            response = Message()
+            response.ParseFromString(response_bytes)
 
-                # Check response type
-                return response.type == Message.MessageType.ADD_PROVIDER
-
-            finally:
-                await stream.close()
+            # Check response type
+            response.type == Message.MessageType.ADD_PROVIDER
+            if response.type:
+                result = True
 
         except Exception as e:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
-            return False
+
+        finally:
+            await stream.close()
+            return result
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
@@ -366,6 +367,7 @@ class ProviderStore:
             List of provider information
 
         """
+        providers: list[PeerInfo] = []
         try:
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
@@ -430,10 +432,9 @@ class ProviderStore:
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")
 
-                return providers
-
             finally:
                 await stream.close()
+                return providers
 
         except Exception as e:
             logger.warning(f"Error getting providers from {peer_id}: {e}")

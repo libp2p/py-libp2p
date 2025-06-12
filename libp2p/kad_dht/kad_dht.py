@@ -7,9 +7,6 @@ implementation based on the Kademlia algorithm and protocol.
 
 import logging
 import time
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -70,7 +67,7 @@ class KadDHT(Service):
     peer discovery, content routing, and value storage.
     """
 
-    def __init__(self, host: IHost, mode: str, bootstrap_peers: list[str] = None):
+    def __init__(self, host: IHost, mode: str, bootstrap_peers: list[str] = []):
         """
         Initialize a new Kademlia DHT node.
 
@@ -106,13 +103,14 @@ class KadDHT(Service):
         self._last_provider_republish = time.time()
 
         # Set protocol handlers
-        if self.mode == "CLIENT":
-            # Client mode: do not handle incoming streams
-            host.set_stream_handler(PROTOCOL_ID, None)
-        elif self.mode == "SERVER":
-            # Server mode: handle incoming streams
-            logger.debug("Setting up stream handler for DHT protocol")
-            host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        # if self.mode == "CLIENT":
+        #     # Client mode: do not handle incoming streams
+        #     host.set_stream_handler(PROTOCOL_ID, None)
+        # elif self.mode == "SERVER":
+        #     # Server mode: handle incoming streams
+        #     logger.debug("Setting up stream handler for DHT protocol")
+        #     host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     async def run(self) -> None:
         """Run the DHT service."""
@@ -144,10 +142,7 @@ class KadDHT(Service):
         if mode not in ["CLIENT", "SERVER"]:
             raise ValueError(f"Invalid mode '{mode}'. Must be 'CLIENT' or 'SERVER'.")
         if mode == "CLIENT":
-            self.host.set_stream_handler(PROTOCOL_ID, None)
             self.routing_table.cleanup_routing_table()
-        elif mode == "SERVER":
-            self.host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
         self.mode = mode
         return self.mode
 
@@ -155,6 +150,9 @@ class KadDHT(Service):
         """
         Handle an incoming DHT stream using varint length prefixes.
         """
+        if self.mode == "CLIENT":
+            stream.close
+            return
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
         await self.add_peer(peer_id)
@@ -411,7 +409,7 @@ class KadDHT(Service):
 
     # Peer routing methods
 
-    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
+    async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
         Find a peer with the given ID.
 
@@ -467,7 +465,7 @@ class KadDHT(Service):
                 for peer in batch:
                     nursery.start_soon(store_one, peer)
 
-    async def get_value(self, key: bytes) -> Optional[bytes]:
+    async def get_value(self, key: bytes) -> bytes | None:
         # 1. Check local store first
         value = self.value_store.get(key)
         if value:

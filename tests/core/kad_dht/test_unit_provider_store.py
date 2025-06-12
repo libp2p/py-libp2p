@@ -35,6 +35,8 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+mock_host = Mock()
+
 
 class TestProviderRecord:
     """Test suite for ProviderRecord class."""
@@ -145,13 +147,11 @@ class TestProviderStore:
 
     def test_init_empty_store(self):
         """Test that a new ProviderStore is initialized empty."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         assert len(store.providers) == 0
-        assert store.host is None
         assert store.peer_routing is None
         assert len(store.providing_keys) == 0
-        assert store.local_peer_id is None
 
     def test_init_with_host(self):
         """Test initialization with host."""
@@ -180,7 +180,7 @@ class TestProviderStore:
 
     def test_add_provider_new_key(self):
         """Test adding a provider for a new key."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
         peer_id = ID.from_base58("QmTest123")
         addresses = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
@@ -197,7 +197,7 @@ class TestProviderStore:
 
     def test_add_provider_existing_key(self):
         """Test adding multiple providers for the same key."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         # Add first provider
@@ -216,7 +216,7 @@ class TestProviderStore:
 
     def test_add_provider_update_existing(self):
         """Test updating an existing provider."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
         peer_id = ID.from_base58("QmTest123")
 
@@ -242,7 +242,7 @@ class TestProviderStore:
 
     def test_get_providers_empty_key(self):
         """Test getting providers for non-existent key."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"nonexistent_key"
 
         providers = store.get_providers(key)
@@ -251,7 +251,7 @@ class TestProviderStore:
 
     def test_get_providers_valid_records(self):
         """Test getting providers with valid records."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         # Add multiple providers
@@ -272,7 +272,7 @@ class TestProviderStore:
 
     def test_get_providers_expired_records(self):
         """Test that expired records are filtered out and cleaned up."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         # Add valid provider
@@ -299,7 +299,7 @@ class TestProviderStore:
 
     def test_get_providers_address_ttl(self):
         """Test address TTL handling in get_providers."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
         peer_id = ID.from_base58("QmTest123")
         addresses = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
@@ -318,7 +318,7 @@ class TestProviderStore:
 
     def test_get_providers_cleanup_empty_key(self):
         """Test that keys with no valid providers are removed."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         # Add only expired providers
@@ -336,7 +336,7 @@ class TestProviderStore:
 
     def test_cleanup_expired_no_expired_records(self):
         """Test cleanup when there are no expired records."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key1 = b"key1"
         key2 = b"key2"
 
@@ -358,7 +358,7 @@ class TestProviderStore:
 
     def test_cleanup_expired_with_expired_records(self):
         """Test cleanup removes expired records."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         # Add valid provider
@@ -383,7 +383,7 @@ class TestProviderStore:
 
     def test_cleanup_expired_remove_empty_keys(self):
         """Test that keys with only expired providers are removed."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key1 = b"key1"
         key2 = b"key2"
 
@@ -407,7 +407,7 @@ class TestProviderStore:
 
     def test_get_provided_keys_empty_store(self):
         """Test get_provided_keys with empty store."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         peer_id = ID.from_base58("QmTest123")
 
         keys = store.get_provided_keys(peer_id)
@@ -416,7 +416,7 @@ class TestProviderStore:
 
     def test_get_provided_keys_single_peer(self):
         """Test get_provided_keys for a specific peer."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         peer_id1 = ID.from_base58("QmTest123")
         peer_id2 = ID.from_base58("QmTest456")
 
@@ -448,7 +448,7 @@ class TestProviderStore:
 
     def test_get_provided_keys_nonexistent_peer(self):
         """Test get_provided_keys for peer that provides nothing."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         peer_id1 = ID.from_base58("QmTest123")
         peer_id2 = ID.from_base58("QmTest456")
 
@@ -464,13 +464,13 @@ class TestProviderStore:
 
     def test_size_empty_store(self):
         """Test size() with empty store."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         assert store.size() == 0
 
     def test_size_with_providers(self):
         """Test size() with multiple providers."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         # Add providers
         key1 = b"key1"
@@ -492,7 +492,7 @@ class TestProviderStore:
     @pytest.mark.trio
     async def test_provide_no_host(self):
         """Test provide() returns False when no host is configured."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         result = await store.provide(key)
@@ -567,7 +567,7 @@ class TestProviderStore:
     @pytest.mark.trio
     async def test_find_providers_no_host(self):
         """Test find_providers() returns empty list when no host."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
 
         result = await store.find_providers(key)
@@ -617,20 +617,9 @@ class TestProviderStore:
             assert result[0].peer_id == remote_peer_id
 
     @pytest.mark.trio
-    async def test_send_add_provider_no_host(self):
-        """Test _send_add_provider without host."""
-        store = ProviderStore()
-        peer_id = ID.from_base58("QmTest123")
-        key = b"test_key"
-
-        # Should handle missing host gracefully
-        result = await store._send_add_provider(peer_id, key)
-        assert result is False
-
-    @pytest.mark.trio
     async def test_get_providers_from_peer_no_host(self):
         """Test _get_providers_from_peer without host."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         peer_id = ID.from_base58("QmTest123")
         key = b"test_key"
 
@@ -640,7 +629,7 @@ class TestProviderStore:
 
     def test_edge_case_empty_key(self):
         """Test handling of empty key."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b""
         peer_id = ID.from_base58("QmTest123")
         provider = PeerInfo(peer_id, [])
@@ -653,7 +642,7 @@ class TestProviderStore:
 
     def test_edge_case_large_key(self):
         """Test handling of large key."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"x" * 10000  # 10KB key
         peer_id = ID.from_base58("QmTest123")
         provider = PeerInfo(peer_id, [])
@@ -666,7 +655,7 @@ class TestProviderStore:
 
     def test_concurrent_operations(self):
         """Test multiple concurrent operations."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         # Add many providers
         num_keys = 100
@@ -695,7 +684,7 @@ class TestProviderStore:
 
     def test_memory_efficiency_large_dataset(self):
         """Test memory behavior with large datasets."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         # Add large number of providers
         num_entries = 1000
@@ -723,7 +712,7 @@ class TestProviderStore:
 
     def test_unicode_key_handling(self):
         """Test handling of unicode content in keys."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         # Test various unicode keys
         unicode_keys = [
@@ -736,7 +725,7 @@ class TestProviderStore:
 
         for i, key in enumerate(unicode_keys):
             # Generate valid Base58 peer IDs
-            peer_id = ID.from_base58(f"QmPeer{i+1}" + "1" * 42)  # Valid base58
+            peer_id = ID.from_base58(f"QmPeer{i + 1}" + "1" * 42)  # Valid base58
             provider = PeerInfo(peer_id, [])
             store.add_provider(key, provider)
 
@@ -746,7 +735,7 @@ class TestProviderStore:
 
     def test_multiple_addresses_per_provider(self):
         """Test providers with multiple addresses."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         key = b"test_key"
         peer_id = ID.from_base58("QmTest123")
 
@@ -768,7 +757,7 @@ class TestProviderStore:
     @pytest.mark.trio
     async def test_republish_provider_records_no_keys(self):
         """Test _republish_provider_records with no providing keys."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
 
         # Should complete without error even with no providing keys
         await store._republish_provider_records()
@@ -777,7 +766,7 @@ class TestProviderStore:
 
     def test_expiration_boundary_conditions(self):
         """Test expiration around boundary conditions."""
-        store = ProviderStore()
+        store = ProviderStore(host=mock_host)
         peer_id = ID.from_base58("QmTest123")
         provider = PeerInfo(peer_id, [])
 

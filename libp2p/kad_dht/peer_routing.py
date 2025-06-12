@@ -6,9 +6,6 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -71,7 +68,7 @@ class PeerRouting(IPeerRouting):
         self.routing_table = routing_table
         self.protocol_id = PROTOCOL_ID
 
-    async def find_peer(self, peer_id: ID) -> Optional[PeerInfo]:
+    async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
         Find a peer with the given ID.
 
@@ -324,15 +321,14 @@ class PeerRouting(IPeerRouting):
 
                         addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
-            return results
 
         except Exception as e:
             logger.debug(f"Error querying peer {peer} for closest: {e}")
-            return []
 
         finally:
             if stream:
                 await stream.close()
+        return results
 
     async def _handle_kad_stream(self, stream: INetStream) -> None:
         """

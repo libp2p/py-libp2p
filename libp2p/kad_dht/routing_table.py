@@ -7,10 +7,6 @@ from collections import (
 )
 import logging
 import time
-from typing import (
-    Optional,
-    Union,
-)
 
 import trio
 
@@ -79,7 +75,7 @@ class KBucket:
         """Get all PeerInfo objects in the bucket."""
         return [info for info, _ in self.peers.values()]
 
-    def get_oldest_peer(self) -> Optional[ID]:
+    def get_oldest_peer(self) -> ID | None:
         """Get the least-recently seen peer."""
         if not self.peers:
             return None
@@ -106,6 +102,9 @@ class KBucket:
         # If bucket is full, we need to replace the least-recently seen peer
         # Get the least-recently seen peer
         oldest_peer_id = self.get_oldest_peer()
+        logger.warning("No oldest peer found")
+        if oldest_peer_id is None:
+            return False
 
         # Check if the old peer is responsive to ping request
         try:
@@ -148,7 +147,7 @@ class KBucket:
         """Check if the peer is in the bucket."""
         return peer_id in self.peers
 
-    def get_peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+    def get_peer_info(self, peer_id: ID) -> PeerInfo | None:
         """Get the PeerInfo for a given peer ID if it exists in the bucket."""
         if peer_id in self.peers:
             return self.peers[peer_id][0]
@@ -236,6 +235,7 @@ class KBucket:
             True if ping successful, False otherwise
 
         """
+        result = False
         # Get peer info directly from the bucket
         peer_info = self.get_peer_info(peer_id)
         if not peer_info:
@@ -262,7 +262,7 @@ class KBucket:
                 await stream.write(msg_bytes)
 
                 # Wait for response with timeout
-                with trio.move_on_after(10):  # 10 second timeout
+                with trio.move_on_after(2):  # 2 second timeout
                     # Read response length (4 bytes)
                     length_bytes = await stream.read(4)
                     if not length_bytes or len(length_bytes) < 4:
@@ -301,7 +301,9 @@ class KBucket:
                     if response.type == Message.PING:
                         # Update the last seen timestamp for this peer
                         logger.debug(f"Successfully pinged peer {peer_id}")
-                        return True
+                        result = True
+                        return result
+
                     else:
                         logger.warning(
                             f"Unexpected response type from {peer_id}: {response.type}"
@@ -314,6 +316,7 @@ class KBucket:
 
             finally:
                 await stream.close()
+                return result
 
         except Exception as e:
             logger.error(f"Error pinging peer {peer_id}: {str(e)}")
@@ -400,7 +403,7 @@ class RoutingTable:
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
 
-    async def add_peer(self, peer_obj: Union[PeerInfo, ID]) -> bool:
+    async def add_peer(self, peer_obj: PeerInfo | ID) -> bool:
         """
         Add a peer to the routing table.
 
@@ -463,7 +466,7 @@ class RoutingTable:
         bucket = self.find_bucket(peer_id)
         return bucket.remove_peer(peer_id)
 
-    def find_bucket(self, peer_obj: Union[PeerInfo, ID]) -> KBucket:
+    def find_bucket(self, peer_id: ID) -> KBucket:
         """
         Find the bucket that would contain the given peer ID or PeerInfo.
 
@@ -474,14 +477,10 @@ class RoutingTable:
             KBucket: The bucket for this peer
 
         """
-        # Handle PeerInfo objects or peer IDs
-        peer_id = peer_obj.peer_id if hasattr(peer_obj, "peer_id") else peer_obj
-
         for bucket in self.buckets:
             if bucket.key_in_range(peer_id.to_bytes()):
                 return bucket
 
-        # This shouldn't happen with proper bucket splitting
         return self.buckets[0]
 
     def find_local_closest_peers(self, key: bytes, count: int = 20) -> list[ID]:
@@ -520,7 +519,7 @@ class RoutingTable:
             peers.extend(bucket.peer_ids())
         return peers
 
-    def get_peer_info(self, peer_id: ID) -> Optional[PeerInfo]:
+    def get_peer_info(self, peer_id: ID) -> PeerInfo | None:
         """
         Get the peer info for a specific peer.
 

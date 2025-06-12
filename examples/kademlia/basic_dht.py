@@ -16,7 +16,6 @@ import secrets
 import sys
 from typing import (
     Any,
-    Optional,
 )
 
 import base58
@@ -70,15 +69,14 @@ for module in [
 NODE_INFO_FILE = "dht_node_info.json"
 bootstrap_nodes = [
     # "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-    # "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    # "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     # "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
     # "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    # "/ip4/127.0.0.1/tcp/48233/p2p/16Uiu2HAmCrXHNdLeB4qHA5WsEtiJfH85DZZhU4mdw2BecwQk1Z6S"
 ]
 
 
-def load_node_info() -> Optional[dict[str, Any]]:
+def load_node_info() -> dict[str, Any] | None:
     """Load node information from file if available."""
     if not os.path.exists(NODE_INFO_FILE):
         return None
@@ -110,10 +108,13 @@ def calculate_content_id(content: bytes) -> bytes:
 
 
 async def run_node(
-    port: int, mode: Optional[str], bootstrap_addrs: Optional[list[str]] = None
+    port: int, mode: str | None, bootstrap_addrs: list[str] | None = None
 ) -> None:
     """Run a node that serves content in the DHT with setup inlined."""
     try:
+        if port <= 0:
+            port = random.randint(10000, 60000)
+        logger.info(f"Using port: {port}")
         bootstrap_addrs = bootstrap_nodes
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
@@ -218,11 +219,13 @@ def parse_args():
     parser.add_argument(
         "--mode",
         default="server",
-        required=True,
         help="Run as a server or client node",
     )
     parser.add_argument(
-        "--port", type=int, default=0, help="Port to listen on (0 for random)"
+        "--port",
+        type=int,
+        default=0,
+        help="Port to listen on (0 for random)",
     )
     parser.add_argument(
         "--bootstrap",
@@ -251,18 +254,15 @@ def parse_args():
         help="Enable verbose logging",
     )
 
+    args = parser.parse_args()
+
+    logger.info("Parsed arguments: %s", args)
+
     # Set logging level based on verbosity
-    if parser.parse_args().verbose:
+    if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     else:
         logging.getLogger().setLevel(logging.INFO)
-
-    args = parser.parse_args()
-
-    # Use random port if not specified
-    if args.port == 0:
-        args.port = random.randint(10000, 60000)
-        logger.info(f"Using random port: {args.port}")
 
     return args
 

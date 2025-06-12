@@ -2,7 +2,6 @@
 Utility functions for Kademlia DHT implementation.
 """
 
-
 import base58
 import multihash
 

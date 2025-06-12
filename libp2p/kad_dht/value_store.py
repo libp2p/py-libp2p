@@ -6,9 +6,6 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 
 import logging
 import time
-from typing import (
-    Optional,
-)
 
 import varint
 
@@ -41,7 +38,7 @@ class ValueStore:
     Values are stored with a timestamp and optional expiration time.
     """
 
-    def __init__(self, host: IHost = None, local_peer_id: Optional[ID] = None):
+    def __init__(self, host: IHost, local_peer_id: ID):
         """
         Initialize an empty value store.
 
@@ -55,7 +52,7 @@ class ValueStore:
         self.host = host
         self.local_peer_id = local_peer_id
 
-    def put(self, key: bytes, value: bytes, validity: Optional[float] = None) -> None:
+    def put(self, key: bytes, value: bytes, validity: float = 0.0) -> None:
         """
         Store a value in the DHT.
 
@@ -68,8 +65,7 @@ class ValueStore:
         None
 
         """
-        if validity is None:
-            # If no validity is provided, set a default TTL
+        if validity == 0.0:
             validity = time.time() + DEFAULT_TTL
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex()[:8], validity
@@ -91,11 +87,13 @@ class ValueStore:
             True if the value was successfully stored, False otherwise
 
         """
+        result = False
         stream = None
         try:
             # Don't try to store at ourselves
             if self.local_peer_id and peer_id == self.local_peer_id:
-                return True
+                result = True
+                return result
 
             if not self.host:
                 logger.error("Host not initialized, cannot store value at peer")
@@ -157,9 +155,8 @@ class ValueStore:
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
                 logger.debug(f"Successfully stored value at peer {peer_id}")
-                return True
-
-            return False
+                result = True
+                return result
 
         except Exception as e:
             logger.warning(f"Failed to store value at peer {peer_id}: {e}")
@@ -168,8 +165,9 @@ class ValueStore:
         finally:
             if stream:
                 await stream.close()
+            return result
 
-    def get(self, key: bytes) -> Optional[bytes]:
+    def get(self, key: bytes) -> bytes | None:
         """
         Retrieve a value from the DHT.
 
@@ -202,7 +200,7 @@ class ValueStore:
 
         return value
 
-    async def _get_from_peer(self, peer_id: ID, key: bytes) -> Optional[bytes]:
+    async def _get_from_peer(self, peer_id: ID, key: bytes) -> bytes | None:
         """
         Retrieve a value from a specific peer.
 
@@ -347,9 +345,7 @@ class ValueStore:
         """
         current_time = time.time()
         expired_keys = [
-            key
-            for key, (_, validity) in self.store.items()
-            if validity is not None and current_time > validity
+            key for key, (_, validity) in self.store.items() if current_time > validity
         ]
 
         for key in expired_keys:
