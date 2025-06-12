@@ -251,7 +251,7 @@ class QUICListener(IListener):
             connection._quic.receive_datagram(data, addr, now=time.time())
 
             # Process events and handle responses
-            await connection._process_events()
+            await connection._process_quic_events()
             await connection._transmit()
 
         except Exception as e:
@@ -386,8 +386,8 @@ class QUICListener(IListener):
 
             # Start connection management tasks
             if self._nursery:
-                self._nursery.start_soon(connection._handle_incoming_data)
-                self._nursery.start_soon(connection._handle_timer)
+                self._nursery.start_soon(connection._handle_datagram_received)
+                self._nursery.start_soon(connection._handle_timer_events)
 
             # TODO: Verify peer identity
             # await connection.verify_peer_identity()
