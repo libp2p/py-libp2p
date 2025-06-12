@@ -15,9 +15,9 @@ from aioquic.quic.connection import (
 )
 import multiaddr
 import trio
+from typing_extensions import Unpack
 
 from libp2p.abc import (
-    IListener,
     IRawConnection,
     ITransport,
 )
@@ -28,6 +28,7 @@ from libp2p.custom_types import THandler, TProtocol
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.transport.quic.config import QUICTransportKwargs
 from libp2p.transport.quic.utils import (
     is_quic_multiaddr,
     multiaddr_to_quic_version,
@@ -131,7 +132,10 @@ class QUICTransport(ITransport):
     #     # This follows the libp2p TLS spec for peer identity verification
     #     tls_config = generate_libp2p_tls_config(self._private_key, self._peer_id)
 
-    #     config.load_cert_chain(certfile=tls_config.cert_file, keyfile=tls_config.key_file)
+    #     config.load_cert_chain(
+    #         certfile=tls_config.cert_file,
+    #         keyfile=tls_config.key_file
+    #     )
     #     if tls_config.ca_file:
     #         config.load_verify_locations(tls_config.ca_file)
 
@@ -210,7 +214,7 @@ class QUICTransport(ITransport):
             logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
             raise QUICDialError(f"Dial failed: {e}") from e
 
-    def create_listener(self, handler_function: THandler) -> IListener:
+    def create_listener(self, handler_function: THandler) -> QUICListener:
         """
         Create a QUIC listener.
 
@@ -298,12 +302,18 @@ class QUICTransport(ITransport):
 
         logger.info("QUIC transport closed")
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int | list[str] | object]:
         """Get transport statistics."""
-        stats = {
+        protocols = self.protocols()
+        str_protocols = []
+
+        for proto in protocols:
+            str_protocols.append(str(proto))
+
+        stats: dict[str, int | list[str] | object] = {
             "active_connections": len(self._connections),
             "active_listeners": len(self._listeners),
-            "supported_protocols": self.protocols(),
+            "supported_protocols": str_protocols,
         }
 
         # Aggregate listener stats
@@ -324,7 +334,9 @@ class QUICTransport(ITransport):
 
 
 def new_transport(
-    private_key: PrivateKey, config: QUICTransportConfig | None = None, **kwargs
+    private_key: PrivateKey,
+    config: QUICTransportConfig | None = None,
+    **kwargs: Unpack[QUICTransportKwargs],
 ) -> QUICTransport:
     """
     Factory function to create a new QUIC transport.

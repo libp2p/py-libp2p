@@ -3,8 +3,6 @@ Multiaddr utilities for QUIC transport.
 Handles QUIC-specific multiaddr parsing and validation.
 """
 
-from typing import Tuple
-
 import multiaddr
 
 from libp2p.custom_types import TProtocol
@@ -54,7 +52,7 @@ def is_quic_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
         return False
 
 
-def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> Tuple[str, int]:
+def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> tuple[str, int]:
     """
     Extract host and port from a QUIC multiaddr.
 
@@ -78,20 +76,21 @@ def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> Tuple[str, int]:
 
         # Try to get IPv4 address
         try:
-            host = maddr.value_for_protocol(multiaddr.protocols.P_IP4) # type: ignore
+            host = maddr.value_for_protocol(multiaddr.protocols.P_IP4)  # type: ignore
         except ValueError:
             pass
 
         # Try to get IPv6 address if IPv4 not found
         if host is None:
             try:
-                host = maddr.value_for_protocol(multiaddr.protocols.P_IP6) # type: ignore
+                host = maddr.value_for_protocol(multiaddr.protocols.P_IP6)  # type: ignore
             except ValueError:
                 pass
 
         # Get UDP port
         try:
-            port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)
+            # The the package is exposed by types not availble
+            port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)  # type: ignore
             port = int(port_str)
         except ValueError:
             pass

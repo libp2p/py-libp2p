@@ -50,7 +50,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
     Uses aioquic's sans-IO core with trio for native async support.
     QUIC natively provides stream multiplexing, so this connection acts as both
     a raw connection (for transport layer) and muxed connection (for upper layers).
-    
+
     Updated to work properly with the QUIC listener for server-side connections.
     """
 
@@ -92,18 +92,20 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._background_tasks_started = False
         self._nursery: trio.Nursery | None = None
 
-        logger.debug(f"Created QUIC connection to {peer_id} (initiator: {is_initiator})")
+        logger.debug(
+            f"Created QUIC connection to {peer_id} (initiator: {is_initiator})"
+        )
 
     def _calculate_initial_stream_id(self) -> int:
         """
         Calculate the initial stream ID based on QUIC specification.
-        
+
         QUIC stream IDs:
         - Client-initiated bidirectional: 0, 4, 8, 12, ...
         - Server-initiated bidirectional: 1, 5, 9, 13, ...
         - Client-initiated unidirectional: 2, 6, 10, 14, ...
         - Server-initiated unidirectional: 3, 7, 11, 15, ...
-        
+
         For libp2p, we primarily use bidirectional streams.
         """
         if self.__is_initiator:
@@ -118,7 +120,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def start(self) -> None:
         """
         Start the connection and its background tasks.
-        
+
         This method implements the IMuxedConn.start() interface.
         It should be called to begin processing connection events.
         """
@@ -165,7 +167,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
             if not self._background_tasks_started:
                 # We would need a nursery to start background tasks
                 # This is a limitation of the current design
-                logger.warning("Background tasks need nursery - connection may not work properly")
+                logger.warning(
+                    "Background tasks need nursery - connection may not work properly"
+                )
 
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -174,13 +178,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def connect(self, nursery: trio.Nursery) -> None:
         """
         Establish the QUIC connection using trio.
-        
+
         Args:
             nursery: Trio nursery for background tasks
 
         """
         if not self.__is_initiator:
-            raise QUICConnectionError("connect() should only be called by client connections")
+            raise QUICConnectionError(
+                "connect() should only be called by client connections"
+            )
 
         try:
             # Store nursery for background tasks
@@ -321,7 +327,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
     def _is_incoming_stream(self, stream_id: int) -> bool:
         """
         Determine if a stream ID represents an incoming stream.
-        
+
         For bidirectional streams:
         - Even IDs are client-initiated
         - Odd IDs are server-initiated
@@ -463,11 +469,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
             # Create stream
-            stream = QUICStream(
-                connection=self,
-                stream_id=stream_id,
-                is_initiator=True
-            )
+            stream = QUICStream(connection=self, stream_id=stream_id, is_initiator=True)
 
             self._streams[stream_id] = stream
 
@@ -530,9 +532,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # The certificate should contain the peer ID in a specific extension
         raise NotImplementedError("Certificate peer ID extraction not implemented")
 
-    def get_stats(self) -> dict:
+    # TODO: Define type for stats
+    def get_stats(self) -> dict[str, object]:
         """Get connection statistics."""
-        return {
+        stats: dict[str, object] = {
             "peer_id": str(self._peer_id),
             "remote_addr": self._remote_addr,
             "is_initiator": self.__is_initiator,
@@ -542,10 +545,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
             "active_streams": len(self._streams),
             "next_stream_id": self._next_stream_id,
         }
+        return stats
 
-    def get_remote_address(self):
+    def get_remote_address(self) -> tuple[str, int]:
         return self._remote_addr
 
     def __str__(self) -> str:
         """String representation of the connection."""
-        return f"QUICConnection(peer={self._peer_id}, streams={len(self._streams)}, established={self._established}, started={self._started})"
+        id = self._peer_id
+        estb = self._established
+        stream_len = len(self._streams)
+        return f"QUICConnection(peer={id}, streams={stream_len}".__add__(
+            f"established={estb}, started={self._started})"
+        )

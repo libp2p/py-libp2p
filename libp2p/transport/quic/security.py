@@ -7,7 +7,6 @@ Full implementation will be in Module 5.
 from dataclasses import dataclass
 import os
 import tempfile
-from typing import Optional
 
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
@@ -21,7 +20,7 @@ class TLSConfig:
 
     cert_file: str
     key_file: str
-    ca_file: Optional[str] = None
+    ca_file: str | None = None
 
 
 def generate_libp2p_tls_config(private_key: PrivateKey, peer_id: ID) -> TLSConfig:

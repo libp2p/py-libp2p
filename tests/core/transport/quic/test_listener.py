@@ -17,7 +17,6 @@ from libp2p.transport.quic.transport import (
 )
 from libp2p.transport.quic.utils import (
     create_quic_multiaddr,
-    quic_multiaddr_to_endpoint,
 )
 
 
@@ -89,71 +88,51 @@ class TestQUICListener:
             assert stats["active_connections"] == 0
             assert stats["pending_connections"] == 0
 
-            # Close listener
-            await listener.close()
-            assert not listener.is_listening()
+            # Sender Cancel Signal
+            nursery.cancel_scope.cancel()
+
+        await listener.close()
+        assert not listener.is_listening()
 
     @pytest.mark.trio
     async def test_listener_double_listen(self, listener: QUICListener):
         """Test that double listen raises error."""
         listen_addr = create_quic_multiaddr("127.0.0.1", 9001, "/quic")
 
-        # The nursery is the outer context
-        async with trio.open_nursery() as nursery:
-            # The try/finally is now INSIDE the nursery scope
-            try:
-                # The listen method creates the socket and starts background tasks
+        try:
+            async with trio.open_nursery() as nursery:
                 success = await listener.listen(listen_addr, nursery)
                 assert success
                 await trio.sleep(0.01)
 
                 addrs = listener.get_addrs()
                 assert len(addrs) > 0
-                print("ADDRS 1: ", len(addrs))
-                print("TEST LOGIC FINISHED")
-
                 async with trio.open_nursery() as nursery2:
                     with pytest.raises(QUICListenError, match="Already listening"):
                         await listener.listen(listen_addr, nursery2)
-            finally:
-                # This block runs BEFORE the 'async with nursery' exits.
-                print("INNER FINALLY: Closing listener to release socket...")
+                        nursery2.cancel_scope.cancel()
 
-                # This closes the socket and sets self._listening = False,
-                # which helps the background tasks terminate cleanly.
-                await listener.close()
-                print("INNER FINALLY: Listener closed.")
-
-        # By the time we get here, the listener and its tasks have been fully
-        # shut down, allowing the nursery to exit without hanging.
-        print("TEST COMPLETED SUCCESSFULLY.")
+                nursery.cancel_scope.cancel()
+        finally:
+            await listener.close()
 
     @pytest.mark.trio
     async def test_listener_port_binding(self, listener: QUICListener):
         """Test listener port binding and cleanup."""
         listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
 
-        # The nursery is the outer context
-        async with trio.open_nursery() as nursery:
-            # The try/finally is now INSIDE the nursery scope
-            try:
-                # The listen method creates the socket and starts background tasks
+        try:
+            async with trio.open_nursery() as nursery:
                 success = await listener.listen(listen_addr, nursery)
                 assert success
                 await trio.sleep(0.5)
 
                 addrs = listener.get_addrs()
                 assert len(addrs) > 0
-                print("TEST LOGIC FINISHED")
 
-            finally:
-                # This block runs BEFORE the 'async with nursery' exits.
-                print("INNER FINALLY: Closing listener to release socket...")
-
-                # This closes the socket and sets self._listening = False,
-                # which helps the background tasks terminate cleanly.
-                await listener.close()
-                print("INNER FINALLY: Listener closed.")
+                nursery.cancel_scope.cancel()
+        finally:
+            await listener.close()
 
         # By the time we get here, the listener and its tasks have been fully
         # shut down, allowing the nursery to exit without hanging.

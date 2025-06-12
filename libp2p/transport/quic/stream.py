@@ -116,7 +116,8 @@ class QUICStream(IMuxedStream):
         """
         Reset the stream
         """
-        self.handle_reset(0)
+        await self.handle_reset(0)
+        return
 
     def get_remote_address(self) -> tuple[str, int] | None:
         return self._connection._remote_addr

@@ -24,18 +24,14 @@ class TestQUICUtils:
             Multiaddr(
                 f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
             ),
-            Multiaddr(
-                f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-            ),
+            Multiaddr(f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"),
             Multiaddr(
                 f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
             ),
             Multiaddr(
                 f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
             ),
-            Multiaddr(
-                f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
-            ),
+            Multiaddr(f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}"),
         ]
 
         for addr in valid:

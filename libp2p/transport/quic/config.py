@@ -7,8 +7,43 @@ from dataclasses import (
     field,
 )
 import ssl
+from typing import TypedDict
 
 from libp2p.custom_types import TProtocol
+
+
+class QUICTransportKwargs(TypedDict, total=False):
+    """Type definition for kwargs accepted by new_transport function."""
+
+    # Connection settings
+    idle_timeout: float
+    max_datagram_size: int
+    local_port: int | None
+
+    # Protocol version support
+    enable_draft29: bool
+    enable_v1: bool
+
+    # TLS settings
+    verify_mode: ssl.VerifyMode
+    alpn_protocols: list[str]
+
+    # Performance settings
+    max_concurrent_streams: int
+    connection_window: int
+    stream_window: int
+
+    # Logging and debugging
+    enable_qlog: bool
+    qlog_dir: str | None
+
+    # Connection management
+    max_connections: int
+    connection_timeout: float
+
+    # Protocol identifiers
+    PROTOCOL_QUIC_V1: TProtocol
+    PROTOCOL_QUIC_DRAFT29: TProtocol
 
 
 @dataclass
@@ -47,7 +82,7 @@ class QUICTransportConfig:
     PROTOCOL_QUIC_V1: TProtocol = TProtocol("quic")  # RFC 9000
     PROTOCOL_QUIC_DRAFT29: TProtocol = TProtocol("quic")  # draft-29
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if not (self.enable_draft29 or self.enable_v1):
             raise ValueError("At least one QUIC version must be enabled")

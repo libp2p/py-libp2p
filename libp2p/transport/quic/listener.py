@@ -8,7 +8,7 @@ import copy
 import logging
 import socket
 import time
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 from aioquic.quic import events
 from aioquic.quic.configuration import QuicConfiguration
@@ -49,7 +49,7 @@ class QUICListener(IListener):
         self,
         transport: "QUICTransport",
         handler_function: THandler,
-        quic_configs: Dict[TProtocol, QuicConfiguration],
+        quic_configs: dict[TProtocol, QuicConfiguration],
         config: QUICTransportConfig,
     ):
         """
@@ -72,8 +72,8 @@ class QUICListener(IListener):
         self._bound_addresses: list[Multiaddr] = []
 
         # Connection management
-        self._connections: Dict[tuple[str, int], QUICConnection] = {}
-        self._pending_connections: Dict[tuple[str, int], QuicConnection] = {}
+        self._connections: dict[tuple[str, int], QUICConnection] = {}
+        self._pending_connections: dict[tuple[str, int], QuicConnection] = {}
         self._connection_lock = trio.Lock()
 
         # Listener state
@@ -104,6 +104,7 @@ class QUICListener(IListener):
 
         Raises:
             QUICListenError: If failed to start listening
+
         """
         if not is_quic_multiaddr(maddr):
             raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
@@ -133,11 +134,11 @@ class QUICListener(IListener):
             self._listening = True
 
             # Start background tasks directly in the provided nursery
-            # This ensures proper cancellation when the nursery exits
+            # This e per cancellation when the nursery exits
             nursery.start_soon(self._handle_incoming_packets)
             nursery.start_soon(self._manage_connections)
 
-            print(f"QUIC listener started on {actual_maddr}")
+            logger.info(f"QUIC listener started on {actual_maddr}")
             return True
 
         except trio.Cancelled:
@@ -190,7 +191,8 @@ class QUICListener(IListener):
         try:
             while self._listening and self._socket:
                 try:
-                    # Receive UDP packet (this blocks until packet arrives or socket closes)
+                    # Receive UDP packet
+                    # (this blocks until packet arrives or socket closes)
                     data, addr = await self._socket.recvfrom(65536)
                     self._stats["bytes_received"] += len(data)
                     self._stats["packets_processed"] += 1
@@ -208,10 +210,9 @@ class QUICListener(IListener):
                     # Continue processing other packets
                     await trio.sleep(0.01)
         except trio.Cancelled:
-            print("PACKET HANDLER CANCELLED - FORCIBLY CLOSING SOCKET")
+            logger.info("Received Cancel, stopping handling incoming packets")
             raise
         finally:
-            print("PACKET HANDLER FINISHED")
             logger.debug("Packet handling loop terminated")
 
     async def _process_packet(self, data: bytes, addr: tuple[str, int]) -> None:
@@ -456,10 +457,7 @@ class QUICListener(IListener):
                 except Exception as e:
                     logger.error(f"Error in connection management: {e}")
         except trio.Cancelled:
-            print("CONNECTION MANAGER CANCELLED")
             raise
-        finally:
-            print("CONNECTION MANAGER FINISHED")
 
     async def _cleanup_closed_connections(self) -> None:
         """Remove closed connections from tracking."""
@@ -500,20 +498,20 @@ class QUICListener(IListener):
 
         self._closed = True
         self._listening = False
-        print("Closing QUIC listener")
+        logger.debug("Closing QUIC listener")
 
         # CRITICAL: Close socket FIRST to unblock recvfrom()
         await self._cleanup_socket()
 
-        print("SOCKET CLEANUP COMPLETE")
+        logger.debug("SOCKET CLEANUP COMPLETE")
 
         # Close all connections WITHOUT using the lock during shutdown
         # (avoid deadlock if background tasks are cancelled while holding lock)
         connections_to_close = list(self._connections.values())
         pending_to_close = list(self._pending_connections.values())
 
-        print(
-            f"CLOSING {len(connections_to_close)} connections and {len(pending_to_close)} pending"
+        logger.debug(
+            f"CLOSING {connections_to_close} connections and {pending_to_close} pending"
         )
 
         # Close active connections
@@ -533,10 +531,7 @@ class QUICListener(IListener):
         # Clear the dictionaries without lock (we're shutting down)
         self._connections.clear()
         self._pending_connections.clear()
-        if self._nursery:
-            print("TASKS", len(self._nursery.child_tasks))
-
-        print("QUIC listener closed")
+        logger.debug("QUIC listener closed")
 
     async def _cleanup_socket(self) -> None:
         """Clean up the UDP socket."""
@@ -562,7 +557,7 @@ class QUICListener(IListener):
         """Check if the listener is actively listening."""
         return self._listening and not self._closed
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int]:
         """Get listener statistics."""
         stats = self._stats.copy()
         stats.update(
@@ -576,4 +571,6 @@ class QUICListener(IListener):
 
     def __str__(self) -> str:
         """String representation of the listener."""
-        return f"QUICListener(addrs={self._bound_addresses}, connections={len(self._connections)})"
+        addr = self._bound_addresses
+        conn_count = len(self._connections)
+        return f"QUICListener(addrs={addr}, connections={conn_count})"
