@@ -87,14 +87,16 @@ async def connect(node1: IHost, node2: IHost) -> None:
     addr = node2.get_addrs()[0]
     info = info_from_p2p_addr(addr)
 
-    # Add retry logic for more robust connection
+    # Add retry logic for more robust connection with timeout
     max_retries = 3
     retry_delay = 0.2
     last_error = None
 
     for attempt in range(max_retries):
         try:
-            await node1.connect(info)
+            # Use timeout for each connection attempt
+            with trio.move_on_after(5):  # 5 second timeout
+                await node1.connect(info)
 
             # Verify connection is established in both directions
             if (
