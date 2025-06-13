@@ -268,7 +268,8 @@ def parse_args():
     return args
 
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the kademlia-demo console script."""
     try:
         args = parse_args()
         logger.info(
@@ -280,3 +281,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
