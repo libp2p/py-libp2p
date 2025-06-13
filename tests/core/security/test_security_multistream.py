@@ -13,6 +13,8 @@ from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
 from libp2p.security.secure_session import (
     SecureSession,
 )
+from libp2p.stream_muxer.mplex.mplex import Mplex
+from libp2p.stream_muxer.yamux.yamux import Yamux
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -46,11 +48,6 @@ async def perform_simple_test(assertion_func, security_protocol):
         # the test will fail with clear error
         assert conn_0 is not None, "Failed to establish connection from host0 to host1"
         assert conn_1 is not None, "Failed to establish connection from host1 to host0"
-
-        # Access the secure connection - we need to adapt to implementation differences
-        # between different connection types
-        from libp2p.stream_muxer.mplex.mplex import Mplex
-        from libp2p.stream_muxer.yamux.yamux import Yamux
 
         # Extract the secured connection from either Mplex or Yamux implementation
         def get_secured_conn(conn):
