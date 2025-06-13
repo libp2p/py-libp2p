@@ -67,13 +67,12 @@ class KadDHT(Service):
     peer discovery, content routing, and value storage.
     """
 
-    def __init__(self, host: IHost, mode: str, bootstrap_peers: list[str] = []):
+    def __init__(self, host: IHost, mode: str):
         """
         Initialize a new Kademlia DHT node.
 
         :param host: The libp2p host.
-        :param bootstrap_peers: Initial peers to bootstrap the routing table.
-
+        :param mode: The mode of host (Client or Server)
         """
         super().__init__()
 
@@ -96,29 +95,15 @@ class KadDHT(Service):
         # Initialize provider store with host and peer_routing references
         self.provider_store = ProviderStore(host=host, peer_routing=self.peer_routing)
 
-        # Store bootstrap peers for later use
-        self.bootstrap_peers = bootstrap_peers or []
-
         # Last time we republished provider records
         self._last_provider_republish = time.time()
 
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
-        # if self.mode == "CLIENT":
-        #     # Client mode: do not handle incoming streams
-        #     host.set_stream_handler(PROTOCOL_ID, None)
-        # elif self.mode == "SERVER":
-        #     # Server mode: handle incoming streams
-        #     logger.debug("Setting up stream handler for DHT protocol")
-        #     host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     async def run(self) -> None:
         """Run the DHT service."""
         logger.info(f"Starting Kademlia DHT with peer ID {self.local_peer_id}")
-
-        # Bootstrap the routing table
-        if self.bootstrap_peers:
-            await self.peer_routing.bootstrap(self.bootstrap_peers)
 
         # Main service loop
         while self.manager.is_running:

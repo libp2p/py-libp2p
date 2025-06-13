@@ -71,12 +71,6 @@ for module in [
 # File to store node information
 NODE_INFO_FILE = "dht_node_info.json"
 bootstrap_nodes = []
-# "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-# "/ip4/145.40.118.135/tcp/4001/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-# "/ip4/147.75.87.27/tcp/4001/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-# "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-# "/ip4/139.178.65.157/tcp/4001/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-# "/ip4/139.178.91.71/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
 
 
 # function to take bootstrap_nodes as input and connects to them
@@ -150,7 +144,6 @@ async def run_node(
         if port <= 0:
             port = random.randint(10000, 60000)
         logger.debug(f"Using port: {port}")
-        # logger.info("Pre loading address bootstrap nodes are ", bootstrap_nodes)
         # Load server addresses for client mode
         if mode.upper() == "CLIENT":
             server_addrs = load_server_addrs()
@@ -160,11 +153,9 @@ async def run_node(
             else:
                 logger.warning("No server addresses found in log file")
 
-        # logger.info("Post loading address bootstrap nodes are ", bootstrap_nodes[0])
-
-        # if bootstrap_addrs:
-        #     for addr in bootstrap_addrs:
-        #         bootstrap_addrs.append(addr)
+        if bootstrap_addrs:
+            for addr in bootstrap_addrs:
+                bootstrap_nodes.append(addr)
 
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)

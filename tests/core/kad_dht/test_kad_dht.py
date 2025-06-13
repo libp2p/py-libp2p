@@ -48,18 +48,11 @@ async def dht_pair(security_protocol):
         peer_b_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         peer_a_info = PeerInfo(host_a.get_id(), host_a.get_addrs())
 
-        # Convert PeerInfo to multiaddr strings for bootstrap_peers
-        # Use the first address and append the peer ID
-        bootstrap_addr_b = f"{peer_b_info.addrs[0]}/p2p/{peer_b_info.peer_id}"
-        bootstrap_addr_a = f"{peer_a_info.addrs[0]}/p2p/{peer_a_info.peer_id}"
-
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
-        dht_a: KadDHT = KadDHT(
-            host_a, mode="server", bootstrap_peers=[bootstrap_addr_b]
-        )
-        dht_b: KadDHT = KadDHT(
-            host_b, mode="server", bootstrap_peers=[bootstrap_addr_a]
-        )
+        dht_a: KadDHT = KadDHT(host_a, mode="server")
+        dht_b: KadDHT = KadDHT(host_b, mode="server")
+        await dht_a.peer_routing.routing_table.add_peer(peer_b_info)
+        await dht_b.peer_routing.routing_table.add_peer(peer_a_info)
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
@@ -95,7 +88,8 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
 async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     """Test storing and retrieving values in the DHT."""
     dht_a, dht_b = dht_pair
-
+    # dht_a.peer_routing.routing_table.add_peer(dht_b.pe)
+    peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
     # Generate a random key and value
     key = create_key_from_binary(b"test-key")
     value = b"test-value"
@@ -105,25 +99,30 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     logger.debug("Local value store: %s", dht_a.value_store.store)
     local_value = dht_a.value_store.get(key)
     assert local_value == value, "Local value storage failed"
+    print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
+    await dht_a.routing_table.add_peer(peer_b_info)
+    print("Routing table of a has ", dht_a.routing_table.get_peer_ids())
 
     # Store the value using the first node (this will also store locally)
     with trio.fail_after(TEST_TIMEOUT):
         await dht_a.put_value(key, value)
 
-    # Log debugging information
+    # # Log debugging information
     logger.debug("Put value with key %s...", key.hex()[:10])
     logger.debug("Node A value store: %s", dht_a.value_store.store)
+    print("hello test")
 
-    # Allow more time for the value to propagate
-    await trio.sleep(0.1)
+    # # Allow more time for the value to propagate
+    await trio.sleep(0.5)
 
-    # Try direct connection between nodes to ensure they're properly linked
+    # # Try direct connection between nodes to ensure they're properly linked
     logger.debug("Node A peers: %s", dht_a.routing_table.get_peer_ids())
     logger.debug("Node B peers: %s", dht_b.routing_table.get_peer_ids())
 
     # Retrieve the value using the second node
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(key)
+        print("the value stored in node b is", dht_b.get_value_store_size())
         logger.debug("Retrieved value: %s", retrieved_value)
 
     # Verify that the retrieved value matches the original

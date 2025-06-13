@@ -4,7 +4,6 @@ Unit tests for the PeerRouting class in Kademlia DHT.
 This module tests the core functionality of peer routing including:
 - Peer discovery and lookup
 - Network queries for closest peers
-- Bootstrap process
 - Protocol message handling
 - Error handling and edge cases
 """
@@ -19,9 +18,6 @@ from unittest.mock import (
 import pytest
 from multiaddr import (
     Multiaddr,
-)
-from multiaddr.exceptions import (
-    StringParseError,
 )
 import varint
 
@@ -281,62 +277,6 @@ class TestPeerRouting:
         mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
-    async def test_bootstrap_success(self, peer_routing, mock_host):
-        """Test successful bootstrap process."""
-        bootstrap_addrs = [
-            "/ip4/127.0.0.1/tcp/8001/p2p/QmBootstrap1",
-            "/ip4/127.0.0.1/tcp/8002/p2p/QmBootstrap2",
-        ]
-
-        # Mock info_from_p2p_addr to return valid peer info
-        mock_peer_infos = []
-        for i, addr in enumerate(bootstrap_addrs):
-            peer_id = create_valid_peer_id(f"bootstrap{i}")
-            peer_info = PeerInfo(peer_id, [Multiaddr(addr.split("/p2p/")[0])])
-            mock_peer_infos.append(peer_info)
-
-        with patch(
-            "libp2p.kad_dht.peer_routing.info_from_p2p_addr",
-            side_effect=mock_peer_infos,
-        ):
-            with patch.object(peer_routing, "refresh_routing_table") as mock_refresh:
-                mock_host.get_peerstore().add_addrs = Mock()
-
-                await peer_routing.bootstrap(bootstrap_addrs)
-
-                # Should attempt to connect to bootstrap peers
-                assert mock_host.connect.call_count == len(bootstrap_addrs)
-                mock_refresh.assert_called_once()
-
-    @pytest.mark.trio
-    async def test_bootstrap_connection_failure(self, peer_routing, mock_host):
-        """Test bootstrap when connection to peers fails."""
-        bootstrap_addrs = ["/ip4/127.0.0.1/tcp/8001/p2p/QmBootstrap1"]
-
-        # Mock connection failure
-        mock_host.connect.side_effect = Exception("Connection failed")
-
-        mock_peer_info = PeerInfo(
-            create_valid_peer_id("bootstrap"), [Multiaddr("/ip4/127.0.0.1/tcp/8001")]
-        )
-
-        with patch(
-            "libp2p.kad_dht.peer_routing.info_from_p2p_addr",
-            return_value=mock_peer_info,
-        ):
-            mock_host.get_peerstore().add_addrs = Mock()
-
-            # Should not raise exception even if connections fail
-            await peer_routing.bootstrap(bootstrap_addrs)
-
-    @pytest.mark.trio
-    async def test_bootstrap_empty_list(self, peer_routing):
-        """Test bootstrap with empty peer list."""
-        await peer_routing.bootstrap([])
-
-        # Should complete without error
-
-    @pytest.mark.trio
     async def test_refresh_routing_table(self, peer_routing, mock_host):
         """Test routing table refresh."""
         local_id = mock_host.get_id()
@@ -517,12 +457,3 @@ class TestPeerRouting:
 
                     # Should stop after max rounds, not infinite loop
                     assert isinstance(result, list)
-
-    @pytest.mark.trio
-    async def test_error_handling_in_bootstrap_parsing(self, peer_routing):
-        """Test error handling when bootstrap address parsing fails."""
-        invalid_addrs = ["invalid_multiaddr_format"]
-
-        # Test that the actual StringParseError is raised when parsing fails
-        with pytest.raises(StringParseError, match="Must begin with /"):
-            await peer_routing.bootstrap(invalid_addrs)

@@ -7,9 +7,6 @@ to efficiently locate peers in a distributed network.
 
 import logging
 
-from multiaddr import (
-    Multiaddr,
-)
 import trio
 import varint
 
@@ -26,7 +23,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-    info_from_p2p_addr,
 )
 
 from .pb.kademlia_pb2 import (
@@ -399,59 +395,6 @@ class PeerRouting(IPeerRouting):
             logger.debug(f"Error handling Kademlia stream: {e}")
         finally:
             await stream.close()
-
-    async def bootstrap(self, bootstrap_peers: list[str]) -> None:
-        """
-        Bootstrap the routing table with a list of known peers.
-
-        params: bootstrap_peers: List of known peers to start with
-
-        Returns
-        -------
-        None
-
-        """
-        logger.info(f"Bootstrapping with {len(bootstrap_peers)} peers")
-
-        peer_infos = []
-
-        if bootstrap_peers:
-            for addr in bootstrap_peers:
-                try:
-                    peer_info = info_from_p2p_addr(Multiaddr(addr))
-                    peer_infos.append(peer_info)
-                    logger.info(f"Using bootstrap node: {addr}")
-                except Exception as e:
-                    logger.error(f"Failed to parse bootstrap address: {e}")
-                    raise
-
-        # Add the bootstrap peers to the routing table
-        for peer_info in peer_infos:
-            try:
-                # Add to peerstore first
-                self.host.get_peerstore().add_addrs(
-                    peer_info.peer_id, peer_info.addrs, 3600
-                )
-                logger.info(f"Added bootstrap peer {peer_info.peer_id} to peerstore")
-                # Establish connection to bootstrap peer
-                await self.host.connect(peer_info)
-                logger.info(f"Connected to bootstrap peer {peer_info.peer_id}")
-
-                # Add to routing table
-                await self.routing_table.add_peer(peer_info)
-                logger.info(
-                    f"Added bootstrap peer {peer_info.peer_id} to routing table"
-                )
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to connect to bootstrap peer {peer_info.peer_id}: {e}"
-                )
-                continue
-
-        # If we have bootstrap peers, refresh the routing table
-        if bootstrap_peers:
-            await self.refresh_routing_table()
 
     async def refresh_routing_table(self) -> None:
         """
