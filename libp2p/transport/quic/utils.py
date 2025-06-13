@@ -1,19 +1,33 @@
 """
-Multiaddr utilities for QUIC transport.
-Handles QUIC-specific multiaddr parsing and validation.
+Multiaddr utilities for QUIC transport - Module 4.
+Essential utilities required for QUIC transport implementation.
+Based on go-libp2p and js-libp2p QUIC implementations.
 """
+
+import ipaddress
 
 import multiaddr
 
 from libp2p.custom_types import TProtocol
 
 from .config import QUICTransportConfig
+from .exceptions import QUICInvalidMultiaddrError, QUICUnsupportedVersionError
 
+# Protocol constants
 QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
 QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 UDP_PROTOCOL = "udp"
 IP4_PROTOCOL = "ip4"
 IP6_PROTOCOL = "ip6"
+
+# QUIC version to wire format mappings (required for aioquic)
+QUIC_VERSION_MAPPINGS = {
+    QUIC_V1_PROTOCOL: 0x00000001,  # RFC 9000
+    QUIC_DRAFT29_PROTOCOL: 0xFF00001D,  # draft-29
+}
+
+# ALPN protocols for libp2p over QUIC
+LIBP2P_ALPN_PROTOCOLS = ["libp2p"]
 
 
 def is_quic_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
@@ -34,7 +48,6 @@ def is_quic_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
 
     """
     try:
-        # Get protocol names from the multiaddr string
         addr_str = str(maddr)
 
         # Check for required components
@@ -63,14 +76,13 @@ def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> tuple[str, int]:
         Tuple of (host, port)
 
     Raises:
-        ValueError: If multiaddr is not a valid QUIC address
+        QUICInvalidMultiaddrError: If multiaddr is not a valid QUIC address
 
     """
     if not is_quic_multiaddr(maddr):
-        raise ValueError(f"Not a valid QUIC multiaddr: {maddr}")
+        raise QUICInvalidMultiaddrError(f"Not a valid QUIC multiaddr: {maddr}")
 
     try:
-        # Use multiaddr's value_for_protocol method to extract values
         host = None
         port = None
 
@@ -89,19 +101,20 @@ def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> tuple[str, int]:
 
         # Get UDP port
         try:
-            # The the package is exposed by types not availble
             port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)  # type: ignore
             port = int(port_str)
         except ValueError:
             pass
 
         if host is None or port is None:
-            raise ValueError(f"Could not extract host/port from {maddr}")
+            raise QUICInvalidMultiaddrError(f"Could not extract host/port from {maddr}")
 
         return host, port
 
     except Exception as e:
-        raise ValueError(f"Failed to parse QUIC multiaddr {maddr}: {e}") from e
+        raise QUICInvalidMultiaddrError(
+            f"Failed to parse QUIC multiaddr {maddr}: {e}"
+        ) from e
 
 
 def multiaddr_to_quic_version(maddr: multiaddr.Multiaddr) -> TProtocol:
@@ -112,10 +125,10 @@ def multiaddr_to_quic_version(maddr: multiaddr.Multiaddr) -> TProtocol:
         maddr: QUIC multiaddr
 
     Returns:
-        QUIC version identifier ("/quic-v1" or "/quic")
+        QUIC version identifier ("quic-v1" or "quic")
 
     Raises:
-        ValueError: If multiaddr doesn't contain QUIC protocol
+        QUICInvalidMultiaddrError: If multiaddr doesn't contain QUIC protocol
 
     """
     try:
@@ -126,14 +139,16 @@ def multiaddr_to_quic_version(maddr: multiaddr.Multiaddr) -> TProtocol:
         elif f"/{QUIC_DRAFT29_PROTOCOL}" in addr_str:
             return QUIC_DRAFT29_PROTOCOL  # draft-29
         else:
-            raise ValueError(f"No QUIC protocol found in {maddr}")
+            raise QUICInvalidMultiaddrError(f"No QUIC protocol found in {maddr}")
 
     except Exception as e:
-        raise ValueError(f"Failed to determine QUIC version from {maddr}: {e}") from e
+        raise QUICInvalidMultiaddrError(
+            f"Failed to determine QUIC version from {maddr}: {e}"
+        ) from e
 
 
 def create_quic_multiaddr(
-    host: str, port: int, version: str = "/quic-v1"
+    host: str, port: int, version: str = "quic-v1"
 ) -> multiaddr.Multiaddr:
     """
     Create a QUIC multiaddr from host, port, and version.
@@ -141,18 +156,16 @@ def create_quic_multiaddr(
     Args:
         host: IP address (IPv4 or IPv6)
         port: UDP port number
-        version: QUIC version ("/quic-v1" or "/quic")
+        version: QUIC version ("quic-v1" or "quic")
 
     Returns:
         QUIC multiaddr
 
     Raises:
-        ValueError: If invalid parameters provided
+        QUICInvalidMultiaddrError: If invalid parameters provided
 
     """
     try:
-        import ipaddress
-
         # Determine IP version
         try:
             ip = ipaddress.ip_address(host)
@@ -161,42 +174,58 @@ def create_quic_multiaddr(
             else:
                 ip_proto = IP6_PROTOCOL
         except ValueError:
-            raise ValueError(f"Invalid IP address: {host}")
+            raise QUICInvalidMultiaddrError(f"Invalid IP address: {host}")
 
         # Validate port
         if not (0 <= port <= 65535):
-            raise ValueError(f"Invalid port: {port}")
+            raise QUICInvalidMultiaddrError(f"Invalid port: {port}")
 
-        # Validate QUIC version
-        if version not in ["/quic-v1", "/quic"]:
-            raise ValueError(f"Invalid QUIC version: {version}")
+        # Validate and normalize QUIC version
+        if version == "quic-v1" or version == "/quic-v1":
+            quic_proto = QUIC_V1_PROTOCOL
+        elif version == "quic" or version == "/quic":
+            quic_proto = QUIC_DRAFT29_PROTOCOL
+        else:
+            raise QUICInvalidMultiaddrError(f"Invalid QUIC version: {version}")
 
         # Construct multiaddr
-        quic_proto = (
-            QUIC_V1_PROTOCOL if version == "/quic-v1" else QUIC_DRAFT29_PROTOCOL
-        )
         addr_str = f"/{ip_proto}/{host}/{UDP_PROTOCOL}/{port}/{quic_proto}"
-
         return multiaddr.Multiaddr(addr_str)
 
     except Exception as e:
-        raise ValueError(f"Failed to create QUIC multiaddr: {e}") from e
+        raise QUICInvalidMultiaddrError(f"Failed to create QUIC multiaddr: {e}") from e
 
 
-def is_quic_v1_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
-    """Check if multiaddr uses QUIC v1 (RFC 9000)."""
-    try:
-        return multiaddr_to_quic_version(maddr) == "/quic-v1"
-    except ValueError:
-        return False
+def quic_version_to_wire_format(version: TProtocol) -> int:
+    """
+    Convert QUIC version string to wire format integer for aioquic.
+
+    Args:
+        version: QUIC version string ("quic-v1" or "quic")
+
+    Returns:
+        Wire format version number
+
+    Raises:
+        QUICUnsupportedVersionError: If version is not supported
+
+    """
+    wire_version = QUIC_VERSION_MAPPINGS.get(version)
+    if wire_version is None:
+        raise QUICUnsupportedVersionError(f"Unsupported QUIC version: {version}")
+
+    return wire_version
 
 
-def is_quic_draft29_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
-    """Check if multiaddr uses QUIC draft-29."""
-    try:
-        return multiaddr_to_quic_version(maddr) == "/quic"
-    except ValueError:
-        return False
+def get_alpn_protocols() -> list[str]:
+    """
+    Get ALPN protocols for libp2p over QUIC.
+
+    Returns:
+        List of ALPN protocol identifiers
+
+    """
+    return LIBP2P_ALPN_PROTOCOLS.copy()
 
 
 def normalize_quic_multiaddr(maddr: multiaddr.Multiaddr) -> multiaddr.Multiaddr:
@@ -210,11 +239,11 @@ def normalize_quic_multiaddr(maddr: multiaddr.Multiaddr) -> multiaddr.Multiaddr:
         Normalized multiaddr
 
     Raises:
-        ValueError: If not a valid QUIC multiaddr
+        QUICInvalidMultiaddrError: If not a valid QUIC multiaddr
 
     """
     if not is_quic_multiaddr(maddr):
-        raise ValueError(f"Not a QUIC multiaddr: {maddr}")
+        raise QUICInvalidMultiaddrError(f"Not a QUIC multiaddr: {maddr}")
 
     host, port = quic_multiaddr_to_endpoint(maddr)
     version = multiaddr_to_quic_version(maddr)

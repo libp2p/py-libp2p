@@ -1,15 +1,16 @@
 """
-QUIC Connection implementation for py-libp2p Module 3.
+QUIC Connection implementation.
 Uses aioquic's sans-IO core with trio for async operations.
 """
 
 import logging
 import socket
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from aioquic.quic import events
 from aioquic.quic.connection import QuicConnection
+from cryptography import x509
 import multiaddr
 import trio
 
@@ -30,6 +31,7 @@ from .exceptions import (
 from .stream import QUICStream, StreamDirection
 
 if TYPE_CHECKING:
+    from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     Features:
     - Native QUIC stream multiplexing
+    - Integrated libp2p TLS security with peer identity verification
     - Resource-aware stream management
     - Comprehensive error handling
     - Flow control integration
@@ -69,10 +72,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
         is_initiator: bool,
         maddr: multiaddr.Multiaddr,
         transport: "QUICTransport",
+        security_manager: Optional["QUICTLSConfigManager"] = None,
         resource_scope: Any | None = None,
     ):
         """
-        Initialize enhanced QUIC connection.
+        Initialize enhanced QUIC connection with security integration.
 
         Args:
             quic_connection: aioquic QuicConnection instance
@@ -82,6 +86,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             is_initiator: Whether this is the connection initiator
             maddr: Multiaddr for this connection
             transport: Parent QUIC transport
+            security_manager: Security manager for TLS/certificate handling
             resource_scope: Resource manager scope for tracking
 
         """
@@ -92,6 +97,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.__is_initiator = is_initiator
         self._maddr = maddr
         self._transport = transport
+        self._security_manager = security_manager
         self._resource_scope = resource_scope
 
         # Trio networking - socket may be provided by listener
@@ -120,6 +126,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._established = False
         self._started = False
         self._handshake_completed = False
+        self._peer_verified = False
+
+        # Security state
+        self._peer_certificate: Optional[x509.Certificate] = None
+        self._handshake_events = []
 
         # Background task management
         self._background_tasks_started = False
@@ -141,7 +152,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         logger.debug(
             f"Created QUIC connection to {peer_id} "
-            f"(initiator: {is_initiator}, addr: {remote_addr})"
+            f"(initiator: {is_initiator}, addr: {remote_addr}, "
+            "security: {security_manager is not None})"
         )
 
     def _calculate_initial_stream_id(self) -> int:
@@ -182,6 +194,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
     def is_started(self) -> bool:
         """Check if connection has been started."""
         return self._started
+
+    @property
+    def is_peer_verified(self) -> bool:
+        """Check if peer identity has been verified."""
+        return self._peer_verified
 
     def multiaddr(self) -> multiaddr.Multiaddr:
         """Get the multiaddr for this connection."""
@@ -288,8 +305,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         f"{self.CONNECTION_HANDSHAKE_TIMEOUT}s"
                     )
 
-                # Verify peer identity if required
-                await self.verify_peer_identity()
+                # Verify peer identity using security manager
+                await self._verify_peer_identity_with_security()
 
                 self._established = True
                 logger.info(f"QUIC connection established with {self._peer_id}")
@@ -353,6 +370,205 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         except Exception as e:
             logger.error(f"Error in periodic maintenance: {e}")
+
+    # Security and identity methods
+
+    async def _verify_peer_identity_with_security(self) -> None:
+        """
+        Verify peer identity using integrated security manager.
+
+        Raises:
+            QUICPeerVerificationError: If peer verification fails
+
+        """
+        if not self._security_manager:
+            logger.warning("No security manager available for peer verification")
+            return
+
+        try:
+            # Extract peer certificate from TLS handshake
+            await self._extract_peer_certificate()
+
+            if not self._peer_certificate:
+                logger.warning("No peer certificate available for verification")
+                return
+
+            # Validate certificate format and accessibility
+            if not self._validate_peer_certificate():
+                raise QUICPeerVerificationError("Peer certificate validation failed")
+
+            # Verify peer identity using security manager
+            verified_peer_id = self._security_manager.verify_peer_identity(
+                self._peer_certificate,
+                self._peer_id,  # Expected peer ID for outbound connections
+            )
+
+            # Update peer ID if it wasn't known (inbound connections)
+            if not self._peer_id:
+                self._peer_id = verified_peer_id
+                logger.info(f"Discovered peer ID from certificate: {verified_peer_id}")
+            elif self._peer_id != verified_peer_id:
+                raise QUICPeerVerificationError(
+                    f"Peer ID mismatch: expected {self._peer_id}, "
+                    f"got {verified_peer_id}"
+                )
+
+            self._peer_verified = True
+            logger.info(f"Peer identity verified successfully: {verified_peer_id}")
+
+        except QUICPeerVerificationError:
+            # Re-raise verification errors as-is
+            raise
+        except Exception as e:
+            # Wrap other errors in verification error
+            raise QUICPeerVerificationError(f"Peer verification failed: {e}") from e
+
+    async def _extract_peer_certificate(self) -> None:
+        """Extract peer certificate from completed TLS handshake."""
+        try:
+            # Get peer certificate from aioquic TLS context
+            # Based on aioquic source code: QuicConnection.tls._peer_certificate
+            if hasattr(self._quic, "tls") and self._quic.tls:
+                tls_context = self._quic.tls
+
+                # Check if peer certificate is available in TLS context
+                if (
+                    hasattr(tls_context, "_peer_certificate")
+                    and tls_context._peer_certificate
+                ):
+                    # aioquic stores the peer certificate as cryptography
+                    # x509.Certificate
+                    self._peer_certificate = tls_context._peer_certificate
+                    logger.debug(
+                        f"Extracted peer certificate: {self._peer_certificate.subject}"
+                    )
+                else:
+                    logger.debug("No peer certificate found in TLS context")
+
+            else:
+                logger.debug("No TLS context available for certificate extraction")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract peer certificate: {e}")
+
+            # Try alternative approach - check if certificate is in handshake events
+            try:
+                # Some versions of aioquic might expose certificate differently
+                if hasattr(self._quic, "configuration") and self._quic.configuration:
+                    config = self._quic.configuration
+                    if hasattr(config, "certificate") and config.certificate:
+                        # This would be the local certificate, not peer certificate
+                        # but we can use it for debugging
+                        logger.debug("Found local certificate in configuration")
+
+            except Exception as inner_e:
+                logger.debug(
+                    f"Alternative certificate extraction also failed: {inner_e}"
+                )
+
+    async def get_peer_certificate(self) -> Optional[x509.Certificate]:
+        """
+        Get the peer's TLS certificate.
+
+        Returns:
+            The peer's X.509 certificate, or None if not available
+
+        """
+        # If we don't have a certificate yet, try to extract it
+        if not self._peer_certificate and self._handshake_completed:
+            await self._extract_peer_certificate()
+
+        return self._peer_certificate
+
+    def _validate_peer_certificate(self) -> bool:
+        """
+        Validate that the peer certificate is properly formatted and accessible.
+
+        Returns:
+            True if certificate is valid and accessible, False otherwise
+
+        """
+        if not self._peer_certificate:
+            return False
+
+        try:
+            # Basic validation - try to access certificate properties
+            subject = self._peer_certificate.subject
+            serial_number = self._peer_certificate.serial_number
+
+            logger.debug(
+                f"Certificate validation - Subject: {subject}, Serial: {serial_number}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Certificate validation failed: {e}")
+            return False
+
+    def get_security_manager(self) -> Optional["QUICTLSConfigManager"]:
+        """Get the security manager for this connection."""
+        return self._security_manager
+
+    def get_security_info(self) -> dict[str, Any]:
+        """Get security-related information about the connection."""
+        info: dict[str, bool | Any | None]= {
+            "peer_verified": self._peer_verified,
+            "handshake_complete": self._handshake_completed,
+            "peer_id": str(self._peer_id) if self._peer_id else None,
+            "local_peer_id": str(self._local_peer_id),
+            "is_initiator": self.__is_initiator,
+            "has_certificate": self._peer_certificate is not None,
+            "security_manager_available": self._security_manager is not None,
+        }
+
+        # Add certificate details if available
+        if self._peer_certificate:
+            try:
+                info.update(
+                    {
+                        "certificate_subject": str(self._peer_certificate.subject),
+                        "certificate_issuer": str(self._peer_certificate.issuer),
+                        "certificate_serial": str(self._peer_certificate.serial_number),
+                        "certificate_not_before": (
+                            self._peer_certificate.not_valid_before.isoformat()
+                        ),
+                        "certificate_not_after": (
+                            self._peer_certificate.not_valid_after.isoformat()
+                            ),
+                    }
+                )
+            except Exception as e:
+                info["certificate_error"] = str(e)
+
+        # Add TLS context debug info
+        try:
+            if hasattr(self._quic, "tls") and self._quic.tls:
+                tls_info = {
+                    "tls_context_available": True,
+                    "tls_state": getattr(self._quic.tls, "state", None),
+                }
+
+                # Check for peer certificate in TLS context
+                if hasattr(self._quic.tls, "_peer_certificate"):
+                    tls_info["tls_peer_certificate_available"] = (
+                        self._quic.tls._peer_certificate is not None
+                    )
+
+                info["tls_debug"] = tls_info
+            else:
+                info["tls_debug"] = {"tls_context_available": False}
+
+        except Exception as e:
+            info["tls_debug"] = {"error": str(e)}
+
+        return info
+
+    # Legacy compatibility for existing code
+    async def verify_peer_identity(self) -> None:
+        """
+        Legacy method for compatibility - delegates to security manager.
+        """
+        await self._verify_peer_identity_with_security()
 
     # Stream management methods (IMuxedConn interface)
 
@@ -520,9 +736,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def _handle_handshake_completed(
         self, event: events.HandshakeCompleted
     ) -> None:
-        """Handle handshake completion."""
+        """Handle handshake completion with security integration."""
         logger.debug("QUIC handshake completed")
         self._handshake_completed = True
+
+        # Store handshake event for security verification
+        self._handshake_events.append(event)
+
+        # Try to extract certificate information after handshake
+        await self._extract_peer_certificate()
+
         self._connected_event.set()
 
     async def _handle_connection_terminated(
@@ -786,39 +1009,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     # Utility and monitoring methods
 
-    async def verify_peer_identity(self) -> None:
-        """
-        Verify the remote peer's identity using TLS certificate.
-        This implements the libp2p TLS handshake verification.
-        """
-        try:
-            # Extract peer ID from TLS certificate
-            # This should match the expected peer ID
-            cert_peer_id = self._extract_peer_id_from_cert()
-
-            if self._peer_id and cert_peer_id != self._peer_id:
-                raise QUICPeerVerificationError(
-                    f"Peer ID mismatch: expected {self._peer_id}, got {cert_peer_id}"
-                )
-
-            if not self._peer_id:
-                self._peer_id = cert_peer_id
-
-            logger.debug(f"Verified peer identity: {self._peer_id}")
-
-        except NotImplementedError:
-            logger.warning("Peer identity verification not implemented - skipping")
-            # For now, we'll skip verification during development
-        except Exception as e:
-            raise QUICPeerVerificationError(f"Peer verification failed: {e}") from e
-
-    def _extract_peer_id_from_cert(self) -> ID:
-        """Extract peer ID from TLS certificate."""
-        # TODO: Implement proper libp2p TLS certificate parsing
-        # This should extract the peer ID from the certificate extension
-        # according to the libp2p TLS specification
-        raise NotImplementedError("TLS certificate parsing not yet implemented")
-
     def get_stream_stats(self) -> dict[str, Any]:
         """Get stream statistics for monitoring."""
         return {
@@ -869,6 +1059,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             f"QUICConnection(peer={self._peer_id}, "
             f"addr={self._remote_addr}, "
             f"initiator={self.__is_initiator}, "
+            f"verified={self._peer_verified}, "
             f"established={self._established}, "
             f"streams={len(self._streams)})"
         )

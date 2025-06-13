@@ -1,7 +1,8 @@
 """
-QUIC Transport implementation for py-libp2p.
+QUIC Transport implementation for py-libp2p with integrated security.
 Uses aioquic's sans-IO core with trio for native async support.
 Based on aioquic library with interface consistency to go-libp2p and js-libp2p.
+Updated to include Module 5 security integration.
 """
 
 import copy
@@ -33,6 +34,8 @@ from libp2p.transport.quic.utils import (
     is_quic_multiaddr,
     multiaddr_to_quic_version,
     quic_multiaddr_to_endpoint,
+    quic_version_to_wire_format,
+    get_alpn_protocols,
 )
 
 from .config import (
@@ -44,9 +47,14 @@ from .connection import (
 from .exceptions import (
     QUICDialError,
     QUICListenError,
+    QUICSecurityError,
 )
 from .listener import (
     QUICListener,
+)
+from .security import (
+    QUICTLSConfigManager,
+    create_quic_security_transport,
 )
 
 QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
@@ -62,13 +70,15 @@ class QUICTransport(ITransport):
     Uses aioquic's sans-IO core with trio for native async support.
     Supports both QUIC v1 (RFC 9000) and draft-29 for compatibility with
     go-libp2p and js-libp2p implementations.
+
+    Includes integrated libp2p TLS security with peer identity verification.
     """
 
     def __init__(
         self, private_key: PrivateKey, config: QUICTransportConfig | None = None
     ):
         """
-        Initialize QUIC transport.
+        Initialize QUIC transport with security integration.
 
         Args:
             private_key: libp2p private key for identity and TLS cert generation
@@ -83,6 +93,11 @@ class QUICTransport(ITransport):
         self._connections: dict[str, QUICConnection] = {}
         self._listeners: list[QUICListener] = []
 
+        # Security manager for TLS integration
+        self._security_manager = create_quic_security_transport(
+            self._private_key, self._peer_id
+        )
+
         # QUIC configurations for different versions
         self._quic_configs: dict[TProtocol, QuicConfiguration] = {}
         self._setup_quic_configurations()
@@ -91,59 +106,121 @@ class QUICTransport(ITransport):
         self._closed = False
         self._nursery_manager = trio.CapacityLimiter(1)
 
-        logger.info(f"Initialized QUIC transport for peer {self._peer_id}")
-
-    def _setup_quic_configurations(self) -> None:
-        """Setup QUIC configurations for supported protocol versions."""
-        # Base configuration
-        base_config = QuicConfiguration(
-            is_client=False,
-            alpn_protocols=["libp2p"],
-            verify_mode=self._config.verify_mode,
-            max_datagram_frame_size=self._config.max_datagram_size,
-            idle_timeout=self._config.idle_timeout,
+        logger.info(
+            f"Initialized QUIC transport with security for peer {self._peer_id}"
         )
 
-        # Add TLS certificate generated from libp2p private key
-        # self._setup_tls_configuration(base_config)
+    def _setup_quic_configurations(self) -> None:
+        """Setup QUIC configurations for supported protocol versions with TLS security."""
+        try:
+            # Get TLS configuration from security manager
+            server_tls_config = self._security_manager.create_server_config()
+            client_tls_config = self._security_manager.create_client_config()
 
-        # QUIC v1 (RFC 9000) configuration
-        quic_v1_config = copy.deepcopy(base_config)
-        quic_v1_config.supported_versions = [0x00000001]  # QUIC v1
-        self._quic_configs[QUIC_V1_PROTOCOL] = quic_v1_config
+            # Base server configuration
+            base_server_config = QuicConfiguration(
+                is_client=False,
+                alpn_protocols=get_alpn_protocols(),
+                verify_mode=self._config.verify_mode,
+                max_datagram_frame_size=self._config.max_datagram_size,
+                idle_timeout=self._config.idle_timeout,
+            )
 
-        # QUIC draft-29 configuration for compatibility
-        if self._config.enable_draft29:
-            draft29_config = copy.deepcopy(base_config)
-            draft29_config.supported_versions = [0xFF00001D]  # draft-29
-            self._quic_configs[QUIC_DRAFT29_PROTOCOL] = draft29_config
+            # Base client configuration
+            base_client_config = QuicConfiguration(
+                is_client=True,
+                alpn_protocols=get_alpn_protocols(),
+                verify_mode=self._config.verify_mode,
+                max_datagram_frame_size=self._config.max_datagram_size,
+                idle_timeout=self._config.idle_timeout,
+            )
 
-    # TODO: SETUP TLS LISTENER
-    # def _setup_tls_configuration(self, config: QuicConfiguration) -> None:
-    #     """
-    #     Setup TLS configuration with libp2p identity integration.
-    #     Similar to go-libp2p's certificate generation approach.
-    #     """
-    #     from .security import (
-    #         generate_libp2p_tls_config,
-    #     )
+            # Apply TLS configuration
+            self._apply_tls_configuration(base_server_config, server_tls_config)
+            self._apply_tls_configuration(base_client_config, client_tls_config)
 
-    #     # Generate TLS certificate with embedded libp2p peer ID
-    #     # This follows the libp2p TLS spec for peer identity verification
-    #     tls_config = generate_libp2p_tls_config(self._private_key, self._peer_id)
+            # QUIC v1 (RFC 9000) configurations
+            quic_v1_server_config = copy.deepcopy(base_server_config)
+            quic_v1_server_config.supported_versions = [
+                quic_version_to_wire_format(QUIC_V1_PROTOCOL)
+            ]
 
-    #     config.load_cert_chain(
-    #         certfile=tls_config.cert_file,
-    #         keyfile=tls_config.key_file
-    #     )
-    #     if tls_config.ca_file:
-    #         config.load_verify_locations(tls_config.ca_file)
+            quic_v1_client_config = copy.deepcopy(base_client_config)
+            quic_v1_client_config.supported_versions = [
+                quic_version_to_wire_format(QUIC_V1_PROTOCOL)
+            ]
+
+            # Store both server and client configs for v1
+            self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_server")] = (
+                quic_v1_server_config
+            )
+            self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_client")] = (
+                quic_v1_client_config
+            )
+
+            # QUIC draft-29 configurations for compatibility
+            if self._config.enable_draft29:
+                draft29_server_config = copy.deepcopy(base_server_config)
+                draft29_server_config.supported_versions = [
+                    quic_version_to_wire_format(QUIC_DRAFT29_PROTOCOL)
+                ]
+
+                draft29_client_config = copy.deepcopy(base_client_config)
+                draft29_client_config.supported_versions = [
+                    quic_version_to_wire_format(QUIC_DRAFT29_PROTOCOL)
+                ]
+
+                self._quic_configs[TProtocol(f"{QUIC_DRAFT29_PROTOCOL}_server")] = (
+                    draft29_server_config
+                )
+                self._quic_configs[TProtocol(f"{QUIC_DRAFT29_PROTOCOL}_client")] = (
+                    draft29_client_config
+                )
+
+            logger.info("QUIC configurations initialized with libp2p TLS security")
+
+        except Exception as e:
+            raise QUICSecurityError(
+                f"Failed to setup QUIC TLS configurations: {e}"
+            ) from e
+
+    def _apply_tls_configuration(
+        self, config: QuicConfiguration, tls_config: dict
+    ) -> None:
+        """
+        Apply TLS configuration to QuicConfiguration.
+
+        Args:
+            config: QuicConfiguration to update
+            tls_config: TLS configuration dictionary from security manager
+
+        """
+        try:
+            # Set certificate and private key
+            if "certificate" in tls_config and "private_key" in tls_config:
+                # aioquic expects certificate and private key in specific formats
+                # This is a simplified approach - full implementation would handle
+                # proper certificate chain setup
+                config.load_cert_chain_from_der(
+                    tls_config["certificate"], tls_config["private_key"]
+                )
+
+            # Set ALPN protocols
+            if "alpn_protocols" in tls_config:
+                config.alpn_protocols = tls_config["alpn_protocols"]
+
+            # Set certificate verification
+            if "verify_mode" in tls_config:
+                config.verify_mode = tls_config["verify_mode"]
+
+        except Exception as e:
+            raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
 
     async def dial(
         self, maddr: multiaddr.Multiaddr, peer_id: ID | None = None
     ) -> IRawConnection:
         """
-        Dial a remote peer using QUIC transport.
+        Dial a remote peer using QUIC transport with security verification.
 
         Args:
             maddr: Multiaddr of the remote peer (e.g., /ip4/1.2.3.4/udp/4001/quic-v1)
@@ -154,6 +231,7 @@ class QUICTransport(ITransport):
 
         Raises:
             QUICDialError: If dialing fails
+            QUICSecurityError: If security verification fails
 
         """
         if self._closed:
@@ -167,23 +245,20 @@ class QUICTransport(ITransport):
             host, port = quic_multiaddr_to_endpoint(maddr)
             quic_version = multiaddr_to_quic_version(maddr)
 
-            # Get appropriate QUIC configuration
-            config = self._quic_configs.get(quic_version)
+            # Get appropriate QUIC client configuration
+            config_key = TProtocol(f"{quic_version}_client")
+            config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
-
-            # Create client configuration
-            client_config = copy.deepcopy(config)
-            client_config.is_client = True
 
             logger.debug(
                 f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
             )
 
             # Create QUIC connection using aioquic's sans-IO core
-            quic_connection = QuicConnection(configuration=client_config)
+            quic_connection = QuicConnection(configuration=config)
 
-            # Create trio-based QUIC connection wrapper
+            # Create trio-based QUIC connection wrapper with security
             connection = QUICConnection(
                 quic_connection=quic_connection,
                 remote_addr=(host, port),
@@ -192,31 +267,66 @@ class QUICTransport(ITransport):
                 is_initiator=True,
                 maddr=maddr,
                 transport=self,
+                security_manager=self._security_manager,  # Pass security manager
             )
 
             # Establish connection using trio
-            # We need a nursery for this - in real usage, this would be provided
-            # by the caller or we'd use a transport-level nursery
             async with trio.open_nursery() as nursery:
                 await connection.connect(nursery)
+
+            # Verify peer identity after TLS handshake
+            if peer_id:
+                await self._verify_peer_identity(connection, peer_id)
 
             # Store connection for management
             conn_id = f"{host}:{port}:{peer_id}"
             self._connections[conn_id] = connection
 
-            # Perform libp2p handshake verification
-            # await connection.verify_peer_identity()
-
-            logger.info(f"Successfully dialed QUIC connection to {peer_id}")
+            logger.info(f"Successfully dialed secure QUIC connection to {peer_id}")
             return connection
 
         except Exception as e:
             logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
             raise QUICDialError(f"Dial failed: {e}") from e
 
+    async def _verify_peer_identity(
+        self, connection: QUICConnection, expected_peer_id: ID
+    ) -> None:
+        """
+        Verify remote peer identity after TLS handshake.
+
+        Args:
+            connection: The established QUIC connection
+            expected_peer_id: Expected peer ID
+
+        Raises:
+            QUICSecurityError: If peer verification fails
+        """
+        try:
+            # Get peer certificate from the connection
+            peer_certificate = await connection.get_peer_certificate()
+
+            if not peer_certificate:
+                raise QUICSecurityError("No peer certificate available")
+
+            # Verify peer identity using security manager
+            verified_peer_id = self._security_manager.verify_peer_identity(
+                peer_certificate, expected_peer_id
+            )
+
+            if verified_peer_id != expected_peer_id:
+                raise QUICSecurityError(
+                    f"Peer ID verification failed: expected {expected_peer_id}, got {verified_peer_id}"
+                )
+
+            logger.info(f"Peer identity verified: {verified_peer_id}")
+
+        except Exception as e:
+            raise QUICSecurityError(f"Peer identity verification failed: {e}") from e
+
     def create_listener(self, handler_function: THandler) -> QUICListener:
         """
-        Create a QUIC listener.
+        Create a QUIC listener with integrated security.
 
         Args:
             handler_function: Function to handle new connections
@@ -231,15 +341,23 @@ class QUICTransport(ITransport):
         if self._closed:
             raise QUICListenError("Transport is closed")
 
+        # Get server configurations for the listener
+        server_configs = {
+            version: config
+            for version, config in self._quic_configs.items()
+            if version.endswith("_server")
+        }
+
         listener = QUICListener(
             transport=self,
             handler_function=handler_function,
-            quic_configs=self._quic_configs,
+            quic_configs=server_configs,
             config=self._config,
+            security_manager=self._security_manager,  # Pass security manager
         )
 
         self._listeners.append(listener)
-        logger.debug("Created QUIC listener")
+        logger.debug("Created QUIC listener with security")
         return listener
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
@@ -303,59 +421,21 @@ class QUICTransport(ITransport):
         logger.info("QUIC transport closed")
 
     def get_stats(self) -> dict[str, int | list[str] | object]:
-        """Get transport statistics."""
-        protocols = self.protocols()
-        str_protocols = []
-
-        for proto in protocols:
-            str_protocols.append(str(proto))
-
-        stats: dict[str, int | list[str] | object] = {
+        """Get transport statistics including security info."""
+        return {
             "active_connections": len(self._connections),
             "active_listeners": len(self._listeners),
-            "supported_protocols": str_protocols,
+            "supported_protocols": self.protocols(),
+            "local_peer_id": str(self._peer_id),
+            "security_enabled": True,
+            "tls_configured": True,
         }
 
-        # Aggregate listener stats
-        listener_stats = {}
-        for i, listener in enumerate(self._listeners):
-            listener_stats[f"listener_{i}"] = listener.get_stats()
+    def get_security_manager(self) -> QUICTLSConfigManager:
+        """
+        Get the security manager for this transport.
 
-        if listener_stats:
-            # TODO: Fix type of listener_stats
-            # type: ignore
-            stats["listeners"] = listener_stats
-
-        return stats
-
-    def __str__(self) -> str:
-        """String representation of the transport."""
-        return f"QUICTransport(peer_id={self._peer_id}, protocols={self.protocols()})"
-
-
-def new_transport(
-    private_key: PrivateKey,
-    config: QUICTransportConfig | None = None,
-    **kwargs: Unpack[QUICTransportKwargs],
-) -> QUICTransport:
-    """
-    Factory function to create a new QUIC transport.
-    Follows the naming convention from go-libp2p (NewTransport).
-
-    Args:
-        private_key: libp2p private key
-        config: Transport configuration
-        **kwargs: Additional configuration options
-
-    Returns:
-        New QUIC transport instance
-
-    """
-    if config is None:
-        config = QUICTransportConfig(**kwargs)
-
-    return QUICTransport(private_key, config)
-
-
-# Type aliases for consistency with go-libp2p
-NewTransport = new_transport  # go-libp2p style naming
+        Returns:
+            The QUIC TLS configuration manager
+        """
+        return self._security_manager
