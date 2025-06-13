@@ -219,11 +219,11 @@ class ValueStore:
             if peer_id == self.local_peer_id:
                 return None
 
-            logger.info(f"Getting value for key {key.hex()} from peer {peer_id}")
+            logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
-            logger.info(f"Opened stream to peer {peer_id} for GET_VALUE")
+            logger.debug(f"Opened stream to peer {peer_id} for GET_VALUE")
 
             # Create the GET_VALUE message using protobuf
             message = Message()
@@ -263,7 +263,7 @@ class ValueStore:
             try:
                 response = Message()
                 response.ParseFromString(response_bytes)
-                logger.info(
+                logger.debug(
                     f"Received protobuf response from peer"
                     f" {peer_id}, type: {response.type}"
                 )

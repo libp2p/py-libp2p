@@ -116,7 +116,10 @@ class KadDHT(Service):
             self._last_provider_republish = current_time
 
             # Clean up expired values and provider records
-            self.value_store.cleanup_expired()
+            expired_values = self.value_store.cleanup_expired()
+            if expired_values > 0:
+                logger.debug(f"Cleaned up {expired_values} expired values")
+
             self.provider_store.cleanup_expired()
 
             # Wait before next maintenance cycle
@@ -129,6 +132,7 @@ class KadDHT(Service):
         if mode == "CLIENT":
             self.routing_table.cleanup_routing_table()
         self.mode = mode
+        logger.info(f"Switched to {mode} mode")
         return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
@@ -149,7 +153,7 @@ class KadDHT(Service):
             while True:
                 byte = await stream.read(1)
                 if not byte:
-                    logger.error("Stream closed while reading varint length")
+                    logger.warning("Stream closed while reading varint length")
                     await stream.close()
                     return
                 length_prefix += byte
@@ -160,7 +164,7 @@ class KadDHT(Service):
             # Read the message bytes
             msg_bytes = await stream.read(msg_length)
             if len(msg_bytes) < msg_length:
-                logger.error("Failed to read full message from stream")
+                logger.warning("Failed to read full message from stream")
                 await stream.close()
                 return
 
@@ -169,10 +173,8 @@ class KadDHT(Service):
                 message = Message()
                 message.ParseFromString(msg_bytes)
                 logger.debug(
-                    f"Received DHT protobuf message"
-                    f" from {peer_id}, type: {message.type}"
+                    f"Received DHT message from {peer_id}, type: {message.type}"
                 )
-                logger.debug("complete message: %s", message)
 
                 # Handle FIND_NODE message
                 if message.type == Message.MessageType.FIND_NODE:
@@ -214,8 +216,7 @@ class KadDHT(Service):
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.debug(
-                        f"Sent protobuf response with"
-                        f" {len(response.closerPeers)} peers to {peer_id}"
+                        f"Sent FIND_NODE response with{len(response.closerPeers)} peers"
                     )
 
                 # Handle ADD_PROVIDER message
@@ -231,8 +232,8 @@ class KadDHT(Service):
                             provider_id = ID(provider_proto.id)
                             if provider_id != peer_id:
                                 logger.warning(
-                                    f"Provider ID {provider_id} doesn't match"
-                                    f" sender {peer_id}, ignoring"
+                                    f"Provider ID {provider_id} doesn't"
+                                    f"match sender {peer_id}, ignoring"
                                 )
                                 continue
 
@@ -261,9 +262,7 @@ class KadDHT(Service):
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
-                    logger.debug(
-                        f"Sent ADD_PROVIDER acknowledgement for key {key.hex()}"
-                    )
+                    logger.debug("Sent ADD_PROVIDER acknowledgement")
 
                 # Handle GET_PROVIDERS message
                 elif message.type == Message.MessageType.GET_PROVIDERS:
@@ -274,9 +273,7 @@ class KadDHT(Service):
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
                     logger.debug(
-                        "Found %d providers for key %s",
-                        len(providers),
-                        key.hex(),
+                        f"Found {len(providers)} providers for key {key.hex()}"
                     )
 
                     # Create response
@@ -300,8 +297,8 @@ class KadDHT(Service):
                             key, 20
                         )
                         logger.debug(
-                            "No providers found, including %d closest peers",
-                            len(closest_peers),
+                            f"No providers found, including {len(closest_peers)}"
+                            "closest peers"
                         )
 
                         for peer in closest_peers:
@@ -325,7 +322,7 @@ class KadDHT(Service):
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
-                    logger.debug(f"Sent provider information for key {key.hex()}")
+                    logger.debug("Sent GET_PROVIDERS response")
 
                 # Handle GET_VALUE message
                 elif message.type == Message.MessageType.GET_VALUE:
@@ -334,12 +331,9 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
                     value = self.value_store.get(key)
-                    logger.debug(
-                        f"Retrieved value for key {key.hex()}:"
-                        " {value.hex() if value else None}"
-                    )
-
                     if value:
+                        logger.debug(f"Found value for key {key.hex()}")
+
                         # Create response using protobuf
                         response = Message()
                         response.type = Message.MessageType.GET_VALUE
@@ -354,7 +348,9 @@ class KadDHT(Service):
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug(f"Sent value response for key {key.hex()}")
+                        logger.debug("Sent GET_VALUE response")
+                    else:
+                        logger.debug(f"No value found for key {key.hex()}")
 
                 # Handle PUT_VALUE message
                 elif message.type == Message.MessageType.PUT_VALUE and message.HasField(
@@ -376,20 +372,21 @@ class KadDHT(Service):
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
+                        logger.debug("Sent PUT_VALUE acknowledgement")
                     else:
-                        logger.error("Invalid PUT_VALUE message format")
+                        logger.warning("Invalid PUT_VALUE message format")
 
             except Exception as proto_err:
-                logger.warning(f"Failed to parse as protobuf {proto_err}")
+                logger.warning(f"Failed to parse protobuf message: {proto_err}")
 
             await stream.close()
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
             await stream.close()
-            logger.debug(f"Closed stream with peer {peer_id}")
 
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
+        logger.debug("Refreshing routing table")
         await self.peer_routing.refresh_routing_table()
 
     # Peer routing methods
@@ -397,16 +394,8 @@ class KadDHT(Service):
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
         Find a peer with the given ID.
-
-        params: peer_id: The ID of the peer to find.
-
-        Returns
-        -------
-        Optional[PeerInfo]
-            The peer information if found, None otherwise.
-
         """
-        logger.debug("find peers is called with peer_id: %s", peer_id)
+        logger.debug(f"Finding peer: {peer_id}")
         return await self.peer_routing.find_peer(peer_id)
 
     # Value storage and retrieval methods
@@ -414,18 +403,12 @@ class KadDHT(Service):
     async def put_value(self, key: bytes, value: bytes) -> None:
         """
         Store a value in the DHT.
-
-        params: key: The key to store (string or bytes).
-        params: value: The value to store.
-
-        Returns
-        -------
-        None
-
         """
+        logger.debug(f"Storing value for key {key.hex()}")
+
         # 1. Store locally first
         self.value_store.put(key, value)
-        logger.debug(f"Stored value for key {key.hex()} locally")
+        logger.debug(f"Stored value locally for key {key.hex()}")
 
         # 2. Get closest peers, excluding self
         closest_peers = [
@@ -433,39 +416,50 @@ class KadDHT(Service):
             for peer in self.routing_table.find_local_closest_peers(key)
             if peer != self.local_peer_id
         ]
+        logger.debug(f"Found {len(closest_peers)} peers to store value at")
 
         # 3. Store at remote peers in batches of ALPHA, in parallel
+        stored_count = 0
         for i in range(0, len(closest_peers), ALPHA):
             batch = closest_peers[i : i + ALPHA]
+            batch_results = [False] * len(batch)
 
-            async def store_one(peer: ID) -> None:
+            async def store_one(idx: int, peer: ID) -> None:
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        await self.value_store._store_at_peer(peer, key, value)
-                        logger.debug(f"Stored value at peer {peer}")
+                        success = await self.value_store._store_at_peer(
+                            peer, key, value
+                        )
+                        batch_results[idx] = success
+                        if success:
+                            logger.debug(f"Stored value at peer {peer}")
                 except Exception as e:
-                    logger.warning(f"Error storing value at peer {peer}: {e}")
+                    logger.debug(f"Error storing value at peer {peer}: {e}")
 
             async with trio.open_nursery() as nursery:
-                for peer in batch:
-                    nursery.start_soon(store_one, peer)
+                for idx, peer in enumerate(batch):
+                    nursery.start_soon(store_one, idx, peer)
+
+            stored_count += sum(batch_results)
+
+        logger.info(f"Successfully stored value at {stored_count} peers")
 
     async def get_value(self, key: bytes) -> bytes | None:
-        logger.info(f"get_value is called with key: {key.hex()}")
+        logger.debug(f"Getting value for key: {key.hex()}")
+
         # 1. Check local store first
         value = self.value_store.get(key)
         if value:
+            logger.debug("Found value locally")
             return value
 
         # 2. Get closest peers, excluding self
-        logger.info("peer store contains ")
         closest_peers = [
             peer
             for peer in self.routing_table.find_local_closest_peers(key)
             if peer != self.local_peer_id
         ]
-        logger.info("closest peers in kad dht ")
-        logger.info(f"closest peers: {[peer.to_base58() for peer in closest_peers]}")
+        logger.debug(f"Searching {len(closest_peers)} peers for value")
 
         # 3. Query ALPHA peers at a time in parallel
         for i in range(0, len(closest_peers), ALPHA):
@@ -479,8 +473,9 @@ class KadDHT(Service):
                         value = await self.value_store._get_from_peer(peer, key)
                         if value is not None and found_value is None:
                             found_value = value
-                except Exception:
-                    pass
+                            logger.debug(f"Found value at peer {peer}")
+                except Exception as e:
+                    logger.debug(f"Error querying peer {peer}: {e}")
 
             async with trio.open_nursery() as nursery:
                 for peer in batch:
@@ -488,9 +483,11 @@ class KadDHT(Service):
 
             if found_value is not None:
                 self.value_store.put(key, found_value)
+                logger.info("Successfully retrieved value from network")
                 return found_value
 
         # 4. Not found
+        logger.warning(f"Value not found for key {key.hex()}")
         return None
 
     # Add these methods in the Utility methods section

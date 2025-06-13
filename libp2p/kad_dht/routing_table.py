@@ -102,8 +102,8 @@ class KBucket:
         # If bucket is full, we need to replace the least-recently seen peer
         # Get the least-recently seen peer
         oldest_peer_id = self.get_oldest_peer()
-        logger.warning("No oldest peer found")
         if oldest_peer_id is None:
+            logger.warning("No oldest peer found when bucket is full")
             return False
 
         # Check if the old peer is responsive to ping request
@@ -426,15 +426,24 @@ class RoutingTable:
             else:
                 # Assume it's a peer ID
                 peer_id = peer_obj
-                # Get addresses from the peerstore if available
-                addrs = self.host.get_peerstore().addrs(peer_id)
-                if addrs:
-                    # Create PeerInfo object
-                    peer_info = PeerInfo(peer_id, addrs)
-                else:
-                    logger.warning(
-                        "No addresses found for peer %s, cannot add to routing table",
+                # Try to get addresses from the peerstore if available
+                try:
+                    addrs = self.host.get_peerstore().addrs(peer_id)
+                    if addrs:
+                        # Create PeerInfo object
+                        peer_info = PeerInfo(peer_id, addrs)
+                    else:
+                        logger.debug(
+                            "No addresses found for peer %s in peerstore, skipping",
+                            peer_id,
+                        )
+                        return False
+                except Exception as peerstore_error:
+                    # Handle case where peer is not in peerstore yet
+                    logger.debug(
+                        "Peer %s not found in peerstore: %s, skipping",
                         peer_id,
+                        str(peerstore_error),
                     )
                     return False
 
@@ -446,10 +455,13 @@ class RoutingTable:
             bucket = self.find_bucket(peer_id)
 
             # Try to add to the bucket
-            return await bucket.add_peer(peer_info)
+            success = await bucket.add_peer(peer_info)
+            if success:
+                logger.debug(f"Successfully added peer {peer_id} to routing table")
+            return success
 
         except Exception as e:
-            logger.warning(f"Error adding peer {peer_obj} to routing table: {e}")
+            logger.debug(f"Error adding peer {peer_obj} to routing table: {e}")
             return False
 
     def remove_peer(self, peer_id: ID) -> bool:

@@ -207,7 +207,7 @@ class ProviderStore:
                     nursery.start_soon(send_one, idx, peer_id, results)
             success_count += sum(results)
 
-        logger.debug(f"Successfully advertised to {success_count} peers")
+        logger.info(f"Successfully advertised to {success_count} peers")
         return success_count > 0
 
     async def _send_add_provider(self, peer_id: ID, key: bytes) -> bool:
@@ -247,11 +247,11 @@ class ProviderStore:
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
-            logger.info(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
+            logger.debug(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
             # Read response length prefix
             length_bytes = b""
             while True:
-                logger.info("Reading response length prefix in add provider")
+                logger.debug("Reading response length prefix in add provider")
                 b = await stream.read(1)
                 if not b:
                     return False
@@ -306,7 +306,7 @@ class ProviderStore:
         # Check local provider store first
         local_providers = self.get_providers(key)
         if local_providers:
-            logger.info(
+            logger.debug(
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
             return local_providers[:count]

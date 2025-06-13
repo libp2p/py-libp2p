@@ -142,7 +142,7 @@ class PeerRouting(IPeerRouting):
             for peer_id in result:
                 if peer_id not in new_peers:
                     new_peers.append(peer_id)
-            logger.info(
+            logger.debug(
                 "Queried peer %s for closest peers, got %d results (%d unique)",
                 peer,
                 len(result),
@@ -167,24 +167,24 @@ class PeerRouting(IPeerRouting):
         """
         # Start with closest peers from our routing table
         closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
-        logger.info("local closest peers are %s", closest_peers)
+        logger.debug("Local closest peers: %d found", len(closest_peers))
         queried_peers: set[ID] = set()
         rounds = 0
 
         # Return early if we have no peers to start with
         if not closest_peers:
-            logger.info("No local peers available for network lookup")
+            logger.warning("No local peers available for network lookup")
             return []
 
         # Iterative lookup until convergence
         while rounds < MAX_PEER_LOOKUP_ROUNDS:
             rounds += 1
-            logger.info(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
+            logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
             # Find peers we haven't queried yet
             peers_to_query = [p for p in closest_peers if p not in queried_peers]
             if not peers_to_query:
-                logger.info("No more unqueried peers available, ending lookup")
+                logger.debug("No more unqueried peers available, ending lookup")
                 break  # No more peers to query
 
             # Query these peers for their closest peers to target
@@ -205,7 +205,7 @@ class PeerRouting(IPeerRouting):
 
             # If we got no new peers, we're done
             if not new_peers:
-                logger.info("No new peers discovered in this round, ending lookup")
+                logger.debug("No new peers discovered in this round, ending lookup")
                 break
 
             # Update our list of closest peers
@@ -214,16 +214,16 @@ class PeerRouting(IPeerRouting):
             closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
                 :count
             ]
-            logger.info(f"Updated closest peers: {closest_peers}")
+            logger.debug(f"Updated closest peers count: {len(closest_peers)}")
 
             # Check if we made any progress (found closer peers)
             if closest_peers == old_closest_peers:
-                logger.info("No improvement in closest peers, ending lookup")
+                logger.debug("No improvement in closest peers, ending lookup")
                 break
 
         logger.info(
-            f"Network lookup completed after {rounds}"
-            " rounds, found {len(closest_peers)} peers"
+            f"Network lookup completed after {rounds} rounds, "
+            f"found {len(closest_peers)} peers"
         )
         return closest_peers
 
@@ -245,12 +245,12 @@ class PeerRouting(IPeerRouting):
                 logger.debug(f"Failed to add peer {peer} to routing table: {e}")
 
             # Open a stream to the peer using the Kademlia protocol
-            logger.info(f"Opening stream to {peer} for closest peers query")
+            logger.debug(f"Opening stream to {peer} for closest peers query")
             try:
                 stream = await self.host.new_stream(peer, [self.protocol_id])
-                logger.info(f"Stream opened to {peer}")
+                logger.debug(f"Stream opened to {peer}")
             except Exception as e:
-                logger.error(f"Failed to open stream to {peer}: {e}")
+                logger.warning(f"Failed to open stream to {peer}: {e}")
                 return []
 
             # Create and send FIND_NODE request using protobuf
@@ -260,7 +260,7 @@ class PeerRouting(IPeerRouting):
 
             # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
-            logger.info(
+            logger.debug(
                 f"Sending FIND_NODE: {proto_bytes.hex()} (len={len(proto_bytes)})"
             )
             await stream.write(varint.encode(len(proto_bytes)))
@@ -294,15 +294,11 @@ class PeerRouting(IPeerRouting):
             # Parse the protobuf response
             response_msg = Message()
             response_msg.ParseFromString(response_bytes)
-            logger.info(
+            logger.debug(
                 "Received response from %s with %d peers",
                 peer,
                 len(response_msg.closerPeers),
             )
-            # logger.info(
-            #     "Response message is1: %s",
-            #     response_msg,
-            # )
 
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:

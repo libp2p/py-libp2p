@@ -7,7 +7,6 @@ advertisement/discovery.
 """
 
 import argparse
-import hashlib
 import logging
 import os
 import random
@@ -52,8 +51,6 @@ logger = logging.getLogger("kademlia-example")
 
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
-kad_logger = logging.getLogger("kademlia-example")
-kad_logger.setLevel(logging.INFO)
 SERVER_ADDR_LOG = "dht_server_addrs.log"
 
 # Set the level for all child loggers
@@ -69,7 +66,6 @@ for module in [
     child_logger.propagate = True  # Allow propagation to parent
 
 # File to store node information
-NODE_INFO_FILE = "dht_node_info.json"
 bootstrap_nodes = []
 
 
@@ -88,7 +84,6 @@ async def connect_to_bootstrap_nodes(host: IHost, bootstrap_addrs: list[str]) ->
     """
     for addr in bootstrap_addrs:
         try:
-            await trio.sleep(2)
             peerInfo = info_from_p2p_addr(Multiaddr(addr))
             host.get_peerstore().add_addrs(peerInfo.peer_id, peerInfo.addrs, 3600)
             await host.connect(peerInfo)
@@ -116,24 +111,6 @@ def load_server_addrs() -> list[str]:
     except Exception as e:
         logger.error(f"Failed to load server addresses: {e}")
         return []
-
-
-def calculate_content_id(content: bytes) -> bytes:
-    """
-    Calculate a multihash-style content ID for a piece of content.
-    This emulates the IPFS CID but much simplified for the example.
-
-    params: content: The content bytes
-
-    Returns
-    -------
-        bytes: A SHA-256 multihash of the content
-
-    """
-    # Get the SHA-256 hash
-    content_hash = hashlib.sha256(content).digest()
-    # For simplicity, we use the raw hash as the key
-    return content_hash
 
 
 async def run_node(
@@ -165,16 +142,11 @@ async def run_node(
             peer_id = host.get_id().pretty()
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
-            await trio.sleep(3)
-            logger.info(
-                f"testing connection to bootstrap nodes: {host.get_connected_peers()}"
-            )
             dht = KadDHT(host, mode)
             # take all peer ids from the host and add them to the dht
             for peer_id in host.get_peerstore().peer_ids():
                 await dht.routing_table.add_peer(peer_id)
             logger.info(f"Connected to bootstrap nodes: {host.get_connected_peers()}")
-            logger.debug("Starting DHT service...")
             bootstrap_cmd = f"--bootstrap {addr_str}"
             logger.info("To connect to this node, use: %s", bootstrap_cmd)
 
@@ -184,59 +156,40 @@ async def run_node(
 
             # Start the DHT service
             async with background_trio_service(dht):
-                await trio.sleep(1)
-                logger.info("DHT service started")
+                logger.info(f"DHT service started in {mode.upper()} mode")
                 val_key = create_key_from_binary(b"py-libp2p kademlia example value")
-                logger.info(
-                    f"Generated value key: {base58.b58encode(val_key).decode()}"
-                )
                 content = b"Hello from python node "
                 content_key = create_key_from_binary(content)
-                logger.info(f"running in mode: {mode.upper()}")
 
                 if mode.upper() == "SERVER":
-                    logger.info("Running in server mode1")
                     # Store a value in the DHT
                     msg = "Hello message from Sumanjeet"
                     val_data = msg.encode()
-                    logger.info(
-                        f"Storing value with key: {base58.b58encode(val_key).decode()}"
-                    )
                     await dht.put_value(val_key, val_data)
                     logger.info(
-                        f"Stored value with key: {base58.b58encode(val_key).decode()}"
+                        f"Stored value '{val_data.decode()}'"
+                        f"with key: {base58.b58encode(val_key).decode()}"
                     )
-                    logger.info("Value stored is %s", val_data.decode())
-                    await trio.sleep(0.5)
 
-                    # # Create a piece of content and advertise as server
-                    logger.info(f"Generated content with ID: {content_key.hex()}")
-                    # Advertise that we can serve this content
-                    logger.info(
-                        f"Advertising as server for content: {content_key.hex()}"
-                    )
+                    # Advertise as content server
                     success = await dht.provider_store.provide(content_key)
                     if success:
-                        logger.info("Successfully advertised as content server")
+                        logger.info(
+                            "Successfully advertised as server"
+                            f"for content: {content_key.hex()}"
+                        )
                     else:
                         logger.warning("Failed to advertise as content server")
 
                 else:
-                    logger.debug("Running in client mode")
-
                     # retrieve the value
                     logger.info(
                         "Looking up key: %s", base58.b58encode(val_key).decode()
                     )
-                    logger.info(
-                        "Number of nodes connected:"
-                        f"{len(dht.host.get_connected_peers())}"
-                    )
-                    await trio.sleep(5)
                     val_data = await dht.get_value(val_key)
                     if val_data:
                         try:
-                            logger.info(f"Retrieved value: {val_data.hex()}")
+                            logger.info(f"Retrieved value: {val_data.decode()}")
                         except UnicodeDecodeError:
                             logger.info(f"Retrieved value (bytes): {val_data!r}")
                     else:
@@ -247,26 +200,24 @@ async def run_node(
                     providers = await dht.provider_store.find_providers(content_key)
                     if providers:
                         logger.info(
-                            "Found %d servers for our content: %s",
+                            "Found %d servers for content: %s",
                             len(providers),
                             [p.peer_id.pretty() for p in providers],
                         )
                     else:
                         logger.warning(
-                            "No servers found for our content %s", content_key.hex()
+                            "No servers found for content %s", content_key.hex()
                         )
 
                 # Keep the node running
                 while True:
-                    logger.info(
-                        "connected peers are %s", dht.host.get_connected_peers()
-                    )
-                    logger.info(
-                        "Number of peers in peer store are %s",
+                    logger.debug(
+                        "Status - Connected peers: %d,"
+                        "Peers in store: %d, Values in store: %d",
+                        len(dht.host.get_connected_peers()),
                         len(dht.host.get_peerstore().peer_ids()),
+                        len(dht.value_store.store),
                     )
-                    logger.info(f"values in value store: {dht.value_store.store}")
-
                     await trio.sleep(10)
 
     except Exception as e:
@@ -300,16 +251,6 @@ def parse_args():
             "This is required for client mode."
         ),
     )
-    parser.add_argument(
-        "--use-saved",
-        action="store_true",
-        help="Use saved node info for bootstrap (client mode only)",
-    )
-    parser.add_argument(
-        "--content-id",
-        type=str,
-        help="Hex-encoded content ID to look for servers (client mode only)",
-    )
     # add option to use verbose logging
     parser.add_argument(
         "--verbose",
@@ -318,9 +259,6 @@ def parse_args():
     )
 
     args = parser.parse_args()
-
-    logger.info("Parsed arguments: %s", args)
-
     # Set logging level based on verbosity
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -338,10 +276,7 @@ if __name__ == "__main__":
             args.mode,
             args.port,
         )
-
         trio.run(run_node, args.port, args.mode, args.bootstrap)
-        # else:
-        #     trio.run(run_client_node, args.port, args.bootstrap, args.content_id)
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
