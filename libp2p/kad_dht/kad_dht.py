@@ -466,17 +466,21 @@ class KadDHT(Service):
                     nursery.start_soon(store_one, peer)
 
     async def get_value(self, key: bytes) -> bytes | None:
+        logger.info(f"get_value is called with key: {key.hex()}")
         # 1. Check local store first
         value = self.value_store.get(key)
         if value:
             return value
 
         # 2. Get closest peers, excluding self
+        logger.info("peer store contains ")
         closest_peers = [
             peer
             for peer in self.routing_table.find_local_closest_peers(key)
             if peer != self.local_peer_id
         ]
+        logger.info("closest peers in kad dht ")
+        logger.info(f"closest peers: {[peer.to_base58() for peer in closest_peers]}")
 
         # 3. Query ALPHA peers at a time in parallel
         for i in range(0, len(closest_peers), ALPHA):
