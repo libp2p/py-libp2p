@@ -1,0 +1,1 @@
+Added sparse connect to pubsub, automatically switching between dense and sparse topologies based on network size.

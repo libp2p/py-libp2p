@@ -40,3 +40,42 @@ async def one_to_all_connect(hosts: Sequence[IHost], central_host_index: int) ->
     for i, host in enumerate(hosts):
         if i != central_host_index:
             await connect(hosts[central_host_index], host)
+
+
+async def sparse_connect(hosts: Sequence[IHost], degree: int = 3) -> None:
+    """
+    Create a sparse network topology where each node connects to a limited number of
+    other nodes. This is more efficient than dense connect for large networks.
+
+    The function will automatically switch between dense and sparse connect based on
+    the network size:
+    - For small networks (nodes <= degree + 1), use dense connect
+    - For larger networks, use sparse connect with the specified degree
+
+    Args:
+        hosts: Sequence of hosts to connect
+        degree: Number of connections each node should maintain (default: 3)
+
+    """
+    if len(hosts) <= degree + 1:
+        # For small networks, use dense connect
+        await dense_connect(hosts)
+        return
+
+    # For larger networks, use sparse connect
+    # For each host, connect to 'degree' number of other hosts
+    for i, host in enumerate(hosts):
+        # Calculate which hosts to connect to
+        # We'll connect to hosts that are 'degree' positions away in the sequence
+        # This creates a more distributed topology
+        for j in range(1, degree + 1):
+            target_idx = (i + j) % len(hosts)
+            # Create bidirectional connection
+            await connect(host, hosts[target_idx])
+            await connect(hosts[target_idx], host)
+
+    # Ensure network connectivity by connecting each node to its immediate neighbors
+    for i in range(len(hosts)):
+        next_idx = (i + 1) % len(hosts)
+        await connect(hosts[i], hosts[next_idx])
+        await connect(hosts[next_idx], hosts[i])
