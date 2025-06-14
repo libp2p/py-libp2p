@@ -51,7 +51,9 @@ logger = logging.getLogger("kademlia-example")
 
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
-SERVER_ADDR_LOG = "dht_server_addrs.log"
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SERVER_ADDR_LOG = os.path.join(SCRIPT_DIR, "server_node_addr.txt")
 
 # Set the level for all child loggers
 for module in [
