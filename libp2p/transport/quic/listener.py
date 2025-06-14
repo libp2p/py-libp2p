@@ -8,7 +8,7 @@ import copy
 import logging
 import socket
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from aioquic.quic import events
 from aioquic.quic.configuration import QuicConfiguration
@@ -18,6 +18,7 @@ import trio
 
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler, TProtocol
+from libp2p.transport.quic.security import QUICTLSConfigManager
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
@@ -51,6 +52,7 @@ class QUICListener(IListener):
         handler_function: THandler,
         quic_configs: dict[TProtocol, QuicConfiguration],
         config: QUICTransportConfig,
+        security_manager: QUICTLSConfigManager | None = None,
     ):
         """
         Initialize QUIC listener.
@@ -60,12 +62,14 @@ class QUICListener(IListener):
             handler_function: Function to handle new connections
             quic_configs: QUIC configurations for different versions
             config: QUIC transport configuration
+            security_manager: Security manager for TLS/certificate handling
 
         """
         self._transport = transport
         self._handler = handler_function
         self._quic_configs = quic_configs
         self._config = config
+        self._security_manager = security_manager
 
         # Network components
         self._socket: trio.socket.SocketType | None = None
@@ -117,8 +121,10 @@ class QUICListener(IListener):
             host, port = quic_multiaddr_to_endpoint(maddr)
             quic_version = multiaddr_to_quic_version(maddr)
 
+            protocol = f"{quic_version}_server"
+
             # Validate QUIC version support
-            if quic_version not in self._quic_configs:
+            if protocol not in self._quic_configs:
                 raise QUICListenError(f"Unsupported QUIC version: {quic_version}")
 
             # Create and bind UDP socket
@@ -379,6 +385,7 @@ class QUICListener(IListener):
                 is_initiator=False,  # We're the server
                 maddr=remote_maddr,
                 transport=self._transport,
+                security_manager=self._security_manager,
             )
 
             # Store the connection
@@ -389,8 +396,16 @@ class QUICListener(IListener):
                 self._nursery.start_soon(connection._handle_datagram_received)
                 self._nursery.start_soon(connection._handle_timer_events)
 
-            # TODO: Verify peer identity
-            # await connection.verify_peer_identity()
+            if self._security_manager:
+                try:
+                    await connection._verify_peer_identity_with_security()
+                    logger.info(f"Security verification successful for {addr}")
+                except Exception as e:
+                    logger.error(f"Security verification failed for {addr}: {e}")
+                    self._stats["security_failures"] += 1
+                    # Close the connection due to security failure
+                    await connection.close()
+                    return
 
             # Call the connection handler
             if self._nursery:
@@ -568,6 +583,16 @@ class QUICListener(IListener):
             }
         )
         return stats
+
+    def get_security_manager(self) -> Optional["QUICTLSConfigManager"]:
+        """
+        Get the security manager for this listener.
+
+        Returns:
+            The QUIC TLS configuration manager, or None if not configured
+
+        """
+        return self._security_manager
 
     def __str__(self) -> str:
         """String representation of the listener."""

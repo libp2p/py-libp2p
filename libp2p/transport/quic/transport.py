@@ -5,6 +5,7 @@ Based on aioquic library with interface consistency to go-libp2p and js-libp2p.
 Updated to include Module 5 security integration.
 """
 
+from collections.abc import Iterable
 import copy
 import logging
 
@@ -16,7 +17,6 @@ from aioquic.quic.connection import (
 )
 import multiaddr
 import trio
-from typing_extensions import Unpack
 
 from libp2p.abc import (
     IRawConnection,
@@ -29,13 +29,13 @@ from libp2p.custom_types import THandler, TProtocol
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.transport.quic.config import QUICTransportKwargs
+from libp2p.transport.quic.security import TSecurityConfig
 from libp2p.transport.quic.utils import (
+    get_alpn_protocols,
     is_quic_multiaddr,
     multiaddr_to_quic_version,
     quic_multiaddr_to_endpoint,
     quic_version_to_wire_format,
-    get_alpn_protocols,
 )
 
 from .config import (
@@ -111,7 +111,7 @@ class QUICTransport(ITransport):
         )
 
     def _setup_quic_configurations(self) -> None:
-        """Setup QUIC configurations for supported protocol versions with TLS security."""
+        """Setup QUIC configurations."""
         try:
             # Get TLS configuration from security manager
             server_tls_config = self._security_manager.create_server_config()
@@ -140,12 +140,12 @@ class QUICTransport(ITransport):
             self._apply_tls_configuration(base_client_config, client_tls_config)
 
             # QUIC v1 (RFC 9000) configurations
-            quic_v1_server_config = copy.deepcopy(base_server_config)
+            quic_v1_server_config = copy.copy(base_server_config)
             quic_v1_server_config.supported_versions = [
                 quic_version_to_wire_format(QUIC_V1_PROTOCOL)
             ]
 
-            quic_v1_client_config = copy.deepcopy(base_client_config)
+            quic_v1_client_config = copy.copy(base_client_config)
             quic_v1_client_config.supported_versions = [
                 quic_version_to_wire_format(QUIC_V1_PROTOCOL)
             ]
@@ -160,12 +160,12 @@ class QUICTransport(ITransport):
 
             # QUIC draft-29 configurations for compatibility
             if self._config.enable_draft29:
-                draft29_server_config = copy.deepcopy(base_server_config)
+                draft29_server_config: QuicConfiguration = copy.copy(base_server_config)
                 draft29_server_config.supported_versions = [
                     quic_version_to_wire_format(QUIC_DRAFT29_PROTOCOL)
                 ]
 
-                draft29_client_config = copy.deepcopy(base_client_config)
+                draft29_client_config = copy.copy(base_client_config)
                 draft29_client_config.supported_versions = [
                     quic_version_to_wire_format(QUIC_DRAFT29_PROTOCOL)
                 ]
@@ -185,10 +185,10 @@ class QUICTransport(ITransport):
             ) from e
 
     def _apply_tls_configuration(
-        self, config: QuicConfiguration, tls_config: dict
+        self, config: QuicConfiguration, tls_config: TSecurityConfig
     ) -> None:
         """
-        Apply TLS configuration to QuicConfiguration.
+        Apply TLS configuration to a QUIC configuration using aioquic's actual API.
 
         Args:
             config: QuicConfiguration to update
@@ -196,22 +196,54 @@ class QUICTransport(ITransport):
 
         """
         try:
-            # Set certificate and private key
+            # Set certificate and private key directly on the configuration
+            # aioquic expects cryptography objects, not DER bytes
             if "certificate" in tls_config and "private_key" in tls_config:
-                # aioquic expects certificate and private key in specific formats
-                # This is a simplified approach - full implementation would handle
-                # proper certificate chain setup
-                config.load_cert_chain_from_der(
-                    tls_config["certificate"], tls_config["private_key"]
-                )
+                # The security manager should return cryptography objects
+                # not DER bytes, but if it returns DER bytes, we need to handle that
+                certificate = tls_config["certificate"]
+                private_key = tls_config["private_key"]
+
+                # Check if we received DER bytes and need
+                # to convert to cryptography objects
+                if isinstance(certificate, bytes):
+                    from cryptography import x509
+
+                    certificate = x509.load_der_x509_certificate(certificate)
+
+                if isinstance(private_key, bytes):
+                    from cryptography.hazmat.primitives import serialization
+
+                    private_key = serialization.load_der_private_key(  # type: ignore
+                        private_key, password=None
+                    )
+
+                # Set directly on the configuration object
+                config.certificate = certificate
+                config.private_key = private_key
+
+                # Handle certificate chain if provided
+                certificate_chain = tls_config.get("certificate_chain", [])
+                if certificate_chain and isinstance(certificate_chain, Iterable):
+                    # Convert DER bytes to cryptography objects if needed
+                    chain_objects = []
+                    for cert in certificate_chain:
+                        if isinstance(cert, bytes):
+                            from cryptography import x509
+
+                            cert = x509.load_der_x509_certificate(cert)
+                        chain_objects.append(cert)
+                    config.certificate_chain = chain_objects
 
             # Set ALPN protocols
             if "alpn_protocols" in tls_config:
-                config.alpn_protocols = tls_config["alpn_protocols"]
+                config.alpn_protocols = tls_config["alpn_protocols"]  # type: ignore
 
-            # Set certificate verification
+            # Set certificate verification mode
             if "verify_mode" in tls_config:
-                config.verify_mode = tls_config["verify_mode"]
+                config.verify_mode = tls_config["verify_mode"]  # type: ignore
+
+            logger.debug("Successfully applied TLS configuration to QUIC config")
 
         except Exception as e:
             raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
@@ -301,6 +333,7 @@ class QUICTransport(ITransport):
 
         Raises:
             QUICSecurityError: If peer verification fails
+
         """
         try:
             # Get peer certificate from the connection
@@ -316,7 +349,8 @@ class QUICTransport(ITransport):
 
             if verified_peer_id != expected_peer_id:
                 raise QUICSecurityError(
-                    f"Peer ID verification failed: expected {expected_peer_id}, got {verified_peer_id}"
+                    "Peer ID verification failed: expected "
+                    f"{expected_peer_id}, got {verified_peer_id}"
                 )
 
             logger.info(f"Peer identity verified: {verified_peer_id}")
@@ -437,5 +471,6 @@ class QUICTransport(ITransport):
 
         Returns:
             The QUIC TLS configuration manager
+
         """
         return self._security_manager

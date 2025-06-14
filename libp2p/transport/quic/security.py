@@ -5,24 +5,30 @@ Based on go-libp2p and js-libp2p security patterns.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 import logging
-import time
-from typing import Optional, Tuple
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.x509.base import Certificate
 from cryptography.x509.oid import NameOID
 
-from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PrivateKey, PublicKey
-from libp2p.crypto.secp256k1 import Secp256k1PublicKey
+from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.peer.id import ID
 
 from .exceptions import (
     QUICCertificateError,
     QUICPeerVerificationError,
 )
+
+TSecurityConfig = dict[
+    str,
+    Certificate | EllipticCurvePrivateKey | RSAPrivateKey | bool | list[str],
+]
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,7 @@ CERTIFICATE_NOT_BEFORE_BUFFER = 3600  # 1 hour before now
 
 
 @dataclass
+@dataclass
 class TLSConfig:
     """TLS configuration for QUIC transport with libp2p extensions."""
 
@@ -43,13 +50,25 @@ class TLSConfig:
     peer_id: ID
 
     def get_certificate_der(self) -> bytes:
-        """Get certificate in DER format for aioquic."""
+        """Get certificate in DER format for external use."""
         return self.certificate.public_bytes(serialization.Encoding.DER)
 
     def get_private_key_der(self) -> bytes:
-        """Get private key in DER format for aioquic."""
+        """Get private key in DER format for external use."""
         return self.private_key.private_bytes(
             encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+    def get_certificate_pem(self) -> bytes:
+        """Get certificate in PEM format."""
+        return self.certificate.public_bytes(serialization.Encoding.PEM)
+
+    def get_private_key_pem(self) -> bytes:
+        """Get private key in PEM format."""
+        return self.private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),
         )
@@ -96,7 +115,8 @@ class LibP2PExtensionHandler:
             # In a full implementation, this would use proper ASN.1 encoding
             public_key_bytes = libp2p_public_key.serialize()
 
-            # Simple encoding: [public_key_length][public_key][signature_length][signature]
+            # Simple encoding:
+            # [public_key_length][public_key][signature_length][signature]
             extension_data = (
                 len(public_key_bytes).to_bytes(4, byteorder="big")
                 + public_key_bytes
@@ -112,7 +132,7 @@ class LibP2PExtensionHandler:
             ) from e
 
     @staticmethod
-    def parse_signed_key_extension(extension_data: bytes) -> Tuple[PublicKey, bytes]:
+    def parse_signed_key_extension(extension_data: bytes) -> tuple[PublicKey, bytes]:
         """
         Parse the libp2p Public Key Extension to extract public key and signature.
 
@@ -158,8 +178,6 @@ class LibP2PExtensionHandler:
 
             signature = extension_data[offset : offset + signature_length]
 
-            # Deserialize the public key
-            # This is a simplified approach - full implementation would handle all key types
             public_key = LibP2PKeyConverter.deserialize_public_key(public_key_bytes)
 
             return public_key, signature
@@ -199,21 +217,20 @@ class LibP2PKeyConverter:
     @staticmethod
     def deserialize_public_key(key_bytes: bytes) -> PublicKey:
         """
-        Deserialize libp2p public key from bytes.
+        Deserialize libp2p public key from protobuf bytes.
 
-        This is a simplified implementation - full version would handle
-        all libp2p key types and proper deserialization.
+        Args:
+            key_bytes: Protobuf-serialized public key bytes
+
+        Returns:
+            Deserialized PublicKey instance
+
         """
-        # For now, assume Ed25519 keys (most common in libp2p)
-        # Full implementation would detect key type from bytes
         try:
-            return Ed25519PublicKey.deserialize(key_bytes)
-        except Exception:
-            # Fallback to other key types
-            try:
-                return Secp256k1PublicKey.deserialize(key_bytes)
-            except Exception:
-                raise QUICCertificateError("Unsupported key type in extension")
+            # Use the official libp2p deserialization function
+            return deserialize_public_key(key_bytes)
+        except Exception as e:
+            raise QUICCertificateError(f"Failed to deserialize public key: {e}") from e
 
 
 class CertificateGenerator:
@@ -222,7 +239,7 @@ class CertificateGenerator:
     Follows libp2p TLS specification for QUIC transport.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.extension_handler = LibP2PExtensionHandler()
         self.key_converter = LibP2PKeyConverter()
 
@@ -234,6 +251,7 @@ class CertificateGenerator:
     ) -> TLSConfig:
         """
         Generate a TLS certificate with embedded libp2p peer identity.
+        Fixed to use datetime objects for validity periods.
 
         Args:
             libp2p_private_key: The libp2p identity private key
@@ -265,24 +283,31 @@ class CertificateGenerator:
                 libp2p_private_key, cert_public_key_bytes
             )
 
-            # Set validity period
-            now = time.time()
-            not_before = time.gmtime(now - CERTIFICATE_NOT_BEFORE_BUFFER)
-            not_after = time.gmtime(now + (validity_days * 24 * 3600))
+            # Set validity period using datetime objects (FIXED)
+            now = datetime.utcnow()  # Use datetime instead of time.time()
+            not_before = now - timedelta(seconds=CERTIFICATE_NOT_BEFORE_BUFFER)
+            not_after = now + timedelta(days=validity_days)
 
-            # Build certificate
+            # Generate serial number
+            serial_number = int(now.timestamp())  # Convert datetime to timestamp
+
+            # Build certificate with proper datetime objects
             certificate = (
                 x509.CertificateBuilder()
                 .subject_name(
-                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, str(peer_id))])
+                    x509.Name(
+                        [x509.NameAttribute(NameOID.COMMON_NAME, peer_id.to_base58())]  # type: ignore
+                    )
                 )
                 .issuer_name(
-                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, str(peer_id))])
+                    x509.Name(
+                        [x509.NameAttribute(NameOID.COMMON_NAME, peer_id.to_base58())]  # type: ignore
+                    )
                 )
                 .public_key(cert_public_key)
-                .serial_number(int(now))  # Use timestamp as serial number
-                .not_valid_before(time.struct_time(not_before))
-                .not_valid_after(time.struct_time(not_after))
+                .serial_number(serial_number)
+                .not_valid_before(not_before)
+                .not_valid_after(not_after)
                 .add_extension(
                     x509.UnrecognizedExtension(
                         oid=LIBP2P_TLS_EXTENSION_OID, value=extension_data
@@ -293,6 +318,7 @@ class CertificateGenerator:
             )
 
             logger.info(f"Generated libp2p TLS certificate for peer {peer_id}")
+            logger.debug(f"Certificate valid from {not_before} to {not_after}")
 
             return TLSConfig(
                 certificate=certificate, private_key=cert_private_key, peer_id=peer_id
@@ -308,11 +334,11 @@ class PeerAuthenticator:
     Validates both TLS certificate integrity and libp2p peer identity.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.extension_handler = LibP2PExtensionHandler()
 
     def verify_peer_certificate(
-        self, certificate: x509.Certificate, expected_peer_id: Optional[ID] = None
+        self, certificate: x509.Certificate, expected_peer_id: ID | None = None
     ) -> ID:
         """
         Verify a peer's TLS certificate and extract/validate peer identity.
@@ -366,7 +392,8 @@ class PeerAuthenticator:
             # Verify against expected peer ID if provided
             if expected_peer_id and derived_peer_id != expected_peer_id:
                 raise QUICPeerVerificationError(
-                    f"Peer ID mismatch: expected {expected_peer_id}, got {derived_peer_id}"
+                    f"Peer ID mismatch: expected {expected_peer_id}, "
+                    f"got {derived_peer_id}"
                 )
 
             logger.info(f"Successfully verified peer certificate for {derived_peer_id}")
@@ -397,38 +424,46 @@ class QUICTLSConfigManager:
             libp2p_private_key, peer_id
         )
 
-    def create_server_config(self) -> dict:
+    def create_server_config(
+        self,
+    ) -> TSecurityConfig:
         """
         Create aioquic server configuration with libp2p TLS settings.
+        Returns cryptography objects instead of DER bytes.
 
         Returns:
             Configuration dictionary for aioquic QuicConfiguration
 
         """
-        return {
-            "certificate": self.tls_config.get_certificate_der(),
-            "private_key": self.tls_config.get_private_key_der(),
-            "alpn_protocols": ["libp2p"],  # Required ALPN protocol
-            "verify_mode": True,  # Require client certificates
+        config: TSecurityConfig = {
+            "certificate": self.tls_config.certificate,
+            "private_key": self.tls_config.private_key,
+            "certificate_chain": [],
+            "alpn_protocols": ["libp2p"],
+            "verify_mode": True,
         }
+        return config
 
-    def create_client_config(self) -> dict:
+    def create_client_config(self) -> TSecurityConfig:
         """
         Create aioquic client configuration with libp2p TLS settings.
+        Returns cryptography objects instead of DER bytes.
 
         Returns:
             Configuration dictionary for aioquic QuicConfiguration
 
         """
-        return {
-            "certificate": self.tls_config.get_certificate_der(),
-            "private_key": self.tls_config.get_private_key_der(),
-            "alpn_protocols": ["libp2p"],  # Required ALPN protocol
-            "verify_mode": True,  # Verify server certificate
+        config: TSecurityConfig = {
+            "certificate": self.tls_config.certificate,
+            "private_key": self.tls_config.private_key,
+            "certificate_chain": [],
+            "alpn_protocols": ["libp2p"],
+            "verify_mode": True,
         }
+        return config
 
     def verify_peer_identity(
-        self, peer_certificate: x509.Certificate, expected_peer_id: Optional[ID] = None
+        self, peer_certificate: x509.Certificate, expected_peer_id: ID | None = None
     ) -> ID:
         """
         Verify remote peer's identity from their TLS certificate.

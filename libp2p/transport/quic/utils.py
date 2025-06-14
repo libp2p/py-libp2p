@@ -184,7 +184,8 @@ def create_quic_multiaddr(
         if version == "quic-v1" or version == "/quic-v1":
             quic_proto = QUIC_V1_PROTOCOL
         elif version == "quic" or version == "/quic":
-            quic_proto = QUIC_DRAFT29_PROTOCOL
+            # This is DRAFT Protocol
+            quic_proto = QUIC_V1_PROTOCOL
         else:
             raise QUICInvalidMultiaddrError(f"Invalid QUIC version: {version}")
 

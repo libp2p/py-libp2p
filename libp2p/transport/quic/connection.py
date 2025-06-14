@@ -76,7 +76,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         resource_scope: Any | None = None,
     ):
         """
-        Initialize enhanced QUIC connection with security integration.
+        Initialize QUIC connection with security integration.
 
         Args:
             quic_connection: aioquic QuicConnection instance
@@ -105,7 +105,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._connected_event = trio.Event()
         self._closed_event = trio.Event()
 
-        # Enhanced stream management
+        # Stream management
         self._streams: dict[int, QUICStream] = {}
         self._next_stream_id: int = self._calculate_initial_stream_id()
         self._stream_handler: TQUICStreamHandlerFn | None = None
@@ -129,8 +129,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._peer_verified = False
 
         # Security state
-        self._peer_certificate: Optional[x509.Certificate] = None
-        self._handshake_events = []
+        self._peer_certificate: x509.Certificate | None = None
+        self._handshake_events: list[events.HandshakeCompleted] = []
 
         # Background task management
         self._background_tasks_started = False
@@ -466,7 +466,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     f"Alternative certificate extraction also failed: {inner_e}"
                 )
 
-    async def get_peer_certificate(self) -> Optional[x509.Certificate]:
+    async def get_peer_certificate(self) -> x509.Certificate | None:
         """
         Get the peer's TLS certificate.
 
@@ -511,7 +511,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     def get_security_info(self) -> dict[str, Any]:
         """Get security-related information about the connection."""
-        info: dict[str, bool | Any | None]= {
+        info: dict[str, bool | Any | None] = {
             "peer_verified": self._peer_verified,
             "handshake_complete": self._handshake_completed,
             "peer_id": str(self._peer_id) if self._peer_id else None,
@@ -534,7 +534,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         ),
                         "certificate_not_after": (
                             self._peer_certificate.not_valid_after.isoformat()
-                            ),
+                        ),
                     }
                 )
             except Exception as e:
@@ -574,7 +574,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def open_stream(self, timeout: float = 5.0) -> QUICStream:
         """
-        Open a new outbound stream with enhanced error handling and resource management.
+        Open a new outbound stream
 
         Args:
             timeout: Timeout for stream creation
@@ -607,7 +607,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 stream_id = self._next_stream_id
                 self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
-                # Create enhanced stream
                 stream = QUICStream(
                     connection=self,
                     stream_id=stream_id,
@@ -766,7 +765,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed_event.set()
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
-        """Enhanced stream data handling with proper error management."""
+        """Stream data handling with proper error management."""
         stream_id = event.stream_id
         self._stats["bytes_received"] += len(event.data)
 
@@ -858,7 +857,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return stream_id % 2 == 0
 
     async def _handle_stream_reset(self, event: events.StreamReset) -> None:
-        """Enhanced stream reset handling."""
+        """Stream reset handling."""
         stream_id = event.stream_id
         self._stats["streams_reset"] += 1
 
@@ -925,7 +924,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
     # Connection close
 
     async def close(self) -> None:
-        """Enhanced connection close with proper stream cleanup."""
+        """Connection close with proper stream cleanup."""
         if self._closed:
             return
 

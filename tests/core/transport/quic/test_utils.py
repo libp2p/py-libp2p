@@ -66,7 +66,8 @@ Focused tests covering essential functionality required for QUIC transport.
 
 #         for addr_str in invalid_addrs:
 #             maddr = Multiaddr(addr_str)
-#             assert not is_quic_multiaddr(maddr), f"Should not detect {addr_str} as QUIC"
+#             assert not is_quic_multiaddr(maddr),
+#                 f"Should not detect {addr_str} as QUIC"
 
 #     def test_malformed_multiaddrs(self):
 #         """Test malformed multiaddrs don't crash."""

@@ -36,8 +36,8 @@ class MockResourceScope:
         self.memory_reserved = max(0, self.memory_reserved - size)
 
 
-class TestQUICConnectionEnhanced:
-    """Enhanced test suite for QUIC connection functionality."""
+class TestQUICConnection:
+    """Test suite for QUIC connection functionality."""
 
     @pytest.fixture
     def mock_quic_connection(self):
@@ -58,10 +58,13 @@ class TestQUICConnectionEnhanced:
         return MockResourceScope()
 
     @pytest.fixture
-    def quic_connection(self, mock_quic_connection, mock_resource_scope):
+    def quic_connection(
+        self, mock_quic_connection: Mock, mock_resource_scope: MockResourceScope
+    ):
         """Create test QUIC connection with enhanced features."""
         private_key = create_new_key_pair().private_key
         peer_id = ID.from_pubkey(private_key.get_public_key())
+        mock_security_manager = Mock()
 
         return QUICConnection(
             quic_connection=mock_quic_connection,
@@ -72,6 +75,7 @@ class TestQUICConnectionEnhanced:
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
             transport=Mock(),
             resource_scope=mock_resource_scope,
+            security_manager=mock_security_manager,
         )
 
     @pytest.fixture
@@ -267,7 +271,9 @@ class TestQUICConnectionEnhanced:
             await quic_connection.start()
 
     @pytest.mark.trio
-    async def test_connection_connect_with_nursery(self, quic_connection):
+    async def test_connection_connect_with_nursery(
+        self, quic_connection: QUICConnection
+    ):
         """Test connection establishment with nursery."""
         quic_connection._started = True
         quic_connection._established = True
@@ -277,7 +283,9 @@ class TestQUICConnectionEnhanced:
             quic_connection, "_start_background_tasks", new_callable=AsyncMock
         ) as mock_start_tasks:
             with patch.object(
-                quic_connection, "verify_peer_identity", new_callable=AsyncMock
+                quic_connection,
+                "_verify_peer_identity_with_security",
+                new_callable=AsyncMock,
             ) as mock_verify:
                 async with trio.open_nursery() as nursery:
                     await quic_connection.connect(nursery)
