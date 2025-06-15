@@ -257,7 +257,6 @@ class Swarm(Service, INetworkService):
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
                 # secure the conn and then mux the conn
                 try:
-                    # FIXME: This dummy `ID(b"")` for the remote peer is useless.
                     secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
                 except SecurityUpgradeFailure as error:
                     logger.debug("failed to upgrade security for peer at %s", maddr)
