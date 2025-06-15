@@ -1,7 +1,3 @@
-# type: ignore
-# To add typing to this module, it's better to do it after refactoring test cases
-# into classes
-
 import pytest
 import trio
 
@@ -151,7 +147,7 @@ FLOODSUB_PROTOCOL_TEST_CASES = [
 ]
 
 floodsub_protocol_pytest_params = [
-    pytest.param(test_case, id=test_case["name"])
+    pytest.param(test_case, id=str(test_case["name"]))
     for test_case in FLOODSUB_PROTOCOL_TEST_CASES
 ]
 
@@ -241,10 +237,8 @@ async def perform_test_from_obj(obj, pubsub_factory) -> None:
             data = msg["data"]
             node_id = msg["node_id"]
 
-            # Publish message
-            # TODO: Should be single RPC package with several topics
-            for topic in topics:
-                await pubsub_map[node_id].publish(topic, data)
+            # Publish message - now uses single RPC package with several topics
+            await pubsub_map[node_id].publish(topics, data)
 
             # For each topic in topics, add (topic, node_id, data) tuple to
             # ordered test list
