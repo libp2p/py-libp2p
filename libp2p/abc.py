@@ -2130,14 +2130,14 @@ class IPubsub(ServiceAPI):
         ...
 
     @abstractmethod
-    async def publish(self, topic_id: str, data: bytes) -> None:
+    async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
-        Publish a message to a topic.
+        Publish a message to a topic or multiple topics.
 
         Parameters
         ----------
-        topic_id : str
-            The identifier of the topic.
+        topic_id : str | list[str]
+            The identifier of the topic (str) or topics (list[str]).
         data : bytes
             The data to publish.
 
