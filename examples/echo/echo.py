@@ -20,11 +20,12 @@ from libp2p.peer.peerinfo import (
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
+MAX_READ_LEN = 2**32 - 1
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
     # Wait until EOF
-    msg = await stream.read()
+    msg = await stream.read(MAX_READ_LEN)
     await stream.write(msg)
     await stream.close()
 
@@ -72,10 +73,8 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
             msg = b"hi, there!\n"
 
             await stream.write(msg)
-            # TODO: check why the stream is closed after the first write ???
-            # Notify the other side about EOF
-            await stream.close()
             response = await stream.read()
+            await stream.close()
 
             print(f"Sent: {msg.decode('utf-8')}")
             print(f"Got: {response.decode('utf-8')}")
