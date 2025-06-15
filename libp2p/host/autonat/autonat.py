@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Union,
-)
 
 from libp2p.custom_types import (
     TProtocol,
@@ -94,7 +91,7 @@ class AutoNATService:
         finally:
             await stream.close()
 
-    async def _handle_request(self, request: Union[bytes, Message]) -> Message:
+    async def _handle_request(self, request: bytes | Message) -> Message:
         """
         Process an AutoNAT protocol request.
 

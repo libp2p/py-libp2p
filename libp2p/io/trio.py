@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 import trio
 
@@ -34,7 +31,7 @@ class TrioTCPStream(ReadWriteCloser):
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
                 raise IOException from error
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         async with self.read_lock:
             if n is not None and n == 0:
                 return b""
@@ -46,7 +43,7 @@ class TrioTCPStream(ReadWriteCloser):
     async def close(self) -> None:
         await self.stream.aclose()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Return the remote address as (host, port) tuple."""
         try:
             return self.stream.socket.getpeername()

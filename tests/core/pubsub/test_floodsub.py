@@ -44,12 +44,12 @@ async def test_simple_two_nodes():
 
 @pytest.mark.trio
 async def test_timed_cache_two_nodes():
-    # Two nodes using LastSeenCache with a TTL of 120 seconds
+    # Two nodes using LastSeenCache with a TTL of 10 seconds
     def get_msg_id(msg):
-        return (msg.data, msg.from_id)
+        return msg.data + msg.from_id
 
     async with PubsubFactory.create_batch_with_floodsub(
-        2, seen_ttl=120, msg_id_constructor=get_msg_id
+        2, seen_ttl=10, msg_id_constructor=get_msg_id
     ) as pubsubs_fsub:
         message_indices = [1, 1, 2, 1, 3, 1, 4, 1, 5, 1]
         expected_received_indices = [1, 2, 3, 4, 5]

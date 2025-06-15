@@ -1,10 +1,8 @@
 from collections.abc import (
     Awaitable,
-)
-import logging
-from typing import (
     Callable,
 )
+import logging
 
 import trio
 
@@ -63,12 +61,12 @@ async def connect_swarm(swarm_0: Swarm, swarm_1: Swarm) -> None:
 
             logging.debug(
                 "Swarm connection verification failed on attempt"
-                + f" {attempt+1}, retrying..."
+                + f" {attempt + 1}, retrying..."
             )
 
         except Exception as e:
             last_error = e
-            logging.debug(f"Swarm connection attempt {attempt+1} failed: {e}")
+            logging.debug(f"Swarm connection attempt {attempt + 1} failed: {e}")
             await trio.sleep(retry_delay)
 
     # If we got here, all retries failed
@@ -115,12 +113,12 @@ async def connect(node1: IHost, node2: IHost) -> None:
                 return
 
             logging.debug(
-                f"Connection verification failed on attempt {attempt+1}, retrying..."
+                f"Connection verification failed on attempt {attempt + 1}, retrying..."
             )
 
         except Exception as e:
             last_error = e
-            logging.debug(f"Connection attempt {attempt+1} failed: {e}")
+            logging.debug(f"Connection attempt {attempt + 1} failed: {e}")
             await trio.sleep(retry_delay)
 
     # If we got here, all retries failed

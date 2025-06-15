@@ -7,6 +7,9 @@ from trio.testing import (
     memory_stream_pair,
 )
 
+from libp2p.abc import (
+    IRawConnection,
+)
 from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
@@ -29,18 +32,19 @@ from libp2p.stream_muxer.yamux.yamux import (
 )
 
 
-class TrioStreamAdapter:
-    def __init__(self, send_stream, receive_stream):
+class TrioStreamAdapter(IRawConnection):
+    def __init__(self, send_stream, receive_stream, is_initiator: bool = False):
         self.send_stream = send_stream
         self.receive_stream = receive_stream
+        self.is_initiator = is_initiator
 
-    async def write(self, data):
+    async def write(self, data: bytes) -> None:
         logging.debug(f"Writing {len(data)} bytes")
         with trio.move_on_after(2):
             await self.send_stream.send_all(data)
 
-    async def read(self, n=-1):
-        if n == -1:
+    async def read(self, n: int | None = None) -> bytes:
+        if n is None or n == -1:
             raise ValueError("Reading unbounded not supported")
         logging.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
@@ -48,8 +52,12 @@ class TrioStreamAdapter:
             logging.debug(f"Read {len(data)} bytes")
             return data
 
-    async def close(self):
+    async def close(self) -> None:
         logging.debug("Closing stream")
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        # Return None since this is a test adapter without real network info
+        return None
 
 
 @pytest.fixture
@@ -68,8 +76,8 @@ async def secure_conn_pair(key_pair, peer_id):
     client_send, server_receive = memory_stream_pair()
     server_send, client_receive = memory_stream_pair()
 
-    client_rw = TrioStreamAdapter(client_send, client_receive)
-    server_rw = TrioStreamAdapter(server_send, server_receive)
+    client_rw = TrioStreamAdapter(client_send, client_receive, is_initiator=True)
+    server_rw = TrioStreamAdapter(server_send, server_receive, is_initiator=False)
 
     insecure_transport = InsecureTransport(key_pair)
 
@@ -196,9 +204,9 @@ async def test_yamux_stream_close(yamux_pair):
     await trio.sleep(0.1)
 
     # Now both directions are closed, so stream should be fully closed
-    assert (
-        client_stream.closed
-    ), "Client stream should be fully closed after bidirectional close"
+    assert client_stream.closed, (
+        "Client stream should be fully closed after bidirectional close"
+    )
 
     # Writing should still fail
     with pytest.raises(MuxedStreamError):
@@ -215,8 +223,12 @@ async def test_yamux_stream_reset(yamux_pair):
     server_stream = await server_yamux.accept_stream()
     await client_stream.reset()
     # After reset, reading should raise MuxedStreamReset or MuxedStreamEOF
-    with pytest.raises((MuxedStreamEOF, MuxedStreamError)):
+    try:
         await server_stream.read()
+    except (MuxedStreamEOF, MuxedStreamError):
+        pass
+    else:
+        pytest.fail("Expected MuxedStreamEOF or MuxedStreamError")
     # Verify subsequent operations fail with StreamReset or EOF
     with pytest.raises(MuxedStreamError):
         await server_stream.read()
@@ -269,9 +281,9 @@ async def test_yamux_flow_control(yamux_pair):
     await client_stream.write(large_data)
 
     # Check that window was reduced
-    assert (
-        client_stream.send_window < initial_window
-    ), "Window should be reduced after sending"
+    assert client_stream.send_window < initial_window, (
+        "Window should be reduced after sending"
+    )
 
     # Read the data on the server side
     received = b""
@@ -307,9 +319,9 @@ async def test_yamux_flow_control(yamux_pair):
         f" {client_stream.send_window},"
         f"initial half: {initial_window // 2}"
     )
-    assert (
-        client_stream.send_window > initial_window // 2
-    ), "Window should be increased after update"
+    assert client_stream.send_window > initial_window // 2, (
+        "Window should be increased after update"
+    )
 
     await client_stream.close()
     await server_stream.close()
@@ -349,17 +361,17 @@ async def test_yamux_half_close(yamux_pair):
     test_data = b"server response after client close"
 
     # The server shouldn't be marked as send_closed yet
-    assert (
-        not server_stream.send_closed
-    ), "Server stream shouldn't be marked as send_closed"
+    assert not server_stream.send_closed, (
+        "Server stream shouldn't be marked as send_closed"
+    )
 
     await server_stream.write(test_data)
 
     # Client can still read
     received = await client_stream.read(len(test_data))
-    assert (
-        received == test_data
-    ), "Client should still be able to read after sending FIN"
+    assert received == test_data, (
+        "Client should still be able to read after sending FIN"
+    )
 
     # Now server closes its sending side
     await server_stream.close()
@@ -406,9 +418,9 @@ async def test_yamux_go_away_with_error(yamux_pair):
     await trio.sleep(0.2)
 
     # Verify server recognized shutdown
-    assert (
-        server_yamux.event_shutting_down.is_set()
-    ), "Server should be shutting down after GO_AWAY"
+    assert server_yamux.event_shutting_down.is_set(), (
+        "Server should be shutting down after GO_AWAY"
+    )
 
     logging.debug("test_yamux_go_away_with_error complete")
 

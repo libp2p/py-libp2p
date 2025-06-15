@@ -1,7 +1,4 @@
 import io
-from typing import (
-    Optional,
-)
 
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -44,7 +41,7 @@ class SecureSession(BaseSession):
 
         self._reset_internal_buffer()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying connection's get_remote_address method."""
         return self.conn.get_remote_address()
 
@@ -53,7 +50,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = 0
 
-    def _drain(self, n: int) -> bytes:
+    def _drain(self, n: int | None) -> bytes:
         if self.low_watermark == self.high_watermark:
             return b""
 
@@ -75,7 +72,7 @@ class SecureSession(BaseSession):
         self.low_watermark = 0
         self.high_watermark = len(msg)
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         if n == 0:
             return b""
 
@@ -84,6 +81,9 @@ class SecureSession(BaseSession):
             return data_from_buffer
 
         msg = await self.conn.read_msg()
+
+        if n is None:
+            return msg
 
         if n < len(msg):
             self._fill(msg)

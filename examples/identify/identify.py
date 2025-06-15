@@ -61,20 +61,20 @@ async def run(port: int, destination: str) -> None:
         async with host_a.run(listen_addrs=[listen_addr]):
             print(
                 "First host listening. Run this from another console:\n\n"
-                f"identify-demo -p {int(port) + 1} "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host_a.get_id().pretty()}\n"
+                f"identify-demo "
+                f"-d {host_a.get_addrs()[0]}\n"
             )
             print("Waiting for incoming identify request...")
             await trio.sleep_forever()
 
     else:
         # Create second host (dialer)
-        print(f"dialer (host_b) listening on /ip4/{localhost_ip}/tcp/{port}")
         listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
         host_b = new_host()
 
         async with host_b.run(listen_addrs=[listen_addr]):
             # Connect to the first host
+            print(f"dialer (host_b) listening on {host_b.get_addrs()[0]}")
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
             print(f"Second host connecting to peer: {info.peer_id}")
@@ -104,13 +104,11 @@ def main() -> None:
     """
 
     example_maddr = (
-        "/ip4/127.0.0.1/tcp/8888/p2p/QmQn4SwGkDZkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+        "/ip4/127.0.0.1/tcp/8888/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
 
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "-p", "--port", default=8888, type=int, help="source port number"
-    )
+    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
     parser.add_argument(
         "-d",
         "--destination",
@@ -118,9 +116,6 @@ def main() -> None:
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
     args = parser.parse_args()
-
-    if not args.port:
-        raise RuntimeError("failed to determine local port")
 
     try:
         trio.run(run, *(args.port, args.destination))

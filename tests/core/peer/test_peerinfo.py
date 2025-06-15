@@ -17,10 +17,14 @@ VALID_MULTI_ADDR_STR = "/ip4/127.0.0.1/tcp/8000/p2p/3YgLAeMKSAPcGqZkAt8mREqhQXmJ
 
 
 def test_init_():
-    random_addrs = [random.randint(0, 255) for r in range(4)]
+    random_addrs = [
+        multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{1000 + i}") for i in range(4)
+    ]
+
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.SystemRandom().choice(ALPHABETS)
+
     peer_id = ID(random_id_string.encode())
     peer_info = PeerInfo(peer_id, random_addrs)
 

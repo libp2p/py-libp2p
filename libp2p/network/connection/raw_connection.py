@@ -1,7 +1,3 @@
-from typing import (
-    Optional,
-)
-
 from libp2p.abc import (
     IRawConnection,
 )
@@ -32,7 +28,7 @@ class RawConnection(IRawConnection):
         except IOException as error:
             raise RawConnError from error
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         """
         Read up to ``n`` bytes from the underlying stream. This call is
         delegated directly to the underlying ``self.reader``.
@@ -47,6 +43,6 @@ class RawConnection(IRawConnection):
     async def close(self) -> None:
         await self.stream.close()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying stream's get_remote_address method."""
         return self.stream.get_remote_address()

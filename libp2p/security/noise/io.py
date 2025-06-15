@@ -1,5 +1,4 @@
 from typing import (
-    Optional,
     cast,
 )
 
@@ -10,7 +9,6 @@ from libp2p.abc import (
 )
 from libp2p.io.abc import (
     EncryptedMsgReadWriter,
-    MsgReadWriteCloser,
     ReadWriteCloser,
 )
 from libp2p.io.msgio import (
@@ -40,7 +38,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     implemented by the subclasses.
     """
 
-    read_writer: MsgReadWriteCloser
+    read_writer: NoisePacketReadWriter
     noise_state: NoiseState
 
     # FIXME: This prefix is added in msg#3 in Go. Check whether it's a desired behavior.
@@ -50,12 +48,12 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
         self.read_writer = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
         self.noise_state = noise_state
 
-    async def write_msg(self, data: bytes, prefix_encoded: bool = False) -> None:
-        data_encrypted = self.encrypt(data)
+    async def write_msg(self, msg: bytes, prefix_encoded: bool = False) -> None:
+        data_encrypted = self.encrypt(msg)
         if prefix_encoded:
-            await self.read_writer.write_msg(self.prefix + data_encrypted)
-        else:
-            await self.read_writer.write_msg(data_encrypted)
+            # Manually add the prefix if needed
+            data_encrypted = self.prefix + data_encrypted
+        await self.read_writer.write_msg(data_encrypted)
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
         noise_msg_encrypted = await self.read_writer.read_msg()
@@ -67,10 +65,11 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     async def close(self) -> None:
         await self.read_writer.close()
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         # Delegate to the underlying connection if possible
         if hasattr(self.read_writer, "read_write_closer") and hasattr(
-            self.read_writer.read_write_closer, "get_remote_address"
+            self.read_writer.read_write_closer,
+            "get_remote_address",
         ):
             return self.read_writer.read_write_closer.get_remote_address()
         return None
@@ -78,7 +77,7 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
 
 class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):
     def encrypt(self, data: bytes) -> bytes:
-        return self.noise_state.write_message(data)
+        return bytes(self.noise_state.write_message(data))
 
     def decrypt(self, data: bytes) -> bytes:
         return bytes(self.noise_state.read_message(data))

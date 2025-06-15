@@ -26,7 +26,7 @@ class Transport(ISecureTransport):
     libp2p_privkey: PrivateKey
     noise_privkey: PrivateKey
     local_peer: ID
-    early_data: bytes
+    early_data: bytes | None
     with_noise_pipes: bool
 
     # NOTE: Implementations that support Noise Pipes must decide whether to use
@@ -37,8 +37,8 @@ class Transport(ISecureTransport):
     def __init__(
         self,
         libp2p_keypair: KeyPair,
-        noise_privkey: PrivateKey = None,
-        early_data: bytes = None,
+        noise_privkey: PrivateKey,
+        early_data: bytes | None = None,
         with_noise_pipes: bool = False,
     ) -> None:
         self.libp2p_privkey = libp2p_keypair.private_key

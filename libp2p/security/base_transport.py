@@ -1,7 +1,7 @@
-import secrets
-from typing import (
+from collections.abc import (
     Callable,
 )
+import secrets
 
 from libp2p.abc import (
     ISecureTransport,

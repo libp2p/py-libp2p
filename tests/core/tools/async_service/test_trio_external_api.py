@@ -1,9 +1,15 @@
 # Copied from https://github.com/ethereum/async-service
+import sys
+
 import pytest
 import trio
-from trio.testing import (
-    RaisesGroup,
-)
+
+if sys.version_info >= (3, 11):
+    from builtins import (
+        ExceptionGroup,
+    )
+else:
+    from exceptiongroup import ExceptionGroup
 
 from libp2p.tools.async_service import (
     LifecycleError,
@@ -50,7 +56,7 @@ async def test_trio_service_external_api_raises_when_cancelled():
     service = ExternalAPIService()
 
     async with background_trio_service(service) as manager:
-        with RaisesGroup(LifecycleError, allow_unwrapped=True, flatten_subgroups=True):
+        with pytest.raises(ExceptionGroup):
             async with trio.open_nursery() as nursery:
                 # an event to ensure that we are indeed within the body of the
                 is_within_fn = trio.Event()

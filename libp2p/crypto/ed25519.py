@@ -4,8 +4,10 @@ from Crypto.Hash import (
 from nacl.exceptions import (
     BadSignatureError,
 )
-from nacl.public import PrivateKey as PrivateKeyImpl
-from nacl.public import PublicKey as PublicKeyImpl
+from nacl.public import (
+    PrivateKey as PrivateKeyImpl,
+    PublicKey as PublicKeyImpl,
+)
 from nacl.signing import (
     SigningKey,
     VerifyKey,
@@ -48,7 +50,7 @@ class Ed25519PrivateKey(PrivateKey):
         self.impl = impl
 
     @classmethod
-    def new(cls, seed: bytes = None) -> "Ed25519PrivateKey":
+    def new(cls, seed: bytes | None = None) -> "Ed25519PrivateKey":
         if not seed:
             seed = utils.random()
 
@@ -75,7 +77,7 @@ class Ed25519PrivateKey(PrivateKey):
         return Ed25519PublicKey(self.impl.public_key)
 
 
-def create_new_key_pair(seed: bytes = None) -> KeyPair:
+def create_new_key_pair(seed: bytes | None = None) -> KeyPair:
     private_key = Ed25519PrivateKey.new(seed)
     public_key = private_key.get_public_key()
     return KeyPair(private_key, public_key)

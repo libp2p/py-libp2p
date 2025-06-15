@@ -14,12 +14,14 @@ async def read_exactly(
     """
     NOTE: relying on exceptions to break out on erroneous conditions, like EOF
     """
-    data = await reader.read(n)
+    buffer = bytearray()
+    buffer.extend(await reader.read(n))
 
     for _ in range(retry_count):
-        if len(data) < n:
-            remaining = n - len(data)
-            data += await reader.read(remaining)
+        if len(buffer) < n:
+            remaining = n - len(buffer)
+            buffer.extend(await reader.read(remaining))
+
         else:
-            return data
-    raise IncompleteReadError({"requested_count": n, "received_count": len(data)})
+            return bytes(buffer)
+    raise IncompleteReadError({"requested_count": n, "received_count": len(buffer)})

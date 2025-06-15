@@ -13,15 +13,13 @@ import sys
 import threading
 from typing import (
     Any,
-    Optional,
-    Union,
 )
 
 # Create a log queue
 log_queue: "queue.Queue[Any]" = queue.Queue()
 
 # Store the current listener to stop it on exit
-_current_listener: Optional[logging.handlers.QueueListener] = None
+_current_listener: logging.handlers.QueueListener | None = None
 
 # Event to track when the listener is ready
 _listener_ready = threading.Event()
@@ -135,7 +133,7 @@ def setup_logging() -> None:
     formatter = logging.Formatter(DEFAULT_LOG_FORMAT)
 
     # Configure handlers
-    handlers: list[Union[logging.StreamHandler[Any], logging.FileHandler]] = []
+    handlers: list[logging.StreamHandler[Any] | logging.FileHandler] = []
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stderr)

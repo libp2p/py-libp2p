@@ -1,12 +1,10 @@
 # Copied from https://github.com/ethereum/async-service
 
 import os
-from typing import (
-    Any,
-)
+from typing import Any
 
 
-def get_task_name(value: Any, explicit_name: str = None) -> str:
+def get_task_name(value: Any, explicit_name: str | None = None) -> str:
     # inline import to ensure `_utils` is always importable from the rest of
     # the module.
     from .abc import (  # noqa: F401

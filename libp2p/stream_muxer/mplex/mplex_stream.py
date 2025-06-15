@@ -3,7 +3,6 @@ from types import (
 )
 from typing import (
     TYPE_CHECKING,
-    Optional,
 )
 
 import trio
@@ -40,9 +39,12 @@ class MplexStream(IMuxedStream):
 
     name: str
     stream_id: StreamID
-    muxed_conn: "Mplex"
-    read_deadline: int
-    write_deadline: int
+    # NOTE: All methods used here are part of `Mplex` which is a derived
+    # class of IMuxedConn. Ignoring this type assignment should not pose
+    # any risk.
+    muxed_conn: "Mplex"  # type: ignore[assignment]
+    read_deadline: int | None
+    write_deadline: int | None
 
     # TODO: Add lock for read/write to avoid interleaving receiving messages?
     close_lock: trio.Lock
@@ -92,7 +94,7 @@ class MplexStream(IMuxedStream):
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
 
-    def _read_return_when_blocked(self) -> bytes:
+    def _read_return_when_blocked(self) -> bytearray:
         buf = bytearray()
         while True:
             try:
@@ -102,7 +104,7 @@ class MplexStream(IMuxedStream):
                 break
         return buf
 
-    async def read(self, n: int = None) -> bytes:
+    async def read(self, n: int | None = None) -> bytes:
         """
         Read up to n bytes. Read possibly returns fewer than `n` bytes, if
         there are not enough bytes in the Mplex buffer. If `n is None`, read
@@ -257,7 +259,7 @@ class MplexStream(IMuxedStream):
         self.write_deadline = ttl
         return True
 
-    def get_remote_address(self) -> Optional[tuple[str, int]]:
+    def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""
         return self.muxed_conn.get_remote_address()
 
@@ -267,9 +269,9 @@ class MplexStream(IMuxedStream):
 
     async def __aexit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and close the stream."""
         await self.close()

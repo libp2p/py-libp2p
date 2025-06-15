@@ -1,6 +1,7 @@
 import pytest
 import trio
 
+from libp2p.abc import ISecureConn
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
@@ -32,7 +33,8 @@ async def test_create_secure_session(nursery):
     async with raw_conn_factory(nursery) as conns:
         local_conn, remote_conn = conns
 
-        local_secure_conn, remote_secure_conn = None, None
+        local_secure_conn: ISecureConn | None = None
+        remote_secure_conn: ISecureConn | None = None
 
         async def local_create_secure_session():
             nonlocal local_secure_conn
@@ -53,6 +55,9 @@ async def test_create_secure_session(nursery):
         async with trio.open_nursery() as nursery_1:
             nursery_1.start_soon(local_create_secure_session)
             nursery_1.start_soon(remote_create_secure_session)
+
+        if local_secure_conn is None or remote_secure_conn is None:
+            raise Exception("Failed to secure connection")
 
         msg = b"abc"
         await local_secure_conn.write(msg)
