@@ -29,6 +29,7 @@ from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
 from libp2p.kad_dht.kad_dht import (
+    DHTMode,
     KadDHT,
 )
 from libp2p.kad_dht.utils import (
@@ -123,8 +124,18 @@ async def run_node(
         if port <= 0:
             port = random.randint(10000, 60000)
         logger.debug(f"Using port: {port}")
+
+        # Convert string mode to DHTMode enum
+        if mode is None or mode.upper() == "CLIENT":
+            dht_mode = DHTMode.CLIENT
+        elif mode.upper() == "SERVER":
+            dht_mode = DHTMode.SERVER
+        else:
+            logger.error(f"Invalid mode: {mode}. Must be 'client' or 'server'")
+            sys.exit(1)
+
         # Load server addresses for client mode
-        if mode.upper() == "CLIENT":
+        if dht_mode == DHTMode.CLIENT:
             server_addrs = load_server_addrs()
             if server_addrs:
                 logger.info(f"Loaded {len(server_addrs)} server addresses from log")
@@ -144,7 +155,7 @@ async def run_node(
             peer_id = host.get_id().pretty()
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
-            dht = KadDHT(host, mode)
+            dht = KadDHT(host, dht_mode)
             # take all peer ids from the host and add them to the dht
             for peer_id in host.get_peerstore().peer_ids():
                 await dht.routing_table.add_peer(peer_id)
@@ -153,17 +164,17 @@ async def run_node(
             logger.info("To connect to this node, use: %s", bootstrap_cmd)
 
             # Save server address in server mode
-            if mode.upper() == "SERVER":
+            if dht_mode == DHTMode.SERVER:
                 save_server_addr(addr_str)
 
             # Start the DHT service
             async with background_trio_service(dht):
-                logger.info(f"DHT service started in {mode.upper()} mode")
+                logger.info(f"DHT service started in {dht_mode.value} mode")
                 val_key = create_key_from_binary(b"py-libp2p kademlia example value")
                 content = b"Hello from python node "
                 content_key = create_key_from_binary(content)
 
-                if mode.upper() == "SERVER":
+                if dht_mode == DHTMode.SERVER:
                     # Store a value in the DHT
                     msg = "Hello message from Sumanjeet"
                     val_data = msg.encode()

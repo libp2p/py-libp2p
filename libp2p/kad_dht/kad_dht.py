@@ -5,6 +5,7 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
+from enum import Enum
 import logging
 import time
 
@@ -59,6 +60,13 @@ ALPHA = 3
 QUERY_TIMEOUT = 10  # seconds
 
 
+class DHTMode(Enum):
+    """DHT operation modes."""
+
+    CLIENT = "CLIENT"
+    SERVER = "SERVER"
+
+
 class KadDHT(Service):
     """
     Kademlia DHT implementation for libp2p.
@@ -67,21 +75,23 @@ class KadDHT(Service):
     peer discovery, content routing, and value storage.
     """
 
-    def __init__(self, host: IHost, mode: str):
+    def __init__(self, host: IHost, mode: DHTMode):
         """
         Initialize a new Kademlia DHT node.
 
         :param host: The libp2p host.
-        :param mode: The mode of host (Client or Server)
+        :param mode: The mode of host (Client or Server) - must be DHTMode enum
         """
         super().__init__()
 
         self.host = host
         self.local_peer_id = host.get_id()
 
-        self.mode = mode.upper()
-        if self.mode not in ["CLIENT", "SERVER"]:
-            raise ValueError(f"Invalid mode '{mode}'. Must be 'CLIENT' or 'SERVER'.")
+        # Validate that mode is a DHTMode enum
+        if not isinstance(mode, DHTMode):
+            raise TypeError(f"mode must be DHTMode enum, got {type(mode)}")
+
+        self.mode = mode
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
@@ -125,21 +135,28 @@ class KadDHT(Service):
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
 
-    async def switch_mode(self, new_mode: str) -> str:
-        mode = new_mode.upper()
-        if mode not in ["CLIENT", "SERVER"]:
-            raise ValueError(f"Invalid mode '{mode}'. Must be 'CLIENT' or 'SERVER'.")
-        if mode == "CLIENT":
+    async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
+        """
+        Switch the DHT mode.
+
+        :param new_mode: The new mode - must be DHTMode enum
+        :return: The new mode as DHTMode enum
+        """
+        # Validate that new_mode is a DHTMode enum
+        if not isinstance(new_mode, DHTMode):
+            raise TypeError(f"new_mode must be DHTMode enum, got {type(new_mode)}")
+
+        if new_mode == DHTMode.CLIENT:
             self.routing_table.cleanup_routing_table()
-        self.mode = mode
-        logger.info(f"Switched to {mode} mode")
+        self.mode = new_mode
+        logger.info(f"Switched to {new_mode.value} mode")
         return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
         """
         Handle an incoming DHT stream using varint length prefixes.
         """
-        if self.mode == "CLIENT":
+        if self.mode == DHTMode.CLIENT:
             stream.close
             return
         peer_id = stream.muxed_conn.peer_id

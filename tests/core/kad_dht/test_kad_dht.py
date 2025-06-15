@@ -15,6 +15,7 @@ import pytest
 import trio
 
 from libp2p.kad_dht.kad_dht import (
+    DHTMode,
     KadDHT,
 )
 from libp2p.kad_dht.utils import (
@@ -49,8 +50,8 @@ async def dht_pair(security_protocol):
         peer_a_info = PeerInfo(host_a.get_id(), host_a.get_addrs())
 
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
-        dht_a: KadDHT = KadDHT(host_a, mode="server")
-        dht_b: KadDHT = KadDHT(host_b, mode="server")
+        dht_a: KadDHT = KadDHT(host_a, mode=DHTMode.SERVER)
+        dht_b: KadDHT = KadDHT(host_b, mode=DHTMode.SERVER)
         await dht_a.peer_routing.routing_table.add_peer(peer_b_info)
         await dht_b.peer_routing.routing_table.add_peer(peer_a_info)
 
