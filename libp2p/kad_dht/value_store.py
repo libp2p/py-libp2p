@@ -280,6 +280,14 @@ class ValueStore:
                     )
                     return response.record.value
 
+                # Handle case where value is not found but peer infos are returned
+                else:
+                    logger.debug(
+                        f"Value not found for key {key.hex()} from peer {peer_id},"
+                        f" received {len(response.closerPeers)} closer peers"
+                    )
+                    return None
+
             except Exception as proto_err:
                 logger.warning(f"Failed to parse as protobuf: {proto_err}")
 

@@ -369,6 +369,43 @@ class KadDHT(Service):
                     else:
                         logger.debug(f"No value found for key {key.hex()}")
 
+                        # Create response with closest peers when no value is found
+                        response = Message()
+                        response.type = Message.MessageType.GET_VALUE
+                        response.key = key
+
+                        # Add closest peers to key
+                        closest_peers = self.routing_table.find_local_closest_peers(
+                            key, 20
+                        )
+                        logger.debug(
+                            "No value found,"
+                            f"including {len(closest_peers)} closest peers"
+                        )
+
+                        for peer in closest_peers:
+                            # Skip if peer is the requester
+                            if peer == peer_id:
+                                continue
+
+                            peer_proto = response.closerPeers.add()
+                            peer_proto.id = peer.to_bytes()
+                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                            # Add addresses if available
+                            try:
+                                addrs = self.host.get_peerstore().addrs(peer)
+                                for addr in addrs:
+                                    peer_proto.addrs.append(addr.to_bytes())
+                            except Exception:
+                                pass
+
+                        # Serialize and send response
+                        response_bytes = response.SerializeToString()
+                        await stream.write(varint.encode(len(response_bytes)))
+                        await stream.write(response_bytes)
+                        logger.debug("Sent GET_VALUE response with closest peers")
+
                 # Handle PUT_VALUE message
                 elif message.type == Message.MessageType.PUT_VALUE and message.HasField(
                     "record"
