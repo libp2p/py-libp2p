@@ -11,6 +11,9 @@ from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamReset,
 )
+from libp2p.relay.circuit_v2.config import (
+    RelayConfig,
+)
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
     RelayInfo,
@@ -21,9 +24,6 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.transport import (
     CircuitV2Transport,
-)
-from libp2p.relay.circuit_v2.config import (
-    RelayConfig,
 )
 from libp2p.tools.constants import (
     MAX_READ_LEN,
@@ -92,7 +92,7 @@ async def test_circuit_v2_transport_initialization():
             max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
             max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
         )
-        protocol = CircuitV2Protocol(host, limits, allow_hop=False)        
+        protocol = CircuitV2Protocol(host, limits, allow_hop=False)
 
         config = RelayConfig()
 

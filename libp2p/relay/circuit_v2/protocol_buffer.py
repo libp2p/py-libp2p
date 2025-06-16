@@ -45,7 +45,6 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
         The protocol buffer Status object
 
     """
-
     # Create status object
     pb_obj = PbStatus()
 

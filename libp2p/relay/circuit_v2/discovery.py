@@ -11,8 +11,8 @@ import logging
 import time
 from typing import (
     Any,
-    cast,
     Protocol as TypingProtocol,
+    cast,
     runtime_checkable,
 )
 
@@ -40,7 +40,6 @@ from .protocol import (
 from .protocol_buffer import (
     StatusCode,
 )
-
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
