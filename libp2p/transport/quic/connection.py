@@ -34,6 +34,11 @@ if TYPE_CHECKING:
     from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -286,11 +291,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             with QUICErrorContext("connection_establishment", "connection"):
                 # Start the connection if not already started
+                print("STARTING TO CONNECT")
                 if not self._started:
                     await self.start()
 
                 # Start background event processing
                 if not self._background_tasks_started:
+                    print("STARTING BACKGROUND TASK")
                     await self._start_background_tasks()
 
                 # Wait for handshake completion with timeout
@@ -324,16 +331,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._background_tasks_started = True
 
         # Start event processing task
-        self._nursery.start_soon(self._event_processing_loop)
+        self._nursery.start_soon(async_fn=self._event_processing_loop)
 
         # Start periodic tasks
-        self._nursery.start_soon(self._periodic_maintenance)
+        # self._nursery.start_soon(async_fn=self._periodic_maintenance)
 
         logger.debug("Started background tasks for QUIC connection")
 
     async def _event_processing_loop(self) -> None:
         """Main event processing loop for the connection."""
         logger.debug("Started QUIC event processing loop")
+        print("Started QUIC event processing loop")
 
         try:
             while not self._closed:
@@ -347,7 +355,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._transmit()
 
                 # Short sleep to prevent busy waiting
-                await trio.sleep(0.001)  # 1ms
+                await trio.sleep(0.01)
 
         except Exception as e:
             logger.error(f"Error in event processing loop: {e}")
@@ -381,6 +389,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             QUICPeerVerificationError: If peer verification fails
 
         """
+        print("VERIFYING PEER IDENTITY")
         if not self._security_manager:
             logger.warning("No security manager available for peer verification")
             return
@@ -719,6 +728,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _handle_quic_event(self, event: events.QuicEvent) -> None:
         """Handle a single QUIC event."""
+        print(f"QUIC event: {type(event).__name__}")
         if isinstance(event, events.ConnectionTerminated):
             await self._handle_connection_terminated(event)
         elif isinstance(event, events.HandshakeCompleted):
@@ -731,6 +741,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             await self._handle_datagram_received(event)
         else:
             logger.debug(f"Unhandled QUIC event: {type(event).__name__}")
+            print(f"Unhandled QUIC event: {type(event).__name__}")
 
     async def _handle_handshake_completed(
         self, event: events.HandshakeCompleted
@@ -897,6 +908,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Send pending datagrams using trio."""
         sock = self._socket
         if not sock:
+            print("No socket to transmit")
             return
 
         try:

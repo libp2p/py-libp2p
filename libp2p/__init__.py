@@ -1,3 +1,7 @@
+from libp2p.transport.quic.utils import is_quic_multiaddr
+from typing import Any
+from libp2p.transport.quic.transport import QUICTransport
+from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
     Mapping,
     Sequence,
@@ -5,16 +9,12 @@ from collections.abc import (
 from importlib.metadata import version as __version
 from typing import (
     Literal,
-    Optional,
-    Type,
-    cast,
 )
 
 import multiaddr
 
 from libp2p.abc import (
     IHost,
-    IMuxedConn,
     INetworkService,
     IPeerRouting,
     IPeerStore,
@@ -163,6 +163,7 @@ def new_swarm(
     peerstore_opt: IPeerStore | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    transport_opt: dict[Any, Any] | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -173,6 +174,7 @@ def new_swarm(
     :param peerstore_opt: optional peerstore
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
+    :param transport_opt: options for transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -185,14 +187,24 @@ def new_swarm(
 
     id_opt = generate_peer_id_from(key_pair)
 
+    transport: TCP | QUICTransport
+
     if listen_addrs is None:
-        transport = TCP()
+        transport_opt = transport_opt or {}
+        quic_config: QUICTransportConfig | None = transport_opt.get('quic_config')
+
+        if quic_config:
+            transport = QUICTransport(key_pair.private_key, quic_config)
+        else:
+            transport = TCP()
     else:
         addr = listen_addrs[0]
         if addr.__contains__("tcp"):
             transport = TCP()
         elif addr.__contains__("quic"):
-            raise ValueError("QUIC not yet supported")
+            transport_opt = transport_opt or {}
+            quic_config = transport_opt.get('quic_config', QUICTransportConfig())
+            transport = QUICTransport(key_pair.private_key, quic_config)
         else:
             raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
 
@@ -253,6 +265,7 @@ def new_host(
     enable_mDNS: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+    transport_opt: dict[Any, Any] | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -266,8 +279,10 @@ def new_host(
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
+    :param transport_opt: optional dictionary of properties of transport
     :return: return a host instance
     """
+    print("INIT")
     swarm = new_swarm(
         key_pair=key_pair,
         muxer_opt=muxer_opt,
@@ -275,6 +290,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
+        transport_opt=transport_opt
     )
 
     if disc_opt is not None:

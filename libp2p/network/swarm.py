@@ -170,14 +170,7 @@ class Swarm(Service, INetworkService):
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
         Try to create a connection to peer_id with addr.
-
-        :param addr: the address we want to connect with
-        :param peer_id: the peer we want to connect to
-        :raises SwarmException: raised when an error occurs
-        :return: network connection
         """
-        # Dial peer (connection to peer does not yet exist)
-        # Transport dials peer (gets back a raw conn)
         try:
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
@@ -188,8 +181,15 @@ class Swarm(Service, INetworkService):
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
-        # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
-        # the conn and then mux the conn
+        # NEW: Check if this is a QUIC connection (already secure and muxed)
+        if isinstance(raw_conn, IMuxedConn):
+            # QUIC connections are already secure and muxed, skip upgrade steps
+            logger.debug("detected QUIC connection, skipping upgrade steps")
+            swarm_conn = await self.add_conn(raw_conn)
+            logger.debug("successfully dialed peer %s via QUIC", peer_id)
+            return swarm_conn
+
+        # Standard TCP flow - security then mux upgrade
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
         except SecurityUpgradeFailure as error:
@@ -211,9 +211,7 @@ class Swarm(Service, INetworkService):
         logger.debug("upgraded mux for peer %s", peer_id)
 
         swarm_conn = await self.add_conn(muxed_conn)
-
         logger.debug("successfully dialed peer %s", peer_id)
-
         return swarm_conn
 
     async def new_stream(self, peer_id: ID) -> INetStream:

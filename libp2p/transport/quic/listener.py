@@ -1,14 +1,12 @@
 """
-QUIC Listener implementation for py-libp2p.
-Based on go-libp2p and js-libp2p QUIC listener patterns.
-Uses aioquic's server-side QUIC implementation with trio.
+QUIC Listener
 """
 
-import copy
 import logging
 import socket
+import struct
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from aioquic.quic import events
 from aioquic.quic.configuration import QuicConfiguration
@@ -19,12 +17,14 @@ import trio
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler, TProtocol
 from libp2p.transport.quic.security import QUICTLSConfigManager
+from libp2p.transport.quic.utils import custom_quic_version_to_wire_format
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
 from .exceptions import QUICListenError
 from .utils import (
     create_quic_multiaddr,
+    create_server_config_from_base,
     is_quic_multiaddr,
     multiaddr_to_quic_version,
     quic_multiaddr_to_endpoint,
@@ -33,17 +33,41 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
+
+
+class QUICPacketInfo:
+    """Information extracted from a QUIC packet header."""
+
+    def __init__(
+        self,
+        version: int,
+        destination_cid: bytes,
+        source_cid: bytes,
+        packet_type: int,
+        token: bytes | None = None,
+    ):
+        self.version = version
+        self.destination_cid = destination_cid
+        self.source_cid = source_cid
+        self.packet_type = packet_type
+        self.token = token
 
 
 class QUICListener(IListener):
     """
-    QUIC Listener implementation following libp2p listener interface.
+    Enhanced QUIC Listener with proper connection ID handling and protocol negotiation.
 
-    Handles incoming QUIC connections, manages server-side handshakes,
-    and integrates with the libp2p connection handler system.
-    Based on go-libp2p and js-libp2p listener patterns.
+    Key improvements:
+    - Proper QUIC packet parsing to extract connection IDs
+    - Version negotiation following RFC 9000
+    - Connection routing based on destination connection ID
+    - Support for connection migration
     """
 
     def __init__(
@@ -54,17 +78,7 @@ class QUICListener(IListener):
         config: QUICTransportConfig,
         security_manager: QUICTLSConfigManager | None = None,
     ):
-        """
-        Initialize QUIC listener.
-
-        Args:
-            transport: Parent QUIC transport
-            handler_function: Function to handle new connections
-            quic_configs: QUIC configurations for different versions
-            config: QUIC transport configuration
-            security_manager: Security manager for TLS/certificate handling
-
-        """
+        """Initialize enhanced QUIC listener."""
         self._transport = transport
         self._handler = handler_function
         self._quic_configs = quic_configs
@@ -75,10 +89,23 @@ class QUICListener(IListener):
         self._socket: trio.socket.SocketType | None = None
         self._bound_addresses: list[Multiaddr] = []
 
-        # Connection management
-        self._connections: dict[tuple[str, int], QUICConnection] = {}
-        self._pending_connections: dict[tuple[str, int], QuicConnection] = {}
+        # Enhanced connection management with connection ID routing
+        self._connections: dict[
+            bytes, QUICConnection
+        ] = {}  # destination_cid -> connection
+        self._pending_connections: dict[
+            bytes, QuicConnection
+        ] = {}  # destination_cid -> quic_conn
+        self._addr_to_cid: dict[
+            tuple[str, int], bytes
+        ] = {}  # (host, port) -> destination_cid
+        self._cid_to_addr: dict[
+            bytes, tuple[str, int]
+        ] = {}  # destination_cid -> (host, port)
         self._connection_lock = trio.Lock()
+
+        # Version negotiation support
+        self._supported_versions = self._get_supported_versions()
 
         # Listener state
         self._closed = False
@@ -89,164 +116,321 @@ class QUICListener(IListener):
         self._stats = {
             "connections_accepted": 0,
             "connections_rejected": 0,
+            "version_negotiations": 0,
             "bytes_received": 0,
             "packets_processed": 0,
+            "invalid_packets": 0,
         }
 
-        logger.debug("Initialized QUIC listener")
+        logger.debug("Initialized enhanced QUIC listener with connection ID support")
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
-        """
-        Start listening on the given multiaddr.
-
-        Args:
-            maddr: Multiaddr to listen on
-            nursery: Trio nursery for managing background tasks
-
-        Returns:
-            True if listening started successfully
-
-        Raises:
-            QUICListenError: If failed to start listening
-
-        """
-        if not is_quic_multiaddr(maddr):
-            raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
-
-        if self._listening:
-            raise QUICListenError("Already listening")
-
-        try:
-            # Extract host and port from multiaddr
-            host, port = quic_multiaddr_to_endpoint(maddr)
-            quic_version = multiaddr_to_quic_version(maddr)
-
-            protocol = f"{quic_version}_server"
-
-            # Validate QUIC version support
-            if protocol not in self._quic_configs:
-                raise QUICListenError(f"Unsupported QUIC version: {quic_version}")
-
-            # Create and bind UDP socket
-            self._socket = await self._create_and_bind_socket(host, port)
-            actual_port = self._socket.getsockname()[1]
-
-            # Update multiaddr with actual bound port
-            actual_maddr = create_quic_multiaddr(host, actual_port, f"/{quic_version}")
-            self._bound_addresses = [actual_maddr]
-
-            # Store nursery reference and set listening state
-            self._nursery = nursery
-            self._listening = True
-
-            # Start background tasks directly in the provided nursery
-            # This e per cancellation when the nursery exits
-            nursery.start_soon(self._handle_incoming_packets)
-            nursery.start_soon(self._manage_connections)
-
-            logger.info(f"QUIC listener started on {actual_maddr}")
-            return True
-
-        except trio.Cancelled:
-            print("CLOSING LISTENER")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to start QUIC listener on {maddr}: {e}")
-            await self._cleanup_socket()
-            raise QUICListenError(f"Listen failed: {e}") from e
-
-    async def _create_and_bind_socket(
-        self, host: str, port: int
-    ) -> trio.socket.SocketType:
-        """Create and bind UDP socket for QUIC."""
-        try:
-            # Determine address family
+    def _get_supported_versions(self) -> set[int]:
+        """Get wire format versions for all supported QUIC configurations."""
+        versions: set[int] = set()
+        for protocol in self._quic_configs:
             try:
-                import ipaddress
+                config = self._quic_configs[protocol]
+                wire_versions = config.supported_versions
+                for version in wire_versions:
+                    versions.add(version)
+            except Exception as e:
+                logger.warning(f"Failed to get wire version for {protocol}: {e}")
+        return versions
 
-                ip = ipaddress.ip_address(host)
-                family = socket.AF_INET if ip.version == 4 else socket.AF_INET6
-            except ValueError:
-                # Assume IPv4 for hostnames
-                family = socket.AF_INET
+    def parse_quic_packet(self, data: bytes) -> QUICPacketInfo | None:
+        """
+        Parse QUIC packet header to extract connection IDs and version.
+        Based on RFC 9000 packet format.
+        """
+        try:
+            if len(data) < 1:
+                return None
 
-            # Create UDP socket
-            sock = trio.socket.socket(family=family, type=socket.SOCK_DGRAM)
+            # Read first byte to get packet type and flags
+            first_byte = data[0]
 
-            # Set socket options for better performance
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if hasattr(socket, "SO_REUSEPORT"):
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            # Check if this is a long header packet (version negotiation, initial, etc.)
+            is_long_header = (first_byte & 0x80) != 0
 
-            # Bind to address
-            await sock.bind((host, port))
+            if not is_long_header:
+                # Short header packet - extract destination connection ID
+                # For short headers, we need to know the connection ID length
+                # This is typically managed by the connection state
+                # For now, we'll handle this in the connection routing logic
+                return None
 
-            logger.debug(f"Created and bound UDP socket to {host}:{port}")
-            return sock
+            # Long header packet parsing
+            offset = 1
+
+            # Extract version (4 bytes)
+            if len(data) < offset + 4:
+                return None
+            version = struct.unpack("!I", data[offset : offset + 4])[0]
+            offset += 4
+
+            # Extract destination connection ID length and value
+            if len(data) < offset + 1:
+                return None
+            dest_cid_len = data[offset]
+            offset += 1
+
+            if len(data) < offset + dest_cid_len:
+                return None
+            dest_cid = data[offset : offset + dest_cid_len]
+            offset += dest_cid_len
+
+            # Extract source connection ID length and value
+            if len(data) < offset + 1:
+                return None
+            src_cid_len = data[offset]
+            offset += 1
+
+            if len(data) < offset + src_cid_len:
+                return None
+            src_cid = data[offset : offset + src_cid_len]
+            offset += src_cid_len
+
+            # Determine packet type from first byte
+            packet_type = (first_byte & 0x30) >> 4
+
+            # For Initial packets, extract token
+            token = b""
+            if packet_type == 0:  # Initial packet
+                if len(data) < offset + 1:
+                    return None
+                # Token length is variable-length integer
+                token_len, token_len_bytes = self._decode_varint(data[offset:])
+                offset += token_len_bytes
+
+                if len(data) < offset + token_len:
+                    return None
+                token = data[offset : offset + token_len]
+
+            return QUICPacketInfo(
+                version=version,
+                destination_cid=dest_cid,
+                source_cid=src_cid,
+                packet_type=packet_type,
+                token=token,
+            )
 
         except Exception as e:
-            raise QUICListenError(f"Failed to create socket: {e}") from e
+            logger.debug(f"Failed to parse QUIC packet: {e}")
+            return None
 
-    async def _handle_incoming_packets(self) -> None:
-        """
-        Handle incoming UDP packets and route to appropriate connections.
-        This is the main packet processing loop.
-        """
-        logger.debug("Started packet handling loop")
+    def _decode_varint(self, data: bytes) -> tuple[int, int]:
+        """Decode QUIC variable-length integer."""
+        if len(data) < 1:
+            return 0, 0
 
-        try:
-            while self._listening and self._socket:
-                try:
-                    # Receive UDP packet
-                    # (this blocks until packet arrives or socket closes)
-                    data, addr = await self._socket.recvfrom(65536)
-                    self._stats["bytes_received"] += len(data)
-                    self._stats["packets_processed"] += 1
+        first_byte = data[0]
+        length_bits = (first_byte & 0xC0) >> 6
 
-                    # Process packet asynchronously to avoid blocking
-                    if self._nursery:
-                        self._nursery.start_soon(self._process_packet, data, addr)
-
-                except trio.ClosedResourceError:
-                    # Socket was closed, exit gracefully
-                    logger.debug("Socket closed, exiting packet handler")
-                    break
-                except Exception as e:
-                    logger.error(f"Error receiving packet: {e}")
-                    # Continue processing other packets
-                    await trio.sleep(0.01)
-        except trio.Cancelled:
-            logger.info("Received Cancel, stopping handling incoming packets")
-            raise
-        finally:
-            logger.debug("Packet handling loop terminated")
+        if length_bits == 0:
+            return first_byte & 0x3F, 1
+        elif length_bits == 1:
+            if len(data) < 2:
+                return 0, 0
+            return ((first_byte & 0x3F) << 8) | data[1], 2
+        elif length_bits == 2:
+            if len(data) < 4:
+                return 0, 0
+            return ((first_byte & 0x3F) << 24) | (data[1] << 16) | (
+                data[2] << 8
+            ) | data[3], 4
+        else:  # length_bits == 3
+            if len(data) < 8:
+                return 0, 0
+            value = (first_byte & 0x3F) << 56
+            for i in range(1, 8):
+                value |= data[i] << (8 * (7 - i))
+            return value, 8
 
     async def _process_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         """
-        Process a single incoming packet.
-        Routes to existing connection or creates new connection.
-
-        Args:
-            data: Raw UDP packet data
-            addr: Source address (host, port)
-
+        Enhanced packet processing with connection ID routing and version negotiation.
         """
         try:
+            self._stats["packets_processed"] += 1
+            self._stats["bytes_received"] += len(data)
+
+            # Parse packet to extract connection information
+            packet_info = self.parse_quic_packet(data)
+
             async with self._connection_lock:
-                # Check if we have an existing connection for this address
-                if addr in self._connections:
-                    connection = self._connections[addr]
-                    await self._route_to_connection(connection, data, addr)
-                elif addr in self._pending_connections:
-                    # Handle packet for pending connection
-                    quic_conn = self._pending_connections[addr]
-                    await self._handle_pending_connection(quic_conn, data, addr)
+                if packet_info:
+                    # Check for version negotiation
+                    if packet_info.version == 0:
+                        # Version negotiation packet - this shouldn't happen on server
+                        logger.warning(
+                            f"Received version negotiation packet from {addr}"
+                        )
+                        return
+
+                    # Check if version is supported
+                    if packet_info.version not in self._supported_versions:
+                        await self._send_version_negotiation(
+                            addr, packet_info.source_cid
+                        )
+                        return
+
+                    # Route based on destination connection ID
+                    dest_cid = packet_info.destination_cid
+
+                    if dest_cid in self._connections:
+                        # Existing connection
+                        connection = self._connections[dest_cid]
+                        await self._route_to_connection(connection, data, addr)
+                    elif dest_cid in self._pending_connections:
+                        # Pending connection
+                        quic_conn = self._pending_connections[dest_cid]
+                        await self._handle_pending_connection(
+                            quic_conn, data, addr, dest_cid
+                        )
+                    else:
+                        # New connection - only handle Initial packets for new conn
+                        if packet_info.packet_type == 0:  # Initial packet
+                            await self._handle_new_connection(data, addr, packet_info)
+                        else:
+                            logger.debug(
+                                "Ignoring non-Initial packet for unknown "
+                                f"connection ID from {addr}"
+                            )
                 else:
-                    # New connection
-                    await self._handle_new_connection(data, addr)
+                    # Fallback to address-based routing for short header packets
+                    await self._handle_short_header_packet(data, addr)
 
         except Exception as e:
             logger.error(f"Error processing packet from {addr}: {e}")
+            self._stats["invalid_packets"] += 1
+
+    async def _send_version_negotiation(
+        self, addr: tuple[str, int], source_cid: bytes
+    ) -> None:
+        """Send version negotiation packet to client."""
+        try:
+            self._stats["version_negotiations"] += 1
+
+            # Construct version negotiation packet
+            packet = bytearray()
+
+            # First byte: long header (1) + unused bits (0111)
+            packet.append(0x80 | 0x70)
+
+            # Version: 0 for version negotiation
+            packet.extend(struct.pack("!I", 0))
+
+            # Destination connection ID (echo source CID from client)
+            packet.append(len(source_cid))
+            packet.extend(source_cid)
+
+            # Source connection ID (empty for version negotiation)
+            packet.append(0)
+
+            # Supported versions
+            for version in sorted(self._supported_versions):
+                packet.extend(struct.pack("!I", version))
+
+            # Send the packet
+            if self._socket:
+                await self._socket.sendto(bytes(packet), addr)
+                logger.debug(
+                    f"Sent version negotiation to {addr} "
+                    f"with versions {sorted(self._supported_versions)}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to send version negotiation to {addr}: {e}")
+
+    async def _handle_new_connection(
+        self,
+        data: bytes,
+        addr: tuple[str, int],
+        packet_info: QUICPacketInfo,
+    ) -> None:
+        """
+        Handle new connection with proper version negotiation.
+        """
+        try:
+            quic_config = None
+            for protocol, config in self._quic_configs.items():
+                wire_versions = custom_quic_version_to_wire_format(protocol)
+                if wire_versions == packet_info.version:
+                    print("PROTOCOL:", protocol)
+                    quic_config = config
+                    break
+
+            if not quic_config:
+                logger.warning(
+                    f"No configuration found for version {packet_info.version:08x}"
+                )
+                await self._send_version_negotiation(addr, packet_info.source_cid)
+                return
+
+            # Create server-side QUIC configuration
+            server_config = create_server_config_from_base(
+                base_config=quic_config,
+                security_manager=self._security_manager,
+                transport_config=self._config,
+            )
+
+            # Generate a new destination connection ID for this connection
+            # In a real implementation, this should be cryptographically secure
+            import secrets
+
+            destination_cid = secrets.token_bytes(8)
+
+            # Create QUIC connection with specific version
+            quic_conn = QuicConnection(
+                configuration=server_config,
+                original_destination_connection_id=packet_info.destination_cid,
+            )
+
+            # Store connection mapping
+            self._pending_connections[destination_cid] = quic_conn
+            self._addr_to_cid[addr] = destination_cid
+            self._cid_to_addr[destination_cid] = addr
+
+            print("Receiving Datagram")
+
+            # Process initial packet
+            quic_conn.receive_datagram(data, addr, now=time.time())
+            print("Processing quic events")
+            await self._process_quic_events(quic_conn, addr, destination_cid)
+            await self._transmit_for_connection(quic_conn, addr)
+
+            logger.debug(
+                f"Started handshake for new connection from {addr} "
+                f"(version: {packet_info.version:08x}, cid: {destination_cid.hex()})"
+            )
+
+        except Exception as e:
+            logger.error(f"Error handling new connection from {addr}: {e}")
+            self._stats["connections_rejected"] += 1
+
+    async def _handle_short_header_packet(
+        self, data: bytes, addr: tuple[str, int]
+    ) -> None:
+        """Handle short header packets using address-based fallback routing."""
+        try:
+            # Check if we have a connection for this address
+            dest_cid = self._addr_to_cid.get(addr)
+            if dest_cid:
+                if dest_cid in self._connections:
+                    connection = self._connections[dest_cid]
+                    await self._route_to_connection(connection, data, addr)
+                elif dest_cid in self._pending_connections:
+                    quic_conn = self._pending_connections[dest_cid]
+                    await self._handle_pending_connection(
+                        quic_conn, data, addr, dest_cid
+                    )
+            else:
+                logger.debug(
+                    f"Received short header packet from unknown address {addr}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling short header packet from {addr}: {e}")
 
     async def _route_to_connection(
         self, connection: QUICConnection, data: bytes, addr: tuple[str, int]
@@ -263,10 +447,14 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Error routing packet to connection {addr}: {e}")
             # Remove problematic connection
-            await self._remove_connection(addr)
+            await self._remove_connection_by_addr(addr)
 
     async def _handle_pending_connection(
-        self, quic_conn: QuicConnection, data: bytes, addr: tuple[str, int]
+        self,
+        quic_conn: QuicConnection,
+        data: bytes,
+        addr: tuple[str, int],
+        dest_cid: bytes,
     ) -> None:
         """Handle packet for a pending (handshaking) connection."""
         try:
@@ -274,58 +462,20 @@ class QUICListener(IListener):
             quic_conn.receive_datagram(data, addr, now=time.time())
 
             # Process events
-            await self._process_quic_events(quic_conn, addr)
+            await self._process_quic_events(quic_conn, addr, dest_cid)
 
             # Send any outgoing packets
-            await self._transmit_for_connection(quic_conn)
+            await self._transmit_for_connection(quic_conn, addr)
 
         except Exception as e:
-            logger.error(f"Error handling pending connection {addr}: {e}")
+            logger.error(f"Error handling pending connection {dest_cid.hex()}: {e}")
             # Remove from pending connections
-            self._pending_connections.pop(addr, None)
-
-    async def _handle_new_connection(self, data: bytes, addr: tuple[str, int]) -> None:
-        """
-        Handle a new incoming connection.
-        Creates a new QUIC connection and starts handshake.
-
-        Args:
-            data: Initial packet data
-            addr: Source address
-
-        """
-        try:
-            # Determine QUIC version from packet
-            # For now, use the first available configuration
-            # TODO: Implement proper version negotiation
-            quic_version = next(iter(self._quic_configs.keys()))
-            config = self._quic_configs[quic_version]
-
-            # Create server-side QUIC configuration
-            server_config = copy.deepcopy(config)
-            server_config.is_client = False
-
-            # Create QUIC connection
-            quic_conn = QuicConnection(configuration=server_config)
-
-            # Store as pending connection
-            self._pending_connections[addr] = quic_conn
-
-            # Process initial packet
-            quic_conn.receive_datagram(data, addr, now=time.time())
-            await self._process_quic_events(quic_conn, addr)
-            await self._transmit_for_connection(quic_conn)
-
-            logger.debug(f"Started handshake for new connection from {addr}")
-
-        except Exception as e:
-            logger.error(f"Error handling new connection from {addr}: {e}")
-            self._stats["connections_rejected"] += 1
+            await self._remove_pending_connection(dest_cid)
 
     async def _process_quic_events(
-        self, quic_conn: QuicConnection, addr: tuple[str, int]
+        self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
     ) -> None:
-        """Process QUIC events for a connection."""
+        """Process QUIC events for a connection with connection ID context."""
         while True:
             event = quic_conn.next_event()
             if event is None:
@@ -333,46 +483,39 @@ class QUICListener(IListener):
 
             if isinstance(event, events.ConnectionTerminated):
                 logger.debug(
-                    f"Connection from {addr} terminated: {event.reason_phrase}"
+                    f"Connection {dest_cid.hex()} from {addr} "
+                    f"terminated: {event.reason_phrase}"
                 )
-                await self._remove_connection(addr)
+                await self._remove_connection(dest_cid)
                 break
 
             elif isinstance(event, events.HandshakeCompleted):
-                logger.debug(f"Handshake completed for {addr}")
-                await self._promote_pending_connection(quic_conn, addr)
+                logger.debug(f"Handshake completed for connection {dest_cid.hex()}")
+                await self._promote_pending_connection(quic_conn, addr, dest_cid)
 
             elif isinstance(event, events.StreamDataReceived):
                 # Forward to established connection if available
-                if addr in self._connections:
-                    connection = self._connections[addr]
+                if dest_cid in self._connections:
+                    connection = self._connections[dest_cid]
                     await connection._handle_stream_data(event)
 
             elif isinstance(event, events.StreamReset):
                 # Forward to established connection if available
-                if addr in self._connections:
-                    connection = self._connections[addr]
+                if dest_cid in self._connections:
+                    connection = self._connections[dest_cid]
                     await connection._handle_stream_reset(event)
 
     async def _promote_pending_connection(
-        self, quic_conn: QuicConnection, addr: tuple[str, int]
+        self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
     ) -> None:
-        """
-        Promote a pending connection to an established connection.
-        Called after successful handshake completion.
-
-        Args:
-            quic_conn: Established QUIC connection
-            addr: Remote address
-
-        """
+        """Promote a pending connection to an established connection."""
         try:
             # Remove from pending connections
-            self._pending_connections.pop(addr, None)
+            self._pending_connections.pop(dest_cid, None)
 
             # Create multiaddr for this connection
             host, port = addr
-            # Use the first supported QUIC version for now
+            # Use the appropriate QUIC version
             quic_version = next(iter(self._quic_configs.keys()))
             remote_maddr = create_quic_multiaddr(host, port, f"/{quic_version}")
 
@@ -388,22 +531,25 @@ class QUICListener(IListener):
                 security_manager=self._security_manager,
             )
 
-            # Store the connection
-            self._connections[addr] = connection
+            # Store the connection with connection ID
+            self._connections[dest_cid] = connection
 
             # Start connection management tasks
             if self._nursery:
                 self._nursery.start_soon(connection._handle_datagram_received)
                 self._nursery.start_soon(connection._handle_timer_events)
 
+            # Handle security verification
             if self._security_manager:
                 try:
                     await connection._verify_peer_identity_with_security()
-                    logger.info(f"Security verification successful for {addr}")
+                    logger.info(
+                        f"Security verification successful for {dest_cid.hex()}"
+                    )
                 except Exception as e:
-                    logger.error(f"Security verification failed for {addr}: {e}")
-                    self._stats["security_failures"] += 1
-                    # Close the connection due to security failure
+                    logger.error(
+                        f"Security verification failed for {dest_cid.hex()}: {e}"
+                    )
                     await connection.close()
                     return
 
@@ -414,188 +560,203 @@ class QUICListener(IListener):
                 )
 
             self._stats["connections_accepted"] += 1
-            logger.info(f"Accepted new QUIC connection from {addr}")
+            logger.info(f"Accepted new QUIC connection {dest_cid.hex()} from {addr}")
 
         except Exception as e:
-            logger.error(f"Error promoting connection from {addr}: {e}")
-            # Clean up
-            await self._remove_connection(addr)
+            logger.error(f"Error promoting connection {dest_cid.hex()}: {e}")
+            await self._remove_connection(dest_cid)
             self._stats["connections_rejected"] += 1
 
-    async def _handle_new_established_connection(
-        self, connection: QUICConnection
-    ) -> None:
-        """
-        Handle a newly established connection by calling the user handler.
-
-        Args:
-            connection: Established QUIC connection
-
-        """
+    async def _remove_connection(self, dest_cid: bytes) -> None:
+        """Remove connection by connection ID."""
         try:
-            # Call the connection handler provided by the transport
-            await self._handler(connection)
-        except Exception as e:
-            logger.error(f"Error in connection handler: {e}")
-            # Close the problematic connection
-            await connection.close()
-
-    async def _transmit_for_connection(self, quic_conn: QuicConnection) -> None:
-        """Send pending datagrams for a QUIC connection."""
-        sock = self._socket
-        if not sock:
-            return
-
-        for data, addr in quic_conn.datagrams_to_send(now=time.time()):
-            try:
-                await sock.sendto(data, addr)
-            except Exception as e:
-                logger.error(f"Failed to send datagram to {addr}: {e}")
-
-    async def _manage_connections(self) -> None:
-        """
-        Background task to manage connection lifecycle.
-        Handles cleanup of closed/idle connections.
-        """
-        try:
-            while not self._closed:
-                try:
-                    # Sleep for a short interval
-                    await trio.sleep(1.0)
-
-                    # Clean up closed connections
-                    await self._cleanup_closed_connections()
-
-                    # Handle connection timeouts
-                    await self._handle_connection_timeouts()
-
-                except Exception as e:
-                    logger.error(f"Error in connection management: {e}")
-        except trio.Cancelled:
-            raise
-
-    async def _cleanup_closed_connections(self) -> None:
-        """Remove closed connections from tracking."""
-        async with self._connection_lock:
-            closed_addrs = []
-
-            for addr, connection in self._connections.items():
-                if connection.is_closed:
-                    closed_addrs.append(addr)
-
-            for addr in closed_addrs:
-                self._connections.pop(addr, None)
-                logger.debug(f"Cleaned up closed connection from {addr}")
-
-    async def _handle_connection_timeouts(self) -> None:
-        """Handle connection timeouts and cleanup."""
-        # TODO: Implement connection timeout handling
-        # Check for idle connections and close them
-        pass
-
-    async def _remove_connection(self, addr: tuple[str, int]) -> None:
-        """Remove a connection from tracking."""
-        async with self._connection_lock:
-            # Remove from active connections
-            connection = self._connections.pop(addr, None)
+            # Remove connection
+            connection = self._connections.pop(dest_cid, None)
             if connection:
                 await connection.close()
 
-            # Remove from pending connections
-            quic_conn = self._pending_connections.pop(addr, None)
-            if quic_conn:
-                quic_conn.close()
+            # Clean up mappings
+            addr = self._cid_to_addr.pop(dest_cid, None)
+            if addr:
+                self._addr_to_cid.pop(addr, None)
+
+            logger.debug(f"Removed connection {dest_cid.hex()}")
+
+        except Exception as e:
+            logger.error(f"Error removing connection {dest_cid.hex()}: {e}")
+
+    async def _remove_pending_connection(self, dest_cid: bytes) -> None:
+        """Remove pending connection by connection ID."""
+        try:
+            self._pending_connections.pop(dest_cid, None)
+            addr = self._cid_to_addr.pop(dest_cid, None)
+            if addr:
+                self._addr_to_cid.pop(addr, None)
+            logger.debug(f"Removed pending connection {dest_cid.hex()}")
+        except Exception as e:
+            logger.error(f"Error removing pending connection {dest_cid.hex()}: {e}")
+
+    async def _remove_connection_by_addr(self, addr: tuple[str, int]) -> None:
+        """Remove connection by address (fallback method)."""
+        dest_cid = self._addr_to_cid.get(addr)
+        if dest_cid:
+            await self._remove_connection(dest_cid)
+
+    async def _transmit_for_connection(
+        self, quic_conn: QuicConnection, addr: tuple[str, int]
+    ) -> None:
+        """Send outgoing packets for a QUIC connection."""
+        try:
+            while True:
+                datagrams = quic_conn.datagrams_to_send(now=time.time())
+                if not datagrams:
+                    break
+
+                for datagram, _ in datagrams:
+                    if self._socket:
+                        await self._socket.sendto(datagram, addr)
+
+        except Exception as e:
+            logger.error(f"Error transmitting packets to {addr}: {e}")
+
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+        """Start listening on the given multiaddr with enhanced connection handling."""
+        if self._listening:
+            raise QUICListenError("Already listening")
+
+        if not is_quic_multiaddr(maddr):
+            raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
+
+        try:
+            host, port = quic_multiaddr_to_endpoint(maddr)
+
+            # Create and configure socket
+            self._socket = await self._create_socket(host, port)
+            self._nursery = nursery
+
+            # Get the actual bound address
+            bound_host, bound_port = self._socket.getsockname()
+            quic_version = multiaddr_to_quic_version(maddr)
+            bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
+            self._bound_addresses = [bound_maddr]
+
+            self._listening = True
+
+            # Start packet handling loop
+            nursery.start_soon(self._handle_incoming_packets)
+
+            logger.info(
+                f"QUIC listener started on {bound_maddr} with connection ID support"
+            )
+            return True
+
+        except Exception as e:
+            await self.close()
+            raise QUICListenError(f"Failed to start listening: {e}") from e
+
+    async def _create_socket(self, host: str, port: int) -> trio.socket.SocketType:
+        """Create and configure UDP socket."""
+        try:
+            # Determine address family
+            try:
+                import ipaddress
+
+                ip = ipaddress.ip_address(host)
+                family = socket.AF_INET if ip.version == 4 else socket.AF_INET6
+            except ValueError:
+                family = socket.AF_INET
+
+            # Create UDP socket
+            sock = trio.socket.socket(family=family, type=socket.SOCK_DGRAM)
+
+            # Set socket options
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+
+            # Bind to address
+            await sock.bind((host, port))
+
+            logger.debug(f"Created and bound UDP socket to {host}:{port}")
+            return sock
+
+        except Exception as e:
+            raise QUICListenError(f"Failed to create socket: {e}") from e
+
+    async def _handle_incoming_packets(self) -> None:
+        """Handle incoming UDP packets with enhanced routing."""
+        logger.debug("Started enhanced packet handling loop")
+
+        try:
+            while self._listening and self._socket:
+                try:
+                    # Receive UDP packet
+                    data, addr = await self._socket.recvfrom(65536)
+
+                    # Process packet asynchronously
+                    if self._nursery:
+                        self._nursery.start_soon(self._process_packet, data, addr)
+
+                except trio.ClosedResourceError:
+                    logger.debug("Socket closed, exiting packet handler")
+                    break
+                except Exception as e:
+                    logger.error(f"Error receiving packet: {e}")
+                    await trio.sleep(0.01)
+        except trio.Cancelled:
+            logger.info("Packet handling cancelled")
+            raise
+        finally:
+            logger.debug("Enhanced packet handling loop terminated")
 
     async def close(self) -> None:
-        """Close the listener and cleanup resources."""
+        """Close the listener and clean up resources."""
         if self._closed:
             return
 
         self._closed = True
         self._listening = False
-        logger.debug("Closing QUIC listener")
 
-        # CRITICAL: Close socket FIRST to unblock recvfrom()
-        await self._cleanup_socket()
+        try:
+            # Close all connections
+            async with self._connection_lock:
+                for dest_cid in list(self._connections.keys()):
+                    await self._remove_connection(dest_cid)
 
-        logger.debug("SOCKET CLEANUP COMPLETE")
+                for dest_cid in list(self._pending_connections.keys()):
+                    await self._remove_pending_connection(dest_cid)
 
-        # Close all connections WITHOUT using the lock during shutdown
-        # (avoid deadlock if background tasks are cancelled while holding lock)
-        connections_to_close = list(self._connections.values())
-        pending_to_close = list(self._pending_connections.values())
-
-        logger.debug(
-            f"CLOSING {connections_to_close} connections and {pending_to_close} pending"
-        )
-
-        # Close active connections
-        for connection in connections_to_close:
-            try:
-                await connection.close()
-            except Exception as e:
-                print(f"Error closing connection: {e}")
-
-        # Close pending connections
-        for quic_conn in pending_to_close:
-            try:
-                quic_conn.close()
-            except Exception as e:
-                print(f"Error closing pending connection: {e}")
-
-        # Clear the dictionaries without lock (we're shutting down)
-        self._connections.clear()
-        self._pending_connections.clear()
-        logger.debug("QUIC listener closed")
-
-    async def _cleanup_socket(self) -> None:
-        """Clean up the UDP socket."""
-        if self._socket:
-            try:
+            # Close socket
+            if self._socket:
                 self._socket.close()
-            except Exception as e:
-                logger.error(f"Error closing socket: {e}")
-            finally:
                 self._socket = None
 
-    def get_addrs(self) -> tuple[Multiaddr, ...]:
-        """
-        Get the addresses this listener is bound to.
+            self._bound_addresses.clear()
 
-        Returns:
-            Tuple of bound multiaddrs
+            logger.info("QUIC listener closed")
 
-        """
-        return tuple(self._bound_addresses)
+        except Exception as e:
+            logger.error(f"Error closing listener: {e}")
 
-    def is_listening(self) -> bool:
-        """Check if the listener is actively listening."""
-        return self._listening and not self._closed
+    def get_addresses(self) -> list[Multiaddr]:
+        """Get the bound addresses."""
+        return self._bound_addresses.copy()
+
+    async def _handle_new_established_connection(
+        self, connection: QUICConnection
+    ) -> None:
+        """Handle a newly established connection."""
+        try:
+            await self._handler(connection)
+        except Exception as e:
+            logger.error(f"Error in connection handler: {e}")
+            await connection.close()
+
+    def get_addrs(self) -> tuple[Multiaddr]:
+        return tuple(self.get_addresses())
 
     def get_stats(self) -> dict[str, int]:
-        """Get listener statistics."""
-        stats = self._stats.copy()
-        stats.update(
-            {
-                "active_connections": len(self._connections),
-                "pending_connections": len(self._pending_connections),
-                "is_listening": self.is_listening(),
-            }
-        )
-        return stats
+        return self._stats
 
-    def get_security_manager(self) -> Optional["QUICTLSConfigManager"]:
-        """
-        Get the security manager for this listener.
-
-        Returns:
-            The QUIC TLS configuration manager, or None if not configured
-
-        """
-        return self._security_manager
-
-    def __str__(self) -> str:
-        """String representation of the listener."""
-        addr = self._bound_addresses
-        conn_count = len(self._connections)
-        return f"QUICListener(addrs={addr}, connections={conn_count})"
+    def is_listening(self) -> bool:
+        raise NotImplementedError()

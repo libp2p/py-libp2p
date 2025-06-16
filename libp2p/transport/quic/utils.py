@@ -5,13 +5,18 @@ Based on go-libp2p and js-libp2p QUIC implementations.
 """
 
 import ipaddress
+import logging
 
+from aioquic.quic.configuration import QuicConfiguration
 import multiaddr
 
 from libp2p.custom_types import TProtocol
+from libp2p.transport.quic.security import QUICTLSConfigManager
 
 from .config import QUICTransportConfig
 from .exceptions import QUICInvalidMultiaddrError, QUICUnsupportedVersionError
+
+logger = logging.getLogger(__name__)
 
 # Protocol constants
 QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
@@ -19,6 +24,18 @@ QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 UDP_PROTOCOL = "udp"
 IP4_PROTOCOL = "ip4"
 IP6_PROTOCOL = "ip6"
+
+SERVER_CONFIG_PROTOCOL_V1 = f"{QUIC_V1_PROTOCOL}_SERVER"
+SERVER_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_V1_PROTOCOL}_SERVER"
+CLIENT_CONFIG_PROTCOL_V1 = f"{QUIC_DRAFT29_PROTOCOL}_SERVER"
+CLIENT_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_DRAFT29_PROTOCOL}_SERVER"
+
+CUSTOM_QUIC_VERSION_MAPPING = {
+    SERVER_CONFIG_PROTOCOL_V1: 0x00000001,  # RFC 9000
+    CLIENT_CONFIG_PROTCOL_V1: 0x00000001,  # RFC 9000
+    SERVER_CONFIG_PROTOCOL_DRAFT_29: 0xFF00001D,  # draft-29
+    CLIENT_CONFIG_PROTOCOL_DRAFT_29: 0xFF00001D,  # draft-29
+}
 
 # QUIC version to wire format mappings (required for aioquic)
 QUIC_VERSION_MAPPINGS = {
@@ -218,6 +235,27 @@ def quic_version_to_wire_format(version: TProtocol) -> int:
     return wire_version
 
 
+def custom_quic_version_to_wire_format(version: TProtocol) -> int:
+    """
+    Convert QUIC version string to wire format integer for aioquic.
+
+    Args:
+        version: QUIC version string ("quic-v1" or "quic")
+
+    Returns:
+        Wire format version number
+
+    Raises:
+        QUICUnsupportedVersionError: If version is not supported
+
+    """
+    wire_version = QUIC_VERSION_MAPPINGS.get(version)
+    if wire_version is None:
+        raise QUICUnsupportedVersionError(f"Unsupported QUIC version: {version}")
+
+    return wire_version
+
+
 def get_alpn_protocols() -> list[str]:
     """
     Get ALPN protocols for libp2p over QUIC.
@@ -250,3 +288,94 @@ def normalize_quic_multiaddr(maddr: multiaddr.Multiaddr) -> multiaddr.Multiaddr:
     version = multiaddr_to_quic_version(maddr)
 
     return create_quic_multiaddr(host, port, version)
+
+
+def create_server_config_from_base(
+    base_config: QuicConfiguration,
+    security_manager: QUICTLSConfigManager | None = None,
+    transport_config: QUICTransportConfig | None = None,
+) -> QuicConfiguration:
+    """
+    Create a server configuration without using deepcopy.
+    Manually copies attributes while handling cryptography objects properly.
+    """
+    try:
+        # Create new server configuration from scratch
+        server_config = QuicConfiguration(is_client=False)
+
+        # Copy basic configuration attributes (these are safe to copy)
+        copyable_attrs = [
+            "alpn_protocols",
+            "verify_mode",
+            "max_datagram_frame_size",
+            "idle_timeout",
+            "max_concurrent_streams",
+            "supported_versions",
+            "max_data",
+            "max_stream_data",
+            "stateless_retry",
+            "quantum_readiness_test",
+        ]
+
+        for attr in copyable_attrs:
+            if hasattr(base_config, attr):
+                value = getattr(base_config, attr)
+                if value is not None:
+                    setattr(server_config, attr, value)
+
+        # Handle cryptography objects - these need direct reference, not copying
+        crypto_attrs = [
+            "certificate",
+            "private_key",
+            "certificate_chain",
+            "ca_certs",
+        ]
+
+        for attr in crypto_attrs:
+            if hasattr(base_config, attr):
+                value = getattr(base_config, attr)
+                if value is not None:
+                    setattr(server_config, attr, value)
+
+        # Apply security manager configuration if available
+        if security_manager:
+            try:
+                server_tls_config = security_manager.create_server_config()
+
+                # Override with security manager's TLS configuration
+                if "certificate" in server_tls_config:
+                    server_config.certificate = server_tls_config["certificate"]
+                if "private_key" in server_tls_config:
+                    server_config.private_key = server_tls_config["private_key"]
+                if "certificate_chain" in server_tls_config:
+                    # type: ignore
+                    server_config.certificate_chain = server_tls_config[  # type: ignore
+                        "certificate_chain"  # type: ignore
+                    ]
+                if "alpn_protocols" in server_tls_config:
+                    # type: ignore
+                    server_config.alpn_protocols = server_tls_config["alpn_protocols"]  # type: ignore
+
+            except Exception as e:
+                logger.warning(f"Failed to apply security manager config: {e}")
+
+        # Set transport-specific defaults if provided
+        if transport_config:
+            if server_config.idle_timeout == 0:
+                server_config.idle_timeout = getattr(
+                    transport_config, "idle_timeout", 30.0
+                )
+            if server_config.max_datagram_frame_size is None:
+                server_config.max_datagram_frame_size = getattr(
+                    transport_config, "max_datagram_size", 1200
+                )
+        # Ensure we have ALPN protocols
+        if server_config.alpn_protocols:
+            server_config.alpn_protocols = ["libp2p"]
+
+        logger.debug("Successfully created server config without deepcopy")
+        return server_config
+
+    except Exception as e:
+        logger.error(f"Failed to create server config: {e}")
+        raise

@@ -13,7 +13,7 @@ from aioquic.quic.configuration import (
     QuicConfiguration,
 )
 from aioquic.quic.connection import (
-    QuicConnection,
+    QuicConnection as NativeQUICConnection,
 )
 import multiaddr
 import trio
@@ -60,6 +60,11 @@ from .security import (
 QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
 QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -279,20 +284,24 @@ class QUICTransport(ITransport):
 
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
+            print("config_key", config_key, self._quic_configs.keys())
             config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
+            config.is_client = True
             logger.debug(
                 f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
             )
 
+            print("Start QUIC Connection")
             # Create QUIC connection using aioquic's sans-IO core
-            quic_connection = QuicConnection(configuration=config)
+            native_quic_connection = NativeQUICConnection(configuration=config)
 
+            print("QUIC Connection Created")
             # Create trio-based QUIC connection wrapper with security
             connection = QUICConnection(
-                quic_connection=quic_connection,
+                quic_connection=native_quic_connection,
                 remote_addr=(host, port),
                 peer_id=peer_id,
                 local_peer_id=self._peer_id,
@@ -354,6 +363,7 @@ class QUICTransport(ITransport):
                 )
 
             logger.info(f"Peer identity verified: {verified_peer_id}")
+            print(f"Peer identity verified: {verified_peer_id}")
 
         except Exception as e:
             raise QUICSecurityError(f"Peer identity verification failed: {e}") from e
