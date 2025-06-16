@@ -413,7 +413,7 @@ class KadDHT(Service):
                     # Process PUT_VALUE
                     key = message.record.key
                     value = message.record.value
-                    sucess = False
+                    success = False
                     try:
                         if not (key and value):
                             raise ValueError(
@@ -421,17 +421,18 @@ class KadDHT(Service):
                             )
 
                         self.value_store.put(key, value)
-                        logger.debug(f"Stored value for key {key.hex()}")
-                        sucess = True
+                        logger.debug(f"Stored value {value.hex()} for key {key.hex()}")
+                        success = True
                     except Exception as e:
                         logger.warning(
-                            f"Failed to store value for key {key.hex()}: {e}"
+                            f"Failed to store value {value.hex()} for key "
+                            f"{key.hex()}: {e}"
                         )
                     finally:
                         # Send acknowledgement
                         response = Message()
                         response.type = Message.MessageType.PUT_VALUE
-                        if sucess:
+                        if success:
                             response.key = key
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
