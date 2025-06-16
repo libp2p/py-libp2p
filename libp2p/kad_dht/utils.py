@@ -24,27 +24,28 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     return multihash.digest(binary_data, "sha2-256").digest
 
 
-def distance(key_one: bytes, key_two: bytes) -> int:
+def xor_distance(key1: bytes, key2: bytes) -> int:
     """
     Calculate the XOR distance between two keys.
 
-    params: key_one: First key
-    params: key_two: Second key
+    params: key1: First key (bytes)
+    params: key2: Second key (bytes)
 
     Returns
     -------
         int: The XOR distance between the keys
 
     """
-    # Ensure keys are the same length by using minimum length
-    length = min(len(key_one), len(key_two))
-    result = 0
+    # Ensure the inputs are bytes
+    if not isinstance(key1, bytes) or not isinstance(key2, bytes):
+        raise TypeError("Both key1 and key2 must be bytes objects")
+
+    # Convert to integers
+    k1 = int.from_bytes(key1, byteorder="big")
+    k2 = int.from_bytes(key2, byteorder="big")
 
     # Calculate XOR distance
-    for i in range(length):
-        result = (result << 8) | (key_one[i] ^ key_two[i])
-
-    return result
+    return k1 ^ k2
 
 
 def bytes_to_base58(data: bytes) -> str:
@@ -77,7 +78,7 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
         peer_hash = multihash.digest(peer_id.to_bytes(), "sha2-256").digest
-        return distance(target_key, peer_hash)
+        return xor_distance(target_key, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
 

@@ -29,6 +29,10 @@ from libp2p.kad_dht.routing_table import (
     KBucket,
     RoutingTable,
 )
+from libp2p.kad_dht.utils import (
+    create_key_from_binary,
+    xor_distance,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -319,7 +323,7 @@ class TestRoutingTable:
         routing_table = RoutingTable(local_peer_id, mock_host)
 
         # Empty table
-        target_key = b"target_key"
+        target_key = create_key_from_binary(b"target_key")
         closest_peers = routing_table.find_local_closest_peers(target_key, 5)
         assert closest_peers == []
 
@@ -338,17 +342,15 @@ class TestRoutingTable:
 
     def test_distance_calculation(self, mock_host, local_peer_id):
         """Test XOR distance calculation."""
-        routing_table = RoutingTable(local_peer_id, mock_host)
-
         # Test same keys
         key = b"\x42" * 32
-        distance = routing_table._distance(key, key)
+        distance = xor_distance(key, key)
         assert distance == 0
 
         # Test different keys
         key1 = b"\x00" * 32
         key2 = b"\xff" * 32
-        distance = routing_table._distance(key1, key2)
+        distance = xor_distance(key1, key2)
         expected = int.from_bytes(b"\xff" * 32, byteorder="big")
         assert distance == expected
 

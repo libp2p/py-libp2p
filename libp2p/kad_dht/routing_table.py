@@ -16,6 +16,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.kad_dht.utils import xor_distance
 from libp2p.peer.id import (
     ID,
 )
@@ -514,7 +515,7 @@ class RoutingTable:
             all_peers.extend(bucket.peer_ids())
 
         # Sort by XOR distance to the key
-        all_peers.sort(key=lambda p: self._distance(p.to_bytes(), key))
+        all_peers.sort(key=lambda p: xor_distance(p.to_bytes(), key))
 
         return all_peers[:count]
 
@@ -573,25 +574,6 @@ class RoutingTable:
         for bucket in self.buckets:
             count += bucket.size()
         return count
-
-    def _distance(self, key1: bytes, key2: bytes) -> int:
-        """
-        Calculate the XOR distance between two keys.
-
-        :param key1: First key (bytes)
-        :param key2: Second key (bytes)
-
-        Returns
-        -------
-            int: XOR distance between the keys
-
-        """
-        # Convert to integers
-        k1 = int.from_bytes(key1, byteorder="big")
-        k2 = int.from_bytes(key2, byteorder="big")
-
-        # Calculate XOR distance
-        return k1 ^ k2
 
     def get_stale_peers(self, stale_threshold_seconds: int = 3600) -> list[ID]:
         """
