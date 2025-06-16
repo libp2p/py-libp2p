@@ -261,7 +261,6 @@ To add a new example (e.g., identify):
                "echo-demo=examples.echo.echo:main",
                "ping-demo=examples.ping.ping:main",
                "identify-demo=examples.identify.identify:main",
-               "kademlia-demo=examples.kademlia.kademlia:main",
            ],
        }
 

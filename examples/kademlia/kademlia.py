@@ -282,7 +282,7 @@ def parse_args():
 
 
 def main():
-    """Main entry point for the kademlia-demo console script."""
+    """Main entry point for the kademlia demo."""
     try:
         args = parse_args()
         logger.info(
