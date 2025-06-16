@@ -11,6 +11,7 @@ import logging
 import time
 from typing import (
     Any,
+    cast,
     Protocol as TypingProtocol,
     runtime_checkable,
 )
@@ -39,6 +40,7 @@ from .protocol import (
 from .protocol_buffer import (
     StatusCode,
 )
+
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
@@ -241,9 +243,6 @@ class RelayDiscovery(Service):
                 # Get protocols list
                 protocols_list = []
                 if hasattr(proto_result, "__await__"):
-                    # For mypy/pyrefly typechecking workaround
-                    from typing import Any, cast
-
                     protocols_list = await cast(Any, proto_result)
                 else:
                     protocols_list = proto_result

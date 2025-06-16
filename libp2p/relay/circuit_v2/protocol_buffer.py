@@ -12,6 +12,8 @@ from typing import (
     Any,
 )
 
+from .pb.circuit_pb2 import Status as PbStatus
+
 
 # Define Status codes as an Enum for better type safety and organization
 class StatusCode(IntEnum):
@@ -43,8 +45,6 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
         The protocol buffer Status object
 
     """
-    # Import here to avoid circular imports
-    from .pb.circuit_pb2 import Status as PbStatus
 
     # Create status object
     pb_obj = PbStatus()

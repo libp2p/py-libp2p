@@ -22,6 +22,9 @@ from libp2p.relay.circuit_v2.protocol import (
 from libp2p.relay.circuit_v2.transport import (
     CircuitV2Transport,
 )
+from libp2p.relay.circuit_v2.config import (
+    RelayConfig,
+)
 from libp2p.tools.constants import (
     MAX_READ_LEN,
 )
@@ -89,12 +92,7 @@ async def test_circuit_v2_transport_initialization():
             max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
             max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
         )
-        protocol = CircuitV2Protocol(host, limits, allow_hop=False)
-
-        # Create a config
-        from libp2p.relay.circuit_v2.config import (
-            RelayConfig,
-        )
+        protocol = CircuitV2Protocol(host, limits, allow_hop=False)        
 
         config = RelayConfig()
 
@@ -134,11 +132,6 @@ async def test_circuit_v2_transport_add_relay():
             max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
         )
         protocol = CircuitV2Protocol(host, limits, allow_hop=False)
-
-        # Create a config
-        from libp2p.relay.circuit_v2.config import (
-            RelayConfig,
-        )
 
         config = RelayConfig()
 
@@ -192,11 +185,6 @@ async def test_circuit_v2_transport_dial_through_relay():
         # Register test handler on target
         test_protocol = "/test/echo/1.0.0"
         target_host.set_stream_handler(TProtocol(test_protocol), echo_stream_handler)
-
-        # Setup transport on client
-        from libp2p.relay.circuit_v2.config import (
-            RelayConfig,
-        )
 
         client_config = RelayConfig()
         client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
@@ -282,11 +270,6 @@ async def test_circuit_v2_transport_relay_limits():
         # Register test handler on target
         test_protocol = "/test/echo/1.0.0"
         target_host.set_stream_handler(TProtocol(test_protocol), echo_stream_handler)
-
-        # Setup transports on clients
-        from libp2p.relay.circuit_v2.config import (
-            RelayConfig,
-        )
 
         client_config = RelayConfig()
 
