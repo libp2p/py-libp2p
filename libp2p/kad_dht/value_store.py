@@ -155,9 +155,9 @@ class ValueStore:
 
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
-                logger.debug(f"Successfully stored value at peer {peer_id}")
-                result = True
-                return result
+                if response.key:
+                    result = True
+            return result
 
         except Exception as e:
             logger.warning(f"Failed to store value at peer {peer_id}: {e}")

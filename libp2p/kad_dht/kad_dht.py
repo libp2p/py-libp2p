@@ -413,22 +413,30 @@ class KadDHT(Service):
                     # Process PUT_VALUE
                     key = message.record.key
                     value = message.record.value
+                    sucess = False
+                    try:
+                        if not (key and value):
+                            raise ValueError(
+                                "Missing key or value in PUT_VALUE message"
+                            )
 
-                    if key and value:
                         self.value_store.put(key, value)
                         logger.debug(f"Stored value for key {key.hex()}")
-
+                        sucess = True
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to store value for key {key.hex()}: {e}"
+                        )
+                    finally:
                         # Send acknowledgement
                         response = Message()
                         response.type = Message.MessageType.PUT_VALUE
-                        response.key = key
-
+                        if sucess:
+                            response.key = key
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                         logger.debug("Sent PUT_VALUE acknowledgement")
-                    else:
-                        logger.warning("Invalid PUT_VALUE message format")
 
             except Exception as proto_err:
                 logger.warning(f"Failed to parse protobuf message: {proto_err}")
@@ -493,6 +501,8 @@ class KadDHT(Service):
                         batch_results[idx] = success
                         if success:
                             logger.debug(f"Stored value at peer {peer}")
+                        else:
+                            logger.debug(f"Failed to store value at peer {peer}")
                 except Exception as e:
                     logger.debug(f"Error storing value at peer {peer}: {e}")
 
