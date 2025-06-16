@@ -58,7 +58,8 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param ttl: Time to live in seconds, or None for no expiration
+        :param validity: validity in seconds before the value expires.
+         Defaults to `DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
@@ -68,10 +69,10 @@ class ValueStore:
         if validity == 0.0:
             validity = time.time() + DEFAULT_TTL
         logger.debug(
-            "Storing value for key %s... with validity %s", key.hex()[:8], validity
+            "Storing value for key %s... with validity %s", key.hex(), validity
         )
         self.store[key] = (value, validity)
-        logger.debug(f"Stored value for key {key.hex()[:8]}...")
+        logger.debug(f"Stored value for key {key.hex()}")
 
     async def _store_at_peer(self, peer_id: ID, key: bytes, value: bytes) -> bool:
         """

@@ -510,7 +510,6 @@ class RoutingTable:
         """
         # Get all peers from all buckets
         all_peers = []
-        # logger.info("bucket is ",self.buckets.)
         for bucket in self.buckets:
             all_peers.extend(bucket.peer_ids())
 

@@ -425,7 +425,13 @@ class KadDHT(Service):
 
         # 1. Store locally first
         self.value_store.put(key, value)
-        logger.debug(f"Stored value locally for key {key.hex()}")
+        try:
+            decoded_value = value.decode("utf-8")
+        except UnicodeDecodeError:
+            decoded_value = value.hex()
+        logger.debug(
+            f"Stored value locally for key {key.hex()} with value {decoded_value}"
+        )
 
         # 2. Get closest peers, excluding self
         closest_peers = [
