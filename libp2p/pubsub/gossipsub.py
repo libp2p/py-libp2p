@@ -550,12 +550,6 @@ class GossipSub(IPubsubRouter, Service):
 
         # Skip if no peers have subscribed to the topic
         if topic not in self.pubsub.peer_topics:
-            if is_fanout:
-                # For fanout topics, check if we should remove the topic
-                if self.time_since_last_publish.get(topic, 0) + self.time_to_live < int(
-                    time.time()
-                ):
-                    return set(), True
             return current_peers, False
 
         # For fanout topics, check if we should remove the topic
