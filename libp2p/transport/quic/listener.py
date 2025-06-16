@@ -17,7 +17,6 @@ import trio
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler, TProtocol
 from libp2p.transport.quic.security import QUICTLSConfigManager
-from libp2p.transport.quic.utils import custom_quic_version_to_wire_format
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
@@ -25,6 +24,7 @@ from .exceptions import QUICListenError
 from .utils import (
     create_quic_multiaddr,
     create_server_config_from_base,
+    custom_quic_version_to_wire_format,
     is_quic_multiaddr,
     multiaddr_to_quic_version,
     quic_multiaddr_to_endpoint,
@@ -356,7 +356,6 @@ class QUICListener(IListener):
             for protocol, config in self._quic_configs.items():
                 wire_versions = custom_quic_version_to_wire_format(protocol)
                 if wire_versions == packet_info.version:
-                    print("PROTOCOL:", protocol)
                     quic_config = config
                     break
 
@@ -395,7 +394,6 @@ class QUICListener(IListener):
 
             # Process initial packet
             quic_conn.receive_datagram(data, addr, now=time.time())
-            print("Processing quic events")
             await self._process_quic_events(quic_conn, addr, destination_cid)
             await self._transmit_for_connection(quic_conn, addr)
 
@@ -755,8 +753,26 @@ class QUICListener(IListener):
     def get_addrs(self) -> tuple[Multiaddr]:
         return tuple(self.get_addresses())
 
-    def get_stats(self) -> dict[str, int]:
-        return self._stats
-
     def is_listening(self) -> bool:
-        raise NotImplementedError()
+        """
+        Check if the listener is currently listening for connections.
+
+        Returns:
+            bool: True if the listener is actively listening, False otherwise
+
+        """
+        return self._listening and not self._closed
+
+    def get_stats(self) -> dict[str, int | bool]:
+        """
+        Get listener statistics including the listening state.
+
+        Returns:
+            dict: Statistics dictionary with current state information
+
+        """
+        stats = self._stats.copy()
+        stats["is_listening"] = self.is_listening()
+        stats["active_connections"] = len(self._connections)
+        stats["pending_connections"] = len(self._pending_connections)
+        return stats

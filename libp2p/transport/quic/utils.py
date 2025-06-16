@@ -25,22 +25,22 @@ UDP_PROTOCOL = "udp"
 IP4_PROTOCOL = "ip4"
 IP6_PROTOCOL = "ip6"
 
-SERVER_CONFIG_PROTOCOL_V1 = f"{QUIC_V1_PROTOCOL}_SERVER"
-SERVER_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_V1_PROTOCOL}_SERVER"
-CLIENT_CONFIG_PROTCOL_V1 = f"{QUIC_DRAFT29_PROTOCOL}_SERVER"
-CLIENT_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_DRAFT29_PROTOCOL}_SERVER"
+SERVER_CONFIG_PROTOCOL_V1 = f"{QUIC_V1_PROTOCOL}_server"
+SERVER_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_V1_PROTOCOL}_server"
+CLIENT_CONFIG_PROTCOL_V1 = f"{QUIC_DRAFT29_PROTOCOL}_client"
+CLIENT_CONFIG_PROTOCOL_DRAFT_29 = f"{QUIC_DRAFT29_PROTOCOL}_client"
 
 CUSTOM_QUIC_VERSION_MAPPING = {
     SERVER_CONFIG_PROTOCOL_V1: 0x00000001,  # RFC 9000
     CLIENT_CONFIG_PROTCOL_V1: 0x00000001,  # RFC 9000
-    SERVER_CONFIG_PROTOCOL_DRAFT_29: 0xFF00001D,  # draft-29
-    CLIENT_CONFIG_PROTOCOL_DRAFT_29: 0xFF00001D,  # draft-29
+    SERVER_CONFIG_PROTOCOL_DRAFT_29: 0x00000001,  # draft-29
+    CLIENT_CONFIG_PROTOCOL_DRAFT_29: 0x00000001,  # draft-29
 }
 
 # QUIC version to wire format mappings (required for aioquic)
 QUIC_VERSION_MAPPINGS = {
     QUIC_V1_PROTOCOL: 0x00000001,  # RFC 9000
-    QUIC_DRAFT29_PROTOCOL: 0xFF00001D,  # draft-29
+    QUIC_DRAFT29_PROTOCOL: 0x00000001,  # draft-29
 }
 
 # ALPN protocols for libp2p over QUIC
@@ -249,7 +249,7 @@ def custom_quic_version_to_wire_format(version: TProtocol) -> int:
         QUICUnsupportedVersionError: If version is not supported
 
     """
-    wire_version = QUIC_VERSION_MAPPINGS.get(version)
+    wire_version = CUSTOM_QUIC_VERSION_MAPPING.get(version)
     if wire_version is None:
         raise QUICUnsupportedVersionError(f"Unsupported QUIC version: {version}")
 
@@ -370,7 +370,7 @@ def create_server_config_from_base(
                     transport_config, "max_datagram_size", 1200
                 )
         # Ensure we have ALPN protocols
-        if server_config.alpn_protocols:
+        if not server_config.alpn_protocols:
             server_config.alpn_protocols = ["libp2p"]
 
         logger.debug("Successfully created server config without deepcopy")

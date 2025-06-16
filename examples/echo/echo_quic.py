@@ -13,6 +13,7 @@ Modified from the original TCP version to use QUIC transport, providing:
 """
 
 import argparse
+import logging
 
 import multiaddr
 import trio
@@ -67,6 +68,7 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
         idle_timeout=30.0,
         max_concurrent_streams=1000,
         connection_timeout=10.0,
+        enable_draft29=False,
     )
 
     # CHANGED: Add QUIC transport options
@@ -142,7 +144,14 @@ def main() -> None:
         type=int,
         help="provide a seed to the random number generator",
     )
+    parser.add_argument(
+        "-log",
+        "--loglevel",
+        default="DEBUG",
+        help="Provide logging level. Example --loglevel debug, default=warning",
+    )
     args = parser.parse_args()
+    logging.basicConfig(level=args.loglevel.upper())
     try:
         trio.run(run, args.port, args.destination, args.seed)
     except KeyboardInterrupt:

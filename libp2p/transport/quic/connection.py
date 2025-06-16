@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level="DEBUG",
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler()],
 )
