@@ -12,3 +12,4 @@ Examples
    examples.ping
    examples.pubsub
    examples.circuit_relay
+   examples.kademlia
