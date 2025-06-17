@@ -1,0 +1,2 @@
+Adds the `StreamState` to the NetStream class to manage the state of network streams more effectively.
+Adds the `remove` method to notify the Swarm that a stream has been removed.
