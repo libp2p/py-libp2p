@@ -5,7 +5,6 @@ Based on aioquic library with interface consistency to go-libp2p and js-libp2p.
 Updated to include Module 5 security integration.
 """
 
-from collections.abc import Iterable
 import copy
 import logging
 import sys
@@ -31,7 +30,7 @@ from libp2p.custom_types import THandler, TProtocol
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.transport.quic.security import TSecurityConfig
+from libp2p.transport.quic.security import QUICTLSSecurityConfig
 from libp2p.transport.quic.utils import (
     get_alpn_protocols,
     is_quic_multiaddr,
@@ -192,7 +191,7 @@ class QUICTransport(ITransport):
             ) from e
 
     def _apply_tls_configuration(
-        self, config: QuicConfiguration, tls_config: TSecurityConfig
+        self, config: QuicConfiguration, tls_config: QUICTLSSecurityConfig
     ) -> None:
         """
         Apply TLS configuration to a QUIC configuration using aioquic's actual API.
@@ -203,52 +202,47 @@ class QUICTransport(ITransport):
 
         """
         try:
-            # Set certificate and private key directly on the configuration
-            # aioquic expects cryptography objects, not DER bytes
-            if "certificate" in tls_config and "private_key" in tls_config:
-                # The security manager should return cryptography objects
-                # not DER bytes, but if it returns DER bytes, we need to handle that
-                certificate = tls_config["certificate"]
-                private_key = tls_config["private_key"]
 
-                # Check if we received DER bytes and need
-                # to convert to cryptography objects
-                if isinstance(certificate, bytes):
+            # The security manager should return cryptography objects
+            # not DER bytes, but if it returns DER bytes, we need to handle that
+            certificate = tls_config.certificate
+            private_key = tls_config.private_key
+
+            # Check if we received DER bytes and need
+            # to convert to cryptography objects
+            if isinstance(certificate, bytes):
+                from cryptography import x509
+
+                certificate = x509.load_der_x509_certificate(certificate)
+
+            if isinstance(private_key, bytes):
+                from cryptography.hazmat.primitives import serialization
+
+                private_key = serialization.load_der_private_key(  # type: ignore
+                    private_key, password=None
+                )
+
+            # Set directly on the configuration object
+            config.certificate = certificate
+            config.private_key = private_key
+
+            # Handle certificate chain if provided
+            certificate_chain = tls_config.certificate_chain
+            # Convert DER bytes to cryptography objects if needed
+            chain_objects = []
+            for cert in certificate_chain:
+                if isinstance(cert, bytes):
                     from cryptography import x509
 
-                    certificate = x509.load_der_x509_certificate(certificate)
-
-                if isinstance(private_key, bytes):
-                    from cryptography.hazmat.primitives import serialization
-
-                    private_key = serialization.load_der_private_key(  # type: ignore
-                        private_key, password=None
-                    )
-
-                # Set directly on the configuration object
-                config.certificate = certificate
-                config.private_key = private_key
-
-                # Handle certificate chain if provided
-                certificate_chain = tls_config.get("certificate_chain", [])
-                if certificate_chain and isinstance(certificate_chain, Iterable):
-                    # Convert DER bytes to cryptography objects if needed
-                    chain_objects = []
-                    for cert in certificate_chain:
-                        if isinstance(cert, bytes):
-                            from cryptography import x509
-
-                            cert = x509.load_der_x509_certificate(cert)
-                        chain_objects.append(cert)
-                    config.certificate_chain = chain_objects
+                    cert = x509.load_der_x509_certificate(cert)
+                chain_objects.append(cert)
+            config.certificate_chain = chain_objects
 
             # Set ALPN protocols
-            if "alpn_protocols" in tls_config:
-                config.alpn_protocols = tls_config["alpn_protocols"]  # type: ignore
+            config.alpn_protocols = tls_config.alpn_protocols
 
             # Set certificate verification mode
-            if "verify_mode" in tls_config:
-                config.verify_mode = tls_config["verify_mode"]  # type: ignore
+            config.verify_mode = tls_config.verify_mode
 
             logger.debug("Successfully applied TLS configuration to QUIC config")
 
