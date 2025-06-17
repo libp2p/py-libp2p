@@ -440,7 +440,8 @@ class QUICTLSConfigManager:
             "private_key": self.tls_config.private_key,
             "certificate_chain": [],
             "alpn_protocols": ["libp2p"],
-            "verify_mode": True,
+            "verify_mode": False,
+            "check_hostname": False,
         }
         return config
 
@@ -458,7 +459,8 @@ class QUICTLSConfigManager:
             "private_key": self.tls_config.private_key,
             "certificate_chain": [],
             "alpn_protocols": ["libp2p"],
-            "verify_mode": True,
+            "verify_mode": False,
+            "check_hostname": False,
         }
         return config
 

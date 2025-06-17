@@ -5,6 +5,7 @@ QUIC Listener
 import logging
 import socket
 import struct
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -35,8 +36,8 @@ if TYPE_CHECKING:
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ Uses aioquic's sans-IO core with trio for async operations.
 
 import logging
 import socket
+from sys import stdout
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -34,10 +35,11 @@ if TYPE_CHECKING:
     from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
+logging.root.handlers = []
 logging.basicConfig(
-    level="DEBUG",
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -252,18 +254,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             raise QUICConnectionError(f"Connection start failed: {e}") from e
 
     async def _initiate_connection(self) -> None:
-        """Initiate client-side connection establishment."""
+        """Initiate client-side connection, reusing listener socket if available."""
         try:
             with QUICErrorContext("connection_initiation", "connection"):
-                # Create UDP socket using trio
-                self._socket = trio.socket.socket(
-                    family=socket.AF_INET, type=socket.SOCK_DGRAM
-                )
+                if not self._socket:
+                    logger.debug("Creating new socket for outbound connection")
+                    self._socket = trio.socket.socket(
+                        family=socket.AF_INET, type=socket.SOCK_DGRAM
+                    )
 
-                # Connect the socket to the remote address
-                await self._socket.connect(self._remote_addr)
+                await self._socket.bind(("0.0.0.0", 0))
 
-                # Start the connection establishment
                 self._quic.connect(self._remote_addr, now=time.time())
 
                 # Send initial packet(s)
@@ -297,8 +298,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Start background event processing
                 if not self._background_tasks_started:
-                    print("STARTING BACKGROUND TASK")
+                    logger.debug("STARTING BACKGROUND TASK")
                     await self._start_background_tasks()
+                else:
+                    logger.debug("BACKGROUND TASK ALREADY STARTED")
 
                 # Wait for handshake completion with timeout
                 with trio.move_on_after(
@@ -330,11 +333,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
+        if self.__is_initiator:  # Only for client connections
+            self._nursery.start_soon(async_fn=self._client_packet_receiver)
+
         # Start event processing task
         self._nursery.start_soon(async_fn=self._event_processing_loop)
 
         # Start periodic tasks
-        # self._nursery.start_soon(async_fn=self._periodic_maintenance)
+        self._nursery.start_soon(async_fn=self._periodic_maintenance)
 
         logger.debug("Started background tasks for QUIC connection")
 
@@ -378,6 +384,40 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         except Exception as e:
             logger.error(f"Error in periodic maintenance: {e}")
+
+    async def _client_packet_receiver(self) -> None:
+        """Receive packets for client connections."""
+        logger.debug("Starting client packet receiver")
+        print("Started QUIC client packet receiver")
+
+        try:
+            while not self._closed and self._socket:
+                try:
+                    # Receive UDP packets
+                    data, addr = await self._socket.recvfrom(65536)
+                    print(f"Client received {len(data)} bytes from {addr}")
+
+                    # Feed packet to QUIC connection
+                    self._quic.receive_datagram(data, addr, now=time.time())
+
+                    # Process any events that result from the packet
+                    await self._process_quic_events()
+
+                    # Send any response packets
+                    await self._transmit()
+
+                except trio.ClosedResourceError:
+                    logger.debug("Client socket closed")
+                    break
+                except Exception as e:
+                    logger.error(f"Error receiving client packet: {e}")
+                    await trio.sleep(0.01)
+
+        except trio.Cancelled:
+            logger.info("Client packet receiver cancelled")
+            raise
+        finally:
+            logger.debug("Client packet receiver terminated")
 
     # Security and identity methods
 

@@ -144,19 +144,14 @@ def main() -> None:
         type=int,
         help="provide a seed to the random number generator",
     )
-    parser.add_argument(
-        "-log",
-        "--loglevel",
-        default="DEBUG",
-        help="Provide logging level. Example --loglevel debug, default=warning",
-    )
     args = parser.parse_args()
-    logging.basicConfig(level=args.loglevel.upper())
+
     try:
         trio.run(run, args.port, args.destination, args.seed)
     except KeyboardInterrupt:
         pass
 
 
+logging.basicConfig(level=logging.DEBUG)
 if __name__ == "__main__":
     main()

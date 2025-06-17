@@ -8,6 +8,7 @@ Updated to include Module 5 security integration.
 from collections.abc import Iterable
 import copy
 import logging
+import sys
 
 from aioquic.quic.configuration import (
     QuicConfiguration,
@@ -15,6 +16,7 @@ from aioquic.quic.configuration import (
 from aioquic.quic.connection import (
     QuicConnection as NativeQUICConnection,
 )
+from aioquic.quic.logger import QuicLogger
 import multiaddr
 import trio
 
@@ -62,8 +64,8 @@ QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
+    format="%(asctime)s [%(levelname)s] [%(name)s]  %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -290,6 +292,7 @@ class QUICTransport(ITransport):
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
             config.is_client = True
+            config.quic_logger = QuicLogger()
             logger.debug(
                 f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
             )
@@ -484,3 +487,10 @@ class QUICTransport(ITransport):
 
         """
         return self._security_manager
+
+    def get_listener_socket(self) -> trio.socket.SocketType | None:
+        """Get the socket from the first active listener."""
+        for listener in self._listeners:
+            if listener.is_listening() and listener._socket:
+                return listener._socket
+        return None
