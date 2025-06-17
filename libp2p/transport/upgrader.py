@@ -48,11 +48,16 @@ class TransportUpgrader:
         # TODO: Figure out what to do with this function.
 
     async def upgrade_security(
-        self, raw_conn: IRawConnection, peer_id: ID, is_initiator: bool
+        self,
+        raw_conn: IRawConnection,
+        is_initiator: bool,
+        peer_id: ID | None = None,
     ) -> ISecureConn:
         """Upgrade conn to a secured connection."""
         try:
             if is_initiator:
+                if peer_id is None:
+                    raise ValueError("peer_id must be provided for outbout connection")
                 return await self.security_multistream.secure_outbound(
                     raw_conn, peer_id
                 )

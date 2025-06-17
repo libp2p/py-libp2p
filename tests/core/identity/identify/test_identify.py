@@ -56,16 +56,9 @@ async def test_identify_protocol(security_protocol):
         )
 
         # Check observed address
-        # TODO: use decapsulateCode(protocols('p2p').code)
-        # when the Multiaddr class will implement it
         host_b_addr = host_b.get_addrs()[0]
-        cleaned_addr = Multiaddr.join(
-            *(
-                host_b_addr.split()[:-1]
-                if str(host_b_addr.split()[-1]).startswith("/p2p/")
-                else host_b_addr.split()
-            )
-        )
+        host_b_peer_id = host_b.get_id()
+        cleaned_addr = host_b_addr.decapsulate(Multiaddr(f"/p2p/{host_b_peer_id}"))
 
         logger.debug("observed_addr: %s", Multiaddr(identify_response.observed_addr))
         logger.debug("host_b.get_addrs()[0]: %s", host_b.get_addrs()[0])
