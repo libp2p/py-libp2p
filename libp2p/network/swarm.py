@@ -411,7 +411,9 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.listen, self, multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
-        raise NotImplementedError
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.closed_stream, self, stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
         raise NotImplementedError
