@@ -136,6 +136,15 @@ def test_get_metadata_key_not_found():
         peer_data.get_metadata("nonexistent_key")
 
 
+# Test case for clearing metadata
+def test_clear_metadata():
+    peer_data = PeerData()
+    peer_data.metadata = {"key1": "value1", "key2": "value2"}
+
+    peer_data.clear_metadata()
+    assert peer_data.metadata == {}
+
+
 # Test case for adding public key
 def test_add_pubkey():
     peer_data = PeerData()
