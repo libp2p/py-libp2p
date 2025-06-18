@@ -157,3 +157,35 @@ def test_get_privkey_not_found():
     peer_data = PeerData()
     with pytest.raises(PeerDataError):
         peer_data.get_privkey()
+
+
+# Test case for recording latency for the first time
+def test_record_latency_initial():
+    peer_data = PeerData()
+    assert peer_data.latency_EWMA() == 0
+
+    peer_data.record_latency(100.0)
+    assert peer_data.latency_EWMA() == 100.0
+
+
+# Test case for updating latency
+def test_record_latency_updates_ewma():
+    peer_data = PeerData()
+    peer_data.record_latency(100.0)  # first measurement
+    first = peer_data.latency_EWMA()
+
+    peer_data.record_latency(50.0)  # second measurement
+    second = peer_data.latency_EWMA()
+
+    assert second < first  # EWMA should have smoothed downward
+    assert second > 50.0  # Not as low as the new latency
+    assert second != first
+
+
+def test_clear_metrics():
+    peer_data = PeerData()
+    peer_data.record_latency(200.0)
+    assert peer_data.latency_EWMA() == 200.0
+
+    peer_data.clear_metrics()
+    assert peer_data.latency_EWMA() == 0

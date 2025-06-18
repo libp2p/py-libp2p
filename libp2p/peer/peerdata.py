@@ -186,7 +186,7 @@ class PeerData(IPeerData):
         if s > 1 or s < 0:
             s = 0.1
 
-        if self.latmap is None:
+        if self.latmap == 0:
             self.latmap = new_latency
         else:
             prev = self.latmap
