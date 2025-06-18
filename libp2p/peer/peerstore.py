@@ -217,10 +217,6 @@ class PeerStore(IPeerStore):
                     peer_data.clear_addrs()
         return output
 
-    def addr_stream(self, peer_id: ID) -> None:
-        """addr_stream"""
-        # TODO!
-
     # -------KEY-BOOK---------
 
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
@@ -292,7 +288,7 @@ class PeerStore(IPeerStore):
         ]
 
     def clear_keydata(self, peer_id: ID) -> None:
-        """Clears all the keys of the peer"""
+        """Clears the keys of the peer"""
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_keydata()
 
