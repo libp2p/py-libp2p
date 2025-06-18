@@ -134,7 +134,7 @@ async def test_handle_graft(monkeypatch):
         # check if it is called in `handle_graft`
         event_emit_prune = trio.Event()
 
-        async def emit_prune(topic, sender_peer_id):
+        async def emit_prune(topic, sender_peer_id, do_px, is_unsubscribe):
             event_emit_prune.set()
             await trio.lowlevel.checkpoint()
 
@@ -193,7 +193,7 @@ async def test_handle_prune():
 
         # alice emit prune message to bob, alice should be removed
         # from bob's mesh peer
-        await gossipsubs[index_alice].emit_prune(topic, id_bob)
+        await gossipsubs[index_alice].emit_prune(topic, id_bob, False, False)
         # `emit_prune` does not remove bob from alice's mesh peers
         assert id_bob in gossipsubs[index_alice].mesh[topic]
 
