@@ -14,10 +14,6 @@ The Python implementation of the libp2p networking stack
 
 .. toctree::
     :maxdepth: 1
-    :caption: Community
-
-.. toctree::
-    :maxdepth: 1
     :caption: py-libp2p
 
     Examples <examples>
