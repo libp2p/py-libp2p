@@ -35,6 +35,9 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.network.stream.net_stream import (
+    NetStream,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -191,11 +194,6 @@ class BasicHost(IHost):
             # Accept the incoming stream that the server creates for us
             # This is the stream that will be used for actual communication
             incoming_stream = await connection.muxed_conn.accept_stream()
-
-            # Create NetStream directly from the incoming stream
-            from libp2p.network.stream.net_stream import (
-                NetStream,
-            )
 
             net_stream = NetStream(incoming_stream)
 
