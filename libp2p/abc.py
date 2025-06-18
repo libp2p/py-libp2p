@@ -480,18 +480,6 @@ class IAddrBook(ABC):
         """
 
     @abstractmethod
-    def set_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
-        """Set addr"""
-
-    @abstractmethod
-    def set_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
-        """Set addrs"""
-
-    @abstractmethod
-    def update_addrs(self, peer_id: ID, oldTTL: int, newTTL: int) -> None:
-        """Update addrs"""
-
-    @abstractmethod
     def addr_stream(self, peer_id: ID) -> None:
         """Addr stream"""
 
@@ -527,7 +515,7 @@ class IKeyBook(ABC):
         """peer_with_keys"""
 
     @abstractmethod
-    def clear_keydata(self, peer_id: ID) -> PublicKey:
+    def clear_keydata(self, peer_id: ID) -> None:
         """clear_keydata"""
 
 
@@ -670,18 +658,6 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
             The time-to-live for the record.
 
         """
-
-    @abstractmethod
-    def set_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
-        """set_addr"""
-
-    @abstractmethod
-    def set_addrs(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
-        """set_addrs"""
-
-    @abstractmethod
-    def update_addrs(self, peer_id: ID, oldTTL: int, newTTL: int) -> None:
-        """update_addrs"""
 
     @abstractmethod
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
@@ -835,7 +811,7 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
         """peer_with_keys"""
 
     @abstractmethod
-    def clear_keydata(self, peer_id: ID) -> PublicKey:
+    def clear_keydata(self, peer_id: ID) -> None:
         """clear_keydata"""
 
     ##
@@ -1488,7 +1464,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def add_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
+    def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         Add multiple multiaddresses to the peer's data.
 

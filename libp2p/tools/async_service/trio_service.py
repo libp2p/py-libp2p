@@ -52,6 +52,7 @@ from .exceptions import (
     LifecycleError,
 )
 from .typing import (
+    EXC_INFO,
     AsyncFn,
 )
 
@@ -231,7 +232,7 @@ class TrioManager(BaseManager):
                         # Exceptions from any tasks spawned by our service will be
                         # caught by trio and raised here, so we store them to report
                         # together with any others we have already captured.
-                        self._errors.append(sys.exc_info())
+                        self._errors.append(cast(EXC_INFO, sys.exc_info()))
                     finally:
                         system_nursery.cancel_scope.cancel()
 
