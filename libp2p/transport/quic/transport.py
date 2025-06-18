@@ -7,6 +7,7 @@ Updated to include Module 5 security integration.
 
 import copy
 import logging
+import ssl
 import sys
 
 from aioquic.quic.configuration import (
@@ -202,47 +203,19 @@ class QUICTransport(ITransport):
 
         """
         try:
-
-            # The security manager should return cryptography objects
-            # not DER bytes, but if it returns DER bytes, we need to handle that
-            certificate = tls_config.certificate
-            private_key = tls_config.private_key
-
-            # Check if we received DER bytes and need
-            # to convert to cryptography objects
-            if isinstance(certificate, bytes):
-                from cryptography import x509
-
-                certificate = x509.load_der_x509_certificate(certificate)
-
-            if isinstance(private_key, bytes):
-                from cryptography.hazmat.primitives import serialization
-
-                private_key = serialization.load_der_private_key(  # type: ignore
-                    private_key, password=None
-                )
-
-            # Set directly on the configuration object
-            config.certificate = certificate
-            config.private_key = private_key
-
-            # Handle certificate chain if provided
-            certificate_chain = tls_config.certificate_chain
-            # Convert DER bytes to cryptography objects if needed
-            chain_objects = []
-            for cert in certificate_chain:
-                if isinstance(cert, bytes):
-                    from cryptography import x509
-
-                    cert = x509.load_der_x509_certificate(cert)
-                chain_objects.append(cert)
-            config.certificate_chain = chain_objects
-
-            # Set ALPN protocols
+            # Access attributes directly from QUICTLSSecurityConfig
+            config.certificate = tls_config.certificate
+            config.private_key = tls_config.private_key
+            config.certificate_chain = tls_config.certificate_chain
             config.alpn_protocols = tls_config.alpn_protocols
 
-            # Set certificate verification mode
+            # Set verification mode (though libp2p typically doesn't verify)
             config.verify_mode = tls_config.verify_mode
+
+            if tls_config.is_client_config:
+                config.verify_mode = ssl.CERT_NONE
+            else:
+                config.verify_mode = ssl.CERT_REQUIRED
 
             logger.debug("Successfully applied TLS configuration to QUIC config")
 

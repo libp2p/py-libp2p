@@ -5,7 +5,6 @@ Based on go-libp2p and js-libp2p security patterns.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 import logging
 import ssl
 from typing import List, Optional, Union
@@ -280,15 +279,15 @@ class CertificateGenerator:
                 libp2p_private_key, cert_public_key_bytes
             )
 
-            # Set validity period using datetime objects (FIXED)
-            now = datetime.utcnow()  # Use datetime instead of time.time()
-            not_before = now - timedelta(seconds=CERTIFICATE_NOT_BEFORE_BUFFER)
+            from datetime import datetime, timedelta, timezone
+
+            now = datetime.now(timezone.utc)
+            not_before = now - timedelta(minutes=1)
             not_after = now + timedelta(days=validity_days)
 
             # Generate serial number
-            serial_number = int(now.timestamp())  # Convert datetime to timestamp
+            serial_number = int(now.timestamp())
 
-            # Build certificate with proper datetime objects
             certificate = (
                 x509.CertificateBuilder()
                 .subject_name(
@@ -537,9 +536,8 @@ class QUICTLSSecurityConfig:
 
         """
         try:
-            libp2p_oid = "1.3.6.1.4.1.53594.1.1"
             for ext in self.certificate.extensions:
-                if str(ext.oid) == libp2p_oid:
+                if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                     return True
             return False
         except Exception:
@@ -554,14 +552,13 @@ class QUICTLSSecurityConfig:
 
         """
         try:
-            from datetime import datetime
+            from datetime import datetime, timezone
 
-            now = datetime.utcnow()
-            return (
-                self.certificate.not_valid_before
-                <= now
-                <= self.certificate.not_valid_after
-            )
+            now = datetime.now(timezone.utc)
+            not_before = self.certificate.not_valid_before_utc
+            not_after = self.certificate.not_valid_after_utc
+
+            return not_before <= now <= not_after
         except Exception:
             return False
 
@@ -578,8 +575,8 @@ class QUICTLSSecurityConfig:
                 "subject": str(self.certificate.subject),
                 "issuer": str(self.certificate.issuer),
                 "serial_number": self.certificate.serial_number,
-                "not_valid_before": self.certificate.not_valid_before,
-                "not_valid_after": self.certificate.not_valid_after,
+                "not_valid_before_utc": self.certificate.not_valid_before_utc,
+                "not_valid_after_utc": self.certificate.not_valid_after_utc,
                 "has_libp2p_extension": self.has_libp2p_extension(),
                 "is_valid": self.is_certificate_valid(),
                 "certificate_key_match": self.validate_certificate_key_match(),
@@ -630,7 +627,7 @@ def create_server_tls_config(
         peer_id=peer_id,
         is_client_config=False,
         config_name="server",
-        verify_mode=False,  # Server doesn't verify client certs in libp2p
+        verify_mode=ssl.CERT_REQUIRED,  # Server doesn't verify client certs in libp2p
         check_hostname=False,
         **kwargs,
     )
@@ -661,7 +658,7 @@ def create_client_tls_config(
         peer_id=peer_id,
         is_client_config=True,
         config_name="client",
-        verify_mode=False,  # Client doesn't verify server certs in libp2p
+        verify_mode=ssl.CERT_NONE,  # Client doesn't verify server certs in libp2p
         check_hostname=False,
         **kwargs,
     )

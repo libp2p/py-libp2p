@@ -17,7 +17,10 @@ import trio
 
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler, TProtocol
-from libp2p.transport.quic.security import QUICTLSConfigManager
+from libp2p.transport.quic.security import (
+    LIBP2P_TLS_EXTENSION_OID,
+    QUICTLSConfigManager,
+)
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
@@ -442,7 +445,7 @@ class QUICListener(IListener):
                 cert = server_config.certificate
                 has_libp2p_ext = False
                 for ext in cert.extensions:
-                    if str(ext.oid) == "1.3.6.1.4.1.53594.1.1":
+                    if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                         has_libp2p_ext = True
                         break
                 print(f"🔧 NEW_CONN: Certificate has libp2p extension: {has_libp2p_ext}")
@@ -557,10 +560,10 @@ class QUICListener(IListener):
                     cert = config.certificate
                     print(f"🔧 QUIC_STATE: Certificate subject: {cert.subject}")
                     print(
-                        f"🔧 QUIC_STATE: Certificate valid from: {cert.not_valid_before}"
+                        f"🔧 QUIC_STATE: Certificate valid from: {cert.not_valid_before_utc}"
                     )
                     print(
-                        f"🔧 QUIC_STATE: Certificate valid until: {cert.not_valid_after}"
+                        f"🔧 QUIC_STATE: Certificate valid until: {cert.not_valid_after_utc}"
                     )
 
             # Check for connection errors

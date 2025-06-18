@@ -11,6 +11,7 @@ import sys
 import trio
 
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.transport.quic.security import LIBP2P_TLS_EXTENSION_OID
 from libp2p.transport.quic.transport import QUICTransport, QUICTransportConfig
 from libp2p.transport.quic.utils import create_quic_multiaddr
 
@@ -59,11 +60,10 @@ async def test_certificate_generation():
         # Check for libp2p extension
         has_libp2p_ext = False
         for ext in cert.extensions:
-            if str(ext.oid) == "1.3.6.1.4.1.53594.1.1":
+            if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                 has_libp2p_ext = True
                 print(f"✅ Found libp2p extension: {ext.oid}")
                 print(f"Extension critical: {ext.critical}")
-                print(f"Extension value length: {len(ext.value)} bytes")
                 break
 
         if not has_libp2p_ext:
@@ -209,7 +209,7 @@ async def test_server_startup():
                 # Check for libp2p extension
                 has_libp2p_ext = False
                 for ext in cert.extensions:
-                    if str(ext.oid) == "1.3.6.1.4.1.53594.1.1":
+                    if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                         has_libp2p_ext = True
                         break
                 print(f"Has libp2p extension: {has_libp2p_ext}")

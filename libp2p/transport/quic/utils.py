@@ -6,6 +6,7 @@ Based on go-libp2p and js-libp2p QUIC implementations.
 
 import ipaddress
 import logging
+import ssl
 
 from aioquic.quic.configuration import QuicConfiguration
 import multiaddr
@@ -302,6 +303,7 @@ def create_server_config_from_base(
     try:
         # Create new server configuration from scratch
         server_config = QuicConfiguration(is_client=False)
+        server_config.verify_mode = ssl.CERT_REQUIRED
 
         # Copy basic configuration attributes (these are safe to copy)
         copyable_attrs = [
@@ -343,18 +345,14 @@ def create_server_config_from_base(
                 server_tls_config = security_manager.create_server_config()
 
                 # Override with security manager's TLS configuration
-                if "certificate" in server_tls_config:
-                    server_config.certificate = server_tls_config["certificate"]
-                if "private_key" in server_tls_config:
-                    server_config.private_key = server_tls_config["private_key"]
-                if "certificate_chain" in server_tls_config:
-                    # type: ignore
-                    server_config.certificate_chain = server_tls_config[  # type: ignore
-                        "certificate_chain"  # type: ignore
-                    ]
-                if "alpn_protocols" in server_tls_config:
-                    # type: ignore
-                    server_config.alpn_protocols = server_tls_config["alpn_protocols"]  # type: ignore
+                if server_tls_config.certificate:
+                    server_config.certificate = server_tls_config.certificate
+                if server_tls_config.private_key:
+                    server_config.private_key = server_tls_config.private_key
+                if server_tls_config.certificate_chain:
+                    server_config.certificate_chain = server_tls_config.certificate_chain
+                if server_tls_config.alpn_protocols:
+                    server_config.alpn_protocols = server_tls_config.alpn_protocols
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")
