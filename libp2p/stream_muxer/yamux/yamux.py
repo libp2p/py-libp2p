@@ -29,6 +29,9 @@ from libp2p.abc import (
 from libp2p.io.exceptions import (
     IncompleteReadError,
 )
+from libp2p.io.utils import (
+    read_exactly,
+)
 from libp2p.network.connection.exceptions import (
     RawConnError,
 )
@@ -455,22 +458,33 @@ class Yamux(IMuxedConn):
     async def handle_incoming(self) -> None:
         while not self.event_shutting_down.is_set():
             try:
-                header = await self.secured_conn.read(HEADER_SIZE)
-                if not header or len(header) < HEADER_SIZE:
+                # Try to read the Yamux header (12 bytes) - ensure we get exactly
+                # HEADER_SIZE bytes
+                try:
+                    header = await read_exactly(self.secured_conn, HEADER_SIZE)
+                except IncompleteReadError as e:
+                    details = getattr(e, "args", [{}])[0] if e.args else {}
+                    received = (
+                        details.get("received_count", 0)
+                        if isinstance(details, dict)
+                        else 0
+                    )
+                    requested = (
+                        details.get("requested_count", 0)
+                        if isinstance(details, dict)
+                        else 0
+                    )
                     logging.debug(
-                        f"Connection closed or"
-                        f"incomplete header for peer {self.peer_id}"
+                        f"Connection closed or incomplete header for peer "
+                        f"{self.peer_id} (got {received}/{requested} bytes)"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
                     break
+
+                # Parse the Yamux header
                 version, typ, flags, stream_id, length = struct.unpack(
                     YAMUX_HEADER_FORMAT, header
-                )
-                logging.debug(
-                    f"Received header for peer {self.peer_id}:"
-                    f"type={typ}, flags={flags}, stream_id={stream_id},"
-                    f"length={length}"
                 )
                 if typ == TYPE_DATA and flags & FLAG_SYN:
                     async with self.streams_lock:
@@ -503,6 +517,48 @@ class Yamux(IMuxedConn):
                                 0,
                             )
                             await self.secured_conn.write(rst_header)
+
+                    # Read the data payload for SYN+DATA frames
+                    if length > 0:
+                        try:
+                            data = await read_exactly(self.secured_conn, length)
+                        except IncompleteReadError as e:
+                            details = getattr(e, "args", [{}])[0] if e.args else {}
+                            received = (
+                                details.get("received_count", 0)
+                                if isinstance(details, dict)
+                                else 0
+                            )
+                            logging.warning(
+                                f"Expected {length} bytes but got {received} bytes "
+                                f"for SYN+DATA frame from peer {self.peer_id} "
+                                f"stream {stream_id}"
+                            )
+                            data = b""  # Use empty data to avoid further errors
+                        except Exception as e:
+                            logging.error(
+                                f"Error reading SYN+DATA payload for stream "
+                                f"{stream_id}: {e}"
+                            )
+                            data = b""
+
+                        async with self.streams_lock:
+                            if stream_id in self.streams:
+                                self.stream_buffers[stream_id].extend(data)
+                                self.stream_events[stream_id].set()
+                                if flags & FLAG_FIN:
+                                    logging.debug(
+                                        f"Received FIN for SYN stream {self.peer_id}:"
+                                        f"{stream_id}, marking recv_closed"
+                                    )
+                                    self.streams[stream_id].recv_closed = True
+                                    if self.streams[stream_id].send_closed:
+                                        self.streams[stream_id].closed = True
+                            else:
+                                logging.warning(
+                                    f"Received SYN+DATA for unknown stream {stream_id} "
+                                    f"from peer {self.peer_id} (length={length})"
+                                )
                 elif typ == TYPE_DATA and flags & FLAG_RST:
                     async with self.streams_lock:
                         if stream_id in self.streams:
@@ -560,9 +616,37 @@ class Yamux(IMuxedConn):
                         )
                 elif typ == TYPE_DATA:
                     try:
-                        data = (
-                            await self.secured_conn.read(length) if length > 0 else b""
-                        )
+                        if length > 0:
+                            try:
+                                data = await read_exactly(self.secured_conn, length)
+                            except IncompleteReadError as e:
+                                details = getattr(e, "args", [{}])[0] if e.args else {}
+                                received = (
+                                    details.get("received_count", 0)
+                                    if isinstance(details, dict)
+                                    else 0
+                                )
+                                received_data = (
+                                    details.get("received_data", b"")
+                                    if isinstance(details, dict)
+                                    else b""
+                                )
+                                logging.warning(
+                                    f"Expected {length} bytes but got {received} bytes "
+                                    f"for peer {self.peer_id} stream {stream_id}"
+                                )
+                                # For partial reads, continue with what we got
+                                # or empty data
+                                if received == 0:
+                                    logging.error(
+                                        f"No data received when expecting "
+                                        f"{length} bytes"
+                                    )
+                                    continue
+                                data = received_data
+                        else:
+                            data = b""
+
                         async with self.streams_lock:
                             if stream_id in self.streams:
                                 self.stream_buffers[stream_id].extend(data)
@@ -575,6 +659,11 @@ class Yamux(IMuxedConn):
                                     self.streams[stream_id].recv_closed = True
                                     if self.streams[stream_id].send_closed:
                                         self.streams[stream_id].closed = True
+                            else:
+                                logging.warning(
+                                    f"Received data for unknown stream {stream_id} "
+                                    f"from peer {self.peer_id} (length={length})"
+                                )
                     except Exception as e:
                         logging.error(f"Error reading data for stream {stream_id}: {e}")
                         # Mark stream as closed on read error
@@ -591,9 +680,9 @@ class Yamux(IMuxedConn):
                             stream = self.streams[stream_id]
                             async with stream.window_lock:
                                 logging.debug(
-                                    f"Received window update for stream"
-                                    f"{self.peer_id}:{stream_id},"
-                                    f" increment: {increment}"
+                                    f"Received window update for stream "
+                                    f"{self.peer_id}:{stream_id}, "
+                                    f"increment: {increment}"
                                 )
                                 stream.send_window += increment
             except Exception as e:
@@ -615,12 +704,12 @@ class Yamux(IMuxedConn):
                     else:
                         logging.error(
                             f"Error in handle_incoming for peer {self.peer_id}: "
-                            + f"{type(e).__name__}: {str(e)}"
+                            f"{type(e).__name__}: {str(e)}"
                         )
                 else:
                     logging.error(
                         f"Error in handle_incoming for peer {self.peer_id}: "
-                        + f"{type(e).__name__}: {str(e)}"
+                        f"{type(e).__name__}: {str(e)}"
                     )
                 # Don't crash the whole connection for temporary errors
                 if self.event_shutting_down.is_set() or isinstance(
