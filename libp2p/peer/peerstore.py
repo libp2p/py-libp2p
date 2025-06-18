@@ -62,6 +62,20 @@ class PeerStore(IPeerStore):
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears the peer data of the peer"""
 
+    def valid_peer_ids(self) -> list[ID]:
+        """
+        :return: all of the valid peer IDs stored in peer store
+        """
+        valid_peer_ids: list[ID] = []
+        for peer_id, peer_data in self.peer_data_map.items():
+            if not peer_data.is_expired():
+                valid_peer_ids.append(peer_id)
+            else:
+                peer_data.clear_addrs()
+        return valid_peer_ids
+
+    # --------PROTO-BOOK--------
+
     def get_protocols(self, peer_id: ID) -> list[str]:
         """
         :param peer_id: peer ID to get protocols for
@@ -112,17 +126,7 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_protocol_data()
 
-    def valid_peer_ids(self) -> list[ID]:
-        """
-        :return: all of the valid peer IDs stored in peer store
-        """
-        valid_peer_ids: list[ID] = []
-        for peer_id, peer_data in self.peer_data_map.items():
-            if not peer_data.is_expired():
-                valid_peer_ids.append(peer_id)
-            else:
-                peer_data.clear_addrs()
-        return valid_peer_ids
+    # ------METADATA---------
 
     def get(self, peer_id: ID, key: str) -> Any:
         """
@@ -152,6 +156,8 @@ class PeerStore(IPeerStore):
         """Clears metadata"""
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_metadata()
+
+    # -------ADDR-BOOK--------
 
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """
@@ -214,6 +220,8 @@ class PeerStore(IPeerStore):
     def addr_stream(self, peer_id: ID) -> None:
         """addr_stream"""
         # TODO!
+
+    # -------KEY-BOOK---------
 
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
         """
@@ -287,6 +295,8 @@ class PeerStore(IPeerStore):
         """Clears all the keys of the peer"""
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_keydata()
+
+    # --------METRICS--------
 
     def record_latency(self, peer_id: ID, RTT: float) -> None:
         """

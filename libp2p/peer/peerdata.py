@@ -46,6 +46,8 @@ class PeerData(IPeerData):
         self.ttl = 0
         self.latmap = 0
 
+    # --------PROTO-BOOK--------
+
     def get_protocols(self) -> list[str]:
         """
         :return: all protocols associated with given peer
@@ -94,6 +96,7 @@ class PeerData(IPeerData):
         """Clear all protocols"""
         self.protocols = []
 
+    # -------ADDR-BOOK---------
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         :param addrs: multiaddresses to add
@@ -112,6 +115,9 @@ class PeerData(IPeerData):
         """Clear all addresses."""
         self.addrs = []
 
+    # TODO! ADDRS_STREAM
+
+    # -------METADATA-----------
     def put_metadata(self, key: str, val: Any) -> None:
         """
         :param key: key in KV pair
@@ -133,6 +139,7 @@ class PeerData(IPeerData):
         """Clears metadata."""
         self.metadata = {}
 
+    # -------KEY-BOOK---------------
     def add_pubkey(self, pubkey: PublicKey) -> None:
         """
         :param pubkey:
@@ -168,6 +175,7 @@ class PeerData(IPeerData):
         self.pubkey = None
         self.privkey = None
 
+    # ----------METRICS--------------
     def record_latency(self, new_latency: float) -> None:
         """
         Records a new latency measurement for the given peer
@@ -196,6 +204,7 @@ class PeerData(IPeerData):
     def update_last_identified(self) -> None:
         self.last_identified = int(time.time())
 
+    # ----------TTL------------------
     def get_last_identified(self) -> int:
         """
         :return: last identified timestamp
