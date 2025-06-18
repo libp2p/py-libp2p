@@ -11,6 +11,7 @@ Subpackages
    libp2p.host
    libp2p.identity
    libp2p.io
+   libp2p.kad_dht
    libp2p.network
    libp2p.peer
    libp2p.protocol_muxer

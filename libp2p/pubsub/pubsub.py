@@ -620,16 +620,22 @@ class Pubsub(Service, IPubsub):
                 logger.debug("Fail to message peer %s: stream closed", peer_id)
                 self._handle_dead_peer(peer_id)
 
-    async def publish(self, topic_id: str, data: bytes) -> None:
+    async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
-        Publish data to a topic.
+        Publish data to a topic or multiple topics.
 
-        :param topic_id: topic which we are going to publish the data to
+        :param topic_id: topic (str) or topics (list[str]) to publish the data to
         :param data: data which we are publishing
         """
+        # Handle both single topic (str) and multiple topics (list[str])
+        if isinstance(topic_id, str):
+            topic_ids = [topic_id]
+        else:
+            topic_ids = topic_id
+
         msg = rpc_pb2.Message(
             data=data,
-            topicIDs=[topic_id],
+            topicIDs=topic_ids,
             # Origin is ourself.
             from_id=self.my_id.to_bytes(),
             seqno=self._next_seqno(),
