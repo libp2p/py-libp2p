@@ -100,7 +100,17 @@ class PeerStore(IPeerStore):
         """
         :return: all of the peer IDs stored in peer store
         """
-        return list(self.peer_data_map.keys())
+        peer_data = self.peer_data_map[peer_id]
+        return peer_data.supports_protocols(protocols)
+
+    def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
+        peer_data = self.peer_data_map[peer_id]
+        return peer_data.first_supported_protocol(protocols)
+
+    def clear_protocol_data(self, peer_id: ID) -> None:
+        """Clears prtocoldata"""
+        peer_data = self.peer_data_map[peer_id]
+        peer_data.clear_protocol_data()
 
     def valid_peer_ids(self) -> list[ID]:
         """
@@ -137,6 +147,11 @@ class PeerStore(IPeerStore):
         """
         peer_data = self.peer_data_map[peer_id]
         peer_data.put_metadata(key, val)
+
+    def clear_metadata(self, peer_id: ID) -> None:
+        """Clears metadata"""
+        peer_data = self.peer_data_map[peer_id]
+        peer_data.clear_metadata()
 
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
         """

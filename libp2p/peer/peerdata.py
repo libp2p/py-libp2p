@@ -34,6 +34,7 @@ class PeerData(IPeerData):
     addrs: list[Multiaddr]
     last_identified: int
     ttl: int  # Keep ttl=0 by default for always valid
+    latmap: float
 
     def __init__(self) -> None:
         self.pubkey = None
@@ -43,6 +44,7 @@ class PeerData(IPeerData):
         self.addrs = []
         self.last_identified = int(time.time())
         self.ttl = 0
+        self.latmap = 0
 
     def get_protocols(self) -> list[str]:
         """
@@ -92,52 +94,13 @@ class PeerData(IPeerData):
         """Clear all protocols"""
         self.protocols = []
 
-    def add_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
+    def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         :param addrs: multiaddresses to add
         """
-        expiry = time.time() + ttl if ttl is not None else float("inf")
         for addr in addrs:
             if addr not in self.addrs:
                 self.addrs.append(addr)
-            current_expiry = self.addrs_ttl.get(addr, 0)
-            if expiry > current_expiry:
-                self.addrs_ttl[addr] = expiry
-
-    def set_addrs(self, addrs: Sequence[Multiaddr], ttl: int) -> None:
-        """
-        :param addrs: multiaddresses to update
-        :param ttl: new ttl
-        """
-        now = time.time()
-
-        if ttl <= 0:
-            # Put the TTL value to -1
-            for addr in addrs:
-                # TODO! if addr in self.addrs, remove them?
-                if addr in self.addrs_ttl:
-                    del self.addrs_ttl[addr]
-            return
-
-        expiry = now + ttl
-        for addr in addrs:
-            # TODO! if addr not in self.addrs, add them?
-            self.addrs_ttl[addr] = expiry
-
-    def update_addrs(self, oldTTL: int, newTTL: int) -> None:
-        """
-        :param oldTTL: old ttl
-        :param newTTL: new ttl
-        """
-        now = time.time()
-
-        new_expiry = now + newTTL
-        old_expiry = now + oldTTL
-
-        for addr, expiry in list(self.addrs_ttl.items()):
-            # Approximate match by expiry time
-            if abs(expiry - old_expiry) < 1:
-                self.addrs_ttl[addr] = new_expiry
 
     def get_addrs(self) -> list[Multiaddr]:
         """
@@ -199,6 +162,36 @@ class PeerData(IPeerData):
         if self.privkey is None:
             raise PeerDataError("private key not found")
         return self.privkey
+
+    def clear_keydata(self) -> None:
+        """Clears keydata"""
+        self.pubkey = None
+        self.privkey = None
+
+    def record_latency(self, new_latency: float) -> None:
+        """
+        Records a new latency measurement for the given peer
+        using Exponentially Weighted Moving Average (EWMA)
+        :param new_latency: the new latency value
+        """
+        s = LATENCY_EWMA_SMOOTHING
+        if s > 1 or s < 0:
+            s = 0.1
+
+        if self.latmap is None:
+            self.latmap = new_latency
+        else:
+            prev = self.latmap
+            updated = ((1.0 - s) * prev) + (s * new_latency)
+            self.latmap = updated
+
+    def latency_EWMA(self) -> float:
+        """Returns the latency EWMA value"""
+        return self.latmap
+
+    def clear_metrics(self) -> None:
+        """Clear the latency metrics"""
+        self.latmap = 0
 
     def update_last_identified(self) -> None:
         self.last_identified = int(time.time())
