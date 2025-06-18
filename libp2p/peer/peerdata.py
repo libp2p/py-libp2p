@@ -115,8 +115,6 @@ class PeerData(IPeerData):
         """Clear all addresses."""
         self.addrs = []
 
-    # TODO! ADDRS_STREAM
-
     # -------METADATA-----------
     def put_metadata(self, key: str, val: Any) -> None:
         """

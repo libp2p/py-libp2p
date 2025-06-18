@@ -387,7 +387,15 @@ class IPeerMetadata(ABC):
 
     @abstractmethod
     def clear_metadata(self, peer_id: ID) -> None:
-        """Clears the metadata"""
+        """
+        Remove all stored metadata for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose metadata are to be removed.
+
+        """
 
 
 # -------------------------- addrbook interface.py --------------------------
@@ -479,96 +487,267 @@ class IAddrBook(ABC):
 
         """
 
-    @abstractmethod
-    def addr_stream(self, peer_id: ID) -> None:
-        """Addr stream"""
-
 
 # -------------------------- keybook interface.py --------------------------
 
 
 class IKeyBook(ABC):
-    """IKeyBook"""
+    """
+    Interface for an key book.
+
+    Provides methods for managing cryptographic keys.
+    """
 
     @abstractmethod
     def pubkey(self, peer_id: ID) -> PublicKey:
-        """Pubkey"""
+        """
+        Returns the public key of the specified peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose public key is to be returned.
+
+        """
 
     @abstractmethod
     def privkey(self, peer_id: ID) -> PrivateKey:
-        """Privkey"""
+        """
+        Returns the private key of the specified peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose private key is to be returned.
+
+        """
 
     @abstractmethod
     def add_pubkey(self, peer_id: ID, pubkey: PublicKey) -> None:
-        """add_pubkey"""
+        """
+        Adds the public key for a specified peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose public key is to be added
+        pubkey: PublicKey
+            The public key of the peer
+
+        """
 
     @abstractmethod
     def add_privkey(self, peer_id: ID, privkey: PrivateKey) -> None:
-        """add_privkey"""
+        """
+        Adds the private key for a specified peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose private key is to be added
+        privkey: PrivateKey
+            The private key of the peer
+
+        """
 
     @abstractmethod
     def add_key_pair(self, peer_id: ID, key_pair: KeyPair) -> None:
-        """add_key_pair"""
+        """
+        Adds the key pair for a specified peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose key pair is to be added
+        key_pair: KeyPair
+            The key pair of the peer
+
+        """
 
     @abstractmethod
     def peer_with_keys(self) -> list[ID]:
-        """peer_with_keys"""
+        """Returns all the peer IDs stored in the AddrBook"""
 
     @abstractmethod
     def clear_keydata(self, peer_id: ID) -> None:
-        """clear_keydata"""
+        """
+        Remove all stored keydata for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose keys are to be removed.
+
+        """
 
 
 # -------------------------- metrics interface.py --------------------------
 
 
 class IMetrics(ABC):
-    """IMetrics"""
+    """
+    Interface for metrics of peer interaction.
+
+    Provides methods for managing the metrics.
+    """
 
     @abstractmethod
     def record_latency(self, peer_id: ID, RTT: float) -> None:
-        """record_latency"""
+        """
+        Records a new round-trip time (RTT) latency value for the specified peer
+        using Exponentially Weighted Moving Average (EWMA).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer for which latency is being recorded.
+
+        RTT : float
+            The round-trip time latency value to record.
+
+        """
 
     @abstractmethod
     def latency_EWMA(self, peer_id: ID) -> float:
-        """latency_EWMA"""
+        """
+        Returns the current latency value for the specified peer using
+        Exponentially Weighted Moving Average (EWMA).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose latency EWMA is to be returned.
+
+        """
 
     @abstractmethod
     def clear_metrics(self, peer_id: ID) -> None:
-        """clear_metrics"""
+        """
+        Clears the stored latency metrics for the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose latency metrics are to be cleared.
+
+        """
 
 
 # -------------------------- protobook interface.py --------------------------
 
 
 class IProtoBook(ABC):
+    """
+    Interface for a protocol book.
+
+    Provides methods for managing the list of supported protocols.
+    """
+
     @abstractmethod
     def get_protocols(self, peer_id: ID) -> list[str]:
-        """get_protocols"""
+        """
+        Returns the list of protocols associated with the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose supported protocols are to be returned.
+
+        """
 
     @abstractmethod
     def add_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
-        """add_protocols"""
+        """
+        Adds the given protocols to the specified peer's protocol list.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to which protocols will be added.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to add.
+
+        """
 
     @abstractmethod
     def set_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
-        """set_protocols"""
+        """
+        Replaces the existing protocols of the specified peer with the given list.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose protocols are to be set.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to assign.
+
+        """
 
     @abstractmethod
     def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
-        """remove_protocols"""
+        """
+        Removes the specified protocols from the peer's protocol list.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer from which protocols will be removed.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to remove.
+
+        """
 
     @abstractmethod
     def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
-        """supports_protocols"""
+        """
+        Returns the list of protocols from the input sequence that the peer supports.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to check for protocol support.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to check against the peer's
+            supported protocols.
+
+        """
 
     @abstractmethod
     def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
-        """first_supported_protocol"""
+        """
+        Returns the first protocol from the input list that the peer supports.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to check for supported protocols.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to check.
+
+        Returns
+        -------
+        str
+            The first matching protocol string, or an empty string
+            if none are supported.
+
+        """
 
     @abstractmethod
     def clear_protocol_data(self, peer_id: ID) -> None:
-        """clear_protocol_data"""
+        """
+        Clears all protocol data associated with the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose protocol data will be cleared.
+
+        """
 
 
 # -------------------------- peerstore interface.py --------------------------
@@ -582,6 +761,7 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
     management, protocol handling, and key storage.
     """
 
+    # -------METADATA---------
     @abstractmethod
     def get(self, peer_id: ID, key: str) -> Any:
         """
@@ -624,9 +804,17 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
     @abstractmethod
     def clear_metadata(self, peer_id: ID) -> None:
-        """clear_metadata"""
+        """
+        Clears the stored latency metrics for the specified peer.
 
-    ##
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose latency metrics are to be cleared.
+
+        """
+
+    # --------ADDR-BOOK---------
     @abstractmethod
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int) -> None:
         """
@@ -700,11 +888,7 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
         """
 
-    @abstractmethod
-    def addr_stream(self, peer_id: ID) -> None:
-        """addr_stream"""
-
-    ##
+    # --------KEY-BOOK----------
     @abstractmethod
     def pubkey(self, peer_id: ID) -> PublicKey:
         """
@@ -808,26 +992,63 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
     @abstractmethod
     def peer_with_keys(self) -> list[ID]:
-        """peer_with_keys"""
+        """Returns all the peer IDs stored in the AddrBook"""
 
     @abstractmethod
     def clear_keydata(self, peer_id: ID) -> None:
-        """clear_keydata"""
+        """
+        Remove all stored keydata for the specified peer.
 
-    ##
+        Parameters
+        ----------
+        peer_id : ID
+            The peer identifier whose keys are to be removed.
+
+        """
+
+    # -------METRICS---------
     @abstractmethod
     def record_latency(self, peer_id: ID, RTT: float) -> None:
-        """record_latency"""
+        """
+        Records a new round-trip time (RTT) latency value for the specified peer
+        using Exponentially Weighted Moving Average (EWMA).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer for which latency is being recorded.
+
+        RTT : float
+            The round-trip time latency value to record.
+
+        """
 
     @abstractmethod
     def latency_EWMA(self, peer_id: ID) -> float:
-        """latency_EWMA"""
+        """
+        Returns the current latency value for the specified peer using
+        Exponentially Weighted Moving Average (EWMA).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose latency EWMA is to be returned.
+
+        """
 
     @abstractmethod
     def clear_metrics(self, peer_id: ID) -> None:
-        """clear_metrics"""
+        """
+        Clears the stored latency metrics for the specified peer.
 
-    ##
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose latency metrics are to be cleared.
+
+        """
+
+    # --------PROTO-BOOK----------
     @abstractmethod
     def get_protocols(self, peer_id: ID) -> list[str]:
         """
@@ -880,21 +1101,69 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
     @abstractmethod
     def remove_protocols(self, peer_id: ID, protocols: Sequence[str]) -> None:
-        """remove_protocols"""
+        """
+        Removes the specified protocols from the peer's protocol list.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer from which protocols will be removed.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to remove.
+
+        """
 
     @abstractmethod
     def supports_protocols(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
-        """supports_protocols"""
+        """
+        Returns the list of protocols from the input sequence that the peer supports.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to check for protocol support.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to check against the peer's
+            supported protocols.
+
+        """
 
     @abstractmethod
     def first_supported_protocol(self, peer_id: ID, protocols: Sequence[str]) -> str:
-        """first_supported_protocol"""
+        """
+        Returns the first protocol from the input list that the peer supports.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to check for supported protocols.
+
+        protocols : Sequence[str]
+            A sequence of protocol strings to check.
+
+        Returns
+        -------
+        str
+            The first matching protocol string, or an empty string
+            if none are supported.
+
+        """
 
     @abstractmethod
     def clear_protocol_data(self, peer_id: ID) -> None:
-        """clear_protocol_data"""
+        """
+        Clears all protocol data associated with the specified peer.
 
-    ##
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer whose protocol data will be cleared.
+
+        """
+
+    # --------PEER-STORE--------
     @abstractmethod
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -1464,6 +1733,60 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
+    def remove_protocols(self, protocols: Sequence[str]) -> None:
+        """
+        Removes the specified protocols from this peer's list of supported protocols.
+
+        Parameters
+        ----------
+        protocols : Sequence[str]
+            A sequence of protocol strings to be removed.
+
+        """
+
+    @abstractmethod
+    def supports_protocols(self, protocols: Sequence[str]) -> list[str]:
+        """
+        Returns the list of protocols from the input sequence that are supported
+        by this peer.
+
+        Parameters
+        ----------
+        protocols : Sequence[str]
+            A sequence of protocol strings to check against this peer's supported
+            protocols.
+
+        Returns
+        -------
+        list[str]
+            A list of protocol strings that are supported.
+
+        """
+
+    @abstractmethod
+    def first_supported_protocol(self, protocols: Sequence[str]) -> str:
+        """
+        Returns the first protocol from the input list that this peer supports.
+
+        Parameters
+        ----------
+        protocols : Sequence[str]
+            A sequence of protocol strings to check for support.
+
+        Returns
+        -------
+        str
+            The first matching protocol, or an empty string if none are supported.
+
+        """
+
+    @abstractmethod
+    def clear_protocol_data(self) -> None:
+        """
+        Clears all protocol data associated with this peer.
+        """
+
+    @abstractmethod
     def add_addrs(self, addrs: Sequence[Multiaddr]) -> None:
         """
         Add multiple multiaddresses to the peer's data.
@@ -1533,6 +1856,12 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
+    def clear_metadata(self) -> None:
+        """
+        Clears all metadata entries associated with this peer.
+        """
+
+    @abstractmethod
     def add_pubkey(self, pubkey: PublicKey) -> None:
         """
         Add a public key to the peer's data.
@@ -1588,6 +1917,45 @@ class IPeerData(ABC):
         PeerDataError
             If the private key is not found.
 
+        """
+
+    @abstractmethod
+    def clear_keydata(self) -> None:
+        """
+        Clears all cryptographic key data associated with this peer,
+        including both public and private keys.
+        """
+
+    @abstractmethod
+    def record_latency(self, new_latency: float) -> None:
+        """
+        Records a new latency measurement using
+        Exponentially Weighted Moving Average (EWMA).
+
+        Parameters
+        ----------
+        new_latency : float
+            The new round-trip time (RTT) latency value to incorporate
+            into the EWMA calculation.
+
+        """
+
+    @abstractmethod
+    def latency_EWMA(self) -> float:
+        """
+        Returns the current EWMA value of the recorded latency.
+
+        Returns
+        -------
+        float
+            The current latency estimate based on EWMA.
+
+        """
+
+    @abstractmethod
+    def clear_metrics(self) -> None:
+        """
+        Clears all latency-related metrics and resets the internal state.
         """
 
     @abstractmethod
