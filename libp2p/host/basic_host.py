@@ -175,6 +175,62 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+    
+    async def _is_py_libp2p_peer(self, peer_id: ID) -> bool:
+        """
+        Simplified detection using connection patterns
+        """
+        peer_id_str = str(peer_id)
+        
+        if not hasattr(self, '_peer_type_cache'):
+            self._peer_type_cache = {}
+            self._rust_peer_attempts = {}
+        
+        # Check if we already know this peer type
+        if peer_id_str in self._peer_type_cache:
+            cached_result = self._peer_type_cache[peer_id_str]
+            
+            # If it's a rust peer, handle the initial instability
+            if not cached_result:  # rust peer
+                if peer_id_str not in self._rust_peer_attempts:
+                    self._rust_peer_attempts[peer_id_str] = 0
+                self._rust_peer_attempts[peer_id_str] += 1
+                
+                # For first 4 attempts with rust peers, keep using rust logic
+                if self._rust_peer_attempts[peer_id_str] <= 4:
+                    logger.debug(f"Rust peer {peer_id}, attempt {self._rust_peer_attempts[peer_id_str]}")
+            
+            return cached_result
+        
+        # First time seeing this peer - detect type
+        try:
+            connection = self._network.connections.get(peer_id)
+            if not connection:
+                return False
+            
+            # Quick detection: try to accept a stream immediately
+            muxed_conn = connection.muxed_conn
+            
+            with trio.move_on_after(0.1):
+                try:
+                    test_stream = await muxed_conn.accept_stream()
+                    await test_stream.close()
+                    # If we can accept immediately, it's rust
+                    self._peer_type_cache[peer_id_str] = False
+                    logger.debug(f"Detected {peer_id} as rust-libp2p (immediate stream)")
+                    return False
+                except Exception:
+                    pass
+            
+            # If no immediate stream, likely py-libp2p
+            self._peer_type_cache[peer_id_str] = True
+            logger.debug(f"Detected {peer_id} as py-libp2p (no immediate stream)")
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Detection failed for {peer_id}: {e}, assuming py-libp2p")
+            self._peer_type_cache[peer_id_str] = True
+            return True
 
     async def new_stream(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
@@ -186,8 +242,7 @@ class BasicHost(IHost):
         :return: stream: new stream created
         """
         # Check if the peer is using py-libp2p (based on peer ID or connection context)
-        # This is a heuristic; you may need a better way to detect py-libp2p peers
-        is_py_libp2p_peer = True  # Replace with actual detection logic if possible
+        is_py_libp2p_peer = await self._is_py_libp2p_peer(peer_id)
 
         if is_py_libp2p_peer:
             # Use single-stream model for py-libp2p to py-libp2p
@@ -202,20 +257,45 @@ class BasicHost(IHost):
                 raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
         else:
             # Use dual-stream model for rust-libp2p compatibility
-            outgoing_stream = await self._network.new_stream(peer_id)
-            connection = self._network.connections[peer_id]
-            incoming_stream = await connection.muxed_conn.accept_stream()
-            net_stream = NetStream(incoming_stream)
-            await outgoing_stream.close()
+            outgoing_stream = None
+            incoming_stream = None
+            net_stream = None
+            
             try:
+                outgoing_stream = await self._network.new_stream(peer_id)
+                connection = self._network.connections[peer_id]
+                incoming_stream = await connection.muxed_conn.accept_stream()
+                net_stream = NetStream(incoming_stream)
+                
+                # Perform protocol negotiation on the incoming stream
                 with trio.fail_after(10):  # 10 second timeout for protocol negotiation
                     selected_protocol = await self.multiselect_client.select_one_of(
                         list(protocol_ids), MultiselectCommunicator(net_stream)
                     )
+                
+                # Only close the outgoing stream after successful negotiation
+                await outgoing_stream.close()
+                
             except (MultiselectClientError, Exception) as error:
                 logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-                await net_stream.reset()
-                await outgoing_stream.reset()
+                
+                # Clean up all streams on error
+                if net_stream:
+                    try:
+                        await net_stream.reset()
+                    except:
+                        pass
+                if incoming_stream and incoming_stream != net_stream:
+                    try:
+                        await incoming_stream.reset()
+                    except:
+                        pass
+                if outgoing_stream:
+                    try:
+                        await outgoing_stream.reset()
+                    except:
+                        pass
+                        
                 raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
 
         net_stream.set_protocol(selected_protocol)
