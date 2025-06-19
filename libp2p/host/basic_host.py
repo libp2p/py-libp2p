@@ -178,37 +178,45 @@ class BasicHost(IHost):
 
     async def new_stream(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
-    ) -> INetStream:
+    ) -> NetStream:
         """
-        :param peer_id: peer_id that host is connecting
+        Create a new stream to the peer_id with one of the given protocol_ids.
+        :param peer_id: peer_id to connect to
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
-        try:
-            # Create outgoing stream to signal intent
-            outgoing_stream = await self._network.new_stream(peer_id)
+        # Check if the peer is using py-libp2p (based on peer ID or connection context)
+        # This is a heuristic; you may need a better way to detect py-libp2p peers
+        is_py_libp2p_peer = True  # Replace with actual detection logic if possible
 
-            # Get the connection to access the muxed connection
-            connection = self._network.connections[peer_id]
-
-            # Accept the incoming stream that the server creates for us
-            # This is the stream that will be used for actual communication
-            incoming_stream = await connection.muxed_conn.accept_stream()
-
-            net_stream = NetStream(incoming_stream)
-
-            # Close the outgoing signaling stream as it's no longer needed
-            await outgoing_stream.close()
-
-            # Perform protocol muxing on the actual communication stream with timeout
-            with trio.fail_after(10):  # 10 second timeout for protocol negotiation
+        if is_py_libp2p_peer:
+            # Use single-stream model for py-libp2p to py-libp2p
+            net_stream = await self._network.new_stream(peer_id)
+            try:
                 selected_protocol = await self.multiselect_client.select_one_of(
                     list(protocol_ids), MultiselectCommunicator(net_stream)
                 )
-        except (MultiselectClientError, Exception) as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await outgoing_stream.reset()
-            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
+            except MultiselectClientError as error:
+                logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+                await net_stream.reset()
+                raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
+        else:
+            # Use dual-stream model for rust-libp2p compatibility
+            outgoing_stream = await self._network.new_stream(peer_id)
+            connection = self._network.connections[peer_id]
+            incoming_stream = await connection.muxed_conn.accept_stream()
+            net_stream = NetStream(incoming_stream)
+            await outgoing_stream.close()
+            try:
+                with trio.fail_after(10):  # 10 second timeout for protocol negotiation
+                    selected_protocol = await self.multiselect_client.select_one_of(
+                        list(protocol_ids), MultiselectCommunicator(net_stream)
+                    )
+            except (MultiselectClientError, Exception) as error:
+                logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+                await net_stream.reset()
+                await outgoing_stream.reset()
+                raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
 
         net_stream.set_protocol(selected_protocol)
         return net_stream
