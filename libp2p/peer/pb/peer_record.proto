@@ -6,10 +6,10 @@ package peer.pb;
 message PeerRecord {
     // The peer ID.
     bytes peer_id = 1;
-    
+
     // The signed addresses where this peer can be reached.
     repeated bytes addrs = 2;
-    
+
     // A sequence number to enforce record freshness.
     uint64 seq = 3;
-} 
+}

@@ -12,4 +12,4 @@ from .peer_record_pb2 import (
     PeerRecord,
 )
 
-__all__ = ["Envelope", "PeerRecord"] 
+__all__ = ["Envelope", "PeerRecord"]

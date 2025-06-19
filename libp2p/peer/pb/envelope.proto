@@ -7,13 +7,13 @@ package peer.pb;
 message Envelope {
     // The public key that was used to sign the payload.
     bytes public_key = 1;
-    
+
     // The payload type identifier for deterministic deserialization.
     bytes payload_type = 2;
-    
+
     // The payload that was signed.
     bytes payload = 3;
-    
+
     // The signature of the payload using the public key.
     bytes signature = 5;
-} 
+}

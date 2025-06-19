@@ -30,7 +30,7 @@ LIBP2P_RECORD_DOMAIN = "libp2p-envelope-signature:"
 class Envelope:
     """
     Envelope represents a signed record.
-    
+
     It provides authentication and integrity for record data by wrapping it
     with a cryptographic signature and the public key used for signing.
     """
@@ -44,12 +44,13 @@ class Envelope:
     ) -> None:
         """
         Initialize an Envelope.
-        
+
         Args:
             public_key: The public key that was used to sign the payload
             payload_type: The type identifier for the payload
             payload: The payload that was signed
             signature: The signature of the payload using the public key
+
         """
         self.public_key = public_key
         self.payload_type = payload_type
@@ -65,19 +66,20 @@ class Envelope:
     ) -> "Envelope":
         """
         Create and sign a new envelope.
-        
+
         Args:
             payload_type: The type identifier for the payload
             payload: The data to be signed
             private_key: The private key to sign with
-            
+
         Returns:
             A new signed Envelope
+
         """
         public_key = private_key.get_public_key()
         signature_data = LIBP2P_RECORD_DOMAIN.encode() + payload
         signature = private_key.sign(signature_data)
-        
+
         return cls(
             public_key=public_key,
             payload_type=payload_type,
@@ -88,9 +90,10 @@ class Envelope:
     def verify(self) -> bool:
         """
         Verify the envelope signature.
-        
+
         Returns:
             True if the signature is valid, False otherwise
+
         """
         try:
             signature_data = LIBP2P_RECORD_DOMAIN.encode() + self.payload
@@ -101,18 +104,20 @@ class Envelope:
     def peer_id(self) -> ID:
         """
         Get the peer ID of the signer.
-        
+
         Returns:
             The peer ID derived from the public key
+
         """
         return ID.from_pubkey(self.public_key)
 
     def serialize(self) -> bytes:
         """
         Serialize the envelope to bytes.
-        
+
         Returns:
             The serialized envelope
+
         """
         pb = EnvelopePB(
             public_key=self.public_key.serialize(),
@@ -126,22 +131,23 @@ class Envelope:
     def deserialize(cls, data: bytes) -> "Envelope":
         """
         Deserialize an envelope from bytes.
-        
+
         Args:
             data: The serialized envelope data
-            
+
         Returns:
             The deserialized Envelope
-            
+
         Raises:
             ValueError: If the data is invalid or cannot be deserialized
+
         """
         try:
             pb = EnvelopePB()
             pb.ParseFromString(data)
-            
+
             public_key = deserialize_public_key(pb.public_key)
-            
+
             return cls(
                 public_key=public_key,
                 payload_type=pb.payload_type,
@@ -168,4 +174,4 @@ class Envelope:
             f"payload_type={self.payload_type.hex()}, "
             f"payload_len={len(self.payload)}, "
             f"signature_len={len(self.signature)})"
-        ) 
+        )
