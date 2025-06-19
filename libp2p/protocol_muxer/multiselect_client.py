@@ -113,6 +113,7 @@ class MultiselectClient(IMultiselectClient):
         """
         try:
             await communicator.write(protocol)
+
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
