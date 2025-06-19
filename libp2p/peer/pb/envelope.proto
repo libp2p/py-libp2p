@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package peer.pb;
+
+// Envelope represents a signed record.
+// Based on libp2p RFC 0002: https://github.com/libp2p/specs/blob/master/RFC/0002-signed-envelopes.md
+message Envelope {
+    // The public key that was used to sign the payload.
+    bytes public_key = 1;
+    
+    // The payload type identifier for deterministic deserialization.
+    bytes payload_type = 2;
+    
+    // The payload that was signed.
+    bytes payload = 3;
+    
+    // The signature of the payload using the public key.
+    bytes signature = 5;
+} 
