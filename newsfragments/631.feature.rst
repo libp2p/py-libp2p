@@ -1,0 +1,3 @@
+Store public key and peer ID in peerstore during handshake
+
+Modified the InsecureTransport class to accept an optional peerstore parameter and updated the handshake process to store the received public key and peer ID in the peerstore when available.
