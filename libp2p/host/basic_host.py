@@ -12,6 +12,7 @@ from typing import (
 )
 
 import multiaddr
+import trio
 
 from libp2p.abc import (
     IHost,
@@ -33,6 +34,9 @@ from libp2p.host.defaults import (
 )
 from libp2p.host.exceptions import (
     StreamFailure,
+)
+from libp2p.network.stream.net_stream import (
+    NetStream,
 )
 from libp2p.peer.id import (
     ID,
@@ -180,16 +184,30 @@ class BasicHost(IHost):
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
-        net_stream = await self._network.new_stream(peer_id)
-
-        # Perform protocol muxing to determine protocol to use
         try:
-            selected_protocol = await self.multiselect_client.select_one_of(
-                list(protocol_ids), MultiselectCommunicator(net_stream)
-            )
-        except MultiselectClientError as error:
+            # Create outgoing stream to signal intent
+            outgoing_stream = await self._network.new_stream(peer_id)
+
+            # Get the connection to access the muxed connection
+            connection = self._network.connections[peer_id]
+
+            # Accept the incoming stream that the server creates for us
+            # This is the stream that will be used for actual communication
+            incoming_stream = await connection.muxed_conn.accept_stream()
+
+            net_stream = NetStream(incoming_stream)
+
+            # Close the outgoing signaling stream as it's no longer needed
+            await outgoing_stream.close()
+
+            # Perform protocol muxing on the actual communication stream with timeout
+            with trio.fail_after(10):  # 10 second timeout for protocol negotiation
+                selected_protocol = await self.multiselect_client.select_one_of(
+                    list(protocol_ids), MultiselectCommunicator(net_stream)
+                )
+        except (MultiselectClientError, Exception) as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await net_stream.reset()
+            await outgoing_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
 
         net_stream.set_protocol(selected_protocol)

@@ -58,11 +58,25 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
             await self.read_writer.write_msg(data_encrypted)
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
-        noise_msg_encrypted = await self.read_writer.read_msg()
-        if prefix_encoded:
-            return self.decrypt(noise_msg_encrypted[len(self.prefix) :])
-        else:
-            return self.decrypt(noise_msg_encrypted)
+        try:
+            noise_msg_encrypted = await self.read_writer.read_msg()
+            if prefix_encoded:
+                return self.decrypt(noise_msg_encrypted[len(self.prefix) :])
+            else:
+                return self.decrypt(noise_msg_encrypted)
+        except Exception as e:
+            # Handle stream closure gracefully for interoperability
+            from libp2p.io.exceptions import (
+                IncompleteReadError,
+            )
+
+            if isinstance(e, IncompleteReadError):
+                # Re-raise with context about Noise layer
+                details = getattr(e, "args", [{}])[0]
+                if isinstance(details, dict):
+                    details["noise_layer"] = True
+                raise e
+            raise
 
     async def close(self) -> None:
         await self.read_writer.close()
