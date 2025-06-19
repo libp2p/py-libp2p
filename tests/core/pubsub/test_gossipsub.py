@@ -510,9 +510,8 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
 
 
 @pytest.mark.trio
-async def test_sparse_connect():
-    """Test sparse connect functionality including transition from dense to sparse."""
-    # Test with small network (should use dense connect)
+async def test_dense_connect_fallback():
+    """Test that sparse_connect falls back to dense connect for small networks."""
     async with PubsubFactory.create_batch_with_gossipsub(3) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         degree = 2
@@ -532,7 +531,10 @@ async def test_sparse_connect():
                 f"expected {expected_connections} in dense mode"
             )
 
-    # Test with larger network (should use sparse connect)
+
+@pytest.mark.trio
+async def test_sparse_connect():
+    """Test sparse connect functionality and message propagation."""
     async with PubsubFactory.create_batch_with_gossipsub(10) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         degree = 2
@@ -561,14 +563,28 @@ async def test_sparse_connect():
         await pubsubs_gsub[0].publish(topic, msg_content)
         await trio.sleep(2)
 
-        # Verify message was received
-        received_messages = []
+        # Verify message propagation - ideally all nodes should receive it
+        received_count = 0
         for queue in queues:
             try:
                 msg = await queue.get()
-                received_messages.append(msg.data)
+                if msg.data == msg_content:
+                    received_count += 1
             except Exception:
                 continue
 
-        assert len(received_messages) > 0, "No messages were received"
-        assert msg_content in received_messages, "Message was not propagated correctly"
+        total_nodes = len(pubsubs_gsub)
+
+        # Ideally all nodes should receive the message for optimal scalability
+        if received_count == total_nodes:
+            # Perfect propagation achieved
+            pass
+        else:
+            # require more than half for acceptable scalability
+            min_required = (total_nodes + 1) // 2
+            assert received_count >= min_required, (
+                f"Message propagation insufficient: "
+                f"{received_count}/{total_nodes} nodes "
+                f"received the message. Ideally all nodes should receive it, but at "
+                f"minimum {min_required} required for sparse network scalability."
+            )
