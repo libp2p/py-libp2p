@@ -1,6 +1,14 @@
 libp2p.peer package
 ===================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.peer.pb
+
 Submodules
 ----------
 
@@ -32,6 +40,22 @@ libp2p.peer.peerstore module
 ----------------------------
 
 .. automodule:: libp2p.peer.peerstore
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.peer.envelope module
+---------------------------
+
+.. automodule:: libp2p.peer.envelope
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.peer.record module
+-------------------------
+
+.. automodule:: libp2p.peer.record
    :members:
    :undoc-members:
    :show-inheritance:
