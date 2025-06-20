@@ -1,0 +1,1 @@
+Added support for ``Kademlia DHT`` in py-libp2p.
