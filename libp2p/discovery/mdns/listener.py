@@ -7,15 +7,10 @@ from zeroconf import (
     Zeroconf,
 )
 
-from libp2p.abc import (
-    IPeerStore, 
-    Multiaddr
-)
+from libp2p.abc import IPeerStore, Multiaddr
+from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.discovery.events.peerDiscovery import (
-    peerDiscovery
-)
 
 
 class PeerListener(ServiceListener):
