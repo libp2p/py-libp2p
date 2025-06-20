@@ -60,7 +60,7 @@ class QUICTransportConfig:
     enable_v1: bool = True  # Enable QUIC v1 (RFC 9000)
 
     # TLS settings
-    verify_mode: ssl.VerifyMode = ssl.CERT_REQUIRED
+    verify_mode: ssl.VerifyMode = ssl.CERT_NONE
     alpn_protocols: list[str] = field(default_factory=lambda: ["libp2p"])
 
     # Performance settings

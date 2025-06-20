@@ -420,7 +420,7 @@ class QUICTLSSecurityConfig:
     alpn_protocols: List[str] = field(default_factory=lambda: ["libp2p"])
 
     # TLS verification settings
-    verify_mode: Union[bool, ssl.VerifyMode] = False
+    verify_mode: ssl.VerifyMode = ssl.CERT_NONE
     check_hostname: bool = False
 
     # Optional peer ID for validation
@@ -627,7 +627,7 @@ def create_server_tls_config(
         peer_id=peer_id,
         is_client_config=False,
         config_name="server",
-        verify_mode=ssl.CERT_REQUIRED,  # Server doesn't verify client certs in libp2p
+        verify_mode=ssl.CERT_NONE,  # Server doesn't verify client certs in libp2p
         check_hostname=False,
         **kwargs,
     )

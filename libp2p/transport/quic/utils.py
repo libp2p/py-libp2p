@@ -303,7 +303,7 @@ def create_server_config_from_base(
     try:
         # Create new server configuration from scratch
         server_config = QuicConfiguration(is_client=False)
-        server_config.verify_mode = ssl.CERT_REQUIRED
+        server_config.verify_mode = ssl.CERT_NONE
 
         # Copy basic configuration attributes (these are safe to copy)
         copyable_attrs = [

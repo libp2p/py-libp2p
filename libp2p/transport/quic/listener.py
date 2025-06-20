@@ -21,6 +21,9 @@ from libp2p.transport.quic.security import (
     LIBP2P_TLS_EXTENSION_OID,
     QUICTLSConfigManager,
 )
+from libp2p.custom_types import TQUICConnHandlerFn
+from libp2p.custom_types import TQUICStreamHandlerFn
+from aioquic.quic.packet import QuicPacketType
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
@@ -53,7 +56,7 @@ class QUICPacketInfo:
         version: int,
         destination_cid: bytes,
         source_cid: bytes,
-        packet_type: int,
+        packet_type: QuicPacketType,
         token: bytes | None = None,
     ):
         self.version = version
@@ -77,7 +80,7 @@ class QUICListener(IListener):
     def __init__(
         self,
         transport: "QUICTransport",
-        handler_function: THandler,
+        handler_function: TQUICConnHandlerFn,
         quic_configs: dict[TProtocol, QuicConfiguration],
         config: QUICTransportConfig,
         security_manager: QUICTLSConfigManager | None = None,
@@ -195,11 +198,20 @@ class QUICListener(IListener):
             offset += src_cid_len
 
             # Determine packet type from first byte
-            packet_type = (first_byte & 0x30) >> 4
+            packet_type_value = (first_byte & 0x30) >> 4
+
+            packet_value_to_type_mapping = {
+                0: QuicPacketType.INITIAL,
+                1: QuicPacketType.ZERO_RTT,
+                2: QuicPacketType.HANDSHAKE,
+                3: QuicPacketType.RETRY,
+                4: QuicPacketType.VERSION_NEGOTIATION,
+                5: QuicPacketType.ONE_RTT,
+            }
 
             # For Initial packets, extract token
             token = b""
-            if packet_type == 0:  # Initial packet
+            if packet_type_value == 0:  # Initial packet
                 if len(data) < offset + 1:
                     return None
                 # Token length is variable-length integer
@@ -214,7 +226,8 @@ class QUICListener(IListener):
                 version=version,
                 destination_cid=dest_cid,
                 source_cid=src_cid,
-                packet_type=packet_type,
+                packet_type=packet_value_to_type_mapping.get(packet_type_value)
+                or QuicPacketType.INITIAL,
                 token=token,
             )
 
@@ -255,8 +268,8 @@ class QUICListener(IListener):
         Enhanced packet processing with better connection ID routing and debugging.
         """
         try:
-            self._stats["packets_processed"] += 1
-            self._stats["bytes_received"] += len(data)
+            # self._stats["packets_processed"] += 1
+            # self._stats["bytes_received"] += len(data)
 
             print(f"🔧 PACKET: Processing {len(data)} bytes from {addr}")
 
@@ -419,12 +432,18 @@ class QUICListener(IListener):
                     break
 
             if not quic_config:
-                print(f"❌ NEW_CONN: No configuration found for version 0x{packet_info.version:08x}")
-                print(f"🔧 NEW_CONN: Available configs: {list(self._quic_configs.keys())}")
+                print(
+                    f"❌ NEW_CONN: No configuration found for version 0x{packet_info.version:08x}"
+                )
+                print(
+                    f"🔧 NEW_CONN: Available configs: {list(self._quic_configs.keys())}"
+                )
                 await self._send_version_negotiation(addr, packet_info.source_cid)
                 return
 
-            print(f"✅ NEW_CONN: Using config {config_key} for version 0x{packet_info.version:08x}")
+            print(
+                f"✅ NEW_CONN: Using config {config_key} for version 0x{packet_info.version:08x}"
+            )
 
             # Create server-side QUIC configuration
             server_config = create_server_config_from_base(
@@ -435,10 +454,16 @@ class QUICListener(IListener):
 
             # Debug the server configuration
             print(f"🔧 NEW_CONN: Server config - is_client: {server_config.is_client}")
-            print(f"🔧 NEW_CONN: Server config - has_certificate: {server_config.certificate is not None}")
-            print(f"🔧 NEW_CONN: Server config - has_private_key: {server_config.private_key is not None}")
+            print(
+                f"🔧 NEW_CONN: Server config - has_certificate: {server_config.certificate is not None}"
+            )
+            print(
+                f"🔧 NEW_CONN: Server config - has_private_key: {server_config.private_key is not None}"
+            )
             print(f"🔧 NEW_CONN: Server config - ALPN: {server_config.alpn_protocols}")
-            print(f"🔧 NEW_CONN: Server config - verify_mode: {server_config.verify_mode}")
+            print(
+                f"🔧 NEW_CONN: Server config - verify_mode: {server_config.verify_mode}"
+            )
 
             # Validate certificate has libp2p extension
             if server_config.certificate:
@@ -448,17 +473,22 @@ class QUICListener(IListener):
                     if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                         has_libp2p_ext = True
                         break
-                print(f"🔧 NEW_CONN: Certificate has libp2p extension: {has_libp2p_ext}")
+                print(
+                    f"🔧 NEW_CONN: Certificate has libp2p extension: {has_libp2p_ext}"
+                )
 
                 if not has_libp2p_ext:
                     print("❌ NEW_CONN: Certificate missing libp2p extension!")
 
             # Generate a new destination connection ID for this connection
             import secrets
+
             destination_cid = secrets.token_bytes(8)
 
             print(f"🔧 NEW_CONN: Generated new CID: {destination_cid.hex()}")
-            print(f"🔧 NEW_CONN: Original destination CID: {packet_info.destination_cid.hex()}")
+            print(
+                f"🔧 NEW_CONN: Original destination CID: {packet_info.destination_cid.hex()}"
+            )
 
             # Create QUIC connection with proper parameters for server
             # CRITICAL FIX: Pass the original destination connection ID from the initial packet
@@ -467,6 +497,24 @@ class QUICListener(IListener):
                 original_destination_connection_id=packet_info.destination_cid,  # Use the original DCID from packet
             )
 
+            quic_conn._replenish_connection_ids()
+            # Use the first host CID as our routing CID
+            if quic_conn._host_cids:
+                destination_cid = quic_conn._host_cids[0].cid
+                print(
+                    f"🔧 NEW_CONN: Using host CID as routing CID: {destination_cid.hex()}"
+                )
+            else:
+                # Fallback to random if no host CIDs generated
+                destination_cid = secrets.token_bytes(8)
+                print(f"🔧 NEW_CONN: Fallback to random CID: {destination_cid.hex()}")
+
+            print(
+                f"🔧 NEW_CONN: Original destination CID: {packet_info.destination_cid.hex()}"
+            )
+
+            print(f"🔧 Generated {len(quic_conn._host_cids)} host CIDs for client")
+
             print("✅ NEW_CONN: QUIC connection created successfully")
 
             # Store connection mapping using our generated CID
@@ -474,7 +522,9 @@ class QUICListener(IListener):
             self._addr_to_cid[addr] = destination_cid
             self._cid_to_addr[destination_cid] = addr
 
-            print(f"🔧 NEW_CONN: Stored mappings for {addr} <-> {destination_cid.hex()}")
+            print(
+                f"🔧 NEW_CONN: Stored mappings for {addr} <-> {destination_cid.hex()}"
+            )
             print("Receiving Datagram")
 
             # Process initial packet
@@ -495,6 +545,7 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Error handling new connection from {addr}: {e}")
             import traceback
+
             traceback.print_exc()
             self._stats["connections_rejected"] += 1
 
@@ -527,9 +578,7 @@ class QUICListener(IListener):
                 # Check TLS handshake completion
                 if hasattr(quic_conn.tls, "handshake_complete"):
                     handshake_status = quic_conn._handshake_complete
-                    print(
-                        f"🔧 QUIC_STATE: TLS handshake complete: {handshake_status}"
-                    )
+                    print(f"🔧 QUIC_STATE: TLS handshake complete: {handshake_status}")
             else:
                 print("❌ QUIC_STATE: No TLS context!")
 
@@ -749,12 +798,30 @@ class QUICListener(IListener):
                     print(
                         f"🔧 EVENT: Connection ID issued: {event.connection_id.hex()}"
                     )
+                    # ADD: Update mappings using existing data structures
+                    # Add new CID to the same address mapping
+                    taddr = self._cid_to_addr.get(dest_cid)
+                    if taddr:
+                        # Don't overwrite, but note that this CID is also valid for this address
+                        print(
+                            f"🔧 EVENT: New CID {event.connection_id.hex()} available for {taddr}"
+                        )
 
                 elif isinstance(event, events.ConnectionIdRetired):
                     print(
                         f"🔧 EVENT: Connection ID retired: {event.connection_id.hex()}"
                     )
-
+                    # ADD: Clean up using existing patterns
+                    retired_cid = event.connection_id
+                    if retired_cid in self._cid_to_addr:
+                        addr = self._cid_to_addr[retired_cid]
+                        del self._cid_to_addr[retired_cid]
+                        # Only remove addr mapping if this was the active CID
+                        if self._addr_to_cid.get(addr) == retired_cid:
+                            del self._addr_to_cid[addr]
+                        print(
+                            f"🔧 EVENT: Cleaned up mapping for retired CID {retired_cid.hex()}"
+                        )
                 else:
                     print(f"🔧 EVENT: Unhandled event type: {type(event).__name__}")
 
@@ -822,31 +889,27 @@ class QUICListener(IListener):
 
             # Create multiaddr for this connection
             host, port = addr
-            # Use the appropriate QUIC version
             quic_version = next(iter(self._quic_configs.keys()))
             remote_maddr = create_quic_multiaddr(host, port, f"/{quic_version}")
 
-            # Create libp2p connection wrapper
+            from .connection import QUICConnection
+
             connection = QUICConnection(
                 quic_connection=quic_conn,
                 remote_addr=addr,
-                peer_id=None,  # Will be determined during identity verification
+                peer_id=None,
                 local_peer_id=self._transport._peer_id,
-                is_initiator=False,  # We're the server
+                is_initiator=False,
                 maddr=remote_maddr,
                 transport=self._transport,
                 security_manager=self._security_manager,
             )
 
-            # Store the connection with connection ID
             self._connections[dest_cid] = connection
 
-            # Start connection management tasks
             if self._nursery:
-                self._nursery.start_soon(connection._handle_datagram_received)
-                self._nursery.start_soon(connection._handle_timer_events)
+                await connection.connect(self._nursery)
 
-            # Handle security verification
             if self._security_manager:
                 try:
                     await connection._verify_peer_identity_with_security()
@@ -867,10 +930,12 @@ class QUICListener(IListener):
                 )
 
             self._stats["connections_accepted"] += 1
-            logger.info(f"Accepted new QUIC connection {dest_cid.hex()} from {addr}")
+            logger.info(
+                f"✅ Enhanced connection {dest_cid.hex()} established from {addr}"
+            )
 
         except Exception as e:
-            logger.error(f"Error promoting connection {dest_cid.hex()}: {e}")
+            logger.error(f"❌ Error promoting connection {dest_cid.hex()}: {e}")
             await self._remove_connection(dest_cid)
             self._stats["connections_rejected"] += 1
 
@@ -1225,7 +1290,9 @@ class QUICListener(IListener):
 
             # Check for pending crypto data
             if hasattr(quic_conn, "_cryptos") and quic_conn._cryptos:
-                print(f"🔧 HANDSHAKE_DEBUG: Crypto data present {len(quic_conn._cryptos.keys())}")
+                print(
+                    f"🔧 HANDSHAKE_DEBUG: Crypto data present {len(quic_conn._cryptos.keys())}"
+                )
 
             # Check loss detection state
             if hasattr(quic_conn, "_loss") and quic_conn._loss:

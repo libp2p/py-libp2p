@@ -27,7 +27,7 @@ from libp2p.abc import (
 from libp2p.crypto.keys import (
     PrivateKey,
 )
-from libp2p.custom_types import THandler, TProtocol
+from libp2p.custom_types import THandler, TProtocol, TQUICConnHandlerFn
 from libp2p.peer.id import (
     ID,
 )
@@ -212,10 +212,7 @@ class QUICTransport(ITransport):
             # Set verification mode (though libp2p typically doesn't verify)
             config.verify_mode = tls_config.verify_mode
 
-            if tls_config.is_client_config:
-                config.verify_mode = ssl.CERT_NONE
-            else:
-                config.verify_mode = ssl.CERT_REQUIRED
+            config.verify_mode = ssl.CERT_NONE
 
             logger.debug("Successfully applied TLS configuration to QUIC config")
 
@@ -224,7 +221,7 @@ class QUICTransport(ITransport):
 
     async def dial(
         self, maddr: multiaddr.Multiaddr, peer_id: ID | None = None
-    ) -> IRawConnection:
+    ) -> QUICConnection:
         """
         Dial a remote peer using QUIC transport with security verification.
 
@@ -338,7 +335,7 @@ class QUICTransport(ITransport):
         except Exception as e:
             raise QUICSecurityError(f"Peer identity verification failed: {e}") from e
 
-    def create_listener(self, handler_function: THandler) -> QUICListener:
+    def create_listener(self, handler_function: TQUICConnHandlerFn) -> QUICListener:
         """
         Create a QUIC listener with integrated security.
 
