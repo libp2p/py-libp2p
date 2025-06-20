@@ -18,9 +18,6 @@ import varint
 from libp2p.abc import (
     IHost,
 )
-from libp2p.custom_types import (
-    TProtocol,
-)
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -59,6 +56,7 @@ logger = logging.getLogger("kademlia-example.kad_dht")
 # logger = logging.getLogger("libp2p.kademlia")
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
+
 
 class DHTMode(Enum):
     """DHT operation modes."""

@@ -31,6 +31,7 @@ from .common import (
 # logger = logging.getLogger("libp2p.kademlia.value_store")
 logger = logging.getLogger("kademlia-example.value_store")
 
+
 class ValueStore:
     """
     Store for key-value pairs in a Kademlia DHT.
