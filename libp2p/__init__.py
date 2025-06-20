@@ -32,6 +32,9 @@ from libp2p.custom_types import (
     TProtocol,
     TSecurityOptions,
 )
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -70,9 +73,6 @@ from libp2p.transport.upgrader import (
 )
 from libp2p.utils.logging import (
     setup_logging,
-)
-from libp2p.discovery.mdns.mdns import (
-    MDNSDiscovery
 )
 
 # Initialize logging configuration
@@ -269,16 +269,13 @@ def new_host(
         listen_addrs=listen_addrs,
     )
 
-    if disc_opt is not None:
-        host = RoutedHost(swarm, disc_opt)
-    else:
-        host = BasicHost(swarm)
-
     if enable_mDNS:
         mdns = MDNSDiscovery(swarm)
         mdns.start()
-        host._mdns = mdns 
-        
-    return host
+
+    if disc_opt is not None:
+        return RoutedHost(swarm, disc_opt)
+    else:
+        return BasicHost(swarm)
 
 __version__ = __version("libp2p")
