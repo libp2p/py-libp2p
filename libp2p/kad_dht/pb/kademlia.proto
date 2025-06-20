@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+message Record {
+    bytes key = 1;
+    bytes value = 2;
+    string timeReceived = 5;
+};
+
+message Message {
+    enum MessageType {
+        PUT_VALUE = 0;
+        GET_VALUE = 1;
+        ADD_PROVIDER = 2;
+        GET_PROVIDERS = 3;
+        FIND_NODE = 4;
+        PING = 5;
+    }
+
+    enum ConnectionType {
+        NOT_CONNECTED = 0;
+        CONNECTED = 1;
+        CAN_CONNECT = 2;
+        CANNOT_CONNECT = 3;
+    }
+
+    message Peer {
+        bytes id = 1;
+        repeated bytes addrs = 2;
+        ConnectionType connection = 3;
+    }
+
+    MessageType type = 1;
+    int32 clusterLevelRaw = 10;
+    bytes key = 2;
+    Record record = 3;
+    repeated Peer closerPeers = 8;
+    repeated Peer providerPeers = 9;
+}
