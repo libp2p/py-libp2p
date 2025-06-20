@@ -1,3 +1,4 @@
+import logging
 import secrets
 
 import multiaddr
@@ -12,9 +13,17 @@ from libp2p.crypto.secp256k1 import (
 )
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 
+logger = logging.getLogger("libp2p.example.discovery.mdns")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(handler)
 
-def customFunctoion(peerinfo: PeerInfo):
-    print("Printing peer info from demo file", repr(peerinfo))
+
+def onPeerDiscovery(peerinfo: PeerInfo):
+    logger.info(f"Discovered: {peerinfo.peer_id}")
 
 
 async def main():
@@ -24,17 +33,17 @@ async def main():
 
     # Listen on a random TCP port
     listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
-    peerDiscovery.register_peer_discovered_handler(customFunctoion)
+    peerDiscovery.register_peer_discovered_handler(onPeerDiscovery)
     # Enable mDNS discovery
+    logger.info("Starting peer Discovery")
     host = new_host(key_pair=key_pair, enable_mDNS=True)
-
+    await trio.sleep(5)
     async with host.run(listen_addrs=[listen_addr]):
-        # Print discovered peers via mDNS
         try:
             while True:
                 await trio.sleep(100)
         except KeyboardInterrupt:
-            print("Exiting...")
+            logger.info("Exiting...")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ Conforms to https://github.com/libp2p/specs/blob/master/discovery/mdns.md
 Uses zeroconf for mDNS broadcast/listen. Async operations use trio.
 """
 
+import logging
+
 from zeroconf import (
     Zeroconf,
 )
@@ -21,6 +23,8 @@ from .listener import (
 from .utils import (
     stringGen,
 )
+
+logger = logging.getLogger("libp2p.discovery.mdns")
 
 SERVICE_TYPE = "_p2p._udp.local."
 MCAST_PORT = 5353
@@ -56,7 +60,9 @@ class MDNSDiscovery:
 
     def start(self) -> None:
         """Register this peer and start listening for others."""
-        print(f"Starting mDNS discovery for peer {self.peer_id} on port {self.port}")
+        logger.debug(
+            f"Starting mDNS discovery for peer {self.peer_id} on port {self.port}"
+        )
         self.broadcaster.register()
         # Listener is started in constructor
 

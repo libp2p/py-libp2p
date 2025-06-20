@@ -1,9 +1,12 @@
+import logging
 import socket
 
 from zeroconf import (
     ServiceInfo,
     Zeroconf,
 )
+
+logger = logging.getLogger("libp2p.discovery.mdns.broadcaster")
 
 
 class PeerBroadcaster:

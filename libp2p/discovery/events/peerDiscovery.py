@@ -24,11 +24,3 @@ class PeerDiscovery:
 
 
 peerDiscovery = PeerDiscovery()
-
-
-# async def peerDiscoveryHandler(peerInfo: PeerInfo) -> None:
-#     await trio.sleep(5)  # Simulate some processing delay
-#     # print("Discovered peer is", peerInfo.peer_id)
-
-
-# peerDiscovery.register_peer_discovered_handler(peerDiscoveryHandler)
