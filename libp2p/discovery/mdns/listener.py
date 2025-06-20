@@ -1,3 +1,4 @@
+import logging
 import socket
 
 from zeroconf import (
@@ -11,6 +12,8 @@ from libp2p.abc import IPeerStore, Multiaddr
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+
+logger = logging.getLogger("libp2p.discovery.mdns.listner")
 
 
 class PeerListener(ServiceListener):
@@ -41,12 +44,12 @@ class PeerListener(ServiceListener):
             self.discovered_services[name] = peer_info.peer_id
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
             peerDiscovery.emit_peer_discovered(peer_info)
-            print("Discovered Peer:", peer_info.peer_id)
+            logger.debug("Discovered Peer:", peer_info.peer_id)
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         peer_id = self.discovered_services.pop(name)
         self.peerstore.clear_addrs(peer_id)
-        print(f"Removed Peer: {peer_id}")
+        logger.debug(f"Removed Peer: {peer_id}")
 
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         info = zc.get_service_info(type_, name, timeout=5000)
@@ -56,7 +59,7 @@ class PeerListener(ServiceListener):
         if peer_info:
             self.peerstore.clear_addrs(peer_info.peer_id)
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
-            print("Updated Peer", peer_info.peer_id)
+            logger.debug("Updated Peer", peer_info.peer_id)
 
     def _process_discovered_service(
         self, zeroconf: Zeroconf, type_: str, name: str
@@ -67,7 +70,7 @@ class PeerListener(ServiceListener):
         peer_info = self._extract_peer_info(info)
         if peer_info:
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
-            print("Discovered:", peer_info.peer_id)
+            logger.debug("Discovered:", peer_info.peer_id)
 
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
         try:
