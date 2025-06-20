@@ -47,7 +47,6 @@ class PeerBroadcaster:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 local_ip = s.getsockname()[0]
-                print(f"Local IP determined: {local_ip}")
             return local_ip
         except Exception:
             # Fallback to localhost if we can't determine the IP
@@ -55,7 +54,6 @@ class PeerBroadcaster:
 
     def register(self) -> None:
         """Register the peer's mDNS service on the network."""
-        print(repr(self.service_info))
         self.zeroconf.register_service(self.service_info)
 
     def unregister(self) -> None:

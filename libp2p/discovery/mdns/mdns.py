@@ -57,7 +57,6 @@ class MDNSDiscovery:
     def start(self) -> None:
         """Register this peer and start listening for others."""
         print(f"Starting mDNS discovery for peer {self.peer_id} on port {self.port}")
-        print("host is listening on", self.swarm.listeners)
         self.broadcaster.register()
         # Listener is started in constructor
 
