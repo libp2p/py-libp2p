@@ -26,11 +26,11 @@ You should see output similar to:
 .. code-block:: console
 
     Run this from another console to start another peer on a different port:
-    
+
     python mdns-demo -p <ANOTHER_PORT>
-    
+
     Waiting for mDNS peer discovery events...
-    
+
     2025-06-20 23:28:12,052 - libp2p.example.discovery.mdns - INFO - Starting peer Discovery
 
 To discover peers, open another terminal and run the same command with a different port:
