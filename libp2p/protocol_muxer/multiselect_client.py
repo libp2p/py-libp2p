@@ -2,6 +2,8 @@ from collections.abc import (
     Sequence,
 )
 
+import trio
+
 from libp2p.abc import (
     IMultiselectClient,
     IMultiselectCommunicator,
@@ -17,6 +19,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
+DEFAULT_NEGOTIATE_TIMEOUT = 60
 
 
 class MultiselectClient(IMultiselectClient):
@@ -39,7 +42,10 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError() from error
 
         try:
-            handshake_contents = await communicator.read()
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+                handshake_contents = await communicator.read()
+        except trio.TooSlowError:
+            raise MultiselectClientError("handshake read timed out")
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
@@ -93,8 +99,11 @@ class MultiselectClient(IMultiselectClient):
             raise ValueError("Command not supported")
 
         try:
-            response = await communicator.read()
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):  # Timeout after 5 seconds
+                response = await communicator.read()
             response_list = response.strip().splitlines()
+        except trio.TooSlowError:
+            raise MultiselectClientError("command response timed out")
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
@@ -117,7 +126,10 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError() from error
 
         try:
-            response = await communicator.read()
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):  # Timeout after 5 seconds
+                response = await communicator.read()
+        except trio.TooSlowError:
+            raise MultiselectClientError("protocol selection response timed out")
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
