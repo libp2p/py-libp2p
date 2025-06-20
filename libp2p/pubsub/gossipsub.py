@@ -354,10 +354,11 @@ class GossipSub(IPubsubRouter, Service):
         topic_in_fanout: bool = topic in self.fanout
         fanout_peers: set[ID] = set()
 
-        for peer in self.fanout[topic]:
-            if self._check_back_off(peer, topic):
-                continue
-            fanout_peers.add(peer)
+        if topic_in_fanout:
+            for peer in self.fanout[topic]:
+                if self._check_back_off(peer, topic):
+                    continue
+                fanout_peers.add(peer)
 
         fanout_size = len(fanout_peers)
         if not topic_in_fanout or (topic_in_fanout and fanout_size < self.degree):
