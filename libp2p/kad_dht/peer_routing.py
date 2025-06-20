@@ -15,9 +15,6 @@ from libp2p.abc import (
     INetStream,
     IPeerRouting,
 )
-from libp2p.custom_types import (
-    TProtocol,
-)
 from libp2p.peer.id import (
     ID,
 )
