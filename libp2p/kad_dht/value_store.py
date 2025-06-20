@@ -19,13 +19,12 @@ from libp2p.peer.id import (
     ID,
 )
 
+from .common import (
+    DEFAULT_TTL,
+    PROTOCOL_ID,
+)
 from .pb.kademlia_pb2 import (
     Message,
-)
-
-from .common import (
-    PROTOCOL_ID,
-    DEFAULT_TTL
 )
 
 # logger = logging.getLogger("libp2p.kademlia.value_store")

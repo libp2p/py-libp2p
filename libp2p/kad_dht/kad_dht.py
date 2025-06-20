@@ -31,6 +31,11 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+    QUERY_TIMEOUT,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -45,11 +50,6 @@ from .routing_table import (
 )
 from .value_store import (
     ValueStore,
-)
-from .common import (
-    PROTOCOL_ID,
-    ALPHA,
-    QUERY_TIMEOUT
 )
 
 logger = logging.getLogger("kademlia-example.kad_dht")

@@ -1,3 +1,7 @@
+"""
+Common Objects for Kademlia DHT implementation.
+"""
+
 from libp2p.custom_types import (
     TProtocol,
 )

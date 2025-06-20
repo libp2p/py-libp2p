@@ -22,16 +22,15 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
-
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
 from .routing_table import (
     RoutingTable,
-)
-from .common import (
-    PROTOCOL_ID,
-    ALPHA
 )
 from .utils import (
     sort_peer_ids_by_distance,

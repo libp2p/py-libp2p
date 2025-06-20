@@ -29,14 +29,13 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+    QUERY_TIMEOUT,
+)
 from .pb.kademlia_pb2 import (
     Message,
-)
-
-from .common import (
-    PROTOCOL_ID,
-    ALPHA,
-    QUERY_TIMEOUT
 )
 
 # logger = logging.getLogger("libp2p.kademlia.provider_store")

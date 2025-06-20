@@ -2,21 +2,16 @@
 Kademlia DHT routing table implementation.
 """
 
-from collections import (
-    OrderedDict,
-)
+from collections import OrderedDict
 import logging
 import time
 
 import trio
 
-from libp2p.abc import (
-    IHost,
+from libp2p.abc import IHost
+from libp2p.kad_dht.utils import (
+    xor_distance,
 )
-from libp2p.custom_types import (
-    TProtocol,
-)
-from libp2p.kad_dht.utils import xor_distance
 from libp2p.peer.id import (
     ID,
 )
@@ -24,9 +19,10 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
-from .pb.kademlia_pb2 import (
-    Message,
+from .common import (
+    PROTOCOL_ID,
 )
+from .pb.kademlia_pb2 import Message
 
 # logger = logging.getLogger("libp2p.kademlia.routing_table")
 logger = logging.getLogger("kademlia-example.routing_table")
@@ -243,7 +239,7 @@ class KBucket:
             raise ValueError(f"Peer {peer_id} not in bucket")
 
         # Default protocol ID for Kademlia DHT
-        protocol_id = TProtocol("/ipfs/kad/1.0.0")
+        protocol_id = PROTOCOL_ID
 
         try:
             # Open a stream to the peer with the DHT protocol
