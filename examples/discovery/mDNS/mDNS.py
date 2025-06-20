@@ -1,9 +1,21 @@
 import secrets
+
 import multiaddr
 import trio
 
-from libp2p import new_host
-from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p import (
+    new_host,
+)
+from libp2p.abc import (
+    PeerInfo,
+)
+from libp2p.crypto.secp256k1 import (
+    create_new_key_pair,
+)
+from libp2p.discovery.events.peerDiscovery import (
+    peerDiscovery,
+)
+
 
 async def main():
     # Generate a key pair for the host
@@ -17,20 +29,19 @@ async def main():
     host = new_host(key_pair=key_pair, enable_mDNS=True)
 
     async with host.run(listen_addrs=[listen_addr]):
-        print("Host started!")
-        print("Peer ID:", host.get_id())
-        print("Listening on:", [str(addr) for addr in host.get_addrs()])
+        print("host peer id", host.get_id())
 
         # Print discovered peers via mDNS
         print("Waiting for mDNS peer discovery events (Ctrl+C to exit)...")
         try:
             while True:
-                # Print all known peers every 5 seconds
-                peers = host.get_peerstore().peer_ids()
-                print("Known peers:", [str(p) for p in peers if p != host.get_id()])
-                await trio.sleep(5)
+                peer_info = PeerInfo(host.get_id(), host.get_addrs())
+
+                await trio.sleep(1)
+                await peerDiscovery.emit_peer_discovered(peer_info=peer_info)
         except KeyboardInterrupt:
             print("Exiting...")
+
 
 if __name__ == "__main__":
     trio.run(main)
