@@ -1,5 +1,5 @@
 mDNS Peer Discovery Example
-==========================
+===========================
 
 This example demonstrates how to use mDNS (Multicast DNS) for peer discovery in py-libp2p.
 
