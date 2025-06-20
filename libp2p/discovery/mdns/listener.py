@@ -1,15 +1,13 @@
 import socket
-import time
 
 from zeroconf import (
     ServiceBrowser,
     ServiceInfo,
     ServiceListener,
-    ServiceStateChange,
     Zeroconf,
 )
 
-from libp2p.abc import IPeerStore
+from libp2p.abc import IPeerStore, Multiaddr
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
@@ -28,64 +26,51 @@ class PeerListener(ServiceListener):
         self.zeroconf = zeroconf
         self.service_type = service_type
         self.service_name = service_name
-        self.discovered_services: set[str] = set()
-
-        # pass `self` as the listener object
+        self.discovered_services: dict[str, ID] = {}
         self.browser = ServiceBrowser(self.zeroconf, self.service_type, listener=self)
 
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        # map to your on_service_state_change logic
-        self._on_state_change(zc, type_, name, ServiceStateChange.Added)
-
-    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        self._on_state_change(zc, type_, name, ServiceStateChange.Removed)
-
-    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
-        self._on_state_change(zc, type_, name, ServiceStateChange.Updated)
-
-    def _on_state_change(
-        self,
-        zeroconf: Zeroconf,
-        service_type: str,
-        name: str,
-        state: ServiceStateChange,
-    ) -> None:
-        # skip our own service
         if name == self.service_name:
             return
-
-        # handle Added
-        if state is ServiceStateChange.Added:
-            if name in self.discovered_services:
-                return
-            self.discovered_services.add(name)
-            self._process_discovered_service(zeroconf, service_type, name)
-
-        # ...optional hooks for Removed/Updated if you need them
-
-    def _process_discovered_service(
-        self, zeroconf: Zeroconf, service_type: str, name: str
-    ) -> None:
-        # same retry logic you had before
-        info = None
-        for attempt in range(3):
-            info = zeroconf.get_service_info(service_type, name, timeout=5000)
-            if info:
-                break
-            time.sleep(1)
-
+        info = zc.get_service_info(type_, name, timeout=5000)
         if not info:
             return
-
         peer_info = self._extract_peer_info(info)
         if peer_info:
-            # your existing hook
-            self._handle_discovered_peer(peer_info)
+            self.discovered_services[name] = peer_info.peer_id
+            self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+            print("Discovered Peer:", peer_info.peer_id)
+
+    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        peer_id = self.discovered_services.pop(name)
+        self.peerstore.clear_addrs(peer_id)
+        print(f"Removed Peer: {peer_id}")
+
+    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        info = zc.get_service_info(type_, name, timeout=5000)
+        if not info:
+            return
+        peer_info = self._extract_peer_info(info)
+        if peer_info:
+            self.peerstore.clear_addrs(peer_info.peer_id)
+            self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+            print("Updated Peer", peer_info.peer_id)
+
+    def _process_discovered_service(
+        self, zeroconf: Zeroconf, type_: str, name: str
+    ) -> None:
+        info = zeroconf.get_service_info(type_, name, timeout=5000)
+        if not info:
+            return
+        peer_info = self._extract_peer_info(info)
+        if peer_info:
+            self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+            print("Discovered:", peer_info.peer_id)
 
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
         try:
             addrs = [
-                f"/ip4/{socket.inet_ntoa(addr)}/udp/{info.port}"
+                Multiaddr(f"/ip4/{socket.inet_ntoa(addr)}/udp/{info.port}")
                 for addr in info.addresses
             ]
             pid_bytes = info.properties.get(b"id")
@@ -95,11 +80,6 @@ class PeerListener(ServiceListener):
             return PeerInfo(peer_id=pid, addrs=addrs)
         except Exception:
             return None
-
-    def _handle_discovered_peer(self, peer_info: PeerInfo) -> None:
-        # your “emit” or “connect” logic goes here
-        # print("Discovered:", peer_info)
-        print("Discovered:", peer_info.peer_id)
 
     def stop(self) -> None:
         self.browser.cancel()
