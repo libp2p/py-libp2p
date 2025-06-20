@@ -49,16 +49,16 @@ from .routing_table import (
 from .value_store import (
     ValueStore,
 )
+from .common import (
+    PROTOCOL_ID,
+    ALPHA,
+    QUERY_TIMEOUT
+)
 
 logger = logging.getLogger("kademlia-example.kad_dht")
 # logger = logging.getLogger("libp2p.kademlia")
 # Default parameters
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
-ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60  # 1 min in seconds for testing
-TTL = 24 * 60 * 60  # 24 hours in seconds
-ALPHA = 3
-QUERY_TIMEOUT = 10  # seconds
-
+ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
 class DHTMode(Enum):
     """DHT operation modes."""

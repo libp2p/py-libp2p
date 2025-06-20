@@ -25,11 +25,16 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+
 from .pb.kademlia_pb2 import (
     Message,
 )
 from .routing_table import (
     RoutingTable,
+)
+from .common import (
+    PROTOCOL_ID,
+    ALPHA
 )
 from .utils import (
     sort_peer_ids_by_distance,
@@ -38,10 +43,7 @@ from .utils import (
 # logger = logging.getLogger("libp2p.kademlia.peer_routing")
 logger = logging.getLogger("kademlia-example.peer_routing")
 
-# Constants for the Kademlia algorithm
-ALPHA = 3  # Concurrency parameter
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 
 
 class PeerRouting(IPeerRouting):

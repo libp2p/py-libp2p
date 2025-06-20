@@ -23,13 +23,13 @@ from .pb.kademlia_pb2 import (
     Message,
 )
 
+from .common import (
+    PROTOCOL_ID,
+    DEFAULT_TTL
+)
+
 # logger = logging.getLogger("libp2p.kademlia.value_store")
 logger = logging.getLogger("kademlia-example.value_store")
-
-# Default time to live for values in seconds (24 hours)
-DEFAULT_TTL = 24 * 60 * 60
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
-
 
 class ValueStore:
     """
