@@ -7,9 +7,15 @@ from zeroconf import (
     Zeroconf,
 )
 
-from libp2p.abc import IPeerStore, Multiaddr
+from libp2p.abc import (
+    IPeerStore, 
+    Multiaddr
+)
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+from libp2p.discovery.events.peerDiscovery import (
+    peerDiscovery
+)
 
 
 class PeerListener(ServiceListener):
@@ -39,6 +45,7 @@ class PeerListener(ServiceListener):
         if peer_info:
             self.discovered_services[name] = peer_info.peer_id
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+            peerDiscovery.emit_peer_discovered(peer_info)
             print("Discovered Peer:", peer_info.peer_id)
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
