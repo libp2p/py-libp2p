@@ -29,6 +29,11 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+    QUERY_TIMEOUT,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -40,9 +45,6 @@ logger = logging.getLogger("kademlia-example.provider_store")
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
 PROVIDER_ADDRESS_TTL = 30 * 60  # 30 minutes in seconds
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
-ALPHA = 3  # Number of parallel queries/advertisements
-QUERY_TIMEOUT = 10  # Timeout for each query in seconds
 
 
 class ProviderRecord:

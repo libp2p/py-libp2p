@@ -18,9 +18,6 @@ import varint
 from libp2p.abc import (
     IHost,
 )
-from libp2p.custom_types import (
-    TProtocol,
-)
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -34,6 +31,11 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+    QUERY_TIMEOUT,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -53,11 +55,7 @@ from .value_store import (
 logger = logging.getLogger("kademlia-example.kad_dht")
 # logger = logging.getLogger("libp2p.kademlia")
 # Default parameters
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
-ROUTING_TABLE_REFRESH_INTERVAL = 1 * 60  # 1 min in seconds for testing
-TTL = 24 * 60 * 60  # 24 hours in seconds
-ALPHA = 3
-QUERY_TIMEOUT = 10  # seconds
+ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
 
 class DHTMode(Enum):
