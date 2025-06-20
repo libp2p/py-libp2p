@@ -6,18 +6,15 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.abc import PeerInfo
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.discovery.events.peerDiscovery import (
-    peerDiscovery
-)
-from libp2p.abc import (
-    PeerInfo
-)
+from libp2p.discovery.events.peerDiscovery import peerDiscovery
+
 
 def customFunctoion(peerinfo: PeerInfo):
-    print("Printing peer info from demo file",repr(peerinfo))
+    print("Printing peer info from demo file", repr(peerinfo))
 
 
 async def main():
