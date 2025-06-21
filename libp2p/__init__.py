@@ -32,6 +32,9 @@ from libp2p.custom_types import (
     TProtocol,
     TSecurityOptions,
 )
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -243,6 +246,7 @@ def new_host(
     disc_opt: IPeerRouting | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    enable_mDNS: bool = False,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -265,9 +269,12 @@ def new_host(
         listen_addrs=listen_addrs,
     )
 
+    if enable_mDNS:
+        mdns = MDNSDiscovery(swarm)
+        mdns.start()
+
     if disc_opt is not None:
         return RoutedHost(swarm, disc_opt)
     return BasicHost(swarm)
-
 
 __version__ = __version("libp2p")
