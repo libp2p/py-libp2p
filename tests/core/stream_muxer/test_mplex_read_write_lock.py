@@ -1,7 +1,7 @@
 import pytest
 import trio
 
-from libp2p.abc import ISecureConn
+from libp2p.abc import IMuxedStream, ISecureConn
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.peer.id import ID
 from libp2p.stream_muxer.mplex.constants import (
@@ -59,13 +59,15 @@ class DummyMuxedConn(Mplex):
         self.event_started = trio.Event()
         self.stream_backlog_limit = 256
         self.stream_backlog_semaphore = trio.Semaphore(256)
-        channels = trio.open_memory_channel[MplexStream](0)
+        # Use IMuxedStream for type consistency with Mplex
+        channels = trio.open_memory_channel[IMuxedStream](0)
         self.new_stream_send_channel, self.new_stream_receive_channel = channels
 
     async def send_message(
-        self, flag: HeaderTags, data: bytes, stream_id: StreamID
-    ) -> None:
+        self, flag: HeaderTags, data: bytes | None, stream_id: StreamID
+    ) -> int:
         await trio.sleep(0.01)
+        return 0
 
 
 @pytest.mark.trio
@@ -75,10 +77,11 @@ async def test_concurrent_writes_are_serialized():
 
     class LoggingMuxedConn(DummyMuxedConn):
         async def send_message(
-            self, flag: HeaderTags, data: bytes, stream_id: StreamID
-        ) -> None:
+            self, flag: HeaderTags, data: bytes | None, stream_id: StreamID
+        ) -> int:
             send_log.append(data)
             await trio.sleep(0.01)
+            return 0
 
     memory_send, memory_recv = trio.open_memory_channel(8)
     stream = MplexStream(
