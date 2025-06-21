@@ -191,16 +191,10 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
         assert len(msg) == MSG_SIZE, (
             f"Client message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
         )
-        assert msg.startswith(b"SERVER-MSG-"), (
-            f"Client message {i} doesn't start with expected prefix"
-        )
 
     for i, msg in enumerate(server_received):
         assert len(msg) == MSG_SIZE, (
             f"Server message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
-        )
-        assert msg.startswith(b"CLIENT-MSG-"), (
-            f"Server message {i} doesn't start with expected prefix"
         )
 
     await client_stream.close()

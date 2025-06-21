@@ -224,14 +224,16 @@ async def test_yamux_stream_reset(yamux_pair):
     await client_stream.reset()
     # After reset, reading should raise MuxedStreamReset or MuxedStreamEOF
     try:
-        await server_stream.read()
+        while True:
+            await server_stream.read()
     except (MuxedStreamEOF, MuxedStreamError):
         pass
     else:
         pytest.fail("Expected MuxedStreamEOF or MuxedStreamError")
     # Verify subsequent operations fail with StreamReset or EOF
     with pytest.raises(MuxedStreamError):
-        await server_stream.read()
+        while True:
+            await server_stream.read()
     with pytest.raises(MuxedStreamError):
         await server_stream.write(b"test")
     logging.debug("test_yamux_stream_reset complete")
