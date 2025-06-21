@@ -180,22 +180,6 @@ class YamuxStream(IMuxedStream):
             async with self.window_lock:
                 await _do_window_update()
 
-    async def read_EOF(self) -> bytes:
-        """
-        To read data from stream until it is closed.
-        """
-        data = b""
-        try:
-            while True:
-                recv = await self.read()
-                if recv:
-                    data += recv
-        except MuxedStreamEOF:
-            logging.debug(
-                f"Stream {self.stream_id}:EOF reached,total data read:{len(data)} bytes"
-            )
-        return data
-
     async def read(self, n: int | None = -1) -> bytes:
         # Handle None value for n by converting it to -1
         if n is None:
@@ -208,25 +192,57 @@ class YamuxStream(IMuxedStream):
             )
             raise MuxedStreamEOF("Stream is closed for receiving")
 
-        # If reading until EOF (n == -1), block until stream is closed
         if n == -1:
-            # Check if there's data in the buffer
-            buffer = self.conn.stream_buffers.get(self.stream_id)
-            size = len(buffer) if buffer else 0
-            if size > 0:
-                # If any data is available,return it immediately
-                assert buffer is not None
-                data = bytes(buffer)
-                buffer.clear()
-                async with self.window_lock:
-                    self.recv_window += len(data)
-                    await self.send_window_update(len(data), skip_lock=True)
-                    return data
-            # Otherwise,wait for data or FIN
-            if self.recv_closed:
-                raise MuxedStreamEOF("Stream is closed for receiving")
-            await self.conn.stream_events[self.stream_id].wait()
-            self.conn.stream_events[self.stream_id] = trio.Event()
+            data = b""
+            while not self.conn.event_shutting_down.is_set():
+                # Check if there's data in the buffer
+                buffer = self.conn.stream_buffers.get(self.stream_id)
+
+                # If buffer is not available, check if stream is closed
+                if buffer is None:
+                    logging.debug(f"Stream {self.stream_id}: No buffer available")
+                    raise MuxedStreamEOF("Stream buffer closed")
+
+                # If we have data in buffer, process it
+                if len(buffer) > 0:
+                    chunk = bytes(buffer)
+                    buffer.clear()
+                    data += chunk
+
+                    # Send window update for the chunk we just read
+                    async with self.window_lock:
+                        self.recv_window += len(chunk)
+                        logging.debug(f"Stream {self.stream_id}: Update {len(chunk)}")
+                        await self.send_window_update(len(chunk), skip_lock=True)
+
+                # If stream is closed (FIN received) and buffer is empty, break
+                if self.recv_closed and len(buffer) == 0:
+                    logging.debug(f"Stream {self.stream_id}: Closed with empty buffer")
+                    break
+
+                # If stream was reset, raise reset error
+                if self.reset_received:
+                    logging.debug(f"Stream {self.stream_id}: Stream was reset")
+                    raise MuxedStreamReset("Stream was reset")
+
+                # Wait for more data or stream closure
+                logging.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
+                await self.conn.stream_events[self.stream_id].wait()
+                self.conn.stream_events[self.stream_id] = trio.Event()
+
+            # After loop exit, first check if we have data to return
+            if data:
+                logging.debug(
+                    f"Stream {self.stream_id}: Returning {len(data)} bytes after loop"
+                )
+                return data
+
+            # No data accumulated, now check why we exited the loop
+            if self.conn.event_shutting_down.is_set():
+                logging.debug(f"Stream {self.stream_id}: Connection shutting down")
+                raise MuxedStreamEOF("Connection shut down")
+
+            # Return empty data
             return b""
         else:
             data = await self.conn.read_stream(self.stream_id, n)
