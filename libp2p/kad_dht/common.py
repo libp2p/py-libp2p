@@ -1,5 +1,5 @@
 """
-Common Objects for Kademlia DHT implementation.
+Shared constants and protocol parameters for the Kademlia DHT.
 """
 
 from libp2p.custom_types import (

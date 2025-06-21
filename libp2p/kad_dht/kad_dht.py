@@ -5,7 +5,9 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
-from enum import Enum
+from enum import (
+    Enum,
+)
 import logging
 import time
 
