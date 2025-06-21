@@ -1,0 +1,1 @@
+Added separate read and write locks to the `MplexStream` & `YamuxStream` class.This ensures thread-safe access and data integrity when multiple coroutines interact with the same MplexStream instance.
