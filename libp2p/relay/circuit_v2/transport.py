@@ -152,6 +152,8 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established
 
         """
+        print(f"1. inside the dial_peer_info is the relay peer id: {relay_peer_id}")
+        print(f"2. inside the dial_peer_info is the peer info: {peer_info}")
         # If no specific relay is provided, try to find one
         if relay_peer_id is None:
             relay_peer_id = await self._select_relay(peer_info)
@@ -160,12 +162,14 @@ class CircuitV2Transport(ITransport):
 
         # Get a stream to the relay
         relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+        print(f"3. inside the dial_peer_info is the relay stream: {relay_stream}")
         if not relay_stream:
             raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
 
         try:
             # First try to make a reservation if enabled
             if self.config.enable_client:
+                print(f"4. inside the dial_peer_info is the relay stream: {relay_stream}")
                 success = await self._make_reservation(relay_stream, relay_peer_id)
                 if not success:
                     logger.warning(
@@ -177,7 +181,9 @@ class CircuitV2Transport(ITransport):
                 type=HopMessage.CONNECT,
                 peer=peer_info.peer_id.to_bytes(),
             )
+            print(f"5. inside the dial_peer_info is the hop msg: {hop_msg}")
             await relay_stream.write(hop_msg.SerializeToString())
+            print(f"6. inside the dial_peer_info is the relay stream: {relay_stream}")
 
             # Read response
             resp_bytes = await relay_stream.read()
