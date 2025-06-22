@@ -1,18 +1,19 @@
 """
 Unit tests for mDNS listener component.
 """
+
 import socket
-import pytest
+
 from zeroconf import ServiceInfo, Zeroconf
 
+from libp2p.abc import Multiaddr
 from libp2p.discovery.mdns.listener import PeerListener
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
-from libp2p.abc import Multiaddr
 
 
 class TestPeerListener:
-    """Basic unit tests for PeerListener."""
+    """Unit tests for PeerListener."""
 
     def test_listener_initialization(self):
         """Test that listener initializes correctly."""
@@ -33,7 +34,7 @@ class TestPeerListener:
         assert listener.service_type == service_type
         assert listener.service_name == service_name
         assert listener.discovered_services == {}
-        
+
         # Clean up
         listener.stop()
         zeroconf.close()
@@ -42,7 +43,7 @@ class TestPeerListener:
         """Test successful PeerInfo extraction from ServiceInfo."""
         peerstore = PeerStore()
         zeroconf = Zeroconf()
-        
+
         listener = PeerListener(
             peerstore=peerstore,
             zeroconf=zeroconf,
@@ -51,10 +52,12 @@ class TestPeerListener:
         )
 
         # Create sample service info
-        sample_peer_id = ID.from_base58("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
+        sample_peer_id = ID.from_base58(
+            "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
+        )
         hostname = socket.gethostname()
         local_ip = "192.168.1.100"
-        
+
         sample_service_info = ServiceInfo(
             type_="_p2p._udp.local.",
             name="test-peer._p2p._udp.local.",
@@ -70,10 +73,10 @@ class TestPeerListener:
         assert isinstance(peer_info.peer_id, ID)
         assert len(peer_info.addrs) > 0
         assert all(isinstance(addr, Multiaddr) for addr in peer_info.addrs)
-        
+
         # Check that protocol is TCP since we always use TCP
         assert "/tcp/" in str(peer_info.addrs[0])
-        
+
         # Clean up
         listener.stop()
         zeroconf.close()
@@ -82,7 +85,7 @@ class TestPeerListener:
         """Test PeerInfo extraction fails with invalid peer ID."""
         peerstore = PeerStore()
         zeroconf = Zeroconf()
-        
+
         listener = PeerListener(
             peerstore=peerstore,
             zeroconf=zeroconf,
@@ -93,7 +96,7 @@ class TestPeerListener:
         # Create service info with invalid peer ID
         hostname = socket.gethostname()
         local_ip = "192.168.1.100"
-        
+
         service_info = ServiceInfo(
             type_="_p2p._udp.local.",
             name="invalid-peer._p2p._udp.local.",
@@ -105,7 +108,7 @@ class TestPeerListener:
 
         peer_info = listener._extract_peer_info(service_info)
         assert peer_info is None
-        
+
         # Clean up
         listener.stop()
         zeroconf.close()

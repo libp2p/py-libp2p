@@ -1,23 +1,24 @@
 """
 Unit tests for mDNS broadcaster component.
 """
-import socket
-import pytest
-from zeroconf import ServiceInfo, Zeroconf
+
+from zeroconf import Zeroconf
 
 from libp2p.discovery.mdns.broadcaster import PeerBroadcaster
 from libp2p.peer.id import ID
 
 
 class TestPeerBroadcaster:
-    """Basic unit tests for PeerBroadcaster."""
+    """Unit tests for PeerBroadcaster."""
 
     def test_broadcaster_initialization(self):
         """Test that broadcaster initializes correctly."""
         zeroconf = Zeroconf()
         service_type = "_p2p._udp.local."
         service_name = "test-peer._p2p._udp.local."
-        peer_id = "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"  # String, not ID object
+        peer_id = (
+            "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"  # String, not ID object
+        )
         port = 8000
 
         broadcaster = PeerBroadcaster(
@@ -25,7 +26,7 @@ class TestPeerBroadcaster:
             service_type=service_type,
             service_name=service_name,
             peer_id=peer_id,
-            port=port
+            port=port,
         )
 
         assert broadcaster.zeroconf == zeroconf
@@ -33,7 +34,7 @@ class TestPeerBroadcaster:
         assert broadcaster.service_name == service_name
         assert broadcaster.peer_id == peer_id
         assert broadcaster.port == port
-        
+
         # Clean up
         zeroconf.close()
 
@@ -51,7 +52,7 @@ class TestPeerBroadcaster:
             service_type=service_type,
             service_name=service_name,
             peer_id=peer_id,
-            port=port
+            port=port,
         )
 
         # Verify service was created and registered
@@ -62,7 +63,7 @@ class TestPeerBroadcaster:
         assert service_info.port == port
         assert b"id" in service_info.properties
         assert service_info.properties[b"id"] == peer_id.encode()
-        
+
         # Clean up
         zeroconf.close()
 
@@ -80,11 +81,11 @@ class TestPeerBroadcaster:
             service_type=service_type,
             service_name=service_name,
             peer_id=peer_id,
-            port=port
+            port=port,
         )
 
         # Service should be registered
         assert broadcaster.service_info is not None
-        
+
         # Clean up
         zeroconf.close()
