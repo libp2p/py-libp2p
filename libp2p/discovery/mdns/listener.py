@@ -13,7 +13,7 @@ from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
-logger = logging.getLogger("libp2p.discovery.mdns.listner")
+logger = logging.getLogger("libp2p.discovery.mdns.listener")
 
 
 class PeerListener(ServiceListener):
@@ -75,7 +75,7 @@ class PeerListener(ServiceListener):
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
         try:
             addrs = [
-                Multiaddr(f"/ip4/{socket.inet_ntoa(addr)}/udp/{info.port}")
+                Multiaddr(f"/ip4/{socket.inet_ntoa(addr)}/tcp/{info.port}")
                 for addr in info.addresses
             ]
             pid_bytes = info.properties.get(b"id")
