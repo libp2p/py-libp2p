@@ -292,7 +292,9 @@ async def test_fanout():
 @pytest.mark.trio
 @pytest.mark.slow
 async def test_fanout_maintenance():
-    async with PubsubFactory.create_batch_with_gossipsub(10) as pubsubs_gsub:
+    async with PubsubFactory.create_batch_with_gossipsub(
+        10, unsubscribe_back_off=1
+    ) as pubsubs_gsub:
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         num_msgs = 5
 

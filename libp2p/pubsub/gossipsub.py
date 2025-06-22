@@ -735,7 +735,7 @@ class GossipSub(IPubsubRouter, Service):
         :param topic: topic to check
         :return: True if the peer is in back off, False otherwise
         """
-        if topic not in self.back_off:
+        if topic not in self.back_off or peer not in self.back_off[topic]:
             return False
         if self.back_off[topic].get(peer, 0) > int(time.time()):
             return True
