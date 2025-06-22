@@ -26,7 +26,9 @@ from libp2p.peer.peerinfo import (
 from .common import (
     PROTOCOL_ID,
 )
-from .pb.kademlia_pb2 import Message
+from .pb.kademlia_pb2 import (
+    Message,
+)
 
 # logger = logging.getLogger("libp2p.kademlia.routing_table")
 logger = logging.getLogger("kademlia-example.routing_table")
