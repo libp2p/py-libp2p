@@ -6,7 +6,6 @@ https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
 import logging
-import time
 from typing import (
     Any,
     Protocol as TypingProtocol,
@@ -40,7 +39,6 @@ from libp2p.tools.async_service import (
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
-    Reservation,
     Status as PbStatus,
     StopMessage,
 )
@@ -158,13 +156,18 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(dst_stream)
             self._active_relays.clear()
 
-            # Unregister protocol handlers
+            # Unregister protocol handlers - safely handle missing method
             if self.allow_hop:
                 try:
-                    # Cast host to extended interface with remove_stream_handler
-                    host_with_handlers = cast(IHostWithStreamHandlers, self.host)
-                    host_with_handlers.remove_stream_handler(PROTOCOL_ID)
-                    host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
+                    # Try to unregister handlers if the method exists
+                    if hasattr(self.host, "remove_stream_handler"):
+                        self.host.remove_stream_handler(PROTOCOL_ID)
+                        self.host.remove_stream_handler(STOP_PROTOCOL_ID)
+                    else:
+                        # Otherwise just log a message - handlers will be garbage collected
+                        logger.debug(
+                            "Host does not support remove_stream_handler, handlers will be garbage collected"
+                        )
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
@@ -508,6 +511,36 @@ class CircuitV2Protocol(Service):
             logger.debug("Accepting reservation from peer %s", peer_id)
             ttl = self.resource_manager.reserve(peer_id)
 
+            # Get the reservation object to access its voucher and sign it
+            reservation_obj = self.resource_manager._reservations.get(peer_id)
+            if not reservation_obj:
+                raise ValueError(f"Failed to create reservation for peer {peer_id}")
+
+            # Create the protobuf reservation with voucher and signature
+            pb_reservation = reservation_obj.to_proto()
+
+            # Get the peer's addresses from the peerstore if available
+            addrs = []
+            try:
+                from libp2p.host.basic_host import get_host_context
+
+                host_context = get_host_context()
+                if host_context and host_context.peerstore:
+                    # Get peer addresses from peerstore
+                    peer_addrs = host_context.peerstore.addrs(peer_id)
+                    # Convert addresses to bytes for the protocol buffer
+                    addrs = [addr.to_bytes() for addr in peer_addrs]
+                    logger.debug(
+                        "Including %d addresses for peer %s in reservation response",
+                        len(addrs),
+                        peer_id,
+                    )
+            except Exception as e:
+                logger.warning("Error getting peer addresses: %s", str(e))
+
+            # Add addresses to the reservation
+            pb_reservation.addrs.extend(addrs)
+
             # Send reservation success response
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
                 status = create_status(
@@ -517,11 +550,7 @@ class CircuitV2Protocol(Service):
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=status.to_pb(),
-                    reservation=Reservation(
-                        expire=int(time.time() + ttl),
-                        voucher=b"",  # We don't use vouchers yet
-                        signature=b"",  # We don't use signatures yet
-                    ),
+                    reservation=pb_reservation,
                     limit=Limit(
                         duration=self.limits.duration,
                         data=self.limits.data,
@@ -530,10 +559,13 @@ class CircuitV2Protocol(Service):
 
                 # Log the response message details for debugging
                 logger.debug(
-                    "Sending reservation response: type=%s, status=%s, ttl=%d",
+                    "Sending reservation response: type=%s, status=%s, ttl=%d, voucher_size=%d, signature_size=%d, addrs=%d",
                     response.type,
                     getattr(response.status, "code", "unknown"),
                     ttl,
+                    len(pb_reservation.voucher),
+                    len(pb_reservation.signature),
+                    len(pb_reservation.addrs),
                 )
 
                 # Send the response with increased timeout
@@ -569,24 +601,41 @@ class CircuitV2Protocol(Service):
         """Handle a connect request."""
         peer_id = ID(msg.peer)
         dst_stream: INetStream | None = None
+        logger.debug("Handling connect request to peer %s", peer_id)
 
         # Verify reservation if provided
         if msg.HasField("reservation"):
+            logger.debug("Verifying reservation for peer %s", peer_id)
             if not self.resource_manager.verify_reservation(peer_id, msg.reservation):
+                logger.warning("Invalid reservation for peer %s", peer_id)
                 await self._send_status(
                     stream,
                     StatusCode.PERMISSION_DENIED,
-                    "Invalid reservation",
+                    "Invalid reservation: signature verification failed or reservation expired",
+                )
+                await stream.reset()
+                return
+            logger.debug("Reservation verified successfully for peer %s", peer_id)
+        else:
+            logger.debug("No reservation provided for peer %s", peer_id)
+            # If no reservation is provided, check if one exists
+            if not self.resource_manager._reservations.get(peer_id):
+                logger.warning("No active reservation found for peer %s", peer_id)
+                await self._send_status(
+                    stream,
+                    StatusCode.PERMISSION_DENIED,
+                    "No active reservation found",
                 )
                 await stream.reset()
                 return
 
         # Check resource limits
         if not self.resource_manager.can_accept_connection(peer_id):
+            logger.warning("Connection limit exceeded for peer %s", peer_id)
             await self._send_status(
                 stream,
                 StatusCode.RESOURCE_LIMIT_EXCEEDED,
-                "Connection limit exceeded",
+                "Connection limit exceeded or data transfer limit reached",
             )
             await stream.reset()
             return
@@ -594,6 +643,7 @@ class CircuitV2Protocol(Service):
         try:
             # Store the source stream with properly typed None
             self._active_relays[peer_id] = (stream, None)
+            logger.debug("Attempting to connect to destination peer %s", peer_id)
 
             # Try to connect to the destination with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
@@ -601,13 +651,19 @@ class CircuitV2Protocol(Service):
                 if not dst_stream:
                     raise ConnectionError("Could not connect to destination")
 
+                logger.debug("Connected to destination peer %s", peer_id)
+
                 # Send STOP CONNECT message
+                src_peer_id = cast(INetStreamWithExtras, stream).get_remote_peer_id()
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
                     # Cast to extended interface with get_remote_peer_id
-                    peer=cast(INetStreamWithExtras, stream)
-                    .get_remote_peer_id()
-                    .to_bytes(),
+                    peer=src_peer_id.to_bytes(),
+                )
+                logger.debug(
+                    "Sending STOP CONNECT message to peer %s for source peer %s",
+                    peer_id,
+                    src_peer_id,
                 )
                 await dst_stream.write(stop_msg.SerializeToString())
 
@@ -627,17 +683,29 @@ class CircuitV2Protocol(Service):
                     status_msg = "No status provided"
 
                 if status_code != StatusCode.OK:
+                    logger.warning(
+                        "Destination rejected connection: %s (code %s)",
+                        status_msg,
+                        status_code,
+                    )
                     raise ConnectionError(
                         f"Destination rejected connection: {status_msg}"
                     )
 
             # Update active relays with destination stream
             self._active_relays[peer_id] = (stream, dst_stream)
+            logger.debug("Connection established for peer %s", peer_id)
 
             # Update reservation connection count
             reservation = self.resource_manager._reservations.get(peer_id)
             if reservation:
                 reservation.active_connections += 1
+                logger.debug(
+                    "Updated active connections for peer %s: %d/%d",
+                    peer_id,
+                    reservation.active_connections,
+                    reservation.limits.max_circuit_conns,
+                )
 
             # Send success status
             await self._send_status(
@@ -651,33 +719,35 @@ class CircuitV2Protocol(Service):
                 nursery.start_soon(self._relay_data, stream, dst_stream, peer_id)
                 nursery.start_soon(self._relay_data, dst_stream, stream, peer_id)
 
-        except (trio.TooSlowError, ConnectionError) as e:
-            logger.error("Error establishing relay connection: %s", str(e))
+        except trio.TooSlowError:
+            logger.error("Timeout connecting to destination peer %s", peer_id)
+            await self._send_status(
+                stream,
+                StatusCode.CONNECTION_FAILED,
+                "Connection timeout",
+            )
+            await stream.reset()
+            if dst_stream:
+                await dst_stream.reset()
+        except ConnectionError as e:
+            logger.error("Connection error for peer %s: %s", peer_id, str(e))
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 str(e),
             )
-            if peer_id in self._active_relays:
-                del self._active_relays[peer_id]
-            # Clean up reservation connection count on failure
-            reservation = self.resource_manager._reservations.get(peer_id)
-            if reservation:
-                reservation.active_connections -= 1
             await stream.reset()
-            if dst_stream and not cast(INetStreamWithExtras, dst_stream).is_closed():
+            if dst_stream:
                 await dst_stream.reset()
         except Exception as e:
-            logger.error("Unexpected error in connect handler: %s", str(e))
+            logger.error("Error handling connect request: %s", str(e))
             await self._send_status(
                 stream,
-                StatusCode.CONNECTION_FAILED,
-                "Internal error",
+                StatusCode.INTERNAL_ERROR,
+                f"Internal error: {str(e)}",
             )
-            if peer_id in self._active_relays:
-                del self._active_relays[peer_id]
             await stream.reset()
-            if dst_stream and not cast(INetStreamWithExtras, dst_stream).is_closed():
+            if dst_stream:
                 await dst_stream.reset()
 
     async def _relay_data(
@@ -692,48 +762,123 @@ class CircuitV2Protocol(Service):
         Parameters
         ----------
         src_stream : INetStream
-            Source stream to read from
+            The source stream
         dst_stream : INetStream
-            Destination stream to write to
+            The destination stream
         peer_id : ID
-            ID of the peer being relayed
+            The peer ID for the reservation
 
         """
         try:
-            while True:
-                # Read data with retries
-                data = await self._read_stream_with_retry(src_stream)
-                if not data:
-                    logger.info("Source stream closed/reset")
-                    break
+            # Get the reservation for tracking data usage
+            reservation = self.resource_manager._reservations.get(peer_id)
 
-                # Write data with timeout
+            # Buffer for data transfer
+            buffer_size = 4096
+            total_bytes = 0
+
+            while True:
                 try:
-                    with trio.fail_after(STREAM_WRITE_TIMEOUT):
-                        await dst_stream.write(data)
+                    # Read with timeout to prevent hanging
+                    with trio.fail_after(STREAM_READ_TIMEOUT):
+                        data = await src_stream.read(buffer_size)
+                        if not data:
+                            # End of stream
+                            logger.debug("End of stream reached for peer %s", peer_id)
+                            break
+
+                        # Track data usage
+                        bytes_transferred = len(data)
+                        total_bytes += bytes_transferred
+
+                        # Track data and check limits
+                        if (
+                            reservation
+                            and not self.resource_manager.track_data_transfer(
+                                peer_id, bytes_transferred
+                            )
+                        ):
+                            logger.warning(
+                                "Data transfer limit exceeded for peer %s: current=%d, attempted=%d, limit=%d",
+                                peer_id,
+                                reservation.data_used,
+                                bytes_transferred,
+                                reservation.limits.data,
+                            )
+                            # Close the connection due to limit exceeded
+                            await self._send_status(
+                                src_stream,
+                                StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                                "Data transfer limit exceeded",
+                            )
+                            await src_stream.reset()
+                            await dst_stream.reset()
+                            return
+
+                        # Write data to destination
+                        with trio.fail_after(STREAM_WRITE_TIMEOUT):
+                            await dst_stream.write(data)
+
                 except trio.TooSlowError:
-                    logger.error("Timeout writing to destination stream")
+                    logger.warning(
+                        "Timeout during relay operation for peer %s", peer_id
+                    )
+                    continue
+                except MplexStreamEOF:
+                    logger.debug("Stream EOF for peer %s", peer_id)
+                    break
+                except MplexStreamReset:
+                    logger.debug("Stream reset for peer %s", peer_id)
                     break
                 except Exception as e:
-                    logger.error("Error writing to destination stream: %s", str(e))
+                    logger.error("Error relaying data for peer %s: %s", peer_id, str(e))
                     break
 
-                # Update resource usage
-                reservation = self.resource_manager._reservations.get(peer_id)
-                if reservation:
-                    reservation.data_used += len(data)
-                    if reservation.data_used >= reservation.limits.data:
-                        logger.warning("Data limit exceeded for peer %s", peer_id)
-                        break
+            # Log the total bytes transferred
+            logger.debug(
+                "Relay complete for peer %s: %d bytes transferred", peer_id, total_bytes
+            )
+
+            # Clean up the connection
+            try:
+                await dst_stream.close()
+            except Exception:
+                await dst_stream.reset()
 
         except Exception as e:
-            logger.error("Error relaying data: %s", str(e))
+            logger.error("Unexpected error in relay: %s", str(e))
+            try:
+                await dst_stream.reset()
+            except Exception:
+                pass
         finally:
-            # Clean up streams and remove from active relays
-            await src_stream.reset()
-            await dst_stream.reset()
+            # Update the active connections count
+            reservation = self.resource_manager._reservations.get(peer_id)
+            if reservation and reservation.active_connections > 0:
+                reservation.active_connections -= 1
+                logger.debug(
+                    "Decreased active connections for peer %s: %d/%d",
+                    peer_id,
+                    reservation.active_connections,
+                    reservation.limits.max_circuit_conns,
+                )
+
+            # Remove from active relays if both streams are closed
             if peer_id in self._active_relays:
-                del self._active_relays[peer_id]
+                relay_src, relay_dst = self._active_relays[peer_id]
+
+                # Check if both streams are closed or reset
+                src_closed = not cast(INetStreamWithExtras, relay_src).is_open()
+                dst_closed = (
+                    relay_dst is None
+                    or not cast(INetStreamWithExtras, relay_dst).is_open()
+                )
+
+                if src_closed and dst_closed:
+                    del self._active_relays[peer_id]
+                    logger.debug(
+                        "Removed relay for peer %s from active relays", peer_id
+                    )
 
     async def _send_status(
         self,
