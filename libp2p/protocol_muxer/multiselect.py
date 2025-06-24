@@ -16,7 +16,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
-DEFAULT_NEGOTIATE_TIMEOUT = 60
+DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
 class Multiselect(IMultiselectMuxer):
@@ -63,7 +63,10 @@ class Multiselect(IMultiselectMuxer):
 
         while True:
             try:
-                command = await communicator.read()
+                with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+                    command = await communicator.read()
+            except trio.TooSlowError:
+                raise MultiselectError("handshake read timeout")
             except MultiselectCommunicatorError as error:
                 raise MultiselectError() from error
 
