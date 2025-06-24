@@ -1,0 +1,5 @@
+Add timeout to:
+1. multiselect handshake
+2. query_multistream_command
+3. try_select
+to prevent indefinite hangs when a remote peer does not respond.
