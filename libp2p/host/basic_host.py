@@ -3,6 +3,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import (
+    AbstractAsyncContextManager,
     asynccontextmanager,
 )
 import logging
@@ -88,14 +89,14 @@ class BasicHost(IHost):
     def __init__(
         self,
         network: INetworkService,
-        default_protocols: "OrderedDict[TProtocol, StreamHandlerFn]" = None,
+        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
-        self.multiselect = Multiselect(default_protocols)
+        self.multiselect = Multiselect(dict(default_protocols.items()))
         self.multiselect_client = MultiselectClient()
 
     def get_id(self) -> ID:
@@ -147,19 +148,23 @@ class BasicHost(IHost):
         """
         return list(self._network.connections.keys())
 
-    @asynccontextmanager
-    async def run(
+    def run(
         self, listen_addrs: Sequence[multiaddr.Multiaddr]
-    ) -> AsyncIterator[None]:
+    ) -> AbstractAsyncContextManager[None]:
         """
         Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
         """
-        network = self.get_network()
-        async with background_trio_service(network):
-            await network.listen(*listen_addrs)
-            yield
+
+        @asynccontextmanager
+        async def _run() -> AsyncIterator[None]:
+            network = self.get_network()
+            async with background_trio_service(network):
+                await network.listen(*listen_addrs)
+                yield
+
+        return _run()
 
     def set_stream_handler(
         self, protocol_id: TProtocol, stream_handler: StreamHandlerFn
@@ -195,6 +200,29 @@ class BasicHost(IHost):
         net_stream.set_protocol(selected_protocol)
         return net_stream
 
+    async def send_command(self, peer_id: ID, command: str) -> list[str]:
+        """
+        Send a multistream-select command to the specified peer and return
+        the response.
+
+        :param peer_id: peer_id that host is connecting
+        :param command: supported multistream-select command (e.g., "ls)
+        :raise StreamFailure: If the stream cannot be opened or negotiation fails
+        :return: list of strings representing the response from peer.
+        """
+        new_stream = await self._network.new_stream(peer_id)
+
+        try:
+            response = await self.multiselect_client.query_multistream_command(
+                MultiselectCommunicator(new_stream), command
+            )
+        except MultiselectClientError as error:
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            await new_stream.reset()
+            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
+
+        return response
+
     async def connect(self, peer_info: PeerInfo) -> None:
         """
         Ensure there is a connection between this host and the peer
@@ -206,7 +234,7 @@ class BasicHost(IHost):
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
-        self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
+        self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 120)
 
         # there is already a connection to this peer
         if peer_info.peer_id in self._network.connections:
@@ -235,6 +263,15 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
         net_stream.set_protocol(protocol)
+        if handler is None:
+            logger.debug(
+                "no handler for protocol %s, closing stream from peer %s",
+                protocol,
+                net_stream.muxed_conn.peer_id,
+            )
+            await net_stream.reset()
+            return
+
         await handler(net_stream)
 
     def get_live_peers(self) -> list[ID]:
@@ -254,7 +291,7 @@ class BasicHost(IHost):
         """
         return peer_id in self._network.connections
 
-    def get_peer_connection_info(self, peer_id: ID) -> Optional[INetConn]:
+    def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
         """
         Get connection information for a specific peer if connected.
 

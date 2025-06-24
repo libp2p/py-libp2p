@@ -15,14 +15,24 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 # sys.path.insert(0, os.path.abspath('.'))
 
+import doctest
 import os
+import sys
+from unittest.mock import MagicMock
 
-DIR = os.path.dirname(__file__)
-with open(os.path.join(DIR, "../setup.py"), "r") as f:
-    for line in f:
-        if "version=" in line:
-            setup_version = line.split('"')[1]
-            break
+try:
+    import tomllib
+except ModuleNotFoundError:
+    # For Python < 3.11
+    import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
+
+# Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
+pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+
+with open(pyproject_path, "rb") as f:
+    pyproject_data = tomllib.load(f)
+
+setup_version = pyproject_data["project"]["version"]
 
 # -- General configuration ------------------------------------------------
 
@@ -53,7 +63,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "py-libp2p"
-copyright = '2019, The Ethereum Foundation'
+copyright = "2019, The libp2p team"
+author = "The libp2p team"
 
 __version__ = setup_version
 # The version info for the project you're documenting, acts as replacement for
@@ -301,7 +312,6 @@ intersphinx_mapping = {
 
 # -- Doctest configuration ----------------------------------------
 
-import doctest
 
 doctest_default_flags = (
     0
@@ -316,13 +326,24 @@ doctest_default_flags = (
 # Mock out dependencies that are unbuildable on readthedocs, as recommended here:
 # https://docs.readthedocs.io/en/rel/faq.html#i-get-import-errors-on-libraries-that-depend-on-c-modules
 
-import sys
-from unittest.mock import MagicMock
 
-# Add new modules to mock here (it should be the same list as those excluded in setup.py)
+# Add new modules to mock here (it should be the same list
+# as those excluded in pyproject.toml)
 MOCK_MODULES = [
     "fastecdsa",
     "fastecdsa.encoding",
     "fastecdsa.encoding.sec1",
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
+# -- Extension configuration -------------------------------------------------
+
+# -- Options for todo extension ----------------------------------------------
+
+# If true, `todo` and `todoList` produce output, else they produce nothing.
+todo_include_todos = True
+
+# -- Options for autodoc extension ------------------------------------------
+
+# Allow duplicate object descriptions
+nitpicky = False
+nitpick_ignore = [("py:class", "type")]

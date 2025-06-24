@@ -7,12 +7,14 @@ help:
 	@echo "clean-pyc - remove Python file artifacts"
 	@echo "clean - run clean-build and clean-pyc"
 	@echo "dist - build package and cat contents of the dist directory"
+	@echo "fix - fix formatting & linting issues with ruff"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
 	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
+	@echo "pr - run clean, fix, lint, typecheck, and test i.e basically everything you need to do before creating a PR"
 
 clean-build:
 	rm -fr build/
@@ -37,9 +39,16 @@ lint:
 		&& pre-commit run --all-files --show-diff-on-failure \
 	)
 
+fix:
+	python -m ruff check --fix
+
+typecheck:
+	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
+
 test:
-	# remove core specification once interop tests pass
-	python -m pytest tests/core
+	python -m pytest tests -n auto
+
+pr: clean fix lint typecheck test
 
 # protobufs management
 
@@ -48,7 +57,11 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/security/insecure/pb/plaintext.proto \
 	libp2p/security/secio/pb/spipe.proto \
 	libp2p/security/noise/pb/noise.proto \
-	libp2p/identity/identify/pb/identify.proto
+	libp2p/identity/identify/pb/identify.proto \
+	libp2p/host/autonat/pb/autonat.proto \
+	libp2p/relay/circuit_v2/pb/circuit.proto \
+	libp2p/kad_dht/pb/kademlia.proto
+
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)
 
@@ -80,7 +93,7 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . setup.py "*conftest*" tests/
+	sphinx-apidoc -o docs/ . "*conftest*" tests/
 	$(MAKE) -C docs clean
 	$(MAKE) -C docs html
 	$(MAKE) -C docs doctest
@@ -124,8 +137,20 @@ ifndef bump
 endif
 
 check-git:
-	# require that upstream is configured for ethereum/py-libp2p
+	# require that upstream is configured for libp2p/py-libp2p
 	@if ! git remote -v | grep "upstream[[:space:]]git@github.com:libp2p/py-libp2p.git (push)\|upstream[[:space:]]https://github.com/libp2p/py-libp2p (push)"; then \
 		echo "Error: You must have a remote named 'upstream' that points to 'py-libp2p'"; \
 		exit 1; \
 	fi
+
+# autonat specific protobuf targets
+format-autonat-proto:
+	black libp2p/host/autonat/pb/autonat_pb2*.py*
+	isort libp2p/host/autonat/pb/autonat_pb2*.py*
+
+autonat-proto: clean-autonat
+	protoc --python_out=. --mypy_out=. libp2p/host/autonat/pb/autonat.proto
+	$(MAKE) format-autonat-proto
+
+clean-autonat:
+	rm -f libp2p/host/autonat/pb/autonat_pb2*.py*

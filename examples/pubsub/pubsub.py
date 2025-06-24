@@ -1,9 +1,6 @@
 import argparse
 import logging
 import socket
-from typing import (
-    Optional,
-)
 
 import base58
 import multiaddr
@@ -109,7 +106,7 @@ async def monitor_peer_topics(pubsub, nursery, termination_event):
         await trio.sleep(2)
 
 
-async def run(topic: str, destination: Optional[str], port: Optional[int]) -> None:
+async def run(topic: str, destination: str | None, port: int | None) -> None:
     # Initialize network settings
     localhost_ip = "127.0.0.1"
 
@@ -136,6 +133,7 @@ async def run(topic: str, destination: Optional[str], port: Optional[int]) -> No
         degree=3,  # Number of peers to maintain in mesh
         degree_low=2,  # Lower bound for mesh peers
         degree_high=4,  # Upper bound for mesh peers
+        direct_peers=None,  # Direct peers
         time_to_live=60,  # TTL for message cache in seconds
         gossip_window=2,  # Smaller window for faster gossip
         gossip_history=5,  # Keep more history

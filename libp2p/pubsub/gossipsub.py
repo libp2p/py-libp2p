@@ -10,6 +10,7 @@ from collections.abc import (
 )
 import logging
 import random
+import time
 from typing import (
     Any,
     DefaultDict,
@@ -28,6 +29,12 @@ from libp2p.network.stream.exceptions import (
 )
 from libp2p.peer.id import (
     ID,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
+from libp2p.peer.peerstore import (
+    PERMANENT_ADDR_TTL,
 )
 from libp2p.pubsub import (
     floodsub,
@@ -60,7 +67,7 @@ logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
-    pubsub: Pubsub
+    pubsub: Pubsub | None
 
     degree: int
     degree_high: int
@@ -74,13 +81,16 @@ class GossipSub(IPubsubRouter, Service):
     # The protocol peer supports
     peer_protocol: dict[ID, TProtocol]
 
-    # TODO: Add `time_since_last_publish`
-    #   Create topic --> time since last publish map.
+    time_since_last_publish: dict[str, int]
 
     mcache: MessageCache
 
     heartbeat_initial_delay: float
     heartbeat_interval: int
+
+    direct_peers: dict[ID, PeerInfo]
+    direct_connect_initial_delay: float
+    direct_connect_interval: int
 
     def __init__(
         self,
@@ -88,11 +98,14 @@ class GossipSub(IPubsubRouter, Service):
         degree: int,
         degree_low: int,
         degree_high: int,
+        direct_peers: Sequence[PeerInfo] | None = None,
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
         heartbeat_initial_delay: float = 0.1,
         heartbeat_interval: int = 120,
+        direct_connect_initial_delay: float = 0.1,
+        direct_connect_interval: int = 300,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -119,10 +132,18 @@ class GossipSub(IPubsubRouter, Service):
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
 
+        # Create direct peers
+        self.direct_peers = dict()
+        for direct_peer in direct_peers or []:
+            self.direct_peers[direct_peer.peer_id] = direct_peer
+        self.direct_connect_interval = direct_connect_interval
+        self.direct_connect_initial_delay = direct_connect_initial_delay
+        self.time_since_last_publish = {}
+
     async def run(self) -> None:
-        if self.pubsub is None:
-            raise NoPubsubAttached
         self.manager.run_daemon_task(self.heartbeat)
+        if len(self.direct_peers) > 0:
+            self.manager.run_daemon_task(self.direct_connect_heartbeat)
         await self.manager.wait_finished()
 
     # Interface functions
@@ -142,9 +163,15 @@ class GossipSub(IPubsubRouter, Service):
         """
         self.pubsub = pubsub
 
+        if len(self.direct_peers) > 0:
+            for pi in self.direct_peers:
+                self.pubsub.host.get_peerstore().add_addrs(
+                    pi, self.direct_peers[pi].addrs, PERMANENT_ADDR_TTL
+                )
+
         logger.debug("attached to pusub")
 
-    def add_peer(self, peer_id: ID, protocol_id: TProtocol) -> None:
+    def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
         Notifies the router that a new peer has been connected.
 
@@ -152,6 +179,9 @@ class GossipSub(IPubsubRouter, Service):
         :param protocol_id: router protocol the peer speaks, e.g., floodsub, gossipsub
         """
         logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
+
+        if protocol_id is None:
+            raise ValueError("Protocol cannot be None")
 
         if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
             # We should never enter here. Becuase the `protocol_id` is registered by
@@ -214,6 +244,8 @@ class GossipSub(IPubsubRouter, Service):
         logger.debug("publishing message %s", pubsub_msg)
 
         for peer_id in peers_gen:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
             stream = self.pubsub.peers[peer_id]
@@ -225,6 +257,8 @@ class GossipSub(IPubsubRouter, Service):
             except StreamClosed:
                 logger.debug("Fail to publish message to %s: stream closed", peer_id)
                 self.pubsub._handle_dead_peer(peer_id)
+        for topic in pubsub_msg.topicIDs:
+            self.time_since_last_publish[topic] = int(time.time())
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -238,8 +272,14 @@ class GossipSub(IPubsubRouter, Service):
         """
         send_to: set[ID] = set()
         for topic in topic_ids:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             if topic not in self.pubsub.peer_topics:
                 continue
+
+            # direct peers
+            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
+            send_to.update(_direct_peers)
 
             # floodsub peers
             floodsub_peers: set[ID] = {
@@ -283,6 +323,9 @@ class GossipSub(IPubsubRouter, Service):
 
         :param topic: topic to join
         """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
         logger.debug("joining topic %s", topic)
 
         if topic in self.mesh:
@@ -310,6 +353,7 @@ class GossipSub(IPubsubRouter, Service):
             await self.emit_graft(topic, peer)
 
         self.fanout.pop(topic, None)
+        self.time_since_last_publish.pop(topic, None)
 
     async def leave(self, topic: str) -> None:
         # Note: the comments here are the near-exact algorithm description from the spec
@@ -425,12 +469,34 @@ class GossipSub(IPubsubRouter, Service):
 
             await trio.sleep(self.heartbeat_interval)
 
+    async def direct_connect_heartbeat(self) -> None:
+        """
+        Connect to direct peers.
+        """
+        await trio.sleep(self.direct_connect_initial_delay)
+        while True:
+            for direct_peer in self.direct_peers:
+                if self.pubsub is None:
+                    raise NoPubsubAttached
+                if direct_peer not in self.pubsub.peers:
+                    try:
+                        await self.pubsub.host.connect(self.direct_peers[direct_peer])
+                    except Exception as e:
+                        logger.debug(
+                            "failed to connect to a direct peer %s: %s",
+                            direct_peer,
+                            e,
+                        )
+            await trio.sleep(self.direct_connect_interval)
+
     def mesh_heartbeat(
         self,
     ) -> tuple[DefaultDict[ID, list[str]], DefaultDict[ID, list[str]]]:
         peers_to_graft: DefaultDict[ID, list[str]] = defaultdict(list)
         peers_to_prune: DefaultDict[ID, list[str]] = defaultdict(list)
         for topic in self.mesh:
+            if self.pubsub is None:
+                raise NoPubsubAttached
             # Skip if no peers have subscribed to the topic
             if topic not in self.pubsub.peer_topics:
                 continue
@@ -462,72 +528,99 @@ class GossipSub(IPubsubRouter, Service):
                     peers_to_prune[peer].append(topic)
         return peers_to_graft, peers_to_prune
 
+    def _handle_topic_heartbeat(
+        self,
+        topic: str,
+        current_peers: set[ID],
+        is_fanout: bool = False,
+        peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] | None = None,
+    ) -> tuple[set[ID], bool]:
+        """
+        Helper method to handle heartbeat for a single topic,
+        supporting both fanout and gossip.
+
+        :param topic: The topic to handle
+        :param current_peers: Current set of peers in the topic
+        :param is_fanout: Whether this is a fanout topic (affects expiration check)
+        :param peers_to_gossip: Optional dictionary to store peers to gossip to
+        :return: Tuple of (updated_peers, should_remove_topic)
+        """
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        # Skip if no peers have subscribed to the topic
+        if topic not in self.pubsub.peer_topics:
+            return current_peers, False
+
+        # For fanout topics, check if we should remove the topic
+        if is_fanout:
+            if self.time_since_last_publish.get(topic, 0) + self.time_to_live < int(
+                time.time()
+            ):
+                return set(), True
+
+        # Check if peers are still in the topic and remove the ones that are not
+        in_topic_peers: set[ID] = {
+            peer for peer in current_peers if peer in self.pubsub.peer_topics[topic]
+        }
+
+        # If we need more peers to reach target degree
+        if len(in_topic_peers) < self.degree:
+            # Select additional peers from peers.gossipsub[topic]
+            selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
+                topic,
+                self.degree - len(in_topic_peers),
+                in_topic_peers,
+            )
+            # Add the selected peers
+            in_topic_peers.update(selected_peers)
+
+        # Handle gossip if requested
+        if peers_to_gossip is not None:
+            msg_ids = self.mcache.window(topic)
+            if msg_ids:
+                # Select D peers from peers.gossipsub[topic] excluding current peers
+                peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
+                    topic, self.degree, current_peers
+                )
+                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
+                for peer in peers_to_emit_ihave_to:
+                    peers_to_gossip[peer][topic] = msg_id_strs
+
+        return in_topic_peers, False
+
     def fanout_heartbeat(self) -> None:
-        # Note: the comments here are the exact pseudocode from the spec
-        for topic in self.fanout:
-            # Delete topic entry if it's not in `pubsub.peer_topics`
-            # or (TODO) if it's time-since-last-published > ttl
-            if topic not in self.pubsub.peer_topics:
-                # Remove topic from fanout
+        """
+        Maintain fanout topics by:
+        1. Removing expired topics
+        2. Removing peers that are no longer in the topic
+        3. Adding new peers if needed to maintain the target degree
+        """
+        for topic in list(self.fanout):
+            updated_peers, should_remove = self._handle_topic_heartbeat(
+                topic, self.fanout[topic], is_fanout=True
+            )
+            if should_remove:
                 del self.fanout[topic]
             else:
-                # Check if fanout peers are still in the topic and remove the ones that are not  # noqa: E501
-                # ref: https://github.com/libp2p/go-libp2p-pubsub/blob/01b9825fbee1848751d90a8469e3f5f43bac8466/gossipsub.go#L498-L504  # noqa: E501
-                in_topic_fanout_peers = [
-                    peer
-                    for peer in self.fanout[topic]
-                    if peer in self.pubsub.peer_topics[topic]
-                ]
-                self.fanout[topic] = set(in_topic_fanout_peers)
-                num_fanout_peers_in_topic = len(self.fanout[topic])
-
-                # If |fanout[topic]| < D
-                if num_fanout_peers_in_topic < self.degree:
-                    # Select D - |fanout[topic]| peers from peers.gossipsub[topic] - fanout[topic]  # noqa: E501
-                    selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
-                        topic,
-                        self.degree - num_fanout_peers_in_topic,
-                        self.fanout[topic],
-                    )
-                    # Add the peers to fanout[topic]
-                    self.fanout[topic].update(selected_peers)
+                self.fanout[topic] = updated_peers
 
     def gossip_heartbeat(self) -> DefaultDict[ID, dict[str, list[str]]]:
         peers_to_gossip: DefaultDict[ID, dict[str, list[str]]] = defaultdict(dict)
+
+        # Handle mesh topics
         for topic in self.mesh:
-            msg_ids = self.mcache.window(topic)
-            if msg_ids:
-                # Get all pubsub peers in a topic and only add them if they are
-                # gossipsub peers too
-                if topic in self.pubsub.peer_topics:
-                    # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = (
-                        self._get_in_topic_gossipsub_peers_from_minus(
-                            topic, self.degree, self.mesh[topic]
-                        )
-                    )
+            self._handle_topic_heartbeat(
+                topic, self.mesh[topic], peers_to_gossip=peers_to_gossip
+            )
 
-                    msg_id_strs = [str(msg_id) for msg_id in msg_ids]
-                    for peer in peers_to_emit_ihave_to:
-                        peers_to_gossip[peer][topic] = msg_id_strs
-
-        # TODO: Refactor and Dedup. This section is the roughly the same as the above.
-        # Do the same for fanout, for all topics not already hit in mesh
+        # Handle fanout topics that aren't in mesh
         for topic in self.fanout:
-            msg_ids = self.mcache.window(topic)
-            if msg_ids:
-                # Get all pubsub peers in topic and only add if they are
-                # gossipsub peers also
-                if topic in self.pubsub.peer_topics:
-                    # Select D peers from peers.gossipsub[topic]
-                    peers_to_emit_ihave_to = (
-                        self._get_in_topic_gossipsub_peers_from_minus(
-                            topic, self.degree, self.fanout[topic]
-                        )
-                    )
-                    msg_id_strs = [str(msg) for msg in msg_ids]
-                    for peer in peers_to_emit_ihave_to:
-                        peers_to_gossip[peer][topic] = msg_id_strs
+            if topic not in self.mesh:
+                self._handle_topic_heartbeat(
+                    topic, self.fanout[topic], peers_to_gossip=peers_to_gossip
+                )
+
         return peers_to_gossip
 
     @staticmethod
@@ -564,6 +657,8 @@ class GossipSub(IPubsubRouter, Service):
     def _get_in_topic_gossipsub_peers_from_minus(
         self, topic: str, num_to_select: int, minus: Iterable[ID]
     ) -> list[ID]:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
@@ -577,6 +672,8 @@ class GossipSub(IPubsubRouter, Service):
         self, ihave_msg: rpc_pb2.ControlIHave, sender_peer_id: ID
     ) -> None:
         """Checks the seen set and requests unknown messages with an IWANT message."""
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
@@ -609,7 +706,7 @@ class GossipSub(IPubsubRouter, Service):
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
-            msg: rpc_pb2.Message = self.mcache.get(msg_id_iwant)
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
 
             # Cache hit
             if msg:
@@ -627,6 +724,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # 2) Serialize that packet
         rpc_msg: bytes = packet.SerializeToString()
+        if self.pubsub is None:
+            raise NoPubsubAttached
 
         # 3) Get the stream to this peer
         if sender_peer_id not in self.pubsub.peers:
@@ -654,6 +753,14 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add peer to mesh for topic
         if topic in self.mesh:
+            for direct_peer in self.direct_peers:
+                if direct_peer == sender_peer_id:
+                    logger.warning(
+                        "GRAFT: ignoring request from direct peer %s", sender_peer_id
+                    )
+                    await self.emit_prune(topic, sender_peer_id)
+                    return
+
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
         else:
@@ -673,9 +780,9 @@ class GossipSub(IPubsubRouter, Service):
 
     def pack_control_msgs(
         self,
-        ihave_msgs: list[rpc_pb2.ControlIHave],
-        graft_msgs: list[rpc_pb2.ControlGraft],
-        prune_msgs: list[rpc_pb2.ControlPrune],
+        ihave_msgs: list[rpc_pb2.ControlIHave] | None,
+        graft_msgs: list[rpc_pb2.ControlGraft] | None,
+        prune_msgs: list[rpc_pb2.ControlPrune] | None,
     ) -> rpc_pb2.ControlMessage:
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:
@@ -707,7 +814,7 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
-    async def emit_graft(self, topic: str, to_peer: ID) -> None:
+    async def emit_graft(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         graft_msg: rpc_pb2.ControlGraft = rpc_pb2.ControlGraft()
         graft_msg.topicID = topic
@@ -715,9 +822,9 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.graft.extend([graft_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
-    async def emit_prune(self, topic: str, to_peer: ID) -> None:
+    async def emit_prune(self, topic: str, id: ID) -> None:
         """Emit graft message, sent to to_peer, for topic."""
         prune_msg: rpc_pb2.ControlPrune = rpc_pb2.ControlPrune()
         prune_msg.topicID = topic
@@ -725,11 +832,13 @@ class GossipSub(IPubsubRouter, Service):
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
 
-        await self.emit_control_message(control_msg, to_peer)
+        await self.emit_control_message(control_msg, id)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
+        if self.pubsub is None:
+            raise NoPubsubAttached
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)

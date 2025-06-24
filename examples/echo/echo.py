@@ -20,17 +20,17 @@ from libp2p.peer.peerinfo import (
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
+MAX_READ_LEN = 2**32 - 1
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
     # Wait until EOF
-    msg = await stream.read()
+    msg = await stream.read(MAX_READ_LEN)
     await stream.write(msg)
     await stream.close()
 
 
-async def run(port: int, destination: str, seed: int = None) -> None:
-    localhost_ip = "127.0.0.1"
+async def run(port: int, destination: str, seed: int | None = None) -> None:
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
     if seed:
@@ -53,8 +53,8 @@ async def run(port: int, destination: str, seed: int = None) -> None:
 
             print(
                 "Run this from the same folder in another console:\n\n"
-                f"echo-demo -p {int(port) + 1} "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
+                f"echo-demo "
+                f"-d {host.get_addrs()[0]}\n"
             )
             print("Waiting for incoming connections...")
             await trio.sleep_forever()
@@ -73,9 +73,8 @@ async def run(port: int, destination: str, seed: int = None) -> None:
             msg = b"hi, there!\n"
 
             await stream.write(msg)
-            # Notify the other side about EOF
-            await stream.close()
             response = await stream.read()
+            await stream.close()
 
             print(f"Sent: {msg.decode('utf-8')}")
             print(f"Got: {response.decode('utf-8')}")
@@ -94,9 +93,7 @@ def main() -> None:
         "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "-p", "--port", default=8000, type=int, help="source port number"
-    )
+    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
     parser.add_argument(
         "-d",
         "--destination",
@@ -110,10 +107,6 @@ def main() -> None:
         help="provide a seed to the random number generator (e.g. to fix peer IDs across runs)",  # noqa: E501
     )
     args = parser.parse_args()
-
-    if not args.port:
-        raise RuntimeError("was not able to determine a local port")
-
     try:
         trio.run(run, args.port, args.destination, args.seed)
     except KeyboardInterrupt:

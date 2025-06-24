@@ -55,9 +55,8 @@ async def send_ping(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    localhost_ip = "127.0.0.1"
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    host = new_host()
+    host = new_host(listen_addrs=[listen_addr])
 
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         if not destination:
@@ -65,8 +64,8 @@ async def run(port: int, destination: str) -> None:
 
             print(
                 "Run this from the same folder in another console:\n\n"
-                f"ping-demo -p {int(port) + 1} "
-                f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id().pretty()}\n"
+                f"ping-demo "
+                f"-d {host.get_addrs()[0]}\n"
             )
             print("Waiting for incoming connection...")
 
@@ -96,10 +95,8 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
 
-    parser.add_argument(
-        "-p", "--port", default=8000, type=int, help="source port number"
-    )
     parser.add_argument(
         "-d",
         "--destination",
@@ -107,9 +104,6 @@ def main() -> None:
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
     args = parser.parse_args()
-
-    if not args.port:
-        raise RuntimeError("failed to determine local port")
 
     try:
         trio.run(run, *(args.port, args.destination))

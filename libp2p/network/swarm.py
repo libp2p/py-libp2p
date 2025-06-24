@@ -1,7 +1,4 @@
 import logging
-from typing import (
-    Optional,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -75,7 +72,7 @@ class Swarm(Service, INetworkService):
     connections: dict[ID, INetConn]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
-    listener_nursery: Optional[trio.Nursery]
+    listener_nursery: trio.Nursery | None
     event_listener_nursery_created: trio.Event
 
     notifees: list[INotifee]
@@ -190,7 +187,7 @@ class Swarm(Service, INetworkService):
         # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
         # the conn and then mux the conn
         try:
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, peer_id, True)
+            secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
         except SecurityUpgradeFailure as error:
             logger.debug("failed to upgrade security for peer %s", peer_id)
             await raw_conn.close()
@@ -260,10 +257,7 @@ class Swarm(Service, INetworkService):
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
                 # secure the conn and then mux the conn
                 try:
-                    # FIXME: This dummy `ID(b"")` for the remote peer is useless.
-                    secured_conn = await self.upgrader.upgrade_security(
-                        raw_conn, ID(b""), False
-                    )
+                    secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
                 except SecurityUpgradeFailure as error:
                     logger.debug("failed to upgrade security for peer at %s", maddr)
                     await raw_conn.close()
@@ -313,7 +307,37 @@ class Swarm(Service, INetworkService):
         return False
 
     async def close(self) -> None:
-        await self.manager.stop()
+        """
+        Close the swarm instance and cleanup resources.
+        """
+        # Check if manager exists before trying to stop it
+        if hasattr(self, "_manager") and self._manager is not None:
+            await self._manager.stop()
+        else:
+            # Perform alternative cleanup if the manager isn't initialized
+            # Close all connections manually
+            if hasattr(self, "connections"):
+                for conn_id in list(self.connections.keys()):
+                    conn = self.connections[conn_id]
+                    await conn.close()
+
+                # Clear connection tracking dictionary
+                self.connections.clear()
+
+            # Close all listeners
+            if hasattr(self, "listeners"):
+                for listener in self.listeners.values():
+                    await listener.close()
+                self.listeners.clear()
+
+            # Close the transport if it exists and has a close method
+            if hasattr(self, "transport") and self.transport is not None:
+                # Check if transport has close method before calling it
+                if hasattr(self.transport, "close"):
+                    await self.transport.close()  # type: ignore
+                # Ignoring the type above since `transport` may not have a close method
+                # and we have already checked it with hasattr
+
         logger.debug("swarm successfully closed")
 
     async def close_peer(self, peer_id: ID) -> None:
@@ -332,7 +356,11 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
-        swarm_conn = SwarmConn(muxed_conn, self)
+        swarm_conn = SwarmConn(
+            muxed_conn,
+            self,
+        )
+
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
         self.manager.run_task(swarm_conn.start)

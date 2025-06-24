@@ -5,6 +5,7 @@ from that repo: "a simple package to r/w length-delimited slices."
 
 NOTE: currently missing the capability to indicate lengths by "varint" method.
 """
+
 from abc import (
     abstractmethod,
 )
@@ -60,12 +61,10 @@ class BaseMsgReadWriter(MsgReadWriteCloser):
         return await read_exactly(self.read_write_closer, length)
 
     @abstractmethod
-    async def next_msg_len(self) -> int:
-        ...
+    async def next_msg_len(self) -> int: ...
 
     @abstractmethod
-    def encode_msg(self, msg: bytes) -> bytes:
-        ...
+    def encode_msg(self, msg: bytes) -> bytes: ...
 
     async def close(self) -> None:
         await self.read_write_closer.close()

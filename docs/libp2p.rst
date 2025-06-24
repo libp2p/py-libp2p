@@ -11,14 +11,17 @@ Subpackages
    libp2p.host
    libp2p.identity
    libp2p.io
+   libp2p.kad_dht
    libp2p.network
    libp2p.peer
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.relay
    libp2p.security
    libp2p.stream_muxer
    libp2p.tools
    libp2p.transport
+   libp2p.utils
 
 Submodules
 ----------

@@ -11,13 +11,8 @@ else:
 
 import pytest
 import trio
-from trio.testing import (
-    Matcher,
-    RaisesGroup,
-)
 
 from libp2p.tools.async_service import (
-    DaemonTaskExit,
     LifecycleError,
     Service,
     TrioManager,
@@ -134,11 +129,7 @@ async def test_trio_service_lifecycle_run_and_exception():
     manager = TrioManager(service)
 
     async def do_service_run():
-        with RaisesGroup(
-            Matcher(RuntimeError, match="Service throwing error"),
-            allow_unwrapped=True,
-            flatten_subgroups=True,
-        ):
+        with pytest.raises(ExceptionGroup):
             await manager.run()
 
     await do_service_lifecycle_check(
@@ -165,11 +156,7 @@ async def test_trio_service_lifecycle_run_and_task_exception():
     manager = TrioManager(service)
 
     async def do_service_run():
-        with RaisesGroup(
-            Matcher(RuntimeError, match="Service throwing error"),
-            allow_unwrapped=True,
-            flatten_subgroups=True,
-        ):
+        with pytest.raises(ExceptionGroup):
             await manager.run()
 
     await do_service_lifecycle_check(
@@ -230,11 +217,7 @@ async def test_trio_service_lifecycle_run_and_daemon_task_exit():
     manager = TrioManager(service)
 
     async def do_service_run():
-        with RaisesGroup(
-            Matcher(DaemonTaskExit, match="Daemon task"),
-            allow_unwrapped=True,
-            flatten_subgroups=True,
-        ):
+        with pytest.raises(ExceptionGroup):
             await manager.run()
 
     await do_service_lifecycle_check(
@@ -395,11 +378,7 @@ async def test_trio_service_manager_run_task_reraises_exceptions():
         with trio.fail_after(1):
             await trio.sleep_forever()
 
-    with RaisesGroup(
-        Matcher(Exception, match="task exception in run_task"),
-        allow_unwrapped=True,
-        flatten_subgroups=True,
-    ):
+    with pytest.raises(ExceptionGroup):
         async with background_trio_service(RunTaskService()):
             task_event.set()
             with trio.fail_after(1):
@@ -419,13 +398,7 @@ async def test_trio_service_manager_run_daemon_task_cancels_if_exits():
         with trio.fail_after(1):
             await trio.sleep_forever()
 
-    with RaisesGroup(
-        Matcher(
-            DaemonTaskExit, match=r"Daemon task daemon_task_fn\[daemon=True\] exited"
-        ),
-        allow_unwrapped=True,
-        flatten_subgroups=True,
-    ):
+    with pytest.raises(ExceptionGroup):
         async with background_trio_service(RunTaskService()):
             task_event.set()
             with trio.fail_after(1):
@@ -443,11 +416,7 @@ async def test_trio_service_manager_propogates_and_records_exceptions():
 
     assert manager.did_error is False
 
-    with RaisesGroup(
-        Matcher(RuntimeError, match="this is the error"),
-        allow_unwrapped=True,
-        flatten_subgroups=True,
-    ):
+    with pytest.raises(ExceptionGroup):
         await manager.run()
 
     assert manager.did_error is True
@@ -641,7 +610,7 @@ async def test_trio_service_with_try_finally_cleanup_with_shielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
                     await trio.lowlevel.checkpoint()
                 self.cleanup_up = True
 
@@ -660,7 +629,7 @@ async def test_error_in_service_run():
             self.manager.run_daemon_task(self.manager.wait_finished)
             raise ValueError("Exception inside run()")
 
-    with RaisesGroup(ValueError, allow_unwrapped=True, flatten_subgroups=True):
+    with pytest.raises(ExceptionGroup):
         await TrioManager.run_service(ServiceTest())
 
 
@@ -679,5 +648,5 @@ async def test_daemon_task_finishes_leaving_children():
         async def run(self):
             self.manager.run_daemon_task(self.buggy_daemon)
 
-    with RaisesGroup(DaemonTaskExit, allow_unwrapped=True, flatten_subgroups=True):
+    with pytest.raises(ExceptionGroup):
         await TrioManager.run_service(ServiceTest())

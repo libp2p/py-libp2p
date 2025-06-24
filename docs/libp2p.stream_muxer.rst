@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.stream_muxer.mplex
+   libp2p.stream_muxer.yamux
 
 Submodules
 ----------

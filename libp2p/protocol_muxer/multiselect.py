@@ -23,16 +23,20 @@ class Multiselect(IMultiselectMuxer):
     communication.
     """
 
-    handlers: dict[TProtocol, StreamHandlerFn]
+    handlers: dict[TProtocol | None, StreamHandlerFn | None]
 
     def __init__(
-        self, default_handlers: dict[TProtocol, StreamHandlerFn] = None
+        self,
+        default_handlers: None
+        | (dict[TProtocol | None, StreamHandlerFn | None]) = None,
     ) -> None:
         if not default_handlers:
             default_handlers = {}
         self.handlers = default_handlers
 
-    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
+    def add_handler(
+        self, protocol: TProtocol | None, handler: StreamHandlerFn | None
+    ) -> None:
         """
         Store the handler with the given protocol.
 
@@ -41,9 +45,10 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
+    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn]:
+    ) -> tuple[TProtocol, StreamHandlerFn | None]:
         """
         Negotiate performs protocol selection.
 
@@ -60,8 +65,14 @@ class Multiselect(IMultiselectMuxer):
                 raise MultiselectError() from error
 
             if command == "ls":
-                # TODO: handle ls command
-                pass
+                supported_protocols = [p for p in self.handlers.keys() if p is not None]
+                response = "\n".join(supported_protocols) + "\n"
+
+                try:
+                    await communicator.write(response)
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectError() from error
+
             else:
                 protocol = TProtocol(command)
                 if protocol in self.handlers:
@@ -75,6 +86,8 @@ class Multiselect(IMultiselectMuxer):
                     await communicator.write(PROTOCOL_NOT_FOUND_MSG)
                 except MultiselectCommunicatorError as error:
                     raise MultiselectError() from error
+
+        raise MultiselectError("Negotiation failed: no matching protocol")
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """

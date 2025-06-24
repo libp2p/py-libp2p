@@ -3,8 +3,8 @@ import trio
 
 from libp2p.tools.async_service import (
     Service,
-    background_trio_service,
 )
+from libp2p.tools.async_service.trio_service import TrioManager
 
 
 @pytest.mark.trio
@@ -33,24 +33,31 @@ async def test_trio_manager_stats():
             self.manager.run_task(trio.lowlevel.checkpoint)
 
     service = StatsTest()
-    async with background_trio_service(service) as manager:
-        service.run_external_root()
-        assert len(manager._root_tasks) == 2
-        with trio.fail_after(1):
-            await ready.wait()
+    async with trio.open_nursery() as nursery:
+        manager = TrioManager(service)
+        nursery.start_soon(manager.run)
+        await manager.wait_started()
 
-        # we need to yield to the event loop a few times to allow the various
-        # tasks to schedule themselves and get running.
-        for _ in range(50):
-            await trio.lowlevel.checkpoint()
+        try:
+            service.run_external_root()
+            assert len(manager._root_tasks) == 2
+            with trio.fail_after(1):
+                await ready.wait()
 
-        assert manager.stats.tasks.total_count == 10
-        assert manager.stats.tasks.finished_count == 3
-        assert manager.stats.tasks.pending_count == 7
+            # we need to yield to the event loop a few times to allow the various
+            # tasks to schedule themselves and get running.
+            for _ in range(50):
+                await trio.lowlevel.checkpoint()
 
-        # This is a simple test to ensure that finished tasks are removed from
-        # tracking to prevent unbounded memory growth.
-        assert len(manager._root_tasks) == 1
+            assert manager.stats.tasks.total_count == 10
+            assert manager.stats.tasks.finished_count == 3
+            assert manager.stats.tasks.pending_count == 7
+
+            # This is a simple test to ensure that finished tasks are removed from
+            # tracking to prevent unbounded memory growth.
+            assert len(manager._root_tasks) == 1
+        finally:
+            await manager.stop()
 
     # now check after exiting
     assert manager.stats.tasks.total_count == 10
@@ -67,18 +74,26 @@ async def test_trio_manager_stats_does_not_count_main_run_method():
             self.manager.run_task(trio.sleep_forever)
             ready.set()
 
-    async with background_trio_service(StatsTest()) as manager:
-        with trio.fail_after(1):
-            await ready.wait()
+    service = StatsTest()
+    async with trio.open_nursery() as nursery:
+        manager = TrioManager(service)
+        nursery.start_soon(manager.run)
+        await manager.wait_started()
 
-        # we need to yield to the event loop a few times to allow the various
-        # tasks to schedule themselves and get running.
-        for _ in range(10):
-            await trio.lowlevel.checkpoint()
+        try:
+            with trio.fail_after(1):
+                await ready.wait()
 
-        assert manager.stats.tasks.total_count == 1
-        assert manager.stats.tasks.finished_count == 0
-        assert manager.stats.tasks.pending_count == 1
+            # we need to yield to the event loop a few times to allow the various
+            # tasks to schedule themselves and get running.
+            for _ in range(10):
+                await trio.lowlevel.checkpoint()
+
+            assert manager.stats.tasks.total_count == 1
+            assert manager.stats.tasks.finished_count == 0
+            assert manager.stats.tasks.pending_count == 1
+        finally:
+            await manager.stop()
 
     # now check after exiting
     assert manager.stats.tasks.total_count == 1
