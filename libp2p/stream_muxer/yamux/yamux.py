@@ -77,8 +77,6 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
-        self.read_lock = trio.Lock()
-        self.write_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
