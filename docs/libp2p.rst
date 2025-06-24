@@ -16,6 +16,7 @@ Subpackages
    libp2p.peer
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.relay
    libp2p.security
    libp2p.stream_muxer
    libp2p.tools

@@ -161,8 +161,8 @@ def noise_handshake_payload_factory() -> NoiseHandshakePayload:
     )
 
 
-def plaintext_transport_factory(key_pair: KeyPair) -> ISecureTransport:
-    return InsecureTransport(key_pair)
+def plaintext_transport_factory(key_pair: KeyPair, peerstore=None) -> ISecureTransport:
+    return InsecureTransport(key_pair, peerstore=peerstore)
 
 
 def secio_transport_factory(key_pair: KeyPair) -> ISecureTransport:

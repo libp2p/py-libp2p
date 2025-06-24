@@ -11,4 +11,5 @@ Examples
    examples.echo
    examples.ping
    examples.pubsub
+   examples.circuit_relay
    examples.kademlia

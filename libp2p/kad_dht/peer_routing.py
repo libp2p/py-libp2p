@@ -15,9 +15,6 @@ from libp2p.abc import (
     INetStream,
     IPeerRouting,
 )
-from libp2p.custom_types import (
-    TProtocol,
-)
 from libp2p.peer.id import (
     ID,
 )
@@ -25,6 +22,10 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+from .common import (
+    ALPHA,
+    PROTOCOL_ID,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -38,10 +39,7 @@ from .utils import (
 # logger = logging.getLogger("libp2p.kademlia.peer_routing")
 logger = logging.getLogger("kademlia-example.peer_routing")
 
-# Constants for the Kademlia algorithm
-ALPHA = 3  # Concurrency parameter
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
-PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 
 
 class PeerRouting(IPeerRouting):
@@ -62,7 +60,6 @@ class PeerRouting(IPeerRouting):
         """
         self.host = host
         self.routing_table = routing_table
-        self.protocol_id = PROTOCOL_ID
 
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
@@ -247,7 +244,7 @@ class PeerRouting(IPeerRouting):
             # Open a stream to the peer using the Kademlia protocol
             logger.debug(f"Opening stream to {peer} for closest peers query")
             try:
-                stream = await self.host.new_stream(peer, [self.protocol_id])
+                stream = await self.host.new_stream(peer, [PROTOCOL_ID])
                 logger.debug(f"Stream opened to {peer}")
             except Exception as e:
                 logger.warning(f"Failed to open stream to {peer}: {e}")

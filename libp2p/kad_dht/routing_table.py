@@ -13,10 +13,9 @@ import trio
 from libp2p.abc import (
     IHost,
 )
-from libp2p.custom_types import (
-    TProtocol,
+from libp2p.kad_dht.utils import (
+    xor_distance,
 )
-from libp2p.kad_dht.utils import xor_distance
 from libp2p.peer.id import (
     ID,
 )
@@ -24,6 +23,9 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
+from .common import (
+    PROTOCOL_ID,
+)
 from .pb.kademlia_pb2 import (
     Message,
 )
@@ -242,12 +244,9 @@ class KBucket:
         if not peer_info:
             raise ValueError(f"Peer {peer_id} not in bucket")
 
-        # Default protocol ID for Kademlia DHT
-        protocol_id = TProtocol("/ipfs/kad/1.0.0")
-
         try:
             # Open a stream to the peer with the DHT protocol
-            stream = await self.host.new_stream(peer_id, [protocol_id])
+            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
 
             try:
                 # Create ping protobuf message
