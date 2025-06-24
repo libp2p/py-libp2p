@@ -200,7 +200,9 @@ def new_swarm(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
+        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
+            key_pair, peerstore=peerstore_opt
+        ),
     }
 
     # Use given muxer preference if provided, otherwise use global default
