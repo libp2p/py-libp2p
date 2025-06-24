@@ -19,7 +19,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
-DEFAULT_NEGOTIATE_TIMEOUT = 60
+DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
 class MultiselectClient(IMultiselectClient):
