@@ -61,17 +61,6 @@ class PeerListener(ServiceListener):
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
             logger.debug("Updated Peer", peer_info.peer_id)
 
-    def _process_discovered_service(
-        self, zeroconf: Zeroconf, type_: str, name: str
-    ) -> None:
-        info = zeroconf.get_service_info(type_, name, timeout=5000)
-        if not info:
-            return
-        peer_info = self._extract_peer_info(info)
-        if peer_info:
-            self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
-            logger.debug("Discovered:", peer_info.peer_id)
-
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
         try:
             addrs = [

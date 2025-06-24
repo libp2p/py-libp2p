@@ -2,6 +2,7 @@ import logging
 import socket
 
 from zeroconf import (
+    EventLoopBlocked,
     ServiceInfo,
     Zeroconf,
 )
@@ -57,8 +58,34 @@ class PeerBroadcaster:
 
     def register(self) -> None:
         """Register the peer's mDNS service on the network."""
-        self.zeroconf.register_service(self.service_info)
+        try:
+            self.zeroconf.register_service(self.service_info)
+            logger.debug("mDNS service registered: %s", self.service_name)
+        except EventLoopBlocked as e:
+            logger.warning(
+                "EventLoopBlocked while registering mDNS '%s': %s", self.service_name, e
+            )
+        except Exception as e:
+            logger.error(
+                "Unexpected error during mDNS registration for '%s': %r",
+                self.service_name,
+                e,
+            )
 
     def unregister(self) -> None:
         """Unregister the peer's mDNS service from the network."""
-        self.zeroconf.unregister_service(self.service_info)
+        try:
+            self.zeroconf.unregister_service(self.service_info)
+            logger.debug("mDNS service unregistered: %s", self.service_name)
+        except EventLoopBlocked as e:
+            logger.warning(
+                "EventLoopBlocked while unregistering mDNS '%s': %s",
+                self.service_name,
+                e,
+            )
+        except Exception as e:
+            logger.error(
+                "Unexpected error during mDNS unregistration for '%s': %r",
+                self.service_name,
+                e,
+            )
