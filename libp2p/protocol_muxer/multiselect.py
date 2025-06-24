@@ -1,3 +1,5 @@
+import trio
+
 from libp2p.abc import (
     IMultiselectCommunicator,
     IMultiselectMuxer,
@@ -14,6 +16,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
+DEFAULT_NEGOTIATE_TIMEOUT = 60
 
 
 class Multiselect(IMultiselectMuxer):
@@ -102,7 +105,10 @@ class Multiselect(IMultiselectMuxer):
             raise MultiselectError() from error
 
         try:
-            handshake_contents = await communicator.read()
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):  # Timeout after 5 seconds
+                handshake_contents = await communicator.read()
+        except trio.TooSlowError:
+            raise MultiselectError("protocol selection response timed out")
         except MultiselectCommunicatorError as error:
             raise MultiselectError() from error
 
