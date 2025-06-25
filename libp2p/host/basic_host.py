@@ -166,13 +166,13 @@ class BasicHost(IHost):
             network = self.get_network()
             async with background_trio_service(network):
                 await network.listen(*listen_addrs)
-                if self.mDNS is not None:
+                if hasattr(self, "mDNS") and self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()
                 try:
                     yield
                 finally:
-                    if self.mDNS is not None:
+                    if hasattr(self, "mDNS") and self.mDNS is not None:
                         self.mDNS.stop()
 
         return _run()
