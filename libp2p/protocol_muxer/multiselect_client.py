@@ -42,10 +42,8 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError() from error
 
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
-                handshake_contents = await communicator.read()
-        except trio.TooSlowError:
-            raise MultiselectClientError("handshake read timed out")
+            handshake_contents = await communicator.read()
+
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
@@ -65,16 +63,22 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
-        await self.handshake(communicator)
+        try:
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+                await self.handshake(communicator)
 
-        for protocol in protocols:
-            try:
-                selected_protocol = await self.try_select(communicator, protocol)
-                return selected_protocol
-            except MultiselectClientError:
-                pass
+                for protocol in protocols:
+                    try:
+                        selected_protocol = await self.try_select(
+                            communicator, protocol
+                        )
+                        return selected_protocol
+                    except MultiselectClientError:
+                        pass
 
-        raise MultiselectClientError("protocols not supported")
+                raise MultiselectClientError("protocols not supported")
+        except trio.TooSlowError:
+            raise MultiselectClientError("response timed out")
 
     async def query_multistream_command(
         self, communicator: IMultiselectCommunicator, command: str
@@ -88,26 +92,28 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
-        await self.handshake(communicator)
-
-        if command == "ls":
-            try:
-                await communicator.write("ls")
-            except MultiselectCommunicatorError as error:
-                raise MultiselectClientError() from error
-        else:
-            raise ValueError("Command not supported")
-
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):  # Timeout after 5 seconds
-                response = await communicator.read()
-            response_list = response.strip().splitlines()
+            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+                await self.handshake(communicator)
+
+                if command == "ls":
+                    try:
+                        await communicator.write("ls")
+                    except MultiselectCommunicatorError as error:
+                        raise MultiselectClientError() from error
+                else:
+                    raise ValueError("Command not supported")
+
+                try:
+                    response = await communicator.read()
+                    response_list = response.strip().splitlines()
+
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectClientError() from error
+
+                return response_list
         except trio.TooSlowError:
             raise MultiselectClientError("command response timed out")
-        except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
-
-        return response_list
 
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
@@ -126,10 +132,8 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError() from error
 
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):  # Timeout after 5 seconds
-                response = await communicator.read()
-        except trio.TooSlowError:
-            raise MultiselectClientError("protocol selection response timed out")
+            response = await communicator.read()
+
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
