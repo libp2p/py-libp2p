@@ -1,5 +1,4 @@
-Add timeout to:
-1. multiselect handshake in multiselect_client.py and multiselect.py
-2. query_multistream_command
-3. try_select
+Add timeout wrappers in:
+1. multiselect.py: `negotiate` function
+2. multiselect_client.py: `select_one_of` , `query_multistream_command` functions
 to prevent indefinite hangs when a remote peer does not respond.
