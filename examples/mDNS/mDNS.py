@@ -14,13 +14,16 @@ from libp2p.crypto.secp256k1 import (
 )
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 
-logger = logging.getLogger("libp2p.example.discovery.mdns")
+logger = logging.getLogger("libp2p.discovery.mdns")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(
     logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 )
 logger.addHandler(handler)
+
+# Set root logger to DEBUG to capture all logs from dependencies
+logging.getLogger().setLevel(logging.DEBUG)
 
 
 def onPeerDiscovery(peerinfo: PeerInfo):
@@ -55,8 +58,12 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
-
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output"
+    )
     args = parser.parse_args()
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
     try:
         trio.run(run, args.port)
     except KeyboardInterrupt:

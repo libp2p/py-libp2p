@@ -45,7 +45,7 @@ class PeerListener(ServiceListener):
             self.discovered_services[name] = peer_info.peer_id
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
             peerDiscovery.emit_peer_discovered(peer_info)
-            logger.debug("Discovered Peer:", peer_info.peer_id)
+            logger.debug(f"Discovered Peer: {peer_info.peer_id}")
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         if name == self.service_name:
