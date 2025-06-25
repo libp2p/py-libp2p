@@ -269,12 +269,8 @@ def new_host(
         listen_addrs=listen_addrs,
     )
 
-    if enable_mDNS:
-        mdns = MDNSDiscovery(swarm)
-        mdns.start()
-
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt)
-    return BasicHost(swarm)
+        return RoutedHost(swarm, disc_opt, enable_mDNS)
+    return BasicHost(swarm, enable_mDNS)
 
 __version__ = __version("libp2p")

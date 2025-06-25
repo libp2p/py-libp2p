@@ -36,6 +36,7 @@ class PeerListener(ServiceListener):
     def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         if name == self.service_name:
             return
+        logger.debug(f"Adding service: {name}")
         info = zc.get_service_info(type_, name, timeout=5000)
         if not info:
             return
@@ -47,6 +48,9 @@ class PeerListener(ServiceListener):
             logger.debug("Discovered Peer:", peer_info.peer_id)
 
     def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        if name == self.service_name:
+            return
+        logger.debug(f"Removing service: {name}")
         peer_id = self.discovered_services.pop(name)
         self.peerstore.clear_addrs(peer_id)
         logger.debug(f"Removed Peer: {peer_id}")

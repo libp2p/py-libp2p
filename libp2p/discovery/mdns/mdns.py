@@ -68,5 +68,6 @@ class MDNSDiscovery:
 
     def stop(self) -> None:
         """Unregister this peer and clean up zeroconf resources."""
+        logger.debug("Stopping mDNS discovery")
         self.broadcaster.unregister()
         self.zeroconf.close()
