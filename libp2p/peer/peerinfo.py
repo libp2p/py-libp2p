@@ -66,5 +66,23 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     return PeerInfo(peer_id, [addr])
 
 
+def peer_info_to_bytes(peer_info: PeerInfo) -> bytes:
+    lines = [str(peer_info.peer_id)] + [str(addr) for addr in peer_info.addrs]
+    return "\n".join(lines).encode("utf-8")
+
+
+def peer_info_from_bytes(data: bytes) -> PeerInfo:
+    try:
+        lines = data.decode("utf-8").splitlines()
+        if not lines:
+            raise InvalidAddrError("no data to decode PeerInfo")
+
+        peer_id = ID.from_base58(lines[0])
+        addrs = [multiaddr.Multiaddr(addr_str) for addr_str in lines[1:]]
+        return PeerInfo(peer_id, addrs)
+    except Exception as e:
+        raise InvalidAddrError(f"failed to decode PeerInfo: {e}")
+
+
 class InvalidAddrError(ValueError):
     pass
