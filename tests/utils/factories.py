@@ -443,6 +443,10 @@ class GossipsubFactory(factory.Factory):
     heartbeat_interval = GOSSIPSUB_PARAMS.heartbeat_interval
     direct_connect_initial_delay = GOSSIPSUB_PARAMS.direct_connect_initial_delay
     direct_connect_interval = GOSSIPSUB_PARAMS.direct_connect_interval
+    do_px = GOSSIPSUB_PARAMS.do_px
+    px_peers_count = GOSSIPSUB_PARAMS.px_peers_count
+    prune_back_off = GOSSIPSUB_PARAMS.prune_back_off
+    unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
 
 
 class PubsubFactory(factory.Factory):
@@ -568,6 +572,10 @@ class PubsubFactory(factory.Factory):
         heartbeat_initial_delay: float = GOSSIPSUB_PARAMS.heartbeat_initial_delay,
         direct_connect_initial_delay: float = GOSSIPSUB_PARAMS.direct_connect_initial_delay,  # noqa: E501
         direct_connect_interval: int = GOSSIPSUB_PARAMS.direct_connect_interval,
+        do_px: bool = GOSSIPSUB_PARAMS.do_px,
+        px_peers_count: int = GOSSIPSUB_PARAMS.px_peers_count,
+        prune_back_off: int = GOSSIPSUB_PARAMS.prune_back_off,
+        unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -588,6 +596,10 @@ class PubsubFactory(factory.Factory):
                 heartbeat_interval=heartbeat_interval,
                 direct_connect_initial_delay=direct_connect_initial_delay,
                 direct_connect_interval=direct_connect_interval,
+                do_px=do_px,
+                px_peers_count=px_peers_count,
+                prune_back_off=prune_back_off,
+                unsubscribe_back_off=unsubscribe_back_off,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -602,6 +614,10 @@ class PubsubFactory(factory.Factory):
                 heartbeat_initial_delay=heartbeat_initial_delay,
                 direct_connect_initial_delay=direct_connect_initial_delay,
                 direct_connect_interval=direct_connect_interval,
+                do_px=do_px,
+                px_peers_count=px_peers_count,
+                prune_back_off=prune_back_off,
+                unsubscribe_back_off=unsubscribe_back_off,
             )
 
         async with cls._create_batch_with_router(
