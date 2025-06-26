@@ -269,7 +269,6 @@ class GossipSub(IPubsubRouter, Service):
             stream = self.pubsub.peers[peer_id]
             # FIXME: We should add a `WriteMsg` similar to write delimited messages.
             #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
-            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
             try:
                 await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
             except StreamClosed:
@@ -485,8 +484,8 @@ class GossipSub(IPubsubRouter, Service):
             self.fanout_heartbeat()
             # Get the peers to send IHAVE to
             peers_to_gossip = self.gossip_heartbeat()
-            # Pack GRAFT, PRUNE and IHAVE for the same peer into one control message and
-            # send it
+            # Pack(piggyback) GRAFT, PRUNE and IHAVE for the same peer into
+            # one control message and send it
             await self._emit_control_msgs(
                 peers_to_graft, peers_to_prune, peers_to_gossip
             )
