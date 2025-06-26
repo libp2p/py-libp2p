@@ -39,13 +39,6 @@ from tests.utils.utils import (
 logger = logging.getLogger("libp2p.identity.identify-push-test")
 
 
-CONCURRENCY_LIMIT = 10
-LIMIT = trio.Semaphore(CONCURRENCY_LIMIT)
-concurrency_counter = 0
-max_observed = 0
-lock = trio.Lock()
-
-
 @pytest.mark.trio
 async def test_identify_push_protocol(security_protocol):
     """
@@ -221,7 +214,7 @@ async def test_identify_push_to_peers(security_protocol):
             # Test for push_identify to only connected peers and not all peers
             # Disconnect a from c.
             await host_c.disconnect(host_a.get_id())
-            #
+
             await push_identify_to_peers(host_c)
 
             # Wait a bit for the push to complete
@@ -456,6 +449,46 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     It mocks `push_identify_to_peer` to simulate delay using sleep,
     allowing the test to measure and assert actual concurrency behavior.
     """
+    CONCURRENCY_LIMIT = 10
+    LIMIT = trio.Semaphore(CONCURRENCY_LIMIT)
+    state = {
+        "concurrency_counter": 0,
+        "max_observed": 0,
+    }
+    lock = trio.Lock()
+
+    async def mock_push_identify_to_peer(
+        host, peer_id, observed_multiaddr=None
+    ) -> bool:
+        """
+        Mock function to test concurrency by simulating an identify message.
+
+        This function patches push_identify_to_peer for testing purpose
+
+        Returns
+        -------
+        bool
+            True if the push was successful, False otherwise.
+
+        """
+        async with LIMIT:
+            async with lock:
+                state["concurrency_counter"] += 1
+                if state["concurrency_counter"] > CONCURRENCY_LIMIT:
+                    raise RuntimeError(
+                        f"Concurrency limit exceeded: {state['concurrency_counter']}"
+                    )
+                state["max_observed"] = max(
+                    state["max_observed"], state["concurrency_counter"]
+                )
+
+            logger.debug("Successfully pushed identify to peer %s", peer_id)
+            await trio.sleep(0.05)
+
+            async with lock:
+                state["concurrency_counter"] -= 1
+
+            return True
 
     # Create a mock host.
     key_pair_host = create_new_key_pair()
@@ -468,35 +501,6 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
         new=mock_push_identify_to_peer,
     ):
         await push_identify_to_peers(host)
-    assert (
-        max_observed <= CONCURRENCY_LIMIT
-    ), f"Max concurrency observed: {max_observed}"
-
-
-async def mock_push_identify_to_peer(host, peer_id, observed_multiaddr=None) -> bool:
-    """
-    Mock function to test concurrency by simulating an identify message.
-
-    This function patches push_identify_to_peer for testing purpose
-
-    Returns
-    -------
-    bool
-        True if the push was successful, False otherwise.
-    """
-    global concurrency_counter, max_observed
-
-    async with LIMIT:
-        async with lock:
-            concurrency_counter += 1
-            if concurrency_counter > CONCURRENCY_LIMIT:
-                raise RuntimeError(f"Concurrency limit exceeded: {concurrency_counter}")
-            max_observed = max(max_observed, concurrency_counter)
-
-        logger.debug("Successfully pushed identify to peer %s", peer_id)
-        await trio.sleep(0.05)
-
-        async with lock:
-            concurrency_counter -= 1
-
-        return True
+    assert state["max_observed"] <= CONCURRENCY_LIMIT, (
+        f"Max concurrency observed: {state['max_observed']}"
+    )
