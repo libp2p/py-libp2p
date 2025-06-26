@@ -51,7 +51,7 @@ class ReservationVoucher:
     # Expiration time as Unix timestamp
     expiration: int
     # Optional list of addresses the client can use
-    addrs: list[bytes] = None
+    addrs: list[bytes] | None = None
 
 
 class Reservation:
@@ -77,7 +77,7 @@ class Reservation:
         self.active_connections = 0
         self.voucher = self._generate_voucher()
         self.voucher_obj: ReservationVoucher | None = None
-        self.addrs = []  # List of addresses for this reservation
+        self.addrs: list[bytes] = []  # List of addresses for this reservation
 
     def _generate_voucher(self) -> bytes:
         """
@@ -156,8 +156,8 @@ class Reservation:
             The protobuf representation of this reservation
 
         """
-        # Get the data to sign
-        data_to_sign = self.get_data_to_sign()
+        # In a real implementation, we would sign the voucher here
+        # data_to_sign = self.get_data_to_sign()
         signature = b""
 
         # In a real implementation, we would sign the voucher here
@@ -177,7 +177,8 @@ class Reservation:
         Returns
         -------
         bytes
-            The data to sign, which includes the domain separator, voucher, and expiration
+            The data to sign, which includes the domain separator, voucher,
+            and expiration
 
         """
         # Format: domain_separator || voucher || expiration_time
@@ -282,7 +283,8 @@ class RelayResourceManager:
             logger.debug("Reservation for peer %s has expired", peer_id)
             return False
 
-        # Check if the expiration time matches (accounting for integer truncation in protobuf)
+        # Check if the expiration time matches (accounting for integer
+        # truncation in protobuf)
         # Protobuf might truncate the expiration time, so we'll check if they're close
         if abs(int(reservation.expires_at) - proto_res.expire) > 1:
             logger.debug(
@@ -428,7 +430,7 @@ class RelayResourceManager:
 
         # Create a new reservation if we can accept it
         if self.can_accept_reservation(peer_id):
-            reservation = self.create_reservation(peer_id)
+            self.create_reservation(peer_id)
             return self.limits.duration
 
         # We can't accept a new reservation

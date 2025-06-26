@@ -159,15 +159,17 @@ class CircuitV2Protocol(Service):
             # Unregister protocol handlers - safely handle missing method
             if self.allow_hop:
                 try:
-                    # Try to unregister handlers if the method exists
-                    if hasattr(self.host, "remove_stream_handler"):
-                        self.host.remove_stream_handler(PROTOCOL_ID)
-                        self.host.remove_stream_handler(STOP_PROTOCOL_ID)
-                    else:
-                        # Otherwise just log a message - handlers will be garbage collected
-                        logger.debug(
-                            "Host does not support remove_stream_handler, handlers will be garbage collected"
-                        )
+                    # Try to unregister handlers - some host implementations
+                    # may not have this method
+                    self.host.remove_stream_handler(PROTOCOL_ID)  # type: ignore
+                    self.host.remove_stream_handler(STOP_PROTOCOL_ID)  # type: ignore
+                except AttributeError:
+                    # Host does not support remove_stream_handler - handlers will be
+                    # garbage collected
+                    logger.debug(
+                        "Host does not support remove_stream_handler, "
+                        "handlers will be garbage collected"
+                    )
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
@@ -520,26 +522,28 @@ class CircuitV2Protocol(Service):
             pb_reservation = reservation_obj.to_proto()
 
             # Get the peer's addresses from the peerstore if available
-            addrs = []
+            addrs: list[bytes] = []
             try:
-                from libp2p.host.basic_host import get_host_context
-
-                host_context = get_host_context()
-                if host_context and host_context.peerstore:
-                    # Get peer addresses from peerstore
-                    peer_addrs = host_context.peerstore.addrs(peer_id)
-                    # Convert addresses to bytes for the protocol buffer
-                    addrs = [addr.to_bytes() for addr in peer_addrs]
-                    logger.debug(
-                        "Including %d addresses for peer %s in reservation response",
-                        len(addrs),
-                        peer_id,
-                    )
+                # Try to get peer addresses from the host's peerstore
+                # Most host implementations have a peerstore attribute
+                peer_addrs = self.host.peerstore.addrs(peer_id)  # type: ignore
+                # Convert addresses to bytes for the protocol buffer
+                addrs = [addr.to_bytes() for addr in peer_addrs]
+                logger.debug(
+                    "Including %d addresses for peer %s in reservation response",
+                    len(addrs),
+                    peer_id,
+                )
+            except AttributeError:
+                # Host does not have peerstore or peerstore doesn't have addrs method
+                logger.debug("Host peerstore not available for address lookup")
             except Exception as e:
                 logger.warning("Error getting peer addresses: %s", str(e))
 
-            # Add addresses to the reservation
-            pb_reservation.addrs.extend(addrs)
+            # Add addresses to the reservation object
+            reservation_obj.addrs = addrs  # type: ignore
+            # Note: pb_reservation.addrs not available in current protobuf definition
+            # pb_reservation.addrs.extend(addrs)
 
             # Send reservation success response
             with trio.fail_after(STREAM_WRITE_TIMEOUT):
@@ -559,13 +563,14 @@ class CircuitV2Protocol(Service):
 
                 # Log the response message details for debugging
                 logger.debug(
-                    "Sending reservation response: type=%s, status=%s, ttl=%d, voucher_size=%d, signature_size=%d, addrs=%d",
+                    "Sending reservation response: type=%s, status=%s, ttl=%d, "
+                    "voucher_size=%d, signature_size=%d, addrs=%d",
                     response.type,
                     getattr(response.status, "code", "unknown"),
                     ttl,
                     len(pb_reservation.voucher),
                     len(pb_reservation.signature),
-                    len(pb_reservation.addrs),
+                    len(reservation_obj.addrs),  # Number of addresses
                 )
 
                 # Send the response with increased timeout
@@ -611,7 +616,8 @@ class CircuitV2Protocol(Service):
                 await self._send_status(
                     stream,
                     StatusCode.PERMISSION_DENIED,
-                    "Invalid reservation: signature verification failed or reservation expired",
+                    "Invalid reservation: signature verification failed or "
+                    "reservation expired",
                 )
                 await stream.reset()
                 return
@@ -799,7 +805,8 @@ class CircuitV2Protocol(Service):
                             )
                         ):
                             logger.warning(
-                                "Data transfer limit exceeded for peer %s: current=%d, attempted=%d, limit=%d",
+                                "Data transfer limit exceeded for peer %s: "
+                                "current=%d, attempted=%d, limit=%d",
                                 peer_id,
                                 reservation.data_used,
                                 bytes_transferred,
