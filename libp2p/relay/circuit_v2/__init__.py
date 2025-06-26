@@ -3,9 +3,6 @@ Circuit Relay v2 implementation for libp2p.
 
 This package implements the Circuit Relay v2 protocol as specified in:
 https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
-
-It also provides NAT traversal capabilities via Direct Connection Upgrade through Relay (DCUtR):
-https://github.com/libp2p/specs/blob/master/relay/DCUtR.md
 """
 
 from .dcutr import (
@@ -18,9 +15,31 @@ from .nat import (
     is_private_ip,
 )
 
+from .discovery import (
+    RelayDiscovery,
+)
+from .protocol import (
+    PROTOCOL_ID,
+    CircuitV2Protocol,
+)
+from .resources import (
+    RelayLimits,
+    RelayResourceManager,
+    Reservation,
+)
+from .transport import (
+    CircuitV2Transport,
+)
 
 __all__ = [
-    "DCUtRProtocol",
+    "CircuitV2Protocol",
+    "PROTOCOL_ID",
+    "RelayLimits",
+    "Reservation",
+    "RelayResourceManager",
+    "CircuitV2Transport",
+    "RelayDiscovery",
+     "DCUtRProtocol",
     "DCUTR_PROTOCOL_ID",
     "ReachabilityChecker",
     "is_private_ip",

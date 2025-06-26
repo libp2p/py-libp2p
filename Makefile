@@ -14,6 +14,7 @@ help:
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
+	@echo "pr - run clean, fix, lint, typecheck, and test i.e basically everything you need to do before creating a PR"
 
 clean-build:
 	rm -fr build/
@@ -47,6 +48,8 @@ typecheck:
 test:
 	python -m pytest tests -n auto
 
+pr: clean fix lint typecheck test
+
 # protobufs management
 
 PB = libp2p/crypto/pb/crypto.proto \
@@ -55,7 +58,10 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/security/secio/pb/spipe.proto \
 	libp2p/security/noise/pb/noise.proto \
 	libp2p/identity/identify/pb/identify.proto \
-	libp2p/host/autonat/pb/autonat.proto
+	libp2p/host/autonat/pb/autonat.proto \
+	libp2p/relay/circuit_v2/pb/circuit.proto \
+	libp2p/kad_dht/pb/kademlia.proto
+
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)
 
@@ -87,7 +93,7 @@ validate-newsfragments:
 check-docs: build-docs validate-newsfragments
 
 build-docs:
-	sphinx-apidoc -o docs/ . setup.py "*conftest*" tests/
+	sphinx-apidoc -o docs/ . "*conftest*" tests/
 	$(MAKE) -C docs clean
 	$(MAKE) -C docs html
 	$(MAKE) -C docs doctest
