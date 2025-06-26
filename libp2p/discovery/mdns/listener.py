@@ -63,7 +63,7 @@ class PeerListener(ServiceListener):
         if peer_info:
             self.peerstore.clear_addrs(peer_info.peer_id)
             self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
-            logger.debug("Updated Peer", peer_info.peer_id)
+            logger.debug(f"Updated Peer {peer_info.peer_id}")
 
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
         try:

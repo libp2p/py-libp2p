@@ -40,7 +40,7 @@ async def run(port: int) -> None:
     print(
         "Run this from the same folder in another console to "
         "start another peer on a different port:\n\n"
-        "python mdns-demo -p <ANOTHER_PORT>\n"
+        "mdns-demo -p <ANOTHER_PORT>\n"
     )
     print("Waiting for mDNS peer discovery events...\n")
 

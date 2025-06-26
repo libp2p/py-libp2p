@@ -60,7 +60,7 @@ class PeerBroadcaster:
         """Register the peer's mDNS service on the network."""
         try:
             self.zeroconf.register_service(self.service_info)
-            logger.debug("mDNS service registered: %s", self.service_name)
+            logger.debug(f"mDNS service registered: {self.service_name}")
         except EventLoopBlocked as e:
             logger.warning(
                 "EventLoopBlocked while registering mDNS '%s': %s", self.service_name, e
@@ -76,7 +76,7 @@ class PeerBroadcaster:
         """Unregister the peer's mDNS service from the network."""
         try:
             self.zeroconf.unregister_service(self.service_info)
-            logger.debug("mDNS service unregistered: %s", self.service_name)
+            logger.debug(f"mDNS service unregistered: {self.service_name}")
         except EventLoopBlocked as e:
             logger.warning(
                 "EventLoopBlocked while unregistering mDNS '%s': %s",
