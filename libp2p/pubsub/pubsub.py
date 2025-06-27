@@ -11,10 +11,6 @@ import functools
 import hashlib
 import logging
 import time
-from typing import (
-    NamedTuple,
-    cast,
-)
 
 import base58
 import trio
@@ -30,8 +26,6 @@ from libp2p.crypto.keys import (
     PrivateKey,
 )
 from libp2p.custom_types import (
-    AsyncValidatorFn,
-    SyncValidatorFn,
     TProtocol,
     ValidatorFn,
 )
@@ -76,6 +70,11 @@ from .pubsub_notifee import (
 from .subscription import (
     TrioSubscriptionAPI,
 )
+from .validation_throttler import (
+    TopicValidator,
+    ValidationResult,
+    ValidationThrottler,
+)
 from .validators import (
     PUBSUB_SIGNING_PREFIX,
     signature_validator,
@@ -94,11 +93,6 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
 
 def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
     return base64.b64encode(hashlib.sha256(msg.data).digest())
-
-
-class TopicValidator(NamedTuple):
-    validator: ValidatorFn
-    is_async: bool
 
 
 class Pubsub(Service, IPubsub):
@@ -142,6 +136,11 @@ class Pubsub(Service, IPubsub):
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
+        # TODO: these values have been copied from Go, but try to tune these dynamically
+        validation_queue_size: int = 32,
+        global_throttle_limit: int = 8192,
+        default_topic_throttle_limit: int = 1024,
+        validation_worker_count: int | None = None,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -202,7 +201,15 @@ class Pubsub(Service, IPubsub):
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
-        # Map of topic to topic validator
+        # Validation Throttler
+        self.validation_throttler = ValidationThrottler(
+            queue_size=validation_queue_size,
+            global_throttle_limit=global_throttle_limit,
+            default_topic_throttle_limit=default_topic_throttle_limit,
+            worker_count=validation_worker_count or 4,
+        )
+
+        # Keep a mapping of topic -> TopicValidator for easier lookup
         self.topic_validators = {}
 
         self.counter = int(time.time())
@@ -214,9 +221,18 @@ class Pubsub(Service, IPubsub):
         self.event_handle_dead_peer_queue_started = trio.Event()
 
     async def run(self) -> None:
+        self.manager.run_daemon_task(self._start_validation_throttler)
         self.manager.run_daemon_task(self.handle_peer_queue)
         self.manager.run_daemon_task(self.handle_dead_peer_queue)
         await self.manager.wait_finished()
+
+    async def _start_validation_throttler(self) -> None:
+        """Start validation throttler in current nursery context"""
+        async with trio.open_nursery() as nursery:
+            await self.validation_throttler.start(nursery)
+            # Keep nursery alive until service stops
+            while self.manager.is_running:
+                await trio.sleep(1)
 
     @property
     def my_id(self) -> ID:
@@ -297,7 +313,12 @@ class Pubsub(Service, IPubsub):
             )
 
     def set_topic_validator(
-        self, topic: str, validator: ValidatorFn, is_async_validator: bool
+        self,
+        topic: str,
+        validator: ValidatorFn,
+        is_async_validator: bool,
+        timeout: float | None = None,
+        throttle_limit: int | None = None,
     ) -> None:
         """
         Register a validator under the given topic. One topic can only have one
@@ -306,8 +327,18 @@ class Pubsub(Service, IPubsub):
         :param topic: the topic to register validator under
         :param validator: the validator used to validate messages published to the topic
         :param is_async_validator: indicate if the validator is an asynchronous validator
+        :param timeout: optional timeout for the validator
+        :param throttle_limit: optional throttle limit for the validator
         """  # noqa: E501
-        self.topic_validators[topic] = TopicValidator(validator, is_async_validator)
+        # Create throttled topic validator
+        topic_validator = self.validation_throttler.create_topic_validator(
+            topic=topic,
+            validator=validator,
+            is_async=is_async_validator,
+            timeout=timeout,
+            throttle_limit=throttle_limit,
+        )
+        self.topic_validators[topic] = topic_validator
 
     def remove_topic_validator(self, topic: str) -> None:
         """
@@ -317,17 +348,18 @@ class Pubsub(Service, IPubsub):
         """
         self.topic_validators.pop(topic, None)
 
-    def get_msg_validators(self, msg: rpc_pb2.Message) -> tuple[TopicValidator, ...]:
+    def get_msg_validators(self, msg: rpc_pb2.Message) -> list[TopicValidator]:
         """
         Get all validators corresponding to the topics in the message.
 
         :param msg: the message published to the topic
+        :return: list of topic validators for the message's topics
         """
-        return tuple(
+        return [
             self.topic_validators[topic]
             for topic in msg.topicIDs
             if topic in self.topic_validators
-        )
+        ]
 
     def add_to_blacklist(self, peer_id: ID) -> None:
         """
@@ -663,39 +695,56 @@ class Pubsub(Service, IPubsub):
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
-        sync_topic_validators: list[SyncValidatorFn] = []
-        async_topic_validators: list[AsyncValidatorFn] = []
-        for topic_validator in self.get_msg_validators(msg):
-            if topic_validator.is_async:
-                async_topic_validators.append(
-                    cast(AsyncValidatorFn, topic_validator.validator)
-                )
-            else:
-                sync_topic_validators.append(
-                    cast(SyncValidatorFn, topic_validator.validator)
-                )
+        # Get applicable validators for this message
+        validators = self.get_msg_validators(msg)
 
-        for validator in sync_topic_validators:
-            if not validator(msg_forwarder, msg):
-                raise ValidationError(f"Validation failed for msg={msg}")
+        if not validators:
+            # No validators, accept immediately
+            return
 
-        # TODO: Implement throttle on async validators
+        # Use trio.Event for async coordination
+        validation_event = trio.Event()
+        result_container: dict[str, ValidationResult | None | Exception] = {
+            "result": None,
+            "error": None,
+        }
 
-        if len(async_topic_validators) > 0:
-            # TODO: Use a better pattern
-            final_result: bool = True
+        def handle_validation_result(
+            result: ValidationResult, error: Exception | None
+        ) -> None:
+            result_container["result"] = result
+            result_container["error"] = error
+            validation_event.set()
 
-            async def run_async_validator(func: AsyncValidatorFn) -> None:
-                nonlocal final_result
-                result = await func(msg_forwarder, msg)
-                final_result = final_result and result
+        # Submit for throttled validation
+        success = await self.validation_throttler.submit_validation(
+            validators=validators,
+            msg_forwarder=msg_forwarder,
+            msg=msg,
+            result_callback=handle_validation_result,
+        )
 
-            async with trio.open_nursery() as nursery:
-                for async_validator in async_topic_validators:
-                    nursery.start_soon(run_async_validator, async_validator)
+        if not success:
+            # Validation was throttled at queue level
+            raise ValidationError("Validation throttled at queue level")
 
-            if not final_result:
-                raise ValidationError(f"Validation failed for msg={msg}")
+        # Wait for validation result
+        await validation_event.wait()
+
+        result = result_container["result"]
+        error = result_container["error"]
+
+        if error:
+            raise ValidationError(f"Validation error: {error}")
+
+        if result == ValidationResult.REJECT:
+            raise ValidationError("Message validation rejected")
+        elif result == ValidationResult.THROTTLED:
+            raise ValidationError("Message validation throttled")
+        elif result == ValidationResult.IGNORE:
+            # Treat IGNORE as rejection for now, or you could silently drop
+            raise ValidationError("Message validation ignored")
+        # ACCEPT case - just return normally
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
