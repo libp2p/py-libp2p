@@ -1,13 +1,14 @@
 """
-NAT detection and reachability assessment for libp2p.
+NAT traversal utilities for libp2p.
 
-This module provides utilities for determining NAT status and
-address reachability for peers.
+This module provides utilities for NAT traversal and reachability detection.
 """
 
+import ipaddress
 import logging
 from typing import (
     Optional,
+    Union,
 )
 
 from multiaddr import (
@@ -16,6 +17,7 @@ from multiaddr import (
 
 from libp2p.abc import (
     IHost,
+    INetConn,
 )
 from libp2p.peer.id import (
     ID,
@@ -26,18 +28,18 @@ logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
 # Timeout for reachability checks
 REACHABILITY_TIMEOUT = 10  # seconds
 
-# Private IP address ranges (RFC 1918)
+# Define private IP ranges
 PRIVATE_IP_RANGES = [
-    ("10.0.0.0", "10.255.255.255"),  # 10.0.0.0/8
-    ("172.16.0.0", "172.31.255.255"),  # 172.16.0.0/12
-    ("192.168.0.0", "192.168.255.255"),  # 192.168.0.0/16
+    ("10.0.0.0", "10.255.255.255"),  # Class A private network: 10.0.0.0/8
+    ("172.16.0.0", "172.31.255.255"),  # Class B private network: 172.16.0.0/12
+    ("192.168.0.0", "192.168.255.255"),  # Class C private network: 192.168.0.0/16
 ]
 
-# Link-local address range (RFC 3927)
-LINK_LOCAL_RANGE = ("169.254.0.0", "169.254.255.255")  # 169.254.0.0/16
+# Link-local address range: 169.254.0.0/16
+LINK_LOCAL_RANGE = ("169.254.0.0", "169.254.255.255")
 
-# Loopback address range
-LOOPBACK_RANGE = ("127.0.0.0", "127.255.255.255")  # 127.0.0.0/8
+# Loopback address range: 127.0.0.0/8
+LOOPBACK_RANGE = ("127.0.0.0", "127.255.255.255")
 
 
 def ip_to_int(ip: str) -> int:
@@ -53,14 +55,13 @@ def ip_to_int(ip: str) -> int:
     -------
     int
         Integer representation of the IP
+
     """
-    octets = ip.split(".")
-    return (
-        (int(octets[0]) << 24)
-        + (int(octets[1]) << 16)
-        + (int(octets[2]) << 8)
-        + int(octets[3])
-    )
+    try:
+        return int(ipaddress.IPv4Address(ip))
+    except ipaddress.AddressValueError:
+        # Handle IPv6 addresses
+        return int(ipaddress.IPv6Address(ip))
 
 
 def is_ip_in_range(ip: str, start_range: str, end_range: str) -> bool:
@@ -72,19 +73,23 @@ def is_ip_in_range(ip: str, start_range: str, end_range: str) -> bool:
     ip : str
         IP address to check
     start_range : str
-        Start of IP range
+        Start of the range
     end_range : str
-        End of IP range
+        End of the range
 
     Returns
     -------
     bool
-        True if IP is in range
+        True if the IP is in the range
+
     """
-    ip_int = ip_to_int(ip)
-    start_int = ip_to_int(start_range)
-    end_int = ip_to_int(end_range)
-    return start_int <= ip_int <= end_int
+    try:
+        ip_int = ip_to_int(ip)
+        start_int = ip_to_int(start_range)
+        end_int = ip_to_int(end_range)
+        return start_int <= ip_int <= end_int
+    except Exception:
+        return False
 
 
 def is_private_ip(ip: str) -> bool:
@@ -100,6 +105,7 @@ def is_private_ip(ip: str) -> bool:
     -------
     bool
         True if IP is private
+
     """
     for start_range, end_range in PRIVATE_IP_RANGES:
         if is_ip_in_range(ip, start_range, end_range):
@@ -116,7 +122,7 @@ def is_private_ip(ip: str) -> bool:
     return False
 
 
-def extract_ip_from_multiaddr(addr: Multiaddr) -> Optional[str]:
+def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
     """
     Extract the IP address from a multiaddr.
 
@@ -129,6 +135,7 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> Optional[str]:
     -------
     Optional[str]
         IP address or None if not found
+
     """
     # Convert to string representation
     addr_str = str(addr)
@@ -168,6 +175,7 @@ class ReachabilityChecker:
         ----------
         host : IHost
             The libp2p host
+
         """
         self.host = host
         self._peer_reachability: dict[ID, bool] = {}
@@ -186,6 +194,7 @@ class ReachabilityChecker:
         -------
         bool
             True if address is likely public
+
         """
         # Extract the IP address
         ip = extract_ip_from_multiaddr(addr)
@@ -208,6 +217,7 @@ class ReachabilityChecker:
         -------
         List[Multiaddr]
             List of likely public addresses
+
         """
         return [addr for addr in addrs if self.is_addr_public(addr)]
 
@@ -224,21 +234,35 @@ class ReachabilityChecker:
         -------
         bool
             True if peer is likely directly reachable
+
         """
         # Check if we already know
         if peer_id in self._peer_reachability:
             return self._peer_reachability[peer_id]
 
-        # Check if peer is connected
-        if self.host.get_network().is_connected(peer_id):
-            # Get the addresses we're connected on
-            conns = self.host.get_network().connections.get(peer_id, [])
-            for conn in conns:
+        # Check if the peer is connected
+        network = self.host.get_network()
+        connections: Optional[Union[INetConn, list[INetConn]]] = network.connections.get(peer_id)
+        if not connections:
+            # Not connected, can't determine reachability
+            return False
+
+        # Check if any connection is direct (not relayed)
+        if isinstance(connections, list):
+            for conn in connections:
+                # Get the transport addresses
                 addrs = conn.get_transport_addresses()
-                # If any connection doesn't use a relay, peer is reachable
+
+                # If any address doesn't start with /p2p-circuit, it's a direct connection
                 if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
                     self._peer_reachability[peer_id] = True
                     return True
+        else:
+            # Handle single connection case
+            addrs = connections.get_transport_addresses()
+            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                self._peer_reachability[peer_id] = True
+                return True
 
         # Get the peer's addresses from peerstore
         try:
@@ -263,6 +287,7 @@ class ReachabilityChecker:
         -------
         Tuple[bool, List[Multiaddr]]
             Tuple of (is_reachable, public_addresses)
+
         """
         # Get all host addresses
         addrs = self.host.get_addrs()
@@ -271,7 +296,8 @@ class ReachabilityChecker:
         public_addrs = self.get_public_addrs(addrs)
 
         # If we have public addresses, assume we're reachable
-        # This is a simplified assumption - real reachability would need external checking
+        # This is a simplified assumption - real reachability would need
+        # external checking
         is_reachable = len(public_addrs) > 0
 
         return is_reachable, public_addrs
