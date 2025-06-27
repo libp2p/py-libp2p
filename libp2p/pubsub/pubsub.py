@@ -785,8 +785,8 @@ class Pubsub(Service, IPubsub):
         """
         Write an RPC message to a stream with proper error handling.
 
-        Implements WriteMsg similar to go-libp2p-pubsub comm.go
-        Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
+        Implements WriteMsg similar to go-msgio which is used in go-libp2p
+        Ref: https://github.com/libp2p/go-msgio/blob/master/protoio/uvarint_writer.go#L56
 
 
         :param stream: stream to write the message to
