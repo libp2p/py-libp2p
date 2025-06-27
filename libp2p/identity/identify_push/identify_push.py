@@ -190,4 +190,4 @@ async def push_identify_to_peers(
     # limiting concurrent connections to 10
     async with trio.open_nursery() as nursery:
         for peer_id in peer_ids:
-            nursery.start_soon(push_identify_to_peer, host, peer_id, observed_multiaddr)
+            nursery.start_soon(limited_push, peer_id)
