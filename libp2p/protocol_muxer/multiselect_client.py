@@ -51,7 +51,10 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError("multiselect protocol ID mismatch")
 
     async def select_one_of(
-        self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
+        self,
+        protocols: Sequence[TProtocol],
+        communicator: IMultiselectCommunicator,
+        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol and
@@ -64,7 +67,7 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+            with trio.fail_after(negotitate_timeout):
                 await self.handshake(communicator)
 
                 for protocol in protocols:
@@ -81,7 +84,10 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError("response timed out")
 
     async def query_multistream_command(
-        self, communicator: IMultiselectCommunicator, command: str
+        self,
+        communicator: IMultiselectCommunicator,
+        command: str,
+        response_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> list[str]:
         """
         Send a multistream-select command over the given communicator and return
@@ -89,11 +95,13 @@ class MultiselectClient(IMultiselectClient):
 
         :param communicator: communicator to use to communicate with counterparty
         :param command: supported multistream-select command(e.g., ls)
+        :param negotiate_timeout: timeout for negotiation,
+        defaults to DEFAULT_NEGOTIATE_TIMEOUT
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+            with trio.fail_after(response_timeout):
                 await self.handshake(communicator)
 
                 if command == "ls":

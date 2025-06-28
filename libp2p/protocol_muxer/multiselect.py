@@ -50,7 +50,9 @@ class Multiselect(IMultiselectMuxer):
 
     # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
-        self, communicator: IMultiselectCommunicator
+        self,
+        communicator: IMultiselectCommunicator,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> tuple[TProtocol, StreamHandlerFn | None]:
         """
         Negotiate performs protocol selection.
@@ -60,7 +62,7 @@ class Multiselect(IMultiselectMuxer):
         :raise MultiselectError: raised when negotiation failed
         """
         try:
-            with trio.fail_after(DEFAULT_NEGOTIATE_TIMEOUT):
+            with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
 
                 while True:
