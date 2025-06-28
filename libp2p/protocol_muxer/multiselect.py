@@ -58,6 +58,8 @@ class Multiselect(IMultiselectMuxer):
         Negotiate performs protocol selection.
 
         :param stream: stream to negotiate on
+        :param negotiate_timeout: timeout for negotiation,
+        defaults to DEFAULT_NEGOTIATE_TIMEOUT
         :return: selected protocol name, handler function
         :raise MultiselectError: raised when negotiation failed
         """

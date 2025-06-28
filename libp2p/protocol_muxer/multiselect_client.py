@@ -63,6 +63,8 @@ class MultiselectClient(IMultiselectClient):
 
         :param protocol: protocol to select
         :param communicator: communicator to use to communicate with counterparty
+        :param negotiate_timeout: timeout for negotiation,
+        defaults to DEFAULT_NEGOTIATE_TIMEOUT
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
