@@ -24,6 +24,12 @@ async def main():
     insecure_transport = InsecureTransport(
         # local_key_pair: The key pair used for libp2p identity
         local_key_pair=key_pair,
+        # secure_bytes_provider: Optional function to generate secure random bytes
+        # (defaults to secrets.token_bytes)
+        secure_bytes_provider=None,  # Use default implementation
+        # peerstore: Optional peerstore to store peer IDs and public keys
+        # (defaults to None)
+        peerstore=None,
     )
 
     # Create a security options dictionary mapping protocol ID to transport
