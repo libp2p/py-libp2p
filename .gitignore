@@ -178,3 +178,7 @@ env.bak/
 #lockfiles
 uv.lock
 poetry.lock
+
+bootstrap_instructions.txt
+.gitignore
+README.md

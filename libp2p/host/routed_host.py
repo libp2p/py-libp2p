@@ -18,8 +18,14 @@ from libp2p.peer.peerinfo import (
 class RoutedHost(BasicHost):
     _router: IPeerRouting
 
-    def __init__(self, network: INetworkService, router: IPeerRouting):
-        super().__init__(network)
+    def __init__(
+        self,
+        network: INetworkService,
+        router: IPeerRouting,
+        enable_mDNS: bool = False,
+        bootstrap: list[str] | None = None,
+    ):
+        super().__init__(network, enable_mDNS, bootstrap)
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:

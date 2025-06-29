@@ -8,6 +8,7 @@ Subpackages
    :maxdepth: 4
 
    libp2p.crypto
+   libp2p.discovery
    libp2p.host
    libp2p.identity
    libp2p.io
