@@ -2,6 +2,8 @@ from collections.abc import (
     Sequence,
 )
 
+import trio
+
 from libp2p.abc import (
     IMultiselectClient,
     IMultiselectCommunicator,
@@ -17,6 +19,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
+DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
 class MultiselectClient(IMultiselectClient):
@@ -40,6 +43,7 @@ class MultiselectClient(IMultiselectClient):
 
         try:
             handshake_contents = await communicator.read()
+
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
@@ -47,7 +51,10 @@ class MultiselectClient(IMultiselectClient):
             raise MultiselectClientError("multiselect protocol ID mismatch")
 
     async def select_one_of(
-        self, protocols: Sequence[TProtocol], communicator: IMultiselectCommunicator
+        self,
+        protocols: Sequence[TProtocol],
+        communicator: IMultiselectCommunicator,
+        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol and
@@ -56,22 +63,32 @@ class MultiselectClient(IMultiselectClient):
 
         :param protocol: protocol to select
         :param communicator: communicator to use to communicate with counterparty
+        :param negotiate_timeout: timeout for negotiation
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
-        await self.handshake(communicator)
+        try:
+            with trio.fail_after(negotitate_timeout):
+                await self.handshake(communicator)
 
-        for protocol in protocols:
-            try:
-                selected_protocol = await self.try_select(communicator, protocol)
-                return selected_protocol
-            except MultiselectClientError:
-                pass
+                for protocol in protocols:
+                    try:
+                        selected_protocol = await self.try_select(
+                            communicator, protocol
+                        )
+                        return selected_protocol
+                    except MultiselectClientError:
+                        pass
 
-        raise MultiselectClientError("protocols not supported")
+                raise MultiselectClientError("protocols not supported")
+        except trio.TooSlowError:
+            raise MultiselectClientError("response timed out")
 
     async def query_multistream_command(
-        self, communicator: IMultiselectCommunicator, command: str
+        self,
+        communicator: IMultiselectCommunicator,
+        command: str,
+        response_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> list[str]:
         """
         Send a multistream-select command over the given communicator and return
@@ -79,26 +96,32 @@ class MultiselectClient(IMultiselectClient):
 
         :param communicator: communicator to use to communicate with counterparty
         :param command: supported multistream-select command(e.g., ls)
+        :param negotiate_timeout: timeout for negotiation
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
-        await self.handshake(communicator)
-
-        if command == "ls":
-            try:
-                await communicator.write("ls")
-            except MultiselectCommunicatorError as error:
-                raise MultiselectClientError() from error
-        else:
-            raise ValueError("Command not supported")
-
         try:
-            response = await communicator.read()
-            response_list = response.strip().splitlines()
-        except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
+            with trio.fail_after(response_timeout):
+                await self.handshake(communicator)
 
-        return response_list
+                if command == "ls":
+                    try:
+                        await communicator.write("ls")
+                    except MultiselectCommunicatorError as error:
+                        raise MultiselectClientError() from error
+                else:
+                    raise ValueError("Command not supported")
+
+                try:
+                    response = await communicator.read()
+                    response_list = response.strip().splitlines()
+
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectClientError() from error
+
+                return response_list
+        except trio.TooSlowError:
+            raise MultiselectClientError("command response timed out")
 
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
@@ -118,6 +141,7 @@ class MultiselectClient(IMultiselectClient):
 
         try:
             response = await communicator.read()
+
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
