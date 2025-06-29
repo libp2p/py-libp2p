@@ -82,6 +82,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         transport: "QUICTransport",
         security_manager: Optional["QUICTLSConfigManager"] = None,
         resource_scope: Any | None = None,
+        listener_socket: trio.socket.SocketType | None = None,
     ):
         """
         Initialize QUIC connection with security integration.
@@ -96,6 +97,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             transport: Parent QUIC transport
             security_manager: Security manager for TLS/certificate handling
             resource_scope: Resource manager scope for tracking
+            listener_socket: Socket of listener to transmit data
 
         """
         self._quic = quic_connection
@@ -109,7 +111,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._resource_scope = resource_scope
 
         # Trio networking - socket may be provided by listener
-        self._socket: trio.socket.SocketType | None = None
+        self._socket = listener_socket if listener_socket else None
+        self._owns_socket = listener_socket is None
         self._connected_event = trio.Event()
         self._closed_event = trio.Event()
 
@@ -974,23 +977,56 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed_event.set()
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
-        """Stream data handling with proper error management."""
+        """Handle stream data events - create streams and add to accept queue."""
         stream_id = event.stream_id
         self._stats["bytes_received"] += len(event.data)
 
         try:
-            with QUICErrorContext("stream_data_handling", "stream"):
-                # Get or create stream
-                stream = await self._get_or_create_stream(stream_id)
+            print(f"🔧 STREAM_DATA: Handling data for stream {stream_id}")
 
-                # Forward data to stream
-                await stream.handle_data_received(event.data, event.end_stream)
+            if stream_id not in self._streams:
+                if self._is_incoming_stream(stream_id):
+                    print(f"🔧 STREAM_DATA: Creating new incoming stream {stream_id}")
+
+                    from .stream import QUICStream, StreamDirection
+
+                    stream = QUICStream(
+                        connection=self,
+                        stream_id=stream_id,
+                        direction=StreamDirection.INBOUND,
+                        resource_scope=self._resource_scope,
+                        remote_addr=self._remote_addr,
+                    )
+
+                    # Store the stream
+                    self._streams[stream_id] = stream
+
+                    async with self._accept_queue_lock:
+                        self._stream_accept_queue.append(stream)
+                        self._stream_accept_event.set()
+                        print(
+                            f"✅ STREAM_DATA: Added stream {stream_id} to accept queue"
+                        )
+
+                    async with self._stream_count_lock:
+                        self._inbound_stream_count += 1
+                        self._stats["streams_opened"] += 1
+
+                else:
+                    print(
+                        f"❌ STREAM_DATA: Unexpected outbound stream {stream_id} in data event"
+                    )
+                    return
+
+            stream = self._streams[stream_id]
+            await stream.handle_data_received(event.data, event.end_stream)
+            print(
+                f"✅ STREAM_DATA: Forwarded {len(event.data)} bytes to stream {stream_id}"
+            )
 
         except Exception as e:
             logger.error(f"Error handling stream data for stream {stream_id}: {e}")
-            # Reset the stream on error
-            if stream_id in self._streams:
-                await self._streams[stream_id].reset(error_code=1)
+            print(f"❌ STREAM_DATA: Error: {e}")
 
     async def _get_or_create_stream(self, stream_id: int) -> QUICStream:
         """Get existing stream or create new inbound stream."""
@@ -1103,20 +1139,24 @@ class QUICConnection(IRawConnection, IMuxedConn):
     # Network transmission
 
     async def _transmit(self) -> None:
-        """Send pending datagrams using trio."""
+        """Transmit pending QUIC packets using available socket."""
         sock = self._socket
         if not sock:
             print("No socket to transmit")
             return
 
         try:
-            datagrams = self._quic.datagrams_to_send(now=time.time())
+            current_time = time.time()
+            datagrams = self._quic.datagrams_to_send(now=current_time)
             for data, addr in datagrams:
                 await sock.sendto(data, addr)
-                self._stats["packets_sent"] += 1
-                self._stats["bytes_sent"] += len(data)
+                # Update stats if available
+                if hasattr(self, "_stats"):
+                    self._stats["packets_sent"] += 1
+                    self._stats["bytes_sent"] += len(data)
+
         except Exception as e:
-            logger.error(f"Failed to send datagram: {e}")
+            logger.error(f"Transmission error: {e}")
             await self._handle_connection_error(e)
 
     # Additional methods for stream data processing
@@ -1179,8 +1219,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._transmit()  # Send close frames
 
             # Close socket
-            if self._socket:
+            if self._socket and self._owns_socket:
                 self._socket.close()
+                self._socket = None
 
             self._streams.clear()
             self._closed_event.set()

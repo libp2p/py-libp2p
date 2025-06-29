@@ -25,15 +25,16 @@ PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
-    """
-    Echo stream handler - unchanged from TCP version.
-
-    Demonstrates transport abstraction: same handler works for both TCP and QUIC.
-    """
-    # Wait until EOF
-    msg = await stream.read()
-    await stream.write(msg)
-    await stream.close()
+    try:
+        msg = await stream.read()
+        await stream.write(msg)
+        await stream.close()
+    except Exception as e:
+        print(f"Echo handler error: {e}")
+        try:
+            await stream.close()
+        except:
+            pass
 
 
 async def run_server(port: int, seed: int | None = None) -> None:

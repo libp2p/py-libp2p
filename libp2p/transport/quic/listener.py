@@ -160,11 +160,20 @@ class QUICListener(IListener):
             is_long_header = (first_byte & 0x80) != 0
 
             if not is_long_header:
-                # Short header packet - extract destination connection ID
-                # For short headers, we need to know the connection ID length
-                # This is typically managed by the connection state
-                # For now, we'll handle this in the connection routing logic
-                return None
+                cid_length = 8  # We are using standard CID length everywhere
+
+                if len(data) < 1 + cid_length:
+                    return None
+
+                dest_cid = data[1 : 1 + cid_length]
+
+                return QUICPacketInfo(
+                    version=1,  # Assume QUIC v1 for established connections
+                    destination_cid=dest_cid,
+                    source_cid=b"",  # Not available in short header
+                    packet_type=QuicPacketType.ONE_RTT,
+                    token=b"",
+                )
 
             # Long header packet parsing
             offset = 1
@@ -275,6 +284,13 @@ class QUICListener(IListener):
 
             # Parse packet to extract connection information
             packet_info = self.parse_quic_packet(data)
+
+            print(f"🔧 DEBUG: Packet info: {packet_info is not None}")
+            if packet_info:
+                print(f"🔧 DEBUG: Packet type: {packet_info.packet_type}")
+                print(
+                    f"🔧 DEBUG: Is short header: {packet_info.packet_type == QuicPacketType.ONE_RTT}"
+                )
 
             print(
                 f"🔧 DEBUG: Pending connections: {[cid.hex() for cid in self._pending_connections.keys()]}"
@@ -606,23 +622,36 @@ class QUICListener(IListener):
     async def _handle_short_header_packet(
         self, data: bytes, addr: tuple[str, int]
     ) -> None:
-        """Handle short header packets using address-based fallback routing."""
+        """Handle short header packets for established connections."""
         try:
-            # Check if we have a connection for this address
+            print(f"🔧 SHORT_HDR: Handling short header packet from {addr}")
+
+            # First, try address-based lookup
             dest_cid = self._addr_to_cid.get(addr)
-            if dest_cid:
-                if dest_cid in self._connections:
-                    connection = self._connections[dest_cid]
-                    await self._route_to_connection(connection, data, addr)
-                elif dest_cid in self._pending_connections:
-                    quic_conn = self._pending_connections[dest_cid]
-                    await self._handle_pending_connection(
-                        quic_conn, data, addr, dest_cid
+            if dest_cid and dest_cid in self._connections:
+                print(f"✅ SHORT_HDR: Routing via address mapping to {dest_cid.hex()}")
+                connection = self._connections[dest_cid]
+                await self._route_to_connection(connection, data, addr)
+                return
+
+            # Fallback: try to extract CID from packet
+            if len(data) >= 9:  # 1 byte header + 8 byte CID
+                potential_cid = data[1:9]
+
+                if potential_cid in self._connections:
+                    print(
+                        f"✅ SHORT_HDR: Routing via extracted CID {potential_cid.hex()}"
                     )
-            else:
-                logger.debug(
-                    f"Received short header packet from unknown address {addr}"
-                )
+                    connection = self._connections[potential_cid]
+
+                    # Update mappings for future packets
+                    self._addr_to_cid[addr] = potential_cid
+                    self._cid_to_addr[potential_cid] = addr
+
+                    await self._route_to_connection(connection, data, addr)
+                    return
+
+            print(f"❌ SHORT_HDR: No matching connection found for {addr}")
 
         except Exception as e:
             logger.error(f"Error handling short header packet from {addr}: {e}")
@@ -858,7 +887,7 @@ class QUICListener(IListener):
 
             # Create multiaddr for this connection
             host, port = addr
-            quic_version = next(iter(self._quic_configs.keys()))
+            quic_version = "quic"
             remote_maddr = create_quic_multiaddr(host, port, f"/{quic_version}")
 
             from .connection import QUICConnection
@@ -872,9 +901,19 @@ class QUICListener(IListener):
                 maddr=remote_maddr,
                 transport=self._transport,
                 security_manager=self._security_manager,
+                listener_socket=self._socket,
+            )
+
+            print(
+                f"🔧 PROMOTION: Created connection with socket: {self._socket is not None}"
+            )
+            print(
+                f"🔧 PROMOTION: Socket type: {type(self._socket) if self._socket else 'None'}"
             )
 
             self._connections[dest_cid] = connection
+            self._addr_to_cid[addr] = dest_cid
+            self._cid_to_addr[dest_cid] = addr
 
             if self._nursery:
                 await connection.connect(self._nursery)
@@ -1178,9 +1217,31 @@ class QUICListener(IListener):
     async def _handle_new_established_connection(
         self, connection: QUICConnection
     ) -> None:
-        """Handle a newly established connection."""
+        """Handle newly established connection with proper stream management."""
         try:
-            await self._handler(connection)
+            logger.debug(
+                f"Handling new established connection from {connection._remote_addr}"
+            )
+
+            # Accept incoming streams and pass them to the handler
+            while not connection.is_closed:
+                try:
+                    print(f"🔧 CONN_HANDLER: Waiting for stream...")
+                    stream = await connection.accept_stream(timeout=1.0)
+                    print(f"✅ CONN_HANDLER: Accepted stream {stream.stream_id}")
+
+                    if self._nursery:
+                        # Pass STREAM to handler, not connection
+                        self._nursery.start_soon(self._handler, stream)
+                        print(
+                            f"✅ CONN_HANDLER: Started handler for stream {stream.stream_id}"
+                        )
+                except trio.TooSlowError:
+                    continue  # Timeout is normal
+                except Exception as e:
+                    logger.error(f"Error accepting stream: {e}")
+                    break
+
         except Exception as e:
             logger.error(f"Error in connection handler: {e}")
             await connection.close()
