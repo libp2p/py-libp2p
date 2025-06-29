@@ -45,6 +45,7 @@ class GossipsubParams(NamedTuple):
     px_peers_count: int = 16
     prune_back_off: int = 60
     unsubscribe_back_off: int = 10
+    flood_publish: bool = False
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()

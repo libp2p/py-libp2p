@@ -576,6 +576,7 @@ class PubsubFactory(factory.Factory):
         px_peers_count: int = GOSSIPSUB_PARAMS.px_peers_count,
         prune_back_off: int = GOSSIPSUB_PARAMS.prune_back_off,
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
+        flood_publish: bool = GOSSIPSUB_PARAMS.flood_publish,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -600,6 +601,7 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                flood_publish=flood_publish,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -618,6 +620,7 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                flood_publish=flood_publish,
             )
 
         async with cls._create_batch_with_router(
