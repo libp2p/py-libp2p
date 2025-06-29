@@ -493,7 +493,7 @@ class Yamux(IMuxedConn):
                     f"type={typ}, flags={flags}, stream_id={stream_id},"
                     f"length={length}"
                 )
-                if typ == TYPE_DATA and flags & FLAG_SYN:
+                if (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_SYN:
                     async with self.streams_lock:
                         if stream_id not in self.streams:
                             stream = YamuxStream(stream_id, self, False)
