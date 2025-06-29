@@ -79,7 +79,7 @@ async def secure_conn_pair(key_pair, peer_id):
     client_rw = TrioStreamAdapter(client_send, client_receive, is_initiator=True)
     server_rw = TrioStreamAdapter(server_send, server_receive, is_initiator=False)
 
-    insecure_transport = InsecureTransport(key_pair)
+    insecure_transport = InsecureTransport(key_pair, peerstore=None)
 
     async def run_outbound(nursery_results):
         with trio.move_on_after(5):
