@@ -24,9 +24,6 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.network.stream.exceptions import (
-    StreamClosed,
-)
 from libp2p.peer.id import (
     ID,
 )
@@ -43,9 +40,6 @@ from libp2p.pubsub import (
 )
 from libp2p.tools.async_service import (
     Service,
-)
-from libp2p.utils import (
-    encode_varint_prefixed,
 )
 
 from .exceptions import (
@@ -272,13 +266,10 @@ class GossipSub(IPubsubRouter, Service):
             if peer_id not in self.pubsub.peers:
                 continue
             stream = self.pubsub.peers[peer_id]
-            # FIXME: We should add a `WriteMsg` similar to write delimited messages.
-            #   Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go#L107
-            try:
-                await stream.write(encode_varint_prefixed(rpc_msg.SerializeToString()))
-            except StreamClosed:
-                logger.debug("Fail to publish message to %s: stream closed", peer_id)
-                self.pubsub._handle_dead_peer(peer_id)
+
+            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
+            await self.pubsub.write_msg(stream, rpc_msg)
+
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
 
@@ -842,8 +833,6 @@ class GossipSub(IPubsubRouter, Service):
 
         packet.publish.extend(msgs_to_forward)
 
-        # 2) Serialize that packet
-        rpc_msg: bytes = packet.SerializeToString()
         if self.pubsub is None:
             raise NoPubsubAttached
 
@@ -857,14 +846,7 @@ class GossipSub(IPubsubRouter, Service):
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        try:
-            await peer_stream.write(encode_varint_prefixed(rpc_msg))
-        except StreamClosed:
-            logger.debug(
-                "Fail to responed to iwant request from %s: stream closed",
-                sender_peer_id,
-            )
-            self.pubsub._handle_dead_peer(sender_peer_id)
+        await self.pubsub.write_msg(peer_stream, packet)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -1006,8 +988,6 @@ class GossipSub(IPubsubRouter, Service):
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)
 
-        rpc_msg: bytes = packet.SerializeToString()
-
         # Get stream for peer from pubsub
         if to_peer not in self.pubsub.peers:
             logger.debug(
@@ -1017,8 +997,4 @@ class GossipSub(IPubsubRouter, Service):
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream
-        try:
-            await peer_stream.write(encode_varint_prefixed(rpc_msg))
-        except StreamClosed:
-            logger.debug("Fail to emit control message to %s: stream closed", to_peer)
-            self.pubsub._handle_dead_peer(to_peer)
+        await self.pubsub.write_msg(peer_stream, packet)
