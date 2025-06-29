@@ -258,6 +258,7 @@ def new_host(
     :param disc_opt: optional discovery
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
+    :param enable_mDNS: whether to enable mDNS discovery
     :return: return a host instance
     """
     swarm = new_swarm(
