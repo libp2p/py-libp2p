@@ -1,0 +1,1 @@
+Added `Bootstrap` peer discovery module that allows nodes to connect to predefined bootstrap peers for network discovery.
