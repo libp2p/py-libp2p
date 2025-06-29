@@ -1,3 +1,4 @@
+
 """
 QUIC Security implementation for py-libp2p Module 5.
 Implements libp2p TLS specification for QUIC transport with peer identity integration.
@@ -15,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.x509.base import Certificate
+from cryptography.x509.extensions import Extension, UnrecognizedExtension
 from cryptography.x509.oid import NameOID
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
@@ -128,57 +130,106 @@ class LibP2PExtensionHandler:
             ) from e
 
     @staticmethod
-    def parse_signed_key_extension(extension_data: bytes) -> tuple[PublicKey, bytes]:
+    def parse_signed_key_extension(extension: Extension) -> tuple[PublicKey, bytes]:
         """
-        Parse the libp2p Public Key Extension to extract public key and signature.
-
-        Args:
-            extension_data: The extension data bytes
-
-        Returns:
-            Tuple of (libp2p_public_key, signature)
-
-        Raises:
-            QUICCertificateError: If extension parsing fails
-
+        Parse the libp2p Public Key Extension with enhanced debugging.
         """
         try:
+            print(f"🔍 Extension type: {type(extension)}")
+            print(f"🔍 Extension.value type: {type(extension.value)}")
+            
+            # Extract the raw bytes from the extension
+            if isinstance(extension.value, UnrecognizedExtension):
+                # Use the .value property to get the bytes
+                raw_bytes = extension.value.value
+                print("🔍 Extension is UnrecognizedExtension, using .value property")
+            else:
+                # Fallback if it's already bytes somehow
+                raw_bytes = extension.value
+                print("🔍 Extension.value is already bytes")
+            
+            print(f"🔍 Total extension length: {len(raw_bytes)} bytes")
+            print(f"🔍 Extension hex (first 50 bytes): {raw_bytes[:50].hex()}")
+            
+            if not isinstance(raw_bytes, bytes):
+                raise QUICCertificateError(f"Expected bytes, got {type(raw_bytes)}")
+
             offset = 0
 
             # Parse public key length and data
-            if len(extension_data) < 4:
+            if len(raw_bytes) < 4:
                 raise QUICCertificateError("Extension too short for public key length")
 
             public_key_length = int.from_bytes(
-                extension_data[offset : offset + 4], byteorder="big"
+                raw_bytes[offset : offset + 4], byteorder="big"
             )
+            print(f"🔍 Public key length: {public_key_length} bytes")
             offset += 4
 
-            if len(extension_data) < offset + public_key_length:
+            if len(raw_bytes) < offset + public_key_length:
                 raise QUICCertificateError("Extension too short for public key data")
 
-            public_key_bytes = extension_data[offset : offset + public_key_length]
+            public_key_bytes = raw_bytes[offset : offset + public_key_length]
+            print(f"🔍 Public key data: {public_key_bytes.hex()}")
             offset += public_key_length
+            print(f"🔍 Offset after public key: {offset}")
 
             # Parse signature length and data
-            if len(extension_data) < offset + 4:
+            if len(raw_bytes) < offset + 4:
                 raise QUICCertificateError("Extension too short for signature length")
 
             signature_length = int.from_bytes(
-                extension_data[offset : offset + 4], byteorder="big"
+                raw_bytes[offset : offset + 4], byteorder="big"
             )
+            print(f"🔍 Signature length: {signature_length} bytes")
             offset += 4
+            print(f"🔍 Offset after signature length: {offset}")
 
-            if len(extension_data) < offset + signature_length:
+            if len(raw_bytes) < offset + signature_length:
                 raise QUICCertificateError("Extension too short for signature data")
 
-            signature = extension_data[offset : offset + signature_length]
+            signature = raw_bytes[offset : offset + signature_length]
+            print(f"🔍 Extracted signature length: {len(signature)} bytes")
+            print(f"🔍 Signature hex (first 20 bytes): {signature[:20].hex()}")
+            print(f"🔍 Signature starts with DER header: {signature[:2].hex() == '3045'}")
+            
+            # Detailed signature analysis
+            if len(signature) >= 2:
+                if signature[0] == 0x30:
+                    der_length = signature[1]
+                    print(f"🔍 DER sequence length field: {der_length}")
+                    print(f"🔍 Expected DER total: {der_length + 2}")
+                    print(f"🔍 Actual signature length: {len(signature)}")
+                    
+                    if len(signature) != der_length + 2:
+                        print(f"⚠️  DER length mismatch! Expected {der_length + 2}, got {len(signature)}")
+                        # Try truncating to correct DER length
+                        if der_length + 2 < len(signature):
+                            print(f"🔧 Truncating signature to correct DER length: {der_length + 2}")
+                            signature = signature[:der_length + 2]
+            
+            # Check if we have extra data
+            expected_total = 4 + public_key_length + 4 + signature_length
+            print(f"🔍 Expected total length: {expected_total}")
+            print(f"🔍 Actual total length: {len(raw_bytes)}")
+            
+            if len(raw_bytes) > expected_total:
+                extra_bytes = len(raw_bytes) - expected_total
+                print(f"⚠️  Extra {extra_bytes} bytes detected!")
+                print(f"🔍 Extra data: {raw_bytes[expected_total:].hex()}")
 
+            # Deserialize the public key
             public_key = LibP2PKeyConverter.deserialize_public_key(public_key_bytes)
+            print(f"🔍 Successfully deserialized public key: {type(public_key)}")
+            
+            print(f"🔍 Final signature to return: {len(signature)} bytes")
 
             return public_key, signature
 
         except Exception as e:
+            print(f"❌ Extension parsing failed: {e}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
             raise QUICCertificateError(
                 f"Failed to parse signed key extension: {e}"
             ) from e
@@ -361,9 +412,15 @@ class PeerAuthenticator:
             if not libp2p_extension:
                 raise QUICPeerVerificationError("Certificate missing libp2p extension")
 
+            assert libp2p_extension.value is not None
+            print(f"Extension type: {type(libp2p_extension)}")
+            print(f"Extension value type: {type(libp2p_extension.value)}")
+            if hasattr(libp2p_extension.value, "__len__"):
+                print(f"Extension value length: {len(libp2p_extension.value)}")
+            print(f"Extension value: {libp2p_extension.value}")
             # Parse the extension to get public key and signature
             public_key, signature = self.extension_handler.parse_signed_key_extension(
-                libp2p_extension.value
+                libp2p_extension
             )
 
             # Get certificate public key for signature verification
@@ -376,7 +433,7 @@ class PeerAuthenticator:
             signature_payload = b"libp2p-tls-handshake:" + cert_public_key_bytes
 
             try:
-                public_key.verify(signature, signature_payload)
+                public_key.verify(signature_payload, signature)
             except Exception as e:
                 raise QUICPeerVerificationError(
                     f"Invalid signature in libp2p extension: {e}"
@@ -387,6 +444,8 @@ class PeerAuthenticator:
 
             # Verify against expected peer ID if provided
             if expected_peer_id and derived_peer_id != expected_peer_id:
+                print(f"Expected Peer id: {expected_peer_id}")
+                print(f"Derived Peer ID: {derived_peer_id}")
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {expected_peer_id}, "
                     f"got {derived_peer_id}"

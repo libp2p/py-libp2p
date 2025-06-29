@@ -277,9 +277,6 @@ class QUICListener(IListener):
             packet_info = self.parse_quic_packet(data)
 
             print(
-                f"🔧 DEBUG: Address mappings: {dict((k, v.hex()) for k, v in self._addr_to_cid.items())}"
-            )
-            print(
                 f"🔧 DEBUG: Pending connections: {[cid.hex() for cid in self._pending_connections.keys()]}"
             )
             print(
@@ -332,33 +329,6 @@ class QUICListener(IListener):
                             quic_conn, data, addr, dest_cid
                         )
                         return
-
-                    # If no exact match, try address-based routing (connection ID might not match)
-                    mapped_cid = self._addr_to_cid.get(addr)
-                    if mapped_cid:
-                        print(
-                            f"🔧 PACKET: Found address mapping {addr} -> {mapped_cid.hex()}"
-                        )
-                        print(
-                            f"🔧 PACKET: Client dest_cid {dest_cid.hex()} != our cid {mapped_cid.hex()}"
-                        )
-
-                        if mapped_cid in self._connections:
-                            print(
-                                "✅ PACKET: Using established connection via address mapping"
-                            )
-                            connection = self._connections[mapped_cid]
-                            await self._route_to_connection(connection, data, addr)
-                            return
-                        elif mapped_cid in self._pending_connections:
-                            print(
-                                "✅ PACKET: Using pending connection via address mapping"
-                            )
-                            quic_conn = self._pending_connections[mapped_cid]
-                            await self._handle_pending_connection(
-                                quic_conn, data, addr, mapped_cid
-                            )
-                            return
 
                     # No existing connection found, create new one
                     print(f"🔧 PACKET: Creating new connection for {addr}")
@@ -491,10 +461,9 @@ class QUICListener(IListener):
             )
 
             # Create QUIC connection with proper parameters for server
-            # CRITICAL FIX: Pass the original destination connection ID from the initial packet
             quic_conn = QuicConnection(
                 configuration=server_config,
-                original_destination_connection_id=packet_info.destination_cid,  # Use the original DCID from packet
+                original_destination_connection_id=packet_info.destination_cid,
             )
 
             quic_conn._replenish_connection_ids()
