@@ -66,6 +66,7 @@ from libp2p.utils import (
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
 )
+from libp2p.utils.varint import encode_uvarint
 
 from .pb import (
     rpc_pb2,
@@ -682,19 +683,18 @@ class Pubsub(Service, IPubsub):
         # TODO: Implement throttle on async validators
 
         if len(async_topic_validators) > 0:
-            # TODO: Use a better pattern
-            final_result: bool = True
+            # Appends to lists are thread safe in CPython
+            results = []
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                nonlocal final_result
                 result = await func(msg_forwarder, msg)
-                final_result = final_result and result
+                results.append(result)
 
             async with trio.open_nursery() as nursery:
                 for async_validator in async_topic_validators:
                     nursery.start_soon(run_async_validator, async_validator)
 
-            if not final_result:
+            if not all(results):
                 raise ValidationError(f"Validation failed for msg={msg}")
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
@@ -779,3 +779,43 @@ class Pubsub(Service, IPubsub):
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
+
+    async def write_msg(self, stream: INetStream, rpc_msg: rpc_pb2.RPC) -> bool:
+        """
+        Write an RPC message to a stream with proper error handling.
+
+        Implements WriteMsg similar to go-msgio which is used in go-libp2p
+        Ref: https://github.com/libp2p/go-msgio/blob/master/protoio/uvarint_writer.go#L56
+
+
+        :param stream: stream to write the message to
+        :param rpc_msg: RPC message to write
+        :return: True if successful, False if stream was closed
+        """
+        try:
+            # Calculate message size first
+            msg_bytes = rpc_msg.SerializeToString()
+            msg_size = len(msg_bytes)
+
+            # Calculate varint size and allocate exact buffer size needed
+
+            varint_bytes = encode_uvarint(msg_size)
+            varint_size = len(varint_bytes)
+
+            # Allocate buffer with exact size (like Go's pool.Get())
+            buf = bytearray(varint_size + msg_size)
+
+            # Write varint length prefix to buffer (like Go's binary.PutUvarint())
+            buf[:varint_size] = varint_bytes
+
+            # Write serialized message after varint (like Go's rpc.MarshalTo())
+            buf[varint_size:] = msg_bytes
+
+            # Single write operation (like Go's s.Write(buf))
+            await stream.write(bytes(buf))
+            return True
+        except StreamClosed:
+            peer_id = stream.muxed_conn.peer_id
+            logger.debug("Fail to write message to %s: stream closed", peer_id)
+            self._handle_dead_peer(peer_id)
+            return False
