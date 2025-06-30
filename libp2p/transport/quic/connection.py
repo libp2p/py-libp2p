@@ -3,11 +3,12 @@ QUIC Connection implementation.
 Uses aioquic's sans-IO core with trio for async operations.
 """
 
+from collections.abc import Awaitable, Callable
 import logging
 import socket
 from sys import stdout
 import time
-from typing import TYPE_CHECKING, Any, Optional, Set
+from typing import TYPE_CHECKING, Any, Optional
 
 from aioquic.quic import events
 from aioquic.quic.connection import QuicConnection
@@ -75,7 +76,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self,
         quic_connection: QuicConnection,
         remote_addr: tuple[str, int],
-        peer_id: ID | None,
+        peer_id: ID,
         local_peer_id: ID,
         is_initiator: bool,
         maddr: multiaddr.Multiaddr,
@@ -102,7 +103,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         self._quic = quic_connection
         self._remote_addr = remote_addr
-        self._peer_id = peer_id
+        self.peer_id = peer_id
         self._local_peer_id = local_peer_id
         self.__is_initiator = is_initiator
         self._maddr = maddr
@@ -147,12 +148,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._background_tasks_started = False
         self._nursery: trio.Nursery | None = None
         self._event_processing_task: Any | None = None
+        self.on_close: Callable[[], Awaitable[None]] | None = None
+        self.event_started = trio.Event()
 
         # *** NEW: Connection ID tracking - CRITICAL for fixing the original issue ***
-        self._available_connection_ids: Set[bytes] = set()
-        self._current_connection_id: Optional[bytes] = None
-        self._retired_connection_ids: Set[bytes] = set()
-        self._connection_id_sequence_numbers: Set[int] = set()
+        self._available_connection_ids: set[bytes] = set()
+        self._current_connection_id: bytes | None = None
+        self._retired_connection_ids: set[bytes] = set()
+        self._connection_id_sequence_numbers: set[int] = set()
 
         # Event processing control
         self._event_processing_active = False
@@ -235,7 +238,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     def remote_peer_id(self) -> ID | None:
         """Get the remote peer ID."""
-        return self._peer_id
+        return self.peer_id
 
     # *** NEW: Connection ID management methods ***
     def get_connection_id_stats(self) -> dict[str, Any]:
@@ -252,7 +255,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             "available_cid_list": [cid.hex() for cid in self._available_connection_ids],
         }
 
-    def get_current_connection_id(self) -> Optional[bytes]:
+    def get_current_connection_id(self) -> bytes | None:
         """Get the current connection ID."""
         return self._current_connection_id
 
@@ -273,7 +276,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
             raise QUICConnectionError("Cannot start a closed connection")
 
         self._started = True
-        logger.debug(f"Starting QUIC connection to {self._peer_id}")
+        self.event_started.set()
+        logger.debug(f"Starting QUIC connection to {self.peer_id}")
 
         try:
             # If this is a client connection, we need to establish the connection
@@ -284,7 +288,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._established = True
                 self._connected_event.set()
 
-            logger.debug(f"QUIC connection to {self._peer_id} started")
+            logger.debug(f"QUIC connection to {self.peer_id} started")
 
         except Exception as e:
             logger.error(f"Failed to start connection: {e}")
@@ -356,7 +360,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._verify_peer_identity_with_security()
 
                 self._established = True
-                logger.info(f"QUIC connection established with {self._peer_id}")
+                logger.info(f"QUIC connection established with {self.peer_id}")
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
@@ -491,17 +495,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Verify peer identity using security manager
             verified_peer_id = self._security_manager.verify_peer_identity(
                 self._peer_certificate,
-                self._peer_id,  # Expected peer ID for outbound connections
+                self.peer_id,  # Expected peer ID for outbound connections
             )
 
             # Update peer ID if it wasn't known (inbound connections)
-            if not self._peer_id:
-                self._peer_id = verified_peer_id
+            if not self.peer_id:
+                self.peer_id = verified_peer_id
                 logger.info(f"Discovered peer ID from certificate: {verified_peer_id}")
-            elif self._peer_id != verified_peer_id:
+            elif self.peer_id != verified_peer_id:
                 raise QUICPeerVerificationError(
-                    f"Peer ID mismatch: expected {self._peer_id}, "
-                    f"got {verified_peer_id}"
+                    f"Peer ID mismatch: expected {self.peer_id}, got {verified_peer_id}"
                 )
 
             self._peer_verified = True
@@ -605,7 +608,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         info: dict[str, bool | Any | None] = {
             "peer_verified": self._peer_verified,
             "handshake_complete": self._handshake_completed,
-            "peer_id": str(self._peer_id) if self._peer_id else None,
+            "peer_id": str(self.peer_id) if self.peer_id else None,
             "local_peer_id": str(self._local_peer_id),
             "is_initiator": self.__is_initiator,
             "has_certificate": self._peer_certificate is not None,
@@ -1188,7 +1191,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         self._closed = True
-        logger.debug(f"Closing QUIC connection to {self._peer_id}")
+        logger.debug(f"Closing QUIC connection to {self.peer_id}")
 
         try:
             # Close all streams gracefully
@@ -1213,8 +1216,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         except Exception:
                             pass
 
+            if self.on_close:
+                await self.on_close()
+
             # Close QUIC connection
             self._quic.close()
+
             if self._socket:
                 await self._transmit()  # Send close frames
 
@@ -1226,7 +1233,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._streams.clear()
             self._closed_event.set()
 
-            logger.debug(f"QUIC connection to {self._peer_id} closed")
+            logger.debug(f"QUIC connection to {self.peer_id} closed")
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")
@@ -1266,6 +1273,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             QUICStreamClosedError: If stream is closed for reading.
             QUICStreamResetError: If stream was reset.
             QUICStreamTimeoutError: If read timeout occurs.
+
         """
         # This method doesn't make sense for a muxed connection
         # It's here for interface compatibility but should not be used
@@ -1325,7 +1333,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     def __repr__(self) -> str:
         return (
-            f"QUICConnection(peer={self._peer_id}, "
+            f"QUICConnection(peer={self.peer_id}, "
             f"addr={self._remote_addr}, "
             f"initiator={self.__is_initiator}, "
             f"verified={self._peer_verified}, "
@@ -1335,4 +1343,4 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
     def __str__(self) -> str:
-        return f"QUICConnection({self._peer_id})"
+        return f"QUICConnection({self.peer_id})"

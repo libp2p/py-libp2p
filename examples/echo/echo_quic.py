@@ -115,7 +115,9 @@ async def run_client(destination: str, seed: int | None = None) -> None:
         info = info_from_p2p_addr(maddr)
 
         # Connect to server
+        print("STARTING CLIENT CONNECTION PROCESS")
         await host.connect(info)
+        print("CLIENT CONNECTED TO SERVER")
 
         # Start a stream with the destination
         stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])

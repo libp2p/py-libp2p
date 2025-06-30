@@ -9,6 +9,7 @@ import copy
 import logging
 import ssl
 import sys
+from typing import TYPE_CHECKING, cast
 
 from aioquic.quic.configuration import (
     QuicConfiguration,
@@ -21,13 +22,12 @@ import multiaddr
 import trio
 
 from libp2p.abc import (
-    IRawConnection,
     ITransport,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
 )
-from libp2p.custom_types import THandler, TProtocol, TQUICConnHandlerFn
+from libp2p.custom_types import TProtocol, TQUICConnHandlerFn
 from libp2p.peer.id import (
     ID,
 )
@@ -39,6 +39,11 @@ from libp2p.transport.quic.utils import (
     quic_multiaddr_to_endpoint,
     quic_version_to_wire_format,
 )
+
+if TYPE_CHECKING:
+    from libp2p.network.swarm import Swarm
+else:
+    Swarm = cast(type, object)
 
 from .config import (
     QUICTransportConfig,
@@ -112,10 +117,20 @@ class QUICTransport(ITransport):
         # Resource management
         self._closed = False
         self._nursery_manager = trio.CapacityLimiter(1)
+        self._background_nursery: trio.Nursery | None = None
 
-        logger.info(
-            f"Initialized QUIC transport with security for peer {self._peer_id}"
-        )
+        self._swarm = None
+
+        print(f"Initialized QUIC transport with security for peer {self._peer_id}")
+
+    def set_background_nursery(self, nursery: trio.Nursery) -> None:
+        """Set the nursery to use for background tasks (called by swarm)."""
+        self._background_nursery = nursery
+        print("Transport background nursery set")
+
+    def set_swarm(self, swarm) -> None:
+        """Set the swarm for adding incoming connections."""
+        self._swarm = swarm
 
     def _setup_quic_configurations(self) -> None:
         """Setup QUIC configurations."""
@@ -184,7 +199,7 @@ class QUICTransport(ITransport):
                     draft29_client_config
                 )
 
-            logger.info("QUIC configurations initialized with libp2p TLS security")
+            print("QUIC configurations initialized with libp2p TLS security")
 
         except Exception as e:
             raise QUICSecurityError(
@@ -214,14 +229,13 @@ class QUICTransport(ITransport):
 
             config.verify_mode = ssl.CERT_NONE
 
-            logger.debug("Successfully applied TLS configuration to QUIC config")
+            print("Successfully applied TLS configuration to QUIC config")
 
         except Exception as e:
             raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
 
-    async def dial(
-        self, maddr: multiaddr.Multiaddr, peer_id: ID | None = None
-    ) -> QUICConnection:
+    # type: ignore
+    async def dial(self, maddr: multiaddr.Multiaddr, peer_id: ID) -> QUICConnection:
         """
         Dial a remote peer using QUIC transport with security verification.
 
@@ -243,6 +257,9 @@ class QUICTransport(ITransport):
         if not is_quic_multiaddr(maddr):
             raise QUICDialError(f"Invalid QUIC multiaddr: {maddr}")
 
+        if not peer_id:
+            raise QUICDialError("Peer id cannot be null")
+
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
@@ -257,9 +274,7 @@ class QUICTransport(ITransport):
 
             config.is_client = True
             config.quic_logger = QuicLogger()
-            logger.debug(
-                f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
-            )
+            print(f"Dialing QUIC connection to {host}:{port} (version: {quic_version})")
 
             print("Start QUIC Connection")
             # Create QUIC connection using aioquic's sans-IO core
@@ -279,8 +294,18 @@ class QUICTransport(ITransport):
             )
 
             # Establish connection using trio
-            async with trio.open_nursery() as nursery:
-                await connection.connect(nursery)
+            if self._background_nursery:
+                # Use swarm's long-lived nursery - background tasks persist!
+                await connection.connect(self._background_nursery)
+                print("Using background nursery for connection tasks")
+            else:
+                # Fallback to temporary nursery (with warning)
+                print(
+                    "No background nursery available. Connection background tasks "
+                    "may be cancelled when dial completes."
+                )
+                async with trio.open_nursery() as temp_nursery:
+                    await connection.connect(temp_nursery)
 
             # Verify peer identity after TLS handshake
             if peer_id:
@@ -290,7 +315,7 @@ class QUICTransport(ITransport):
             conn_id = f"{host}:{port}:{peer_id}"
             self._connections[conn_id] = connection
 
-            logger.info(f"Successfully dialed secure QUIC connection to {peer_id}")
+            print(f"Successfully dialed secure QUIC connection to {peer_id}")
             return connection
 
         except Exception as e:
@@ -329,7 +354,7 @@ class QUICTransport(ITransport):
                     f"{expected_peer_id}, got {verified_peer_id}"
                 )
 
-            logger.info(f"Peer identity verified: {verified_peer_id}")
+            print(f"Peer identity verified: {verified_peer_id}")
             print(f"Peer identity verified: {verified_peer_id}")
 
         except Exception as e:
@@ -368,7 +393,7 @@ class QUICTransport(ITransport):
         )
 
         self._listeners.append(listener)
-        logger.debug("Created QUIC listener with security")
+        print("Created QUIC listener with security")
         return listener
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
@@ -414,7 +439,7 @@ class QUICTransport(ITransport):
             return
 
         self._closed = True
-        logger.info("Closing QUIC transport")
+        print("Closing QUIC transport")
 
         # Close all active connections and listeners concurrently using trio nursery
         async with trio.open_nursery() as nursery:
@@ -429,7 +454,7 @@ class QUICTransport(ITransport):
         self._connections.clear()
         self._listeners.clear()
 
-        logger.info("QUIC transport closed")
+        print("QUIC transport closed")
 
     def get_stats(self) -> dict[str, int | list[str] | object]:
         """Get transport statistics including security info."""

@@ -12,18 +12,19 @@ from typing import TYPE_CHECKING
 from aioquic.quic import events
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.connection import QuicConnection
+from aioquic.quic.packet import QuicPacketType
 from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import IListener
-from libp2p.custom_types import THandler, TProtocol
+from libp2p.custom_types import (
+    TProtocol,
+    TQUICConnHandlerFn,
+)
 from libp2p.transport.quic.security import (
     LIBP2P_TLS_EXTENSION_OID,
     QUICTLSConfigManager,
 )
-from libp2p.custom_types import TQUICConnHandlerFn
-from libp2p.custom_types import TQUICStreamHandlerFn
-from aioquic.quic.packet import QuicPacketType
 
 from .config import QUICTransportConfig
 from .connection import QUICConnection
@@ -1099,12 +1100,21 @@ class QUICListener(IListener):
         if not is_quic_multiaddr(maddr):
             raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
 
+        if self._transport._background_nursery:
+            active_nursery = self._transport._background_nursery
+            logger.debug("Using transport background nursery for listener")
+        elif nursery:
+            active_nursery = nursery
+            logger.debug("Using provided nursery for listener")
+        else:
+            raise QUICListenError("No nursery available")
+
         try:
             host, port = quic_multiaddr_to_endpoint(maddr)
 
             # Create and configure socket
             self._socket = await self._create_socket(host, port)
-            self._nursery = nursery
+            self._nursery = active_nursery
 
             # Get the actual bound address
             bound_host, bound_port = self._socket.getsockname()
@@ -1115,7 +1125,7 @@ class QUICListener(IListener):
             self._listening = True
 
             # Start packet handling loop
-            nursery.start_soon(self._handle_incoming_packets)
+            active_nursery.start_soon(self._handle_incoming_packets)
 
             logger.info(
                 f"QUIC listener started on {bound_maddr} with connection ID support"
@@ -1217,33 +1227,22 @@ class QUICListener(IListener):
     async def _handle_new_established_connection(
         self, connection: QUICConnection
     ) -> None:
-        """Handle newly established connection with proper stream management."""
+        """Handle newly established connection by adding to swarm."""
         try:
             logger.debug(
-                f"Handling new established connection from {connection._remote_addr}"
+                f"New QUIC connection established from {connection._remote_addr}"
             )
 
-            # Accept incoming streams and pass them to the handler
-            while not connection.is_closed:
-                try:
-                    print(f"🔧 CONN_HANDLER: Waiting for stream...")
-                    stream = await connection.accept_stream(timeout=1.0)
-                    print(f"✅ CONN_HANDLER: Accepted stream {stream.stream_id}")
-
-                    if self._nursery:
-                        # Pass STREAM to handler, not connection
-                        self._nursery.start_soon(self._handler, stream)
-                        print(
-                            f"✅ CONN_HANDLER: Started handler for stream {stream.stream_id}"
-                        )
-                except trio.TooSlowError:
-                    continue  # Timeout is normal
-                except Exception as e:
-                    logger.error(f"Error accepting stream: {e}")
-                    break
+            if self._transport._swarm:
+                logger.debug("Adding QUIC connection directly to swarm")
+                await self._transport._swarm.add_conn(connection)
+                logger.debug("Successfully added QUIC connection to swarm")
+            else:
+                logger.error("No swarm available for QUIC connection")
+                await connection.close()
 
         except Exception as e:
-            logger.error(f"Error in connection handler: {e}")
+            logger.error(f"Error adding QUIC connection to swarm: {e}")
             await connection.close()
 
     def get_addrs(self) -> tuple[Multiaddr]:

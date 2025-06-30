@@ -40,6 +40,7 @@ from libp2p.transport.exceptions import (
     OpenConnectionError,
     SecurityUpgradeFailure,
 )
+from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -114,6 +115,11 @@ class Swarm(Service, INetworkService):
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
             self.event_listener_nursery_created.set()
+
+            if isinstance(self.transport, QUICTransport):
+                self.transport.set_background_nursery(nursery)
+                self.transport.set_swarm(self)
+
             try:
                 await self.manager.wait_finished()
             finally:
@@ -177,6 +183,14 @@ class Swarm(Service, INetworkService):
         """
         Try to create a connection to peer_id with addr.
         """
+        # QUIC Transport
+        if isinstance(self.transport, QUICTransport):
+            raw_conn = await self.transport.dial(addr, peer_id)
+            print("detected QUIC connection, skipping upgrade steps")
+            swarm_conn = await self.add_conn(raw_conn)
+            print("successfully dialed peer %s via QUIC", peer_id)
+            return swarm_conn
+
         try:
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
@@ -186,14 +200,6 @@ class Swarm(Service, INetworkService):
             ) from error
 
         logger.debug("dialed peer %s over base transport", peer_id)
-
-        # NEW: Check if this is a QUIC connection (already secure and muxed)
-        if isinstance(raw_conn, IMuxedConn):
-            # QUIC connections are already secure and muxed, skip upgrade steps
-            logger.debug("detected QUIC connection, skipping upgrade steps")
-            swarm_conn = await self.add_conn(raw_conn)
-            logger.debug("successfully dialed peer %s via QUIC", peer_id)
-            return swarm_conn
 
         # Standard TCP flow - security then mux upgrade
         try:
