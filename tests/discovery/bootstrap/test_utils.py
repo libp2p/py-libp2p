@@ -3,11 +3,11 @@
 Test bootstrap address validation
 """
 
-import pytest
 from libp2p.discovery.bootstrap.utils import (
     parse_bootstrap_peer_info,
     validate_bootstrap_addresses,
 )
+
 
 def test_validate_addresses():
     """Test validation with a mix of valid and invalid addresses in one list."""
@@ -26,10 +26,14 @@ def test_validate_addresses():
         "/ip4/104.236.179.241/tcp/4001/p2p/QmSoLPppuBtQSGwKDZT2M73ULpjvfd3aZ6ha4oFGL1KrGM",
     ]
     validated = validate_bootstrap_addresses(addresses)
-    assert validated == valid_expected, f"Expected only valid addresses, got: {validated}"
+    assert validated == valid_expected, (
+        f"Expected only valid addresses, got: {validated}"
+    )
     for addr in addresses:
         peer_info = parse_bootstrap_peer_info(addr)
         if addr in valid_expected:
-            assert peer_info is not None and peer_info.peer_id is not None, f"Should parse valid address: {addr}"
+            assert peer_info is not None and peer_info.peer_id is not None, (
+                f"Should parse valid address: {addr}"
+            )
         else:
             assert peer_info is None, f"Should not parse invalid address: {addr}"
