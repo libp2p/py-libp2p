@@ -590,3 +590,46 @@ async def test_sparse_connect():
                 f"received the message. Ideally all nodes should receive it, but at "
                 f"minimum {min_required} required for sparse network scalability."
             )
+
+
+@pytest.mark.trio
+async def test_flood_publish():
+    async with PubsubFactory.create_batch_with_gossipsub(
+        6,
+        degree=2,
+        degree_low=1,
+        degree_high=3,
+        flood_publish=False,
+    ) as pubsubs_gsub:
+        routers: list[GossipSub] = []
+        for pubsub in pubsubs_gsub:
+            assert isinstance(pubsub.router, GossipSub)
+            routers.append(pubsub.router)
+        hosts = [ps.host for ps in pubsubs_gsub]
+
+        topic = "flood_test_topic"
+        queues = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub]
+
+        # connect host 0 to all other hosts
+        await one_to_all_connect(hosts, 0)
+
+        # wait for connections to be established
+        await trio.sleep(1)
+
+        # publish a message from the first host
+        msg_content = b"flood_msg"
+        await pubsubs_gsub[0].publish(topic, msg_content)
+
+        # wait for messages to propagate
+        await trio.sleep(0.5)
+
+        print(routers[0].mesh[topic])
+        if routers[0].pubsub:
+            print(routers[0].pubsub.peer_topics)
+
+        # verify all nodes received the message
+        for queue in queues:
+            msg = await queue.get()
+            assert msg.data == msg_content, (
+                f"node did not receive expected message: {msg.data}"
+            )
