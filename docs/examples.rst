@@ -13,3 +13,4 @@ Examples
    examples.pubsub
    examples.circuit_relay
    examples.kademlia
+   examples.mDNS
