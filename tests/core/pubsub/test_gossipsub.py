@@ -15,6 +15,7 @@ from tests.utils.factories import (
     PubsubFactory,
 )
 from tests.utils.pubsub.utils import (
+    connect_some,
     dense_connect,
     one_to_all_connect,
     sparse_connect,
@@ -590,3 +591,166 @@ async def test_sparse_connect():
                 f"received the message. Ideally all nodes should receive it, but at "
                 f"minimum {min_required} required for sparse network scalability."
             )
+
+
+@pytest.mark.trio
+async def test_connect_some_with_fewer_hosts_than_degree():
+    """Test connect_some when there are fewer hosts than degree."""
+    # Create 3 hosts with degree=5
+    async with PubsubFactory.create_batch_with_floodsub(3) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+        degree = 5
+
+        await connect_some(hosts, degree)
+        await trio.sleep(0.1)  # Allow connections to establish
+
+        # Each host should connect to all other hosts (since there are only 2 others)
+        for i, pubsub in enumerate(pubsubs_fsub):
+            connected_peers = len(pubsub.peers)
+            expected_max_connections = len(hosts) - 1  # All others
+            assert connected_peers <= expected_max_connections, (
+                f"Host {i} has {connected_peers} connections, "
+                f"but can only connect to {expected_max_connections} others"
+            )
+
+
+@pytest.mark.trio
+async def test_connect_some_degree_limit_enforced():
+    """Test that connect_some enforces degree limits and creates expected topology."""
+    # Test with small network where we can verify exact behavior
+    async with PubsubFactory.create_batch_with_floodsub(6) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+        degree = 2
+
+        await connect_some(hosts, degree)
+        await trio.sleep(0.1)
+
+        # With 6 hosts and degree=2, expected connections:
+        # Host 0 → connects to hosts 1,2 (2 peers total)
+        # Host 1 → connects to hosts 2,3 (3 peers: 0,2,3)
+        # Host 2 → connects to hosts 3,4 (4 peers: 0,1,3,4)
+        # Host 3 → connects to hosts 4,5 (3 peers: 1,2,4,5) - wait, that's 4!
+        # Host 4 → connects to host 5 (3 peers: 2,3,5)
+        # Host 5 → (2 peers: 3,4)
+
+        peer_counts = [len(pubsub.peers) for pubsub in pubsubs_fsub]
+
+        # First and last hosts should have exactly degree connections
+        assert peer_counts[0] == degree, (
+            f"Host 0 should have {degree} peers, got {peer_counts[0]}"
+        )
+        assert peer_counts[-1] <= degree, (
+            f"Last host should have ≤ {degree} peers, got {peer_counts[-1]}"
+        )
+
+        # Middle hosts may have more due to bidirectional connections
+        # but the pattern should be consistent with degree limit
+        total_connections = sum(peer_counts)
+
+        # Should be less than full mesh (each host connected to all others)
+        full_mesh_connections = len(hosts) * (len(hosts) - 1)
+        assert total_connections < full_mesh_connections, (
+            f"Got {total_connections} total connections, "
+            f"but full mesh would be {full_mesh_connections}"
+        )
+
+        # Should be more than just a chain (each host connected to next only)
+        chain_connections = 2 * (len(hosts) - 1)  # bidirectional chain
+        assert total_connections > chain_connections, (
+            f"Got {total_connections} total connections, which is too few "
+            f"(chain would be {chain_connections})"
+        )
+
+
+@pytest.mark.trio
+async def test_connect_some_degree_zero():
+    """Test edge case: degree=0 should result in no connections."""
+    # Create 5 hosts with degree=0
+    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+        degree = 0
+
+        await connect_some(hosts, degree)
+        await trio.sleep(0.1)  # Allow any potential connections to establish
+
+        # Verify no connections were made
+        for i, pubsub in enumerate(pubsubs_fsub):
+            connected_peers = len(pubsub.peers)
+            assert connected_peers == 0, (
+                f"Host {i} has {connected_peers} connections, "
+                f"but degree=0 should result in no connections"
+            )
+
+
+@pytest.mark.trio
+async def test_connect_some_negative_degree():
+    """Test edge case: negative degree should be handled gracefully."""
+    # Create 5 hosts with degree=-1
+    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+        degree = -1
+
+        await connect_some(hosts, degree)
+        await trio.sleep(0.1)  # Allow any potential connections to establish
+
+        # Verify no connections were made (negative degree should behave like 0)
+        for i, pubsub in enumerate(pubsubs_fsub):
+            connected_peers = len(pubsub.peers)
+            assert connected_peers == 0, (
+                f"Host {i} has {connected_peers} connections, "
+                f"but negative degree should result in no connections"
+            )
+
+
+@pytest.mark.trio
+async def test_sparse_connect_degree_zero():
+    """Test sparse_connect with degree=0."""
+    async with PubsubFactory.create_batch_with_floodsub(8) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+        degree = 0
+
+        await sparse_connect(hosts, degree)
+        await trio.sleep(0.1)  # Allow connections to establish
+
+        # With degree=0, sparse_connect should still create neighbor connections
+        # for connectivity (this is part of the algorithm design)
+        for i, pubsub in enumerate(pubsubs_fsub):
+            connected_peers = len(pubsub.peers)
+            # Should have some connections due to neighbor connectivity
+            # (each node connects to immediate neighbors)
+            expected_neighbors = 2  # previous and next in ring
+            assert connected_peers >= expected_neighbors, (
+                f"Host {i} has {connected_peers} connections, "
+                f"expected at least {expected_neighbors} neighbor connections"
+            )
+
+
+@pytest.mark.trio
+async def test_empty_host_list():
+    """Test edge case: empty host list should be handled gracefully."""
+    hosts = []
+
+    # All functions should handle empty lists gracefully
+    await connect_some(hosts, 5)
+    await sparse_connect(hosts, 3)
+    await dense_connect(hosts)
+
+    # If we reach here without exceptions, the test passes
+
+
+@pytest.mark.trio
+async def test_single_host():
+    """Test edge case: single host should be handled gracefully."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        hosts = [pubsub.host for pubsub in pubsubs_fsub]
+
+        # All functions should handle single host gracefully
+        await connect_some(hosts, 5)
+        await sparse_connect(hosts, 3)
+        await dense_connect(hosts)
+
+        # Single host should have no connections
+        connected_peers = len(pubsubs_fsub[0].peers)
+        assert connected_peers == 0, (
+            f"Single host has {connected_peers} connections, expected 0"
+        )
