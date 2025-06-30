@@ -20,6 +20,7 @@ from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
 from libp2p.identity.identify_push.identify_push import (
+    CONCURRENCY_LIMIT,
     ID_PUSH,
     _update_peerstore_from_identify,
     identify_push_handler_for,
@@ -449,8 +450,6 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     It mocks `push_identify_to_peer` to simulate delay using sleep,
     allowing the test to measure and assert actual concurrency behavior.
     """
-    CONCURRENCY_LIMIT = 10
-    LIMIT = trio.Semaphore(CONCURRENCY_LIMIT)
     state = {
         "concurrency_counter": 0,
         "max_observed": 0,
@@ -458,7 +457,7 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     lock = trio.Lock()
 
     async def mock_push_identify_to_peer(
-        host, peer_id, observed_multiaddr=None
+        host, peer_id, observed_multiaddr=None, limit=trio.Semaphore(CONCURRENCY_LIMIT)
     ) -> bool:
         """
         Mock function to test concurrency by simulating an identify message.
@@ -471,7 +470,7 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
             True if the push was successful, False otherwise.
 
         """
-        async with LIMIT:
+        async with limit:
             async with lock:
                 state["concurrency_counter"] += 1
                 if state["concurrency_counter"] > CONCURRENCY_LIMIT:

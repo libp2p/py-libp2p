@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 ID_PUSH = TProtocol("/ipfs/id/push/1.0.0")
 PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
-LIMIT = trio.Semaphore(10)
+CONCURRENCY_LIMIT = 10
+LIMIT = trio.Semaphore(CONCURRENCY_LIMIT)
 
 
 def identify_push_handler_for(host: IHost) -> StreamHandlerFn:
