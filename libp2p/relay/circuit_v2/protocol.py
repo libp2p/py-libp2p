@@ -128,7 +128,11 @@ class CircuitV2Protocol(Service):
         self.host = host
         self.limits = limits or DEFAULT_RELAY_LIMITS
         self.allow_hop = allow_hop
-        self.resource_manager = RelayResourceManager(self.limits)
+
+        # Ensure we pass the host to the resource manager for crypto operations
+        logger.debug("Creating resource manager with host %s", host.get_id())
+        self.resource_manager = RelayResourceManager(self.limits, self.host)
+
         self._active_relays: dict[ID, tuple[INetStream, INetStream | None]] = {}
         self.event_started = trio.Event()
 
@@ -611,6 +615,17 @@ class CircuitV2Protocol(Service):
         # Verify reservation if provided
         if msg.HasField("reservation"):
             logger.debug("Verifying reservation for peer %s", peer_id)
+
+            # Log reservation details for debugging
+            reservation_msg = msg.reservation
+            logger.debug(
+                "Reservation details: expire=%d, voucher_length=%d, "
+                "signature_length=%d",
+                reservation_msg.expire,
+                len(reservation_msg.voucher),
+                len(reservation_msg.signature),
+            )
+
             if not self.resource_manager.verify_reservation(peer_id, msg.reservation):
                 logger.warning("Invalid reservation for peer %s", peer_id)
                 await self._send_status(

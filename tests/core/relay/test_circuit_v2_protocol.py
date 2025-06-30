@@ -24,6 +24,7 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
+    RelayResourceManager,
 )
 from libp2p.tools.async_service import (
     background_trio_service,
@@ -305,6 +306,145 @@ async def test_circuit_v2_protocol_initialization():
             assert len(protocol.resource_manager._reservations) == 0, (
                 "Reservations should be empty"
             )
+
+
+@pytest.mark.trio
+async def test_circuit_v2_voucher_verification_complete():
+    """Test complete voucher verification with cryptographic signatures."""
+    async with HostFactory.create_batch_and_listen(2) as hosts:
+        relay_host, client_host = hosts
+        logger.info("Created hosts for test_circuit_v2_voucher_verification_complete")
+        logger.info("Relay host ID: %s", relay_host.get_id())
+        logger.info("Client host ID: %s", client_host.get_id())
+
+        # Create resource manager with host for cryptographic operations
+        limits = RelayLimits(
+            duration=3600,  # 1 hour
+            data=1024 * 1024 * 1024,  # 1GB
+            max_circuit_conns=4,
+            max_reservations=2,
+        )
+
+        # Create resource manager with the relay host
+        # Note: No need to add client's public key since we now use relay's key
+        # for signing/verification
+        resource_manager = RelayResourceManager(limits, relay_host)
+        client_peer_id = client_host.get_id()
+
+        logger.info("Creating reservation for peer %s", client_peer_id)
+        ttl = resource_manager.reserve(client_peer_id)
+        assert ttl > 0, "Should create reservation successfully"
+
+        # Get the reservation object
+        reservation = resource_manager._reservations.get(client_peer_id)
+        assert reservation is not None, "Reservation should exist"
+
+        # Ensure the reservation has the host reference
+        assert reservation.host is not None, "Reservation should have host reference"
+
+        # Convert to protobuf with signature
+        pb_reservation = reservation.to_proto()
+
+        # Verify the reservation has a signature
+        assert pb_reservation.signature != b"", "Reservation should have a signature"
+        assert len(pb_reservation.signature) > 0, "Signature should not be empty"
+
+        logger.info(
+            "Created reservation with signature length: %d bytes",
+            len(pb_reservation.signature),
+        )
+
+        # Verify the reservation with correct signature
+        logger.info("Verifying reservation with correct signature")
+        is_valid = resource_manager.verify_reservation(client_peer_id, pb_reservation)
+        assert is_valid is True, "Valid reservation should pass verification"
+        logger.info("Reservation verification succeeded with valid signature")
+
+        # Test with tampered voucher (should fail)
+        tampered_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=b"tampered-voucher-data",
+            signature=pb_reservation.signature,
+        )
+
+        is_valid_tampered = resource_manager.verify_reservation(
+            client_peer_id, tampered_reservation
+        )
+        assert is_valid_tampered is False, "Tampered voucher should fail verification"
+        logger.info("Tampered voucher correctly rejected")
+
+        # Test with wrong signature (should fail)
+        wrong_sig_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=pb_reservation.voucher,
+            signature=b"wrong-signature-data",
+        )
+
+        is_valid_wrong_sig = resource_manager.verify_reservation(
+            client_peer_id, wrong_sig_reservation
+        )
+        assert is_valid_wrong_sig is False, "Wrong signature should fail verification"
+        logger.info("Wrong signature correctly rejected")
+
+        # Test with different peer ID (should fail)
+        other_peer_id = relay_host.get_id()
+
+        is_valid_wrong_peer = resource_manager.verify_reservation(
+            other_peer_id, pb_reservation
+        )
+        assert is_valid_wrong_peer is False, (
+            "Reservation for different peer should fail verification"
+        )
+        logger.info("Reservation for wrong peer correctly rejected")
+
+        # Test with missing signature (should fail)
+        no_sig_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=pb_reservation.voucher,
+            signature=b"",
+        )
+
+        is_valid_no_sig = resource_manager.verify_reservation(
+            client_peer_id, no_sig_reservation
+        )
+        assert is_valid_no_sig is False, (
+            "Reservation without signature should fail verification"
+        )
+        logger.info("Reservation without signature correctly rejected")
+
+        # Test with expired reservation
+        expired_reservation = resource_manager._reservations[client_peer_id]
+        expired_reservation.expires_at = time.time() - 1
+
+        is_valid_expired = resource_manager.verify_reservation(
+            client_peer_id, pb_reservation
+        )
+        assert is_valid_expired is False, "Expired reservation should fail verification"
+        logger.info("Expired reservation correctly rejected")
+
+        # Test resource manager without host (should fail)
+        resource_manager_no_host = RelayResourceManager(limits, None)
+        temp_peer_id = client_host.get_id()
+        temp_ttl = resource_manager_no_host.reserve(temp_peer_id)
+        assert temp_ttl > 0, "Should create reservation even without host"
+
+        temp_reservation = resource_manager_no_host._reservations.get(temp_peer_id)
+        assert temp_reservation is not None, "Temp reservation should exist"
+
+        temp_pb_reservation = temp_reservation.to_proto()
+        assert temp_pb_reservation.signature == b"", (
+            "Should have empty signature without host"
+        )
+
+        is_valid_no_host = resource_manager_no_host.verify_reservation(
+            temp_peer_id, temp_pb_reservation
+        )
+        assert is_valid_no_host is False, (
+            "Reservation verification should fail when no host available"
+        )
+        logger.info("Reservation correctly rejected when no host available")
+
+        logger.info("All voucher verification tests passed successfully!")
 
 
 @pytest.mark.trio
@@ -666,164 +806,6 @@ async def test_circuit_v2_reservation_limit():
 
 
 @pytest.mark.trio
-async def test_circuit_v2_voucher_verification_invalid_voucher():
-    """Test that invalid vouchers are properly rejected."""
-    async with HostFactory.create_batch_and_listen(2) as hosts:
-        relay_host, client_host = hosts
-        logger.info(
-            "Created hosts for test_circuit_v2_voucher_verification_invalid_voucher"
-        )
-
-        # Mock handler that rejects invalid vouchers
-        async def mock_voucher_handler(stream):
-            try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
-
-                if request.type == proto.HopMessage.CONNECT:
-                    # Check if voucher is invalid
-                    if (
-                        request.HasField("reservation")
-                        and request.reservation.voucher == b"invalid-voucher-data"
-                    ):
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
-                            status=proto.Status(
-                                code=proto.Status.PERMISSION_DENIED,
-                                message="Invalid voucher",
-                            ),
-                        )
-                    else:
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
-                            status=proto.Status(
-                                code=proto.Status.OK,
-                                message="Valid voucher",
-                            ),
-                        )
-
-                    await stream.write(response.SerializeToString())
-                    await trio.sleep(1)
-            except Exception as e:
-                logger.error("Error in mock voucher handler: %s", str(e))
-
-        relay_host.set_stream_handler(PROTOCOL_ID, mock_voucher_handler)
-
-        # Connect peers
-        with trio.fail_after(CONNECT_TIMEOUT):
-            await connect(client_host, relay_host)
-
-        # Test invalid voucher
-        stream = None
-        try:
-            stream = await client_host.new_stream(relay_host.get_id(), [PROTOCOL_ID])
-
-            invalid_reservation = proto.Reservation(
-                expire=int(time.time()) + 3600,
-                voucher=b"invalid-voucher-data",
-                signature=b"test-signature",
-            )
-
-            request = proto.HopMessage(
-                type=proto.HopMessage.CONNECT,
-                peer=relay_host.get_id().to_bytes(),
-                reservation=invalid_reservation,
-            )
-            await stream.write(request.SerializeToString())
-
-            response_bytes = await stream.read(MAX_READ_LEN)
-            response = proto.HopMessage()
-            response.ParseFromString(response_bytes)
-
-            assert response.HasField("status")
-            assert response.status.code == proto.Status.PERMISSION_DENIED
-            logger.info("Invalid voucher correctly rejected")
-
-        finally:
-            await close_stream(stream)
-
-
-@pytest.mark.trio
-async def test_circuit_v2_voucher_verification_expired_voucher():
-    """Test that expired vouchers are properly rejected."""
-    async with HostFactory.create_batch_and_listen(2) as hosts:
-        relay_host, client_host = hosts
-        logger.info(
-            "Created hosts for test_circuit_v2_voucher_verification_expired_voucher"
-        )
-
-        # Mock handler that checks expiration time
-        async def mock_expiry_handler(stream):
-            try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
-
-                if request.type == proto.HopMessage.CONNECT:
-                    current_time = int(time.time())
-                    if (
-                        request.HasField("reservation")
-                        and request.reservation.expire < current_time
-                    ):
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
-                            status=proto.Status(
-                                code=proto.Status.PERMISSION_DENIED,
-                                message="Reservation expired",
-                            ),
-                        )
-                    else:
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
-                            status=proto.Status(
-                                code=proto.Status.OK,
-                                message="Valid reservation",
-                            ),
-                        )
-
-                    await stream.write(response.SerializeToString())
-                    await trio.sleep(1)
-            except Exception as e:
-                logger.error("Error in mock expiry handler: %s", str(e))
-
-        relay_host.set_stream_handler(PROTOCOL_ID, mock_expiry_handler)
-
-        # Connect peers
-        with trio.fail_after(CONNECT_TIMEOUT):
-            await connect(client_host, relay_host)
-
-        # Test expired voucher
-        stream = None
-        try:
-            stream = await client_host.new_stream(relay_host.get_id(), [PROTOCOL_ID])
-
-            expired_reservation = proto.Reservation(
-                expire=int(time.time()) - 1,  # Already expired
-                voucher=b"test-voucher",
-                signature=b"test-signature",
-            )
-
-            request = proto.HopMessage(
-                type=proto.HopMessage.CONNECT,
-                peer=relay_host.get_id().to_bytes(),
-                reservation=expired_reservation,
-            )
-            await stream.write(request.SerializeToString())
-
-            response_bytes = await stream.read(MAX_READ_LEN)
-            response = proto.HopMessage()
-            response.ParseFromString(response_bytes)
-
-            assert response.HasField("status")
-            assert response.status.code == proto.Status.PERMISSION_DENIED
-            logger.info("Expired voucher correctly rejected")
-
-        finally:
-            await close_stream(stream)
-
-
-@pytest.mark.trio
 async def test_circuit_v2_data_transfer_limit_enforcement():
     """Test that data transfer limits are properly enforced."""
     async with HostFactory.create_batch_and_listen(1) as hosts:
@@ -838,9 +820,7 @@ async def test_circuit_v2_data_transfer_limit_enforcement():
             max_reservations=2,
         )
 
-        from libp2p.relay.circuit_v2.resources import RelayResourceManager
-
-        resource_manager = RelayResourceManager(limits)
+        resource_manager = RelayResourceManager(limits, host)
 
         # Create a reservation
         peer_id = host.get_id()
@@ -876,69 +856,126 @@ async def test_circuit_v2_data_transfer_limit_enforcement():
 
 
 @pytest.mark.trio
-async def test_circuit_v2_voucher_verification_no_reservation():
-    """Test that connect requests without valid reservations are rejected."""
-    async with HostFactory.create_batch_and_listen(2) as hosts:
-        relay_host, client_host = hosts
-        logger.info(
-            "Created hosts for test_circuit_v2_voucher_verification_no_reservation"
+async def test_circuit_v2_connection_with_voucher():
+    """Test end-to-end circuit connection with voucher verification integration."""
+    async with HostFactory.create_batch_and_listen(3) as hosts:
+        relay_host, src_host, dst_host = hosts
+
+        # Create and start the relay protocol
+        limits = RelayLimits(
+            duration=3600,
+            data=1024 * 1024 * 1024,
+            max_circuit_conns=4,
+            max_reservations=2,
         )
+        protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
 
-        # Mock handler that rejects requests without reservations
-        async def mock_no_reservation_handler(stream):
-            try:
-                request_data = await stream.read(MAX_READ_LEN)
-                request = proto.HopMessage()
-                request.ParseFromString(request_data)
+        # Connect all hosts
+        with trio.fail_after(CONNECT_TIMEOUT):
+            await connect(src_host, relay_host)
+            await connect(dst_host, relay_host)
 
-                if request.type == proto.HopMessage.CONNECT:
-                    if not request.HasField("reservation"):
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
-                            status=proto.Status(
-                                code=proto.Status.PERMISSION_DENIED,
-                                message="No active reservation found",
-                            ),
-                        )
-                    else:
-                        response = proto.HopMessage(
-                            type=proto.HopMessage.STATUS,
+        # Start the protocol
+        async with background_trio_service(protocol):
+            await protocol.event_started.wait()
+            await trio.sleep(SLEEP_TIME)
+
+            # Create a reservation for the source host
+            src_peer_id = src_host.get_id()
+            ttl = protocol.resource_manager.reserve(src_peer_id)
+            assert ttl > 0, "Should create reservation successfully"
+
+            # Get the reservation with signature
+            reservation = protocol.resource_manager._reservations.get(src_peer_id)
+            assert reservation is not None, "Reservation should exist"
+            pb_reservation = reservation.to_proto()
+
+            # Simple mock handler for the destination side that just responds OK
+            async def mock_stop_handler(stream):
+                try:
+                    logger.debug("Mock stop handler: Reading STOP message")
+                    msg_bytes = await stream.read(MAX_READ_LEN)
+                    stop_msg = proto.StopMessage()
+                    stop_msg.ParseFromString(msg_bytes)
+
+                    logger.debug(
+                        "Mock stop handler: Parsed message type %s", stop_msg.type
+                    )
+
+                    if stop_msg.type == proto.StopMessage.CONNECT:
+                        # Send success response and close
+                        response = proto.StopMessage(
+                            type=proto.StopMessage.STATUS,
                             status=proto.Status(
                                 code=proto.Status.OK,
-                                message="Valid reservation",
+                                message="Connection accepted",
                             ),
                         )
+                        logger.debug("Mock stop handler: Sending OK response")
+                        await stream.write(response.SerializeToString())
 
-                    await stream.write(response.SerializeToString())
-                    await trio.sleep(1)
-            except Exception as e:
-                logger.error("Error in mock no reservation handler: %s", str(e))
+                        # Wait a bit to ensure response is sent, then close gracefully
+                        await trio.sleep(0.5)
+                        logger.debug("Mock stop handler: Closing stream")
+                        try:
+                            await stream.close()
+                        except Exception:
+                            await stream.reset()
+                    else:
+                        logger.warning(
+                            "Mock stop handler: Unexpected message type %s",
+                            stop_msg.type,
+                        )
 
-        relay_host.set_stream_handler(PROTOCOL_ID, mock_no_reservation_handler)
+                except Exception as e:
+                    logger.error("Error in mock stop handler: %s", str(e))
+                finally:
+                    logger.debug("Mock stop handler: Exiting")
 
-        # Connect peers
-        with trio.fail_after(CONNECT_TIMEOUT):
-            await connect(client_host, relay_host)
+            # Register the mock handler on destination
+            dst_host.set_stream_handler(STOP_PROTOCOL_ID, mock_stop_handler)
 
-        # Test connect without reservation
-        stream = None
-        try:
-            stream = await client_host.new_stream(relay_host.get_id(), [PROTOCOL_ID])
+            # Test the connection flow
+            stream = None
+            try:
+                stream = await src_host.new_stream(relay_host.get_id(), [PROTOCOL_ID])
 
-            request = proto.HopMessage(
-                type=proto.HopMessage.CONNECT,
-                peer=relay_host.get_id().to_bytes(),
-                # No reservation field
-            )
-            await stream.write(request.SerializeToString())
+                # Send connect request with voucher
+                connect_request = proto.HopMessage(
+                    type=proto.HopMessage.CONNECT,
+                    peer=dst_host.get_id().to_bytes(),
+                    reservation=pb_reservation,
+                )
+                await stream.write(connect_request.SerializeToString())
 
-            response_bytes = await stream.read(MAX_READ_LEN)
-            response = proto.HopMessage()
-            response.ParseFromString(response_bytes)
+                # Read the immediate response (should be OK before data relay starts)
+                await trio.sleep(SLEEP_TIME)
+                response_bytes = await stream.read(MAX_READ_LEN)
+                response = proto.HopMessage()
+                response.ParseFromString(response_bytes)
 
-            assert response.HasField("status")
-            assert response.status.code == proto.Status.PERMISSION_DENIED
-            logger.info("Connect without reservation correctly rejected")
+                assert response.HasField("status"), "No status in response"
 
-        finally:
-            await close_stream(stream)
+                # The connection should initially succeed, even if data relay
+                # fails later
+                if response.status.code == proto.Status.OK:
+                    logger.info("Integration test: voucher verification successful")
+                elif response.status.code == proto.Status.CONNECTION_FAILED:
+                    # This is expected if the destination closes the stream
+                    logger.info(
+                        "Integration test: Connection failed as expected when "
+                        "destination closes"
+                    )
+                else:
+                    # Any other error is unexpected
+                    assert False, (
+                        f"Unexpected status code: {response.status.code}, "
+                        f"message: {response.status.message}"
+                    )
+
+                logger.info(
+                    "Integration test: voucher verification in protocol flow successful"
+                )
+
+            finally:
+                await close_stream(stream)
