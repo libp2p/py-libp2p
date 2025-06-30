@@ -125,12 +125,12 @@ async def run_client(destination: str, seed: int | None = None) -> None:
         msg = b"hi, there!\n"
 
         await stream.write(msg)
-        # Notify the other side about EOF
-        await stream.close()
         response = await stream.read()
 
         print(f"Sent: {msg.decode('utf-8')}")
         print(f"Got: {response.decode('utf-8')}")
+        await stream.close()
+        await host.disconnect(info.peer_id)
 
 
 async def run(port: int, destination: str, seed: int | None = None) -> None:

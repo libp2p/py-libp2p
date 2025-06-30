@@ -360,10 +360,6 @@ class QUICStream(IMuxedStream):
             return
 
         try:
-            # Signal read closure to QUIC layer
-            self._connection._quic.reset_stream(self._stream_id, error_code=0)
-            await self._connection._transmit()
-
             self._read_closed = True
 
             async with self._state_lock:
@@ -590,6 +586,7 @@ class QUICStream(IMuxedStream):
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and close the stream."""
+        print("Exiting the context and closing the stream")
         await self.close()
 
     def set_deadline(self, ttl: int) -> bool:

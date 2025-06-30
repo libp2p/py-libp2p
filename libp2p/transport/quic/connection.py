@@ -966,7 +966,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self, event: events.ConnectionTerminated
     ) -> None:
         """Handle connection termination."""
-        logger.debug(f"QUIC connection terminated: {event.reason_phrase}")
+        print(f"QUIC connection terminated: {event.reason_phrase}")
 
         # Close all streams
         for stream in list(self._streams.values()):
