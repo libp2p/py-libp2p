@@ -233,7 +233,7 @@ class Pubsub(Service, IPubsub):
             await self.validation_throttler.start(nursery)
             # Keep nursery alive until service stops
             while self.manager.is_running:
-                await trio.sleep(1)
+                await self.manager.wait_finished()
 
     @property
     def my_id(self) -> ID:
