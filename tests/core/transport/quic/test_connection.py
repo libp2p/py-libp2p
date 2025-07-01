@@ -69,7 +69,7 @@ class TestQUICConnection:
         return QUICConnection(
             quic_connection=mock_quic_connection,
             remote_addr=("127.0.0.1", 4001),
-            peer_id=peer_id,
+            remote_peer_id=None,
             local_peer_id=peer_id,
             is_initiator=True,
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
@@ -87,7 +87,7 @@ class TestQUICConnection:
         return QUICConnection(
             quic_connection=mock_quic_connection,
             remote_addr=("127.0.0.1", 4001),
-            peer_id=peer_id,
+            remote_peer_id=peer_id,
             local_peer_id=peer_id,
             is_initiator=False,
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
@@ -117,7 +117,7 @@ class TestQUICConnection:
         client_conn = QUICConnection(
             quic_connection=Mock(),
             remote_addr=("127.0.0.1", 4001),
-            peer_id=None,
+            remote_peer_id=None,
             local_peer_id=Mock(),
             is_initiator=True,
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
@@ -129,7 +129,7 @@ class TestQUICConnection:
         server_conn = QUICConnection(
             quic_connection=Mock(),
             remote_addr=("127.0.0.1", 4001),
-            peer_id=None,
+            remote_peer_id=None,
             local_peer_id=Mock(),
             is_initiator=False,
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),

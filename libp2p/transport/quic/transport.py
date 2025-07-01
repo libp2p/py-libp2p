@@ -218,13 +218,11 @@ class QUICTransport(ITransport):
 
         """
         try:
-            # Access attributes directly from QUICTLSSecurityConfig
             config.certificate = tls_config.certificate
             config.private_key = tls_config.private_key
             config.certificate_chain = tls_config.certificate_chain
             config.alpn_protocols = tls_config.alpn_protocols
 
-            # Set verification mode (though libp2p typically doesn't verify)
             config.verify_mode = tls_config.verify_mode
 
             config.verify_mode = ssl.CERT_NONE
@@ -285,12 +283,12 @@ class QUICTransport(ITransport):
             connection = QUICConnection(
                 quic_connection=native_quic_connection,
                 remote_addr=(host, port),
-                peer_id=peer_id,
+                remote_peer_id=peer_id,
                 local_peer_id=self._peer_id,
                 is_initiator=True,
                 maddr=maddr,
                 transport=self,
-                security_manager=self._security_manager,  # Pass security manager
+                security_manager=self._security_manager,
             )
 
             # Establish connection using trio
@@ -389,7 +387,7 @@ class QUICTransport(ITransport):
             handler_function=handler_function,
             quic_configs=server_configs,
             config=self._config,
-            security_manager=self._security_manager,  # Pass security manager
+            security_manager=self._security_manager,
         )
 
         self._listeners.append(listener)
@@ -455,6 +453,17 @@ class QUICTransport(ITransport):
         self._listeners.clear()
 
         print("QUIC transport closed")
+
+    async def _cleanup_terminated_connection(self, connection) -> None:
+        """Clean up a terminated connection from all listeners."""
+        try:
+            for listener in self._listeners:
+                await listener._remove_connection_by_object(connection)
+            logger.debug(
+                "✅ TRANSPORT: Cleaned up terminated connection from all listeners"
+            )
+        except Exception as e:
+            logger.error(f"❌ TRANSPORT: Error cleaning up terminated connection: {e}")
 
     def get_stats(self) -> dict[str, int | list[str] | object]:
         """Get transport statistics including security info."""

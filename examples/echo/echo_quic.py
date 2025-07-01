@@ -55,7 +55,7 @@ async def run_server(port: int, seed: int | None = None) -> None:
     # QUIC transport configuration
     quic_config = QUICTransportConfig(
         idle_timeout=30.0,
-        max_concurrent_streams=1000,
+        max_concurrent_streams=100,
         connection_timeout=10.0,
         enable_draft29=False,
     )
@@ -68,16 +68,21 @@ async def run_server(port: int, seed: int | None = None) -> None:
 
     # Server mode: start listener
     async with host.run(listen_addrs=[listen_addr]):
-        print(f"I am {host.get_id().to_string()}")
-        host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
+        try:
+            print(f"I am {host.get_id().to_string()}")
+            host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
-        print(
-            "Run this from the same folder in another console:\n\n"
-            f"python3 ./examples/echo/echo_quic.py "
-            f"-d {host.get_addrs()[0]}\n"
-        )
-        print("Waiting for incoming QUIC connections...")
-        await trio.sleep_forever()
+            print(
+                "Run this from the same folder in another console:\n\n"
+                f"python3 ./examples/echo/echo_quic.py "
+                f"-d {host.get_addrs()[0]}\n"
+            )
+            print("Waiting for incoming QUIC connections...")
+            await trio.sleep_forever()
+        except KeyboardInterrupt:
+            print("Closing server gracefully...")
+            await host.close()
+            return
 
 
 async def run_client(destination: str, seed: int | None = None) -> None:
@@ -96,7 +101,7 @@ async def run_client(destination: str, seed: int | None = None) -> None:
     # QUIC transport configuration
     quic_config = QUICTransportConfig(
         idle_timeout=30.0,
-        max_concurrent_streams=1000,
+        max_concurrent_streams=100,
         connection_timeout=10.0,
         enable_draft29=False,
     )

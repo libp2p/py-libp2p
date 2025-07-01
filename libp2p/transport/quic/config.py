@@ -1,3 +1,5 @@
+from typing import Literal
+
 """
 Configuration classes for QUIC transport.
 """
@@ -64,7 +66,7 @@ class QUICTransportConfig:
     alpn_protocols: list[str] = field(default_factory=lambda: ["libp2p"])
 
     # Performance settings
-    max_concurrent_streams: int = 1000  # Maximum concurrent streams per connection
+    max_concurrent_streams: int = 100  # Maximum concurrent streams per connection
     connection_window: int = 1024 * 1024  # Connection flow control window
     stream_window: int = 64 * 1024  # Stream flow control window
 
@@ -299,10 +301,11 @@ class QUICStreamMetricsConfig:
         self.metrics_aggregation_interval = metrics_aggregation_interval
 
 
-# Factory function for creating optimized configurations
-
-
-def create_stream_config_for_use_case(use_case: str) -> QUICTransportConfig:
+def create_stream_config_for_use_case(
+    use_case: Literal[
+        "high_throughput", "low_latency", "many_streams", "memory_constrained"
+    ],
+) -> QUICTransportConfig:
     """
     Create optimized stream configuration for specific use cases.
 

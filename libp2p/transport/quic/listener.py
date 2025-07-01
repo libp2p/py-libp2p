@@ -880,42 +880,49 @@ class QUICListener(IListener):
 
     async def _promote_pending_connection(
         self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
-    ) -> None:
-        """Promote a pending connection to an established connection."""
+    ):
+        """Promote pending connection - avoid duplicate creation."""
         try:
             # Remove from pending connections
             self._pending_connections.pop(dest_cid, None)
 
-            # Create multiaddr for this connection
-            host, port = addr
-            quic_version = "quic"
-            remote_maddr = create_quic_multiaddr(host, port, f"/{quic_version}")
+            # CHECK: Does QUICConnection already exist?
+            if dest_cid in self._connections:
+                connection = self._connections[dest_cid]
+                print(
+                    f"🔄 PROMOTION: Using existing QUICConnection {id(connection)} for {dest_cid.hex()}"
+                )
+            else:
+                from .connection import QUICConnection
 
-            from .connection import QUICConnection
+                host, port = addr
+                quic_version = "quic"
+                remote_maddr = create_quic_multiaddr(host, port, f"/{quic_version}")
 
-            connection = QUICConnection(
-                quic_connection=quic_conn,
-                remote_addr=addr,
-                peer_id=None,
-                local_peer_id=self._transport._peer_id,
-                is_initiator=False,
-                maddr=remote_maddr,
-                transport=self._transport,
-                security_manager=self._security_manager,
-                listener_socket=self._socket,
-            )
+                connection = QUICConnection(
+                    quic_connection=quic_conn,
+                    remote_addr=addr,
+                    remote_peer_id=None,
+                    local_peer_id=self._transport._peer_id,
+                    is_initiator=False,
+                    maddr=remote_maddr,
+                    transport=self._transport,
+                    security_manager=self._security_manager,
+                    listener_socket=self._socket,
+                )
 
-            print(
-                f"🔧 PROMOTION: Created connection with socket: {self._socket is not None}"
-            )
-            print(
-                f"🔧 PROMOTION: Socket type: {type(self._socket) if self._socket else 'None'}"
-            )
+                print(
+                    f"🔄 PROMOTION: Created NEW QUICConnection {id(connection)} for {dest_cid.hex()}"
+                )
 
-            self._connections[dest_cid] = connection
+                # Store the connection
+                self._connections[dest_cid] = connection
+
+            # Update mappings
             self._addr_to_cid[addr] = dest_cid
             self._cid_to_addr[dest_cid] = addr
 
+            # Rest of the existing promotion code...
             if self._nursery:
                 await connection.connect(self._nursery)
 
@@ -932,10 +939,11 @@ class QUICListener(IListener):
                     await connection.close()
                     return
 
-            # Call the connection handler
-            if self._nursery:
-                self._nursery.start_soon(
-                    self._handle_new_established_connection, connection
+            if self._transport._swarm:
+                print(f"🔄 PROMOTION: Adding connection {id(connection)} to swarm")
+                await self._transport._swarm.add_conn(connection)
+                print(
+                    f"🔄 PROMOTION: Successfully added connection {id(connection)} to swarm"
                 )
 
             self._stats["connections_accepted"] += 1
@@ -946,7 +954,6 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"❌ Error promoting connection {dest_cid.hex()}: {e}")
             await self._remove_connection(dest_cid)
-            self._stats["connections_rejected"] += 1
 
     async def _remove_connection(self, dest_cid: bytes) -> None:
         """Remove connection by connection ID."""
@@ -1219,6 +1226,32 @@ class QUICListener(IListener):
 
         except Exception as e:
             logger.error(f"Error closing listener: {e}")
+
+    async def _remove_connection_by_object(self, connection_obj) -> None:
+        """Remove a connection by object reference (called when connection terminates)."""
+        try:
+            # Find the connection ID for this object
+            connection_cid = None
+            for cid, tracked_connection in self._connections.items():
+                if tracked_connection is connection_obj:
+                    connection_cid = cid
+                    break
+
+            if connection_cid:
+                await self._remove_connection(connection_cid)
+                logger.debug(
+                    f"✅ TERMINATION: Removed connection {connection_cid.hex()} by object reference"
+                )
+                print(
+                    f"✅ TERMINATION: Removed connection {connection_cid.hex()} by object reference"
+                )
+            else:
+                logger.warning("⚠️ TERMINATION: Connection object not found in tracking")
+                print("⚠️ TERMINATION: Connection object not found in tracking")
+
+        except Exception as e:
+            logger.error(f"❌ TERMINATION: Error removing connection by object: {e}")
+            print(f"❌ TERMINATION: Error removing connection by object: {e}")
 
     def get_addresses(self) -> list[Multiaddr]:
         """Get the bound addresses."""
