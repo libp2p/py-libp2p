@@ -18,6 +18,7 @@ from libp2p.stream_muxer.exceptions import (
     MuxedStreamError,
     MuxedStreamReset,
 )
+from libp2p.transport.quic.exceptions import QUICStreamClosedError, QUICStreamResetError
 
 from .exceptions import (
     StreamClosed,
@@ -174,7 +175,7 @@ class NetStream(INetStream):
                     print("NETSTREAM: READ ERROR, NEW STATE -> CLOSE_READ")
                     self.__stream_state = StreamState.CLOSE_READ
             raise StreamEOF() from error
-        except MuxedStreamReset as error:
+        except (MuxedStreamReset, QUICStreamClosedError, QUICStreamResetError) as error:
             print("NETSTREAM: READ ERROR, MUXED STREAM RESET")
             async with self._state_lock:
                 if self.__stream_state in [
@@ -205,7 +206,12 @@ class NetStream(INetStream):
 
         try:
             await self.muxed_stream.write(data)
-        except (MuxedStreamClosed, MuxedStreamError) as error:
+        except (
+            MuxedStreamClosed,
+            MuxedStreamError,
+            QUICStreamClosedError,
+            QUICStreamResetError,
+        ) as error:
             async with self._state_lock:
                 if self.__stream_state == StreamState.OPEN:
                     self.__stream_state = StreamState.CLOSE_WRITE

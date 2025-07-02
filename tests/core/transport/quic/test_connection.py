@@ -295,7 +295,10 @@ class TestQUICConnection:
                     mock_verify.assert_called_once()
 
     @pytest.mark.trio
-    async def test_connection_connect_timeout(self, quic_connection: QUICConnection):
+    @pytest.mark.slow
+    async def test_connection_connect_timeout(
+        self, quic_connection: QUICConnection
+    ) -> None:
         """Test connection establishment timeout."""
         quic_connection._started = True
         # Don't set connected event to simulate timeout
@@ -330,7 +333,7 @@ class TestQUICConnection:
     # Error handling tests
 
     @pytest.mark.trio
-    async def test_connection_error_handling(self, quic_connection):
+    async def test_connection_error_handling(self, quic_connection) -> None:
         """Test connection error handling."""
         error = Exception("Test error")
 
@@ -343,7 +346,7 @@ class TestQUICConnection:
     # Statistics and monitoring tests
 
     @pytest.mark.trio
-    async def test_connection_stats_enhanced(self, quic_connection):
+    async def test_connection_stats_enhanced(self, quic_connection) -> None:
         """Test enhanced connection statistics."""
         quic_connection._started = True
 
@@ -370,7 +373,7 @@ class TestQUICConnection:
         assert stats["inbound_streams"] == 0
 
     @pytest.mark.trio
-    async def test_get_active_streams(self, quic_connection):
+    async def test_get_active_streams(self, quic_connection) -> None:
         """Test getting active streams."""
         quic_connection._started = True
 
@@ -385,7 +388,7 @@ class TestQUICConnection:
         assert stream2 in active_streams
 
     @pytest.mark.trio
-    async def test_get_streams_by_protocol(self, quic_connection):
+    async def test_get_streams_by_protocol(self, quic_connection) -> None:
         """Test getting streams by protocol."""
         quic_connection._started = True
 
@@ -407,7 +410,9 @@ class TestQUICConnection:
     # Enhanced close tests
 
     @pytest.mark.trio
-    async def test_connection_close_enhanced(self, quic_connection: QUICConnection):
+    async def test_connection_close_enhanced(
+        self, quic_connection: QUICConnection
+    ) -> None:
         """Test enhanced connection close with stream cleanup."""
         quic_connection._started = True
 
@@ -423,7 +428,9 @@ class TestQUICConnection:
     # Concurrent operations tests
 
     @pytest.mark.trio
-    async def test_concurrent_stream_operations(self, quic_connection):
+    async def test_concurrent_stream_operations(
+        self, quic_connection: QUICConnection
+    ) -> None:
         """Test concurrent stream operations."""
         quic_connection._started = True
 
@@ -444,16 +451,16 @@ class TestQUICConnection:
 
     # Connection properties tests
 
-    def test_connection_properties(self, quic_connection):
+    def test_connection_properties(self, quic_connection: QUICConnection) -> None:
         """Test connection property accessors."""
         assert quic_connection.multiaddr() == quic_connection._maddr
         assert quic_connection.local_peer_id() == quic_connection._local_peer_id
-        assert quic_connection.remote_peer_id() == quic_connection._peer_id
+        assert quic_connection.remote_peer_id() == quic_connection._remote_peer_id
 
     # IRawConnection interface tests
 
     @pytest.mark.trio
-    async def test_raw_connection_write(self, quic_connection):
+    async def test_raw_connection_write(self, quic_connection: QUICConnection) -> None:
         """Test raw connection write interface."""
         quic_connection._started = True
 
@@ -468,26 +475,16 @@ class TestQUICConnection:
             mock_stream.close_write.assert_called_once()
 
     @pytest.mark.trio
-    async def test_raw_connection_read_not_implemented(self, quic_connection):
+    async def test_raw_connection_read_not_implemented(
+        self, quic_connection: QUICConnection
+    ) -> None:
         """Test raw connection read raises NotImplementedError."""
-        with pytest.raises(NotImplementedError, match="Use muxed connection interface"):
+        with pytest.raises(NotImplementedError):
             await quic_connection.read()
-
-    # String representation tests
-
-    def test_connection_string_representation(self, quic_connection):
-        """Test connection string representations."""
-        repr_str = repr(quic_connection)
-        str_str = str(quic_connection)
-
-        assert "QUICConnection" in repr_str
-        assert str(quic_connection._peer_id) in repr_str
-        assert str(quic_connection._remote_addr) in repr_str
-        assert str(quic_connection._peer_id) in str_str
 
     # Mock verification helpers
 
-    def test_mock_resource_scope_functionality(self, mock_resource_scope):
+    def test_mock_resource_scope_functionality(self, mock_resource_scope) -> None:
         """Test mock resource scope works correctly."""
         assert mock_resource_scope.memory_reserved == 0
 

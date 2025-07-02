@@ -130,8 +130,6 @@ class QUICListener(IListener):
             "invalid_packets": 0,
         }
 
-        logger.debug("Initialized enhanced QUIC listener with connection ID support")
-
     def _get_supported_versions(self) -> set[int]:
         """Get wire format versions for all supported QUIC configurations."""
         versions: set[int] = set()
@@ -274,90 +272,145 @@ class QUICListener(IListener):
             return value, 8
 
     async def _process_packet(self, data: bytes, addr: tuple[str, int]) -> None:
-        """
-        Enhanced packet processing with better connection ID routing and debugging.
-        """
+        """Process incoming QUIC packet with fine-grained locking."""
         try:
-            # self._stats["packets_processed"] += 1
-            # self._stats["bytes_received"] += len(data)
+            self._stats["packets_processed"] += 1
+            self._stats["bytes_received"] += len(data)
 
             print(f"🔧 PACKET: Processing {len(data)} bytes from {addr}")
 
-            # Parse packet to extract connection information
+            # Parse packet header OUTSIDE the lock
             packet_info = self.parse_quic_packet(data)
+            if packet_info is None:
+                print("❌ PACKET: Failed to parse packet header")
+                self._stats["invalid_packets"] += 1
+                return
 
+            dest_cid = packet_info.destination_cid
             print(f"🔧 DEBUG: Packet info: {packet_info is not None}")
-            if packet_info:
-                print(f"🔧 DEBUG: Packet type: {packet_info.packet_type}")
-                print(
-                    f"🔧 DEBUG: Is short header: {packet_info.packet_type == QuicPacketType.ONE_RTT}"
-                )
+            print(f"🔧 DEBUG: Packet type: {packet_info.packet_type}")
+            print(
+                f"🔧 DEBUG: Is short header: {packet_info.packet_type.name != 'INITIAL'}"
+            )
 
-            print(
-                f"🔧 DEBUG: Pending connections: {[cid.hex() for cid in self._pending_connections.keys()]}"
-            )
-            print(
-                f"🔧 DEBUG: Established connections: {[cid.hex() for cid in self._connections.keys()]}"
-            )
+            # CRITICAL FIX: Reduce lock scope - only protect connection lookups
+            # Get connection references with minimal lock time
+            connection_obj = None
+            pending_quic_conn = None
 
             async with self._connection_lock:
-                if packet_info:
+                # Quick lookup operations only
+                print(
+                    f"🔧 DEBUG: Pending connections: {[cid.hex() for cid in self._pending_connections.keys()]}"
+                )
+                print(
+                    f"🔧 DEBUG: Established connections: {[cid.hex() for cid in self._connections.keys()]}"
+                )
+
+                if dest_cid in self._connections:
+                    connection_obj = self._connections[dest_cid]
                     print(
-                        f"🔧 PACKET: Parsed packet - version: 0x{packet_info.version:08x}, "
-                        f"dest_cid: {packet_info.destination_cid.hex()}, "
-                        f"src_cid: {packet_info.source_cid.hex()}"
+                        f"✅ PACKET: Routing to established connection {dest_cid.hex()}"
                     )
 
-                    # Check for version negotiation
-                    if packet_info.version == 0:
-                        logger.warning(
-                            f"Received version negotiation packet from {addr}"
-                        )
-                        return
-
-                    # Check if version is supported
-                    if packet_info.version not in self._supported_versions:
-                        print(
-                            f"❌ PACKET: Unsupported version 0x{packet_info.version:08x}"
-                        )
-                        await self._send_version_negotiation(
-                            addr, packet_info.source_cid
-                        )
-                        return
-
-                    # Route based on destination connection ID
-                    dest_cid = packet_info.destination_cid
-
-                    # First, try exact connection ID match
-                    if dest_cid in self._connections:
-                        print(
-                            f"✅ PACKET: Routing to established connection {dest_cid.hex()}"
-                        )
-                        connection = self._connections[dest_cid]
-                        await self._route_to_connection(connection, data, addr)
-                        return
-
-                    elif dest_cid in self._pending_connections:
-                        print(
-                            f"✅ PACKET: Routing to pending connection {dest_cid.hex()}"
-                        )
-                        quic_conn = self._pending_connections[dest_cid]
-                        await self._handle_pending_connection(
-                            quic_conn, data, addr, dest_cid
-                        )
-                        return
-
-                    # No existing connection found, create new one
-                    print(f"🔧 PACKET: Creating new connection for {addr}")
-                    await self._handle_new_connection(data, addr, packet_info)
+                elif dest_cid in self._pending_connections:
+                    pending_quic_conn = self._pending_connections[dest_cid]
+                    print(f"✅ PACKET: Routing to pending connection {dest_cid.hex()}")
 
                 else:
-                    # Failed to parse packet
-                    print(f"❌ PACKET: Failed to parse packet from {addr}")
-                    await self._handle_short_header_packet(data, addr)
+                    # Check if this is a new connection
+                    print(
+                        f"🔧 PACKET: Parsed packet - version: {packet_info.version:#x}, dest_cid: {dest_cid.hex()}, src_cid: {packet_info.source_cid.hex()}"
+                    )
+
+                    if packet_info.packet_type.name == "INITIAL":
+                        print(f"🔧 PACKET: Creating new connection for {addr}")
+
+                        # Create new connection INSIDE the lock for safety
+                        pending_quic_conn = await self._handle_new_connection(
+                            data, addr, packet_info
+                        )
+                    else:
+                        print(
+                            f"❌ PACKET: Unknown connection for non-initial packet {dest_cid.hex()}"
+                        )
+                        return
+
+            # CRITICAL: Process packets OUTSIDE the lock to prevent deadlock
+            if connection_obj:
+                # Handle established connection
+                await self._handle_established_connection_packet(
+                    connection_obj, data, addr, dest_cid
+                )
+
+            elif pending_quic_conn:
+                # Handle pending connection
+                await self._handle_pending_connection_packet(
+                    pending_quic_conn, data, addr, dest_cid
+                )
 
         except Exception as e:
             logger.error(f"Error processing packet from {addr}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    async def _handle_established_connection_packet(
+        self,
+        connection_obj: QUICConnection,
+        data: bytes,
+        addr: tuple[str, int],
+        dest_cid: bytes,
+    ) -> None:
+        """Handle packet for established connection WITHOUT holding connection lock."""
+        try:
+            print(f"🔧 ESTABLISHED: Handling packet for connection {dest_cid.hex()}")
+
+            # Forward packet to connection object
+            # This may trigger event processing and stream creation
+            await self._route_to_connection(connection_obj, data, addr)
+
+        except Exception as e:
+            logger.error(f"Error handling established connection packet: {e}")
+
+    async def _handle_pending_connection_packet(
+        self,
+        quic_conn: QuicConnection,
+        data: bytes,
+        addr: tuple[str, int],
+        dest_cid: bytes,
+    ) -> None:
+        """Handle packet for pending connection WITHOUT holding connection lock."""
+        try:
+            print(
+                f"🔧 PENDING: Handling packet for pending connection {dest_cid.hex()}"
+            )
+            print(f"🔧 PENDING: Packet size: {len(data)} bytes from {addr}")
+
+            # Feed data to QUIC connection
+            quic_conn.receive_datagram(data, addr, now=time.time())
+            print("✅ PENDING: Datagram received by QUIC connection")
+
+            # Process events - this is crucial for handshake progression
+            print("🔧 PENDING: Processing QUIC events...")
+            await self._process_quic_events(quic_conn, addr, dest_cid)
+
+            # Send any outgoing packets
+            print("🔧 PENDING: Transmitting response...")
+            await self._transmit_for_connection(quic_conn, addr)
+
+            # Check if handshake completed (with minimal locking)
+            if (
+                hasattr(quic_conn, "_handshake_complete")
+                and quic_conn._handshake_complete
+            ):
+                print("✅ PENDING: Handshake completed, promoting connection")
+                await self._promote_pending_connection(quic_conn, addr, dest_cid)
+            else:
+                print("🔧 PENDING: Handshake still in progress")
+
+        except Exception as e:
+            logger.error(f"Error handling pending connection {dest_cid.hex()}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -784,6 +837,9 @@ class QUICListener(IListener):
                     # Forward to established connection if available
                     if dest_cid in self._connections:
                         connection = self._connections[dest_cid]
+                        print(
+                            f"📨 FORWARDING: Stream data to connection {id(connection)}"
+                        )
                         await connection._handle_stream_data(event)
 
                 elif isinstance(event, events.StreamReset):
@@ -892,6 +948,7 @@ class QUICListener(IListener):
                 print(
                     f"🔄 PROMOTION: Using existing QUICConnection {id(connection)} for {dest_cid.hex()}"
                 )
+
             else:
                 from .connection import QUICConnection
 
@@ -924,7 +981,9 @@ class QUICListener(IListener):
 
             # Rest of the existing promotion code...
             if self._nursery:
+                connection._nursery = self._nursery
                 await connection.connect(self._nursery)
+                print("QUICListener: Connection connected succesfully")
 
             if self._security_manager:
                 try:
@@ -939,12 +998,25 @@ class QUICListener(IListener):
                     await connection.close()
                     return
 
+            if self._nursery:
+                connection._nursery = self._nursery
+                await connection._start_background_tasks()
+                print(f"Started background tasks for connection {dest_cid.hex()}")
+
             if self._transport._swarm:
                 print(f"🔄 PROMOTION: Adding connection {id(connection)} to swarm")
                 await self._transport._swarm.add_conn(connection)
                 print(
                     f"🔄 PROMOTION: Successfully added connection {id(connection)} to swarm"
                 )
+
+            if self._handler:
+                try:
+                    print(f"Invoking user callback {dest_cid.hex()}")
+                    await self._handler(connection)
+
+                except Exception as e:
+                    logger.error(f"Error in user callback: {e}")
 
             self._stats["connections_accepted"] += 1
             logger.info(

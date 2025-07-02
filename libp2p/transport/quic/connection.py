@@ -179,7 +179,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             "connection_id_changes": 0,
         }
 
-        logger.debug(
+        print(
             f"Created QUIC connection to {remote_peer_id} "
             f"(initiator: {is_initiator}, addr: {remote_addr}, "
             "security: {security_manager is not None})"
@@ -278,7 +278,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._started = True
         self.event_started.set()
-        logger.debug(f"Starting QUIC connection to {self._remote_peer_id}")
+        print(f"Starting QUIC connection to {self._remote_peer_id}")
 
         try:
             # If this is a client connection, we need to establish the connection
@@ -289,7 +289,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._established = True
                 self._connected_event.set()
 
-            logger.debug(f"QUIC connection to {self._remote_peer_id} started")
+            print(f"QUIC connection to {self._remote_peer_id} started")
 
         except Exception as e:
             logger.error(f"Failed to start connection: {e}")
@@ -300,7 +300,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             with QUICErrorContext("connection_initiation", "connection"):
                 if not self._socket:
-                    logger.debug("Creating new socket for outbound connection")
+                    print("Creating new socket for outbound connection")
                     self._socket = trio.socket.socket(
                         family=socket.AF_INET, type=socket.SOCK_DGRAM
                     )
@@ -312,7 +312,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Send initial packet(s)
                 await self._transmit()
 
-                logger.debug(f"Initiated QUIC connection to {self._remote_addr}")
+                print(f"Initiated QUIC connection to {self._remote_addr}")
 
         except Exception as e:
             logger.error(f"Failed to initiate connection: {e}")
@@ -340,10 +340,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 # Start background event processing
                 if not self._background_tasks_started:
-                    logger.debug("STARTING BACKGROUND TASK")
+                    print("STARTING BACKGROUND TASK")
                     await self._start_background_tasks()
                 else:
-                    logger.debug("BACKGROUND TASK ALREADY STARTED")
+                    print("BACKGROUND TASK ALREADY STARTED")
 
                 # Wait for handshake completion with timeout
                 with trio.move_on_after(
@@ -357,11 +357,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         f"{self.CONNECTION_HANDSHAKE_TIMEOUT}s"
                     )
 
+                print("QUICConnection: Verifying peer identity with security manager")
                 # Verify peer identity using security manager
                 await self._verify_peer_identity_with_security()
 
+                print("QUICConnection: Peer identity verified")
                 self._established = True
-                logger.info(f"QUIC connection established with {self._remote_peer_id}")
+                print(f"QUIC connection established with {self._remote_peer_id}")
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
@@ -375,21 +377,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
-        if self.__is_initiator:  # Only for client connections
+        if self.__is_initiator:
+            print(f"CLIENT CONNECTION {id(self)}: Starting processing event loop")
             self._nursery.start_soon(async_fn=self._client_packet_receiver)
-
-        # Start event processing task
-        self._nursery.start_soon(async_fn=self._event_processing_loop)
+            self._nursery.start_soon(async_fn=self._event_processing_loop)
+        else:
+            print(
+                f"SERVER CONNECTION {id(self)}: Using listener event forwarding, not own loop"
+            )
 
         # Start periodic tasks
         self._nursery.start_soon(async_fn=self._periodic_maintenance)
 
-        logger.debug("Started background tasks for QUIC connection")
+        print("Started background tasks for QUIC connection")
 
     async def _event_processing_loop(self) -> None:
         """Main event processing loop for the connection."""
-        logger.debug("Started QUIC event processing loop")
-        print("Started QUIC event processing loop")
+        print(
+            f"Started QUIC event processing loop for connection id: {id(self)} "
+            f"and local peer id {str(self.local_peer_id())}"
+        )
 
         try:
             while not self._closed:
@@ -409,7 +416,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             logger.error(f"Error in event processing loop: {e}")
             await self._handle_connection_error(e)
         finally:
-            logger.debug("QUIC event processing loop finished")
+            print("QUIC event processing loop finished")
 
     async def _periodic_maintenance(self) -> None:
         """Perform periodic connection maintenance."""
@@ -424,7 +431,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # *** NEW: Log connection ID status periodically ***
                 if logger.isEnabledFor(logging.DEBUG):
                     cid_stats = self.get_connection_id_stats()
-                    logger.debug(f"Connection ID stats: {cid_stats}")
+                    print(f"Connection ID stats: {cid_stats}")
 
                 # Sleep for maintenance interval
                 await trio.sleep(30.0)  # 30 seconds
@@ -434,7 +441,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _client_packet_receiver(self) -> None:
         """Receive packets for client connections."""
-        logger.debug("Starting client packet receiver")
+        print("Starting client packet receiver")
         print("Started QUIC client packet receiver")
 
         try:
@@ -454,7 +461,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     await self._transmit()
 
                 except trio.ClosedResourceError:
-                    logger.debug("Client socket closed")
+                    print("Client socket closed")
                     break
                 except Exception as e:
                     logger.error(f"Error receiving client packet: {e}")
@@ -464,7 +471,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             logger.info("Client packet receiver cancelled")
             raise
         finally:
-            logger.debug("Client packet receiver terminated")
+            print("Client packet receiver terminated")
 
     # Security and identity methods
 
@@ -534,14 +541,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     # aioquic stores the peer certificate as cryptography
                     # x509.Certificate
                     self._peer_certificate = tls_context._peer_certificate
-                    logger.debug(
+                    print(
                         f"Extracted peer certificate: {self._peer_certificate.subject}"
                     )
                 else:
-                    logger.debug("No peer certificate found in TLS context")
+                    print("No peer certificate found in TLS context")
 
             else:
-                logger.debug("No TLS context available for certificate extraction")
+                print("No TLS context available for certificate extraction")
 
         except Exception as e:
             logger.warning(f"Failed to extract peer certificate: {e}")
@@ -554,12 +561,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     if hasattr(config, "certificate") and config.certificate:
                         # This would be the local certificate, not peer certificate
                         # but we can use it for debugging
-                        logger.debug("Found local certificate in configuration")
+                        print("Found local certificate in configuration")
 
             except Exception as inner_e:
-                logger.debug(
-                    f"Alternative certificate extraction also failed: {inner_e}"
-                )
+                print(f"Alternative certificate extraction also failed: {inner_e}")
 
     async def get_peer_certificate(self) -> x509.Certificate | None:
         """
@@ -591,7 +596,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             subject = self._peer_certificate.subject
             serial_number = self._peer_certificate.serial_number
 
-            logger.debug(
+            print(
                 f"Certificate validation - Subject: {subject}, Serial: {serial_number}"
             )
             return True
@@ -716,7 +721,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     self._outbound_stream_count += 1
                     self._stats["streams_opened"] += 1
 
-                logger.debug(f"Opened outbound QUIC stream {stream_id}")
+                print(f"Opened outbound QUIC stream {stream_id}")
                 return stream
 
         raise QUICStreamTimeoutError(f"Stream creation timed out after {timeout}s")
@@ -749,7 +754,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 async with self._accept_queue_lock:
                     if self._stream_accept_queue:
                         stream = self._stream_accept_queue.pop(0)
-                        logger.debug(f"Accepted inbound stream {stream.stream_id}")
+                        print(f"Accepted inbound stream {stream.stream_id}")
                         return stream
 
                 if self._closed:
@@ -777,7 +782,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         """
         self._stream_handler = handler_function
-        logger.debug("Set stream handler for incoming streams")
+        print("Set stream handler for incoming streams")
 
     def _remove_stream(self, stream_id: int) -> None:
         """
@@ -804,7 +809,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             if self._nursery:
                 self._nursery.start_soon(update_counts)
 
-            logger.debug(f"Removed stream {stream_id} from connection")
+            print(f"Removed stream {stream_id} from connection")
 
     # *** UPDATED: Complete QUIC event handling - FIXES THE ORIGINAL ISSUE ***
 
@@ -826,14 +831,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._handle_quic_event(event)
 
             if events_processed > 0:
-                logger.debug(f"Processed {events_processed} QUIC events")
+                print(f"Processed {events_processed} QUIC events")
 
         finally:
             self._event_processing_active = False
 
     async def _handle_quic_event(self, event: events.QuicEvent) -> None:
         """Handle a single QUIC event with COMPLETE event type coverage."""
-        logger.debug(f"Handling QUIC event: {type(event).__name__}")
+        print(f"Handling QUIC event: {type(event).__name__}")
         print(f"QUIC event: {type(event).__name__}")
 
         try:
@@ -860,7 +865,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             elif isinstance(event, events.StopSendingReceived):
                 await self._handle_stop_sending_received(event)
             else:
-                logger.debug(f"Unhandled QUIC event type: {type(event).__name__}")
+                print(f"Unhandled QUIC event type: {type(event).__name__}")
                 print(f"Unhandled QUIC event: {type(event).__name__}")
 
         except Exception as e:
@@ -891,7 +896,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Update statistics
         self._stats["connection_ids_issued"] += 1
 
-        logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
+        print(f"Available connection IDs: {len(self._available_connection_ids)}")
         print(f"Available connection IDs: {len(self._available_connection_ids)}")
 
     async def _handle_connection_id_retired(
@@ -932,7 +937,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""
-        logger.debug(f"Ping acknowledged: uid={event.uid}")
+        print(f"Ping acknowledged: uid={event.uid}")
 
     async def _handle_protocol_negotiated(
         self, event: events.ProtocolNegotiated
@@ -944,7 +949,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self, event: events.StopSendingReceived
     ) -> None:
         """Handle stop sending request from peer."""
-        logger.debug(
+        print(
             f"Stop sending received: stream_id={event.stream_id}, error_code={event.error_code}"
         )
 
@@ -960,7 +965,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self, event: events.HandshakeCompleted
     ) -> None:
         """Handle handshake completion with security integration."""
-        logger.debug("QUIC handshake completed")
+        print("QUIC handshake completed")
         self._handshake_completed = True
 
         # Store handshake event for security verification
@@ -969,6 +974,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Try to extract certificate information after handshake
         await self._extract_peer_certificate()
 
+        print("✅ Setting connected event")
         self._connected_event.set()
 
     async def _handle_connection_terminated(
@@ -1100,7 +1106,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             except Exception as e:
                 logger.error(f"Error in stream handler for stream {stream_id}: {e}")
 
-        logger.debug(f"Created inbound stream {stream_id}")
+        print(f"Created inbound stream {stream_id}")
         return stream
 
     def _is_incoming_stream(self, stream_id: int) -> bool:
@@ -1127,7 +1133,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             try:
                 stream = self._streams[stream_id]
                 await stream.handle_reset(event.error_code)
-                logger.debug(
+                print(
                     f"Handled reset for stream {stream_id}"
                     f"with error code {event.error_code}"
                 )
@@ -1136,13 +1142,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Force remove the stream
                 self._remove_stream(stream_id)
         else:
-            logger.debug(f"Received reset for unknown stream {stream_id}")
+            print(f"Received reset for unknown stream {stream_id}")
 
     async def _handle_datagram_received(
         self, event: events.DatagramFrameReceived
     ) -> None:
         """Handle datagram frame (if using QUIC datagrams)."""
-        logger.debug(f"Datagram frame received: size={len(event.data)}")
+        print(f"Datagram frame received: size={len(event.data)}")
         # For now, just log. Could be extended for custom datagram handling
 
     async def _handle_timer_events(self) -> None:
@@ -1205,7 +1211,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         self._closed = True
-        logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
+        print(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:
             # Close all streams gracefully
@@ -1247,7 +1253,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._streams.clear()
             self._closed_event.set()
 
-            logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
+            print(f"QUIC connection to {self._remote_peer_id} closed")
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")
@@ -1262,15 +1268,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             if self._transport:
                 await self._transport._cleanup_terminated_connection(self)
-                logger.debug("Notified transport of connection termination")
+                print("Notified transport of connection termination")
                 return
 
             for listener in self._transport._listeners:
                 try:
                     await listener._remove_connection_by_object(self)
-                    logger.debug(
-                        "Found and notified listener of connection termination"
-                    )
+                    print("Found and notified listener of connection termination")
                     return
                 except Exception:
                     continue
@@ -1294,12 +1298,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 for tracked_cid, tracked_conn in list(listener._connections.items()):
                     if tracked_conn is self:
                         await listener._remove_connection(tracked_cid)
-                        logger.debug(
+                        print(
                             f"Removed connection {tracked_cid.hex()} by object reference"
                         )
                         return
 
-            logger.debug("Fallback cleanup by connection ID completed")
+            print("Fallback cleanup by connection ID completed")
         except Exception as e:
             logger.error(f"Error in fallback cleanup: {e}")
 

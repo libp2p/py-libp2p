@@ -321,3 +321,95 @@ class TestBasicQUICFlow:
         )
 
         print("✅ TIMEOUT TEST PASSED!")
+
+    @pytest.mark.trio
+    async def test_debug_accept_stream_hanging(
+        self, server_key, client_key, server_config, client_config
+    ):
+        """Debug test to see exactly where accept_stream might be hanging."""
+        print("\n=== DEBUGGING ACCEPT_STREAM HANGING ===")
+
+        server_transport = QUICTransport(server_key.private_key, server_config)
+        server_peer_id = ID.from_pubkey(server_key.public_key)
+
+        async def debug_handler(connection: QUICConnection) -> None:
+            """Handler with extensive debugging."""
+            print(f"🔗 SERVER: Handler called for connection {id(connection)} ")
+            print(f"   Connection closed: {connection.is_closed}")
+            print(f"   Connection started: {connection._started}")
+            print(f"   Connection established: {connection._established}")
+
+            try:
+                print("📡 SERVER: About to call accept_stream...")
+                print(f"   Accept queue length: {len(connection._stream_accept_queue)}")
+                print(
+                    f"   Accept event set: {connection._stream_accept_event.is_set()}"
+                )
+
+                # Use a short timeout to avoid hanging the test
+                with trio.move_on_after(3.0) as cancel_scope:
+                    stream = await connection.accept_stream()
+                    if stream:
+                        print(f"✅ SERVER: Got stream {stream.stream_id}")
+                    else:
+                        print("❌ SERVER: accept_stream returned None")
+
+                if cancel_scope.cancelled_caught:
+                    print("⏰ SERVER: accept_stream cancelled due to timeout")
+
+            except Exception as e:
+                print(f"❌ SERVER: Exception in accept_stream: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+        listener = server_transport.create_listener(debug_handler)
+        listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+
+        try:
+            async with trio.open_nursery() as nursery:
+                success = await listener.listen(listen_addr, nursery)
+                assert success
+
+                server_addr = listener.get_addrs()[0]
+                print(f"🔧 SERVER: Listening on {server_addr}")
+
+                # Create client and connect
+                client_transport = QUICTransport(client_key.private_key, client_config)
+
+                try:
+                    print("📞 CLIENT: Connecting...")
+                    connection = await client_transport.dial(
+                        server_addr, peer_id=server_peer_id, nursery=nursery
+                    )
+                    print("✅ CLIENT: Connected")
+
+                    # Open stream after a short delay
+                    await trio.sleep(0.1)
+                    print("📤 CLIENT: Opening stream...")
+                    stream = await connection.open_stream()
+                    print(f"📤 CLIENT: Stream {stream.stream_id} opened")
+
+                    # Send some data
+                    await stream.write(b"test data")
+                    print("📨 CLIENT: Data sent")
+
+                    # Give server time to process
+                    await trio.sleep(1.0)
+
+                    # Cleanup
+                    await stream.close()
+                    await connection.close()
+                    print("🔒 CLIENT: Cleaned up")
+
+                finally:
+                    await client_transport.close()
+
+                await trio.sleep(0.5)
+                nursery.cancel_scope.cancel()
+
+        finally:
+            await listener.close()
+            await server_transport.close()
+
+        print("✅ DEBUG TEST COMPLETED!")

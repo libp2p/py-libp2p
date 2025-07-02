@@ -88,7 +88,7 @@ class QUICTransport(ITransport):
 
     def __init__(
         self, private_key: PrivateKey, config: QUICTransportConfig | None = None
-    ):
+    ) -> None:
         """
         Initialize QUIC transport with security integration.
 
@@ -119,7 +119,7 @@ class QUICTransport(ITransport):
         self._nursery_manager = trio.CapacityLimiter(1)
         self._background_nursery: trio.Nursery | None = None
 
-        self._swarm = None
+        self._swarm: Swarm | None = None
 
         print(f"Initialized QUIC transport with security for peer {self._peer_id}")
 
@@ -233,13 +233,19 @@ class QUICTransport(ITransport):
             raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
 
     # type: ignore
-    async def dial(self, maddr: multiaddr.Multiaddr, peer_id: ID) -> QUICConnection:
+    async def dial(
+        self,
+        maddr: multiaddr.Multiaddr,
+        peer_id: ID,
+        nursery: trio.Nursery | None = None,
+    ) -> QUICConnection:
         """
         Dial a remote peer using QUIC transport with security verification.
 
         Args:
             maddr: Multiaddr of the remote peer (e.g., /ip4/1.2.3.4/udp/4001/quic-v1)
             peer_id: Expected peer ID for verification
+            nursery: Nursery to execute the background tasks
 
         Returns:
             Raw connection interface to the remote peer
@@ -278,7 +284,6 @@ class QUICTransport(ITransport):
             # Create QUIC connection using aioquic's sans-IO core
             native_quic_connection = NativeQUICConnection(configuration=config)
 
-            print("QUIC Connection Created")
             # Create trio-based QUIC connection wrapper with security
             connection = QUICConnection(
                 quic_connection=native_quic_connection,
@@ -290,25 +295,22 @@ class QUICTransport(ITransport):
                 transport=self,
                 security_manager=self._security_manager,
             )
+            print("QUIC Connection Created")
 
-            # Establish connection using trio
-            if self._background_nursery:
-                # Use swarm's long-lived nursery - background tasks persist!
-                await connection.connect(self._background_nursery)
-                print("Using background nursery for connection tasks")
-            else:
-                # Fallback to temporary nursery (with warning)
-                print(
-                    "No background nursery available. Connection background tasks "
-                    "may be cancelled when dial completes."
-                )
-                async with trio.open_nursery() as temp_nursery:
-                    await connection.connect(temp_nursery)
+            active_nursery = nursery or self._background_nursery
 
+            if active_nursery is None:
+                logger.error("No nursery set to execute background tasks")
+                raise QUICDialError("No nursery found to execute tasks")
+
+            await connection.connect(active_nursery)
+
+            print("Starting to verify peer identity")
             # Verify peer identity after TLS handshake
             if peer_id:
                 await self._verify_peer_identity(connection, peer_id)
 
+            print("Identity verification done")
             # Store connection for management
             conn_id = f"{host}:{port}:{peer_id}"
             self._connections[conn_id] = connection
