@@ -1165,7 +1165,6 @@ class IMultiselectMuxer(ABC):
         """
 
 
-
 # -------------------------- host interface.py --------------------------
 
 
@@ -1595,9 +1594,6 @@ class IPeerData(ABC):
 # ------------------ multiselect_communicator interface.py ------------------
 
 
-
-
-
 # -------------------------- multiselect_client interface.py --------------------------
 
 
@@ -1678,8 +1674,6 @@ class IMultiselectClient(ABC):
             If protocol selection fails.
 
         """
-
-
 
 
 # -------------------------- routing interface.py --------------------------

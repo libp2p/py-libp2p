@@ -264,7 +264,8 @@ class Mplex(IMuxedConn):
         else:
             # Receives messages with an unknown flag
             logger.warning(
-                "Received message with unknown flag %d for stream %s from peer %s. Resetting stream.",
+                "Received message with unknown flag %d for stream %s from peer %s. "
+                "Resetting stream.",
                 flag,
                 stream_id,
                 self.peer_id,
@@ -293,7 +294,8 @@ class Mplex(IMuxedConn):
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
                 logger.warning(
-                    "Received message for unknown stream %s from peer %s (message length: %d)",
+                    "Received message for unknown stream %s from peer %s "
+                    "(message length: %d)",
                     stream_id,
                     self.peer_id,
                     len(message),
@@ -304,7 +306,8 @@ class Mplex(IMuxedConn):
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
                 logger.warning(
-                    "Received data from remote after stream was closed by them. Stream: %s, Peer: %s, Data length: %d",
+                    "Received data from remote after stream was closed by them. "
+                    "Stream: %s, Peer: %s, Data length: %d",
                     stream_id,
                     self.peer_id,
                     len(message),

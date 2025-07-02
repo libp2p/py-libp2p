@@ -15,13 +15,10 @@ from libp2p.host.basic_host import BasicHost
 
 # For expected errors in negotiation tests
 from libp2p.protocol_muxer.exceptions import (
-    MultiselectError,
     MultiselectCommunicatorError,
+    MultiselectError,
 )
 from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import (
-    MultiselectClient,
-)  # Needed for mock calls
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )  # Needed for mock calls
@@ -81,7 +78,8 @@ def basic_host(mock_network_service):
 def mock_communicator():
     """
     Provides a mock for IMultiselectCommunicator for negotiation tests.
-    By default, it will provide responses for a successful handshake and a protocol proposal.
+    By default, it will provide responses for a successful handshake
+    and a protocol proposal.
     Reset side_effect in specific tests if different behavior is needed.
     """
     mock = AsyncMock(
@@ -146,6 +144,7 @@ def test_get_mux_interface_compliance(basic_host):
 
 # --- Functionality / Integration Tests ---
 
+
 @pytest.mark.trio
 async def test_get_mux_add_handler_and_get_protocols(basic_host):
     """
@@ -203,8 +202,10 @@ async def test_get_mux_negotiate_success(basic_host, mock_communicator):
 
     # Configure the mock_communicator to simulate a successful negotiation sequence
     mock_communicator.read.side_effect = [
-        "/multistream/1.0.0",  # First read: Client sends its multistream protocol (handshake)
-        selected_protocol_str,  # Second read: Client proposes the app protocol
+        # First read: Client sends its multistream protocol (handshake)
+        "/multistream/1.0.0",
+        # Second read: Client proposes the app protocol
+        selected_protocol_str,
     ]
 
     # Perform the negotiation
@@ -239,11 +240,14 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     non_existent_protocol = TProtocol("/non-existent/protocol")
     assert non_existent_protocol not in mux.get_protocols()  # Ensure it's not present
 
-    # Configure the mock_communicator to simulate a handshake followed by a non-existent protocol
+    # Configure the mock_communicator to simulate a handshake
+    # followed by a non-existent protocol
     mock_communicator.read.side_effect = [
-        "/multistream/1.0.0",  # Handshake response
-        str(non_existent_protocol),  # Client proposes a non-existent protocol
-        MultiselectCommunicatorError("Mock is exhausted")
+        # Handshake response
+        "/multistream/1.0.0",
+        # Client proposes a non-existent protocol
+        str(non_existent_protocol),
+        MultiselectCommunicatorError("Mock is exhausted"),
     ]
 
     # Expect a MultiselectError as the protocol won't be found

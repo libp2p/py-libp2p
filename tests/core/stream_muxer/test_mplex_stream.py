@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 import trio
 from trio.testing import (
     wait_all_tasks_blocked,
@@ -237,7 +238,7 @@ async def test_send_message_return_type(mplex_conn_pair):
     bytes_written = await mplex_conn.send_message(
         flag=HeaderTags.MessageInitiator,
         data=dummy_data,
-        stream_id=StreamID(channel_id=0, is_initiator=True)
+        stream_id=StreamID(channel_id=0, is_initiator=True),
     )
 
     # Assert the type and a reasonable value
