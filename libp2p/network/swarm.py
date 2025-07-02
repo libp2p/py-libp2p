@@ -183,14 +183,6 @@ class Swarm(Service, INetworkService):
         """
         Try to create a connection to peer_id with addr.
         """
-        # QUIC Transport
-        if isinstance(self.transport, QUICTransport):
-            raw_conn = await self.transport.dial(addr, peer_id)
-            print("detected QUIC connection, skipping upgrade steps")
-            swarm_conn = await self.add_conn(raw_conn)
-            print("successfully dialed peer %s via QUIC", peer_id)
-            return swarm_conn
-
         try:
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:

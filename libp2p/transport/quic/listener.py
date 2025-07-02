@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logging.basicConfig(
-    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -277,63 +276,40 @@ class QUICListener(IListener):
             self._stats["packets_processed"] += 1
             self._stats["bytes_received"] += len(data)
 
-            print(f"🔧 PACKET: Processing {len(data)} bytes from {addr}")
+            logger.debug(f"Processing packet of {len(data)} bytes from {addr}")
 
             # Parse packet header OUTSIDE the lock
             packet_info = self.parse_quic_packet(data)
             if packet_info is None:
-                print("❌ PACKET: Failed to parse packet header")
+                logger.error(f"Failed to parse packet header quic packet from {addr}")
                 self._stats["invalid_packets"] += 1
                 return
 
             dest_cid = packet_info.destination_cid
-            print(f"🔧 DEBUG: Packet info: {packet_info is not None}")
-            print(f"🔧 DEBUG: Packet type: {packet_info.packet_type}")
-            print(
-                f"🔧 DEBUG: Is short header: {packet_info.packet_type.name != 'INITIAL'}"
-            )
-
-            # CRITICAL FIX: Reduce lock scope - only protect connection lookups
-            # Get connection references with minimal lock time
             connection_obj = None
             pending_quic_conn = None
 
             async with self._connection_lock:
-                # Quick lookup operations only
-                print(
-                    f"🔧 DEBUG: Pending connections: {[cid.hex() for cid in self._pending_connections.keys()]}"
-                )
-                print(
-                    f"🔧 DEBUG: Established connections: {[cid.hex() for cid in self._connections.keys()]}"
-                )
-
                 if dest_cid in self._connections:
                     connection_obj = self._connections[dest_cid]
-                    print(
-                        f"✅ PACKET: Routing to established connection {dest_cid.hex()}"
-                    )
+                    print(f"PACKET: Routing to established connection {dest_cid.hex()}")
 
                 elif dest_cid in self._pending_connections:
                     pending_quic_conn = self._pending_connections[dest_cid]
-                    print(f"✅ PACKET: Routing to pending connection {dest_cid.hex()}")
+                    print(f"PACKET: Routing to pending connection {dest_cid.hex()}")
 
                 else:
                     # Check if this is a new connection
-                    print(
-                        f"🔧 PACKET: Parsed packet - version: {packet_info.version:#x}, dest_cid: {dest_cid.hex()}, src_cid: {packet_info.source_cid.hex()}"
-                    )
-
                     if packet_info.packet_type.name == "INITIAL":
-                        print(f"🔧 PACKET: Creating new connection for {addr}")
+                        logger.debug(
+                            f"Received INITIAL Packet Creating new conn for {addr}"
+                        )
 
                         # Create new connection INSIDE the lock for safety
                         pending_quic_conn = await self._handle_new_connection(
                             data, addr, packet_info
                         )
                     else:
-                        print(
-                            f"❌ PACKET: Unknown connection for non-initial packet {dest_cid.hex()}"
-                        )
                         return
 
             # CRITICAL: Process packets OUTSIDE the lock to prevent deadlock
@@ -364,7 +340,7 @@ class QUICListener(IListener):
     ) -> None:
         """Handle packet for established connection WITHOUT holding connection lock."""
         try:
-            print(f"🔧 ESTABLISHED: Handling packet for connection {dest_cid.hex()}")
+            print(f" ESTABLISHED: Handling packet for connection {dest_cid.hex()}")
 
             # Forward packet to connection object
             # This may trigger event processing and stream creation
@@ -382,21 +358,19 @@ class QUICListener(IListener):
     ) -> None:
         """Handle packet for pending connection WITHOUT holding connection lock."""
         try:
-            print(
-                f"🔧 PENDING: Handling packet for pending connection {dest_cid.hex()}"
-            )
-            print(f"🔧 PENDING: Packet size: {len(data)} bytes from {addr}")
+            print(f"Handling packet for pending connection {dest_cid.hex()}")
+            print(f"Packet size: {len(data)} bytes from {addr}")
 
             # Feed data to QUIC connection
             quic_conn.receive_datagram(data, addr, now=time.time())
-            print("✅ PENDING: Datagram received by QUIC connection")
+            print("PENDING: Datagram received by QUIC connection")
 
             # Process events - this is crucial for handshake progression
-            print("🔧 PENDING: Processing QUIC events...")
+            print("Processing QUIC events...")
             await self._process_quic_events(quic_conn, addr, dest_cid)
 
             # Send any outgoing packets
-            print("🔧 PENDING: Transmitting response...")
+            print("Transmitting response...")
             await self._transmit_for_connection(quic_conn, addr)
 
             # Check if handshake completed (with minimal locking)
@@ -404,10 +378,10 @@ class QUICListener(IListener):
                 hasattr(quic_conn, "_handshake_complete")
                 and quic_conn._handshake_complete
             ):
-                print("✅ PENDING: Handshake completed, promoting connection")
+                print("PENDING: Handshake completed, promoting connection")
                 await self._promote_pending_connection(quic_conn, addr, dest_cid)
             else:
-                print("🔧 PENDING: Handshake still in progress")
+                print("Handshake still in progress")
 
         except Exception as e:
             logger.error(f"Error handling pending connection {dest_cid.hex()}: {e}")
@@ -455,54 +429,34 @@ class QUICListener(IListener):
 
     async def _handle_new_connection(
         self, data: bytes, addr: tuple[str, int], packet_info: QUICPacketInfo
-    ) -> None:
+    ) -> QuicConnection | None:
         """Handle new connection with proper connection ID handling."""
         try:
-            print(f"🔧 NEW_CONN: Starting handshake for {addr}")
+            logger.debug(f"Starting handshake for {addr}")
 
             # Find appropriate QUIC configuration
             quic_config = None
-            config_key = None
 
             for protocol, config in self._quic_configs.items():
                 wire_versions = custom_quic_version_to_wire_format(protocol)
                 if wire_versions == packet_info.version:
                     quic_config = config
-                    config_key = protocol
                     break
 
             if not quic_config:
-                print(
-                    f"❌ NEW_CONN: No configuration found for version 0x{packet_info.version:08x}"
-                )
-                print(
-                    f"🔧 NEW_CONN: Available configs: {list(self._quic_configs.keys())}"
+                logger.error(
+                    f"No configuration found for version 0x{packet_info.version:08x}"
                 )
                 await self._send_version_negotiation(addr, packet_info.source_cid)
-                return
 
-            print(
-                f"✅ NEW_CONN: Using config {config_key} for version 0x{packet_info.version:08x}"
-            )
+            if not quic_config:
+                raise QUICListenError("Cannot determine QUIC configuration")
 
             # Create server-side QUIC configuration
             server_config = create_server_config_from_base(
                 base_config=quic_config,
                 security_manager=self._security_manager,
                 transport_config=self._config,
-            )
-
-            # Debug the server configuration
-            print(f"🔧 NEW_CONN: Server config - is_client: {server_config.is_client}")
-            print(
-                f"🔧 NEW_CONN: Server config - has_certificate: {server_config.certificate is not None}"
-            )
-            print(
-                f"🔧 NEW_CONN: Server config - has_private_key: {server_config.private_key is not None}"
-            )
-            print(f"🔧 NEW_CONN: Server config - ALPN: {server_config.alpn_protocols}")
-            print(
-                f"🔧 NEW_CONN: Server config - verify_mode: {server_config.verify_mode}"
             )
 
             # Validate certificate has libp2p extension
@@ -513,24 +467,15 @@ class QUICListener(IListener):
                     if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                         has_libp2p_ext = True
                         break
-                print(
-                    f"🔧 NEW_CONN: Certificate has libp2p extension: {has_libp2p_ext}"
-                )
+                logger.debug(f"Certificate has libp2p extension: {has_libp2p_ext}")
 
                 if not has_libp2p_ext:
-                    print("❌ NEW_CONN: Certificate missing libp2p extension!")
+                    logger.error("Certificate missing libp2p extension!")
 
-            # Generate a new destination connection ID for this connection
-            import secrets
-
-            destination_cid = secrets.token_bytes(8)
-
-            print(f"🔧 NEW_CONN: Generated new CID: {destination_cid.hex()}")
-            print(
-                f"🔧 NEW_CONN: Original destination CID: {packet_info.destination_cid.hex()}"
+            logger.debug(
+                f"Original destination CID: {packet_info.destination_cid.hex()}"
             )
 
-            # Create QUIC connection with proper parameters for server
             quic_conn = QuicConnection(
                 configuration=server_config,
                 original_destination_connection_id=packet_info.destination_cid,
@@ -540,37 +485,27 @@ class QUICListener(IListener):
             # Use the first host CID as our routing CID
             if quic_conn._host_cids:
                 destination_cid = quic_conn._host_cids[0].cid
-                print(
-                    f"🔧 NEW_CONN: Using host CID as routing CID: {destination_cid.hex()}"
-                )
+                logger.debug(f"Using host CID as routing CID: {destination_cid.hex()}")
             else:
                 # Fallback to random if no host CIDs generated
+                import secrets
+
                 destination_cid = secrets.token_bytes(8)
-                print(f"🔧 NEW_CONN: Fallback to random CID: {destination_cid.hex()}")
+                logger.debug(f"Fallback to random CID: {destination_cid.hex()}")
 
-            print(
-                f"🔧 NEW_CONN: Original destination CID: {packet_info.destination_cid.hex()}"
+            logger.debug(f"Generated {len(quic_conn._host_cids)} host CIDs for client")
+
+            logger.debug(
+                f"QUIC connection created for destination CID {destination_cid.hex()}"
             )
-
-            print(f"🔧 Generated {len(quic_conn._host_cids)} host CIDs for client")
-
-            print("✅ NEW_CONN: QUIC connection created successfully")
 
             # Store connection mapping using our generated CID
             self._pending_connections[destination_cid] = quic_conn
             self._addr_to_cid[addr] = destination_cid
             self._cid_to_addr[destination_cid] = addr
 
-            print(
-                f"🔧 NEW_CONN: Stored mappings for {addr} <-> {destination_cid.hex()}"
-            )
-            print("Receiving Datagram")
-
             # Process initial packet
             quic_conn.receive_datagram(data, addr, now=time.time())
-
-            # Debug connection state after receiving packet
-            await self._debug_quic_connection_state_detailed(quic_conn, destination_cid)
 
             # Process events and send response
             await self._process_quic_events(quic_conn, addr, destination_cid)
@@ -581,109 +516,27 @@ class QUICListener(IListener):
                 f"(version: 0x{packet_info.version:08x}, cid: {destination_cid.hex()})"
             )
 
+            return quic_conn
+
         except Exception as e:
             logger.error(f"Error handling new connection from {addr}: {e}")
             import traceback
 
             traceback.print_exc()
             self._stats["connections_rejected"] += 1
-
-    async def _debug_quic_connection_state_detailed(
-        self, quic_conn: QuicConnection, connection_id: bytes
-    ):
-        """Enhanced connection state debugging."""
-        try:
-            print(f"🔧 QUIC_STATE: Debugging connection {connection_id.hex()}")
-
-            if not quic_conn:
-                print("❌ QUIC_STATE: QUIC CONNECTION NOT FOUND")
-                return
-
-            # Check TLS state
-            if hasattr(quic_conn, "tls") and quic_conn.tls:
-                print("✅ QUIC_STATE: TLS context exists")
-                if hasattr(quic_conn.tls, "state"):
-                    print(f"🔧 QUIC_STATE: TLS state: {quic_conn.tls.state}")
-
-                # Check if we have peer certificate
-                if (
-                    hasattr(quic_conn.tls, "_peer_certificate")
-                    and quic_conn.tls._peer_certificate
-                ):
-                    print("✅ QUIC_STATE: Peer certificate available")
-                else:
-                    print("🔧 QUIC_STATE: No peer certificate yet")
-
-                # Check TLS handshake completion
-                if hasattr(quic_conn.tls, "handshake_complete"):
-                    handshake_status = quic_conn._handshake_complete
-                    print(f"🔧 QUIC_STATE: TLS handshake complete: {handshake_status}")
-            else:
-                print("❌ QUIC_STATE: No TLS context!")
-
-            # Check connection state
-            if hasattr(quic_conn, "_state"):
-                print(f"🔧 QUIC_STATE: Connection state: {quic_conn._state}")
-
-            # Check if handshake is complete
-            if hasattr(quic_conn, "_handshake_complete"):
-                print(
-                    f"🔧 QUIC_STATE: Handshake complete: {quic_conn._handshake_complete}"
-                )
-
-            # Check configuration
-            if hasattr(quic_conn, "configuration"):
-                config = quic_conn.configuration
-                print(
-                    f"🔧 QUIC_STATE: Config certificate: {config.certificate is not None}"
-                )
-                print(
-                    f"🔧 QUIC_STATE: Config private_key: {config.private_key is not None}"
-                )
-                print(f"🔧 QUIC_STATE: Config is_client: {config.is_client}")
-                print(f"🔧 QUIC_STATE: Config verify_mode: {config.verify_mode}")
-                print(f"🔧 QUIC_STATE: Config ALPN: {config.alpn_protocols}")
-
-                if config.certificate:
-                    cert = config.certificate
-                    print(f"🔧 QUIC_STATE: Certificate subject: {cert.subject}")
-                    print(
-                        f"🔧 QUIC_STATE: Certificate valid from: {cert.not_valid_before_utc}"
-                    )
-                    print(
-                        f"🔧 QUIC_STATE: Certificate valid until: {cert.not_valid_after_utc}"
-                    )
-
-            # Check for connection errors
-            if hasattr(quic_conn, "_close_event") and quic_conn._close_event:
-                print(
-                    f"❌ QUIC_STATE: Connection has close event: {quic_conn._close_event}"
-                )
-
-            # Check for TLS errors
-            if (
-                hasattr(quic_conn, "_handshake_complete")
-                and not quic_conn._handshake_complete
-            ):
-                print("⚠️  QUIC_STATE: Handshake not yet complete")
-
-        except Exception as e:
-            print(f"❌ QUIC_STATE: Error checking state: {e}")
-            import traceback
-
-            traceback.print_exc()
+            return None
 
     async def _handle_short_header_packet(
         self, data: bytes, addr: tuple[str, int]
     ) -> None:
         """Handle short header packets for established connections."""
         try:
-            print(f"🔧 SHORT_HDR: Handling short header packet from {addr}")
+            print(f" SHORT_HDR: Handling short header packet from {addr}")
 
             # First, try address-based lookup
             dest_cid = self._addr_to_cid.get(addr)
             if dest_cid and dest_cid in self._connections:
-                print(f"✅ SHORT_HDR: Routing via address mapping to {dest_cid.hex()}")
+                print(f"SHORT_HDR: Routing via address mapping to {dest_cid.hex()}")
                 connection = self._connections[dest_cid]
                 await self._route_to_connection(connection, data, addr)
                 return
@@ -693,9 +546,7 @@ class QUICListener(IListener):
                 potential_cid = data[1:9]
 
                 if potential_cid in self._connections:
-                    print(
-                        f"✅ SHORT_HDR: Routing via extracted CID {potential_cid.hex()}"
-                    )
+                    print(f"SHORT_HDR: Routing via extracted CID {potential_cid.hex()}")
                     connection = self._connections[potential_cid]
 
                     # Update mappings for future packets
@@ -734,59 +585,26 @@ class QUICListener(IListener):
         addr: tuple[str, int],
         dest_cid: bytes,
     ) -> None:
-        """Handle packet for a pending (handshaking) connection with enhanced debugging."""
+        """Handle packet for a pending (handshaking) connection."""
         try:
-            print(
-                f"🔧 PENDING: Handling packet for pending connection {dest_cid.hex()}"
-            )
-            print(f"🔧 PENDING: Packet size: {len(data)} bytes from {addr}")
-
-            # Check connection state before processing
-            if hasattr(quic_conn, "_state"):
-                print(f"🔧 PENDING: Connection state before: {quic_conn._state}")
-
-            if (
-                hasattr(quic_conn, "tls")
-                and quic_conn.tls
-                and hasattr(quic_conn.tls, "state")
-            ):
-                print(f"🔧 PENDING: TLS state before: {quic_conn.tls.state}")
+            logger.debug(f"Handling packet for pending connection {dest_cid.hex()}")
 
             # Feed data to QUIC connection
             quic_conn.receive_datagram(data, addr, now=time.time())
-            print("✅ PENDING: Datagram received by QUIC connection")
 
-            # Check state after receiving packet
-            if hasattr(quic_conn, "_state"):
-                print(f"🔧 PENDING: Connection state after: {quic_conn._state}")
-
-            if (
-                hasattr(quic_conn, "tls")
-                and quic_conn.tls
-                and hasattr(quic_conn.tls, "state")
-            ):
-                print(f"🔧 PENDING: TLS state after: {quic_conn.tls.state}")
+            if quic_conn.tls:
+                print(f"TLS state after: {quic_conn.tls.state}")
 
             # Process events - this is crucial for handshake progression
-            print("🔧 PENDING: Processing QUIC events...")
             await self._process_quic_events(quic_conn, addr, dest_cid)
 
             # Send any outgoing packets - this is where the response should be sent
-            print("🔧 PENDING: Transmitting response...")
             await self._transmit_for_connection(quic_conn, addr)
 
             # Check if handshake completed
-            if (
-                hasattr(quic_conn, "_handshake_complete")
-                and quic_conn._handshake_complete
-            ):
-                print("✅ PENDING: Handshake completed, promoting connection")
+            if quic_conn._handshake_complete:
+                logger.debug("PENDING: Handshake completed, promoting connection")
                 await self._promote_pending_connection(quic_conn, addr, dest_cid)
-            else:
-                print("🔧 PENDING: Handshake still in progress")
-
-                # Debug why handshake might be stuck
-                await self._debug_handshake_state(quic_conn, dest_cid)
 
         except Exception as e:
             logger.error(f"Error handling pending connection {dest_cid.hex()}: {e}")
@@ -795,7 +613,7 @@ class QUICListener(IListener):
             traceback.print_exc()
 
             # Remove problematic pending connection
-            print(f"❌ PENDING: Removing problematic connection {dest_cid.hex()}")
+            logger.error(f"Removing problematic connection {dest_cid.hex()}")
             await self._remove_pending_connection(dest_cid)
 
     async def _process_quic_events(
@@ -810,15 +628,15 @@ class QUICListener(IListener):
                     break
 
                 events_processed += 1
-                print(
-                    f"🔧 EVENT: Processing event {events_processed}: {type(event).__name__}"
+                logger.debug(
+                    "QUIC EVENT: Processing event "
+                    f"{events_processed}: {type(event).__name__}"
                 )
 
                 if isinstance(event, events.ConnectionTerminated):
-                    print(
-                        f"❌ EVENT: Connection terminated - code: {event.error_code}, reason: {event.reason_phrase}"
-                    )
                     logger.debug(
+                        "QUIC EVENT: Connection terminated "
+                        f"- code: {event.error_code}, reason: {event.reason_phrase}"
                         f"Connection {dest_cid.hex()} from {addr} "
                         f"terminated: {event.reason_phrase}"
                     )
@@ -826,47 +644,44 @@ class QUICListener(IListener):
                     break
 
                 elif isinstance(event, events.HandshakeCompleted):
-                    print(
-                        f"✅ EVENT: Handshake completed for connection {dest_cid.hex()}"
+                    logger.debug(
+                        "QUIC EVENT: Handshake completed for connection "
+                        f"{dest_cid.hex()}"
                     )
                     logger.debug(f"Handshake completed for connection {dest_cid.hex()}")
                     await self._promote_pending_connection(quic_conn, addr, dest_cid)
 
                 elif isinstance(event, events.StreamDataReceived):
-                    print(f"🔧 EVENT: Stream data received on stream {event.stream_id}")
-                    # Forward to established connection if available
+                    logger.debug(
+                        f"QUIC EVENT: Stream data received on stream {event.stream_id}"
+                    )
                     if dest_cid in self._connections:
                         connection = self._connections[dest_cid]
-                        print(
-                            f"📨 FORWARDING: Stream data to connection {id(connection)}"
-                        )
                         await connection._handle_stream_data(event)
 
                 elif isinstance(event, events.StreamReset):
-                    print(f"🔧 EVENT: Stream reset on stream {event.stream_id}")
-                    # Forward to established connection if available
+                    logger.debug(
+                        f"QUIC EVENT: Stream reset on stream {event.stream_id}"
+                    )
                     if dest_cid in self._connections:
                         connection = self._connections[dest_cid]
                         await connection._handle_stream_reset(event)
 
                 elif isinstance(event, events.ConnectionIdIssued):
                     print(
-                        f"🔧 EVENT: Connection ID issued: {event.connection_id.hex()}"
+                        f"QUIC EVENT: Connection ID issued: {event.connection_id.hex()}"
                     )
-                    # ADD: Update mappings using existing data structures
                     # Add new CID to the same address mapping
                     taddr = self._cid_to_addr.get(dest_cid)
                     if taddr:
-                        # Don't overwrite, but note that this CID is also valid for this address
-                        print(
-                            f"🔧 EVENT: New CID {event.connection_id.hex()} available for {taddr}"
+                        # Don't overwrite, but this CID is also valid for this address
+                        logger.debug(
+                            f"QUIC EVENT: New CID {event.connection_id.hex()} "
+                            f"available for {taddr}"
                         )
 
                 elif isinstance(event, events.ConnectionIdRetired):
-                    print(
-                        f"🔧 EVENT: Connection ID retired: {event.connection_id.hex()}"
-                    )
-                    # ADD: Clean up using existing patterns
+                    print(f"EVENT: Connection ID retired: {event.connection_id.hex()}")
                     retired_cid = event.connection_id
                     if retired_cid in self._cid_to_addr:
                         addr = self._cid_to_addr[retired_cid]
@@ -874,16 +689,13 @@ class QUICListener(IListener):
                         # Only remove addr mapping if this was the active CID
                         if self._addr_to_cid.get(addr) == retired_cid:
                             del self._addr_to_cid[addr]
-                        print(
-                            f"🔧 EVENT: Cleaned up mapping for retired CID {retired_cid.hex()}"
-                        )
                 else:
-                    print(f"🔧 EVENT: Unhandled event type: {type(event).__name__}")
+                    print(f" EVENT: Unhandled event type: {type(event).__name__}")
 
             if events_processed == 0:
-                print("🔧 EVENT: No events to process")
+                print(" EVENT: No events to process")
             else:
-                print(f"🔧 EVENT: Processed {events_processed} events total")
+                print(f" EVENT: Processed {events_processed} events total")
 
         except Exception as e:
             print(f"❌ EVENT: Error processing events: {e}")
@@ -891,62 +703,18 @@ class QUICListener(IListener):
 
             traceback.print_exc()
 
-    async def _debug_quic_connection_state(
-        self, quic_conn: QuicConnection, connection_id: bytes
-    ):
-        """Debug the internal state of the QUIC connection."""
-        try:
-            print(f"🔧 QUIC_STATE: Debugging connection {connection_id}")
-
-            if not quic_conn:
-                print("🔧 QUIC_STATE: QUIC CONNECTION NOT FOUND")
-                return
-
-            # Check TLS state
-            if hasattr(quic_conn, "tls") and quic_conn.tls:
-                print("🔧 QUIC_STATE: TLS context exists")
-                if hasattr(quic_conn.tls, "state"):
-                    print(f"🔧 QUIC_STATE: TLS state: {quic_conn.tls.state}")
-            else:
-                print("❌ QUIC_STATE: No TLS context!")
-
-            # Check connection state
-            if hasattr(quic_conn, "_state"):
-                print(f"🔧 QUIC_STATE: Connection state: {quic_conn._state}")
-
-            # Check if handshake is complete
-            if hasattr(quic_conn, "_handshake_complete"):
-                print(
-                    f"🔧 QUIC_STATE: Handshake complete: {quic_conn._handshake_complete}"
-                )
-
-            # Check configuration
-            if hasattr(quic_conn, "configuration"):
-                config = quic_conn.configuration
-                print(
-                    f"🔧 QUIC_STATE: Config certificate: {config.certificate is not None}"
-                )
-                print(
-                    f"🔧 QUIC_STATE: Config private_key: {config.private_key is not None}"
-                )
-                print(f"🔧 QUIC_STATE: Config is_client: {config.is_client}")
-
-        except Exception as e:
-            print(f"❌ QUIC_STATE: Error checking state: {e}")
-
     async def _promote_pending_connection(
         self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
-    ):
+    ) -> None:
         """Promote pending connection - avoid duplicate creation."""
         try:
-            # Remove from pending connections
             self._pending_connections.pop(dest_cid, None)
 
-            # CHECK: Does QUICConnection already exist?
             if dest_cid in self._connections:
                 connection = self._connections[dest_cid]
-                print(
-                    f"🔄 PROMOTION: Using existing QUICConnection {id(connection)} for {dest_cid.hex()}"
+                logger.debug(
+                    f"Using existing QUICConnection {id(connection)} "
+                    f"for {dest_cid.hex()}"
                 )
 
             else:
@@ -968,22 +736,17 @@ class QUICListener(IListener):
                     listener_socket=self._socket,
                 )
 
-                print(
-                    f"🔄 PROMOTION: Created NEW QUICConnection {id(connection)} for {dest_cid.hex()}"
-                )
+                logger.debug(f"🔄 Created NEW QUICConnection for {dest_cid.hex()}")
 
-                # Store the connection
                 self._connections[dest_cid] = connection
 
-            # Update mappings
             self._addr_to_cid[addr] = dest_cid
             self._cid_to_addr[dest_cid] = addr
 
-            # Rest of the existing promotion code...
             if self._nursery:
                 connection._nursery = self._nursery
                 await connection.connect(self._nursery)
-                print("QUICListener: Connection connected succesfully")
+                logger.debug(f"Connection connected succesfully for {dest_cid.hex()}")
 
             if self._security_manager:
                 try:
@@ -1001,27 +764,23 @@ class QUICListener(IListener):
             if self._nursery:
                 connection._nursery = self._nursery
                 await connection._start_background_tasks()
-                print(f"Started background tasks for connection {dest_cid.hex()}")
-
-            if self._transport._swarm:
-                print(f"🔄 PROMOTION: Adding connection {id(connection)} to swarm")
-                await self._transport._swarm.add_conn(connection)
-                print(
-                    f"🔄 PROMOTION: Successfully added connection {id(connection)} to swarm"
+                logger.debug(
+                    f"Started background tasks for connection {dest_cid.hex()}"
                 )
 
-            if self._handler:
-                try:
-                    print(f"Invoking user callback {dest_cid.hex()}")
-                    await self._handler(connection)
+            if self._transport._swarm:
+                await self._transport._swarm.add_conn(connection)
+                logger.debug(f"Successfully added connection {dest_cid.hex()} to swarm")
 
-                except Exception as e:
-                    logger.error(f"Error in user callback: {e}")
+            try:
+                print(f"Invoking user callback {dest_cid.hex()}")
+                await self._handler(connection)
+
+            except Exception as e:
+                logger.error(f"Error in user callback: {e}")
 
             self._stats["connections_accepted"] += 1
-            logger.info(
-                f"✅ Enhanced connection {dest_cid.hex()} established from {addr}"
-            )
+            logger.info(f"Enhanced connection {dest_cid.hex()} established from {addr}")
 
         except Exception as e:
             logger.error(f"❌ Error promoting connection {dest_cid.hex()}: {e}")
@@ -1062,10 +821,12 @@ class QUICListener(IListener):
         if dest_cid:
             await self._remove_connection(dest_cid)
 
-    async def _transmit_for_connection(self, quic_conn, addr):
+    async def _transmit_for_connection(
+        self, quic_conn: QuicConnection, addr: tuple[str, int]
+    ) -> None:
         """Enhanced transmission diagnostics to analyze datagram content."""
         try:
-            print(f"🔧 TRANSMIT: Starting transmission to {addr}")
+            print(f" TRANSMIT: Starting transmission to {addr}")
 
             # Get current timestamp for timing
             import time
@@ -1073,56 +834,31 @@ class QUICListener(IListener):
             now = time.time()
 
             datagrams = quic_conn.datagrams_to_send(now=now)
-            print(f"🔧 TRANSMIT: Got {len(datagrams)} datagrams to send")
+            print(f" TRANSMIT: Got {len(datagrams)} datagrams to send")
 
             if not datagrams:
                 print("⚠️  TRANSMIT: No datagrams to send")
                 return
 
             for i, (datagram, dest_addr) in enumerate(datagrams):
-                print(f"🔧 TRANSMIT: Analyzing datagram {i}")
-                print(f"🔧 TRANSMIT: Datagram size: {len(datagram)} bytes")
-                print(f"🔧 TRANSMIT: Destination: {dest_addr}")
-                print(f"🔧 TRANSMIT: Expected destination: {addr}")
+                print(f" TRANSMIT: Analyzing datagram {i}")
+                print(f" TRANSMIT: Datagram size: {len(datagram)} bytes")
+                print(f" TRANSMIT: Destination: {dest_addr}")
+                print(f" TRANSMIT: Expected destination: {addr}")
 
                 # Analyze datagram content
                 if len(datagram) > 0:
                     # QUIC packet format analysis
                     first_byte = datagram[0]
                     header_form = (first_byte & 0x80) >> 7  # Bit 7
-                    fixed_bit = (first_byte & 0x40) >> 6  # Bit 6
-                    packet_type = (first_byte & 0x30) >> 4  # Bits 4-5
-                    type_specific = first_byte & 0x0F  # Bits 0-3
-
-                    print(f"🔧 TRANSMIT: First byte: 0x{first_byte:02x}")
-                    print(
-                        f"🔧 TRANSMIT: Header form: {header_form} ({'Long' if header_form else 'Short'})"
-                    )
-                    print(
-                        f"🔧 TRANSMIT: Fixed bit: {fixed_bit} ({'Valid' if fixed_bit else 'INVALID!'})"
-                    )
-                    print(f"🔧 TRANSMIT: Packet type: {packet_type}")
 
                     # For long header packets (handshake), analyze further
                     if header_form == 1:  # Long header
-                        packet_types = {
-                            0: "Initial",
-                            1: "0-RTT",
-                            2: "Handshake",
-                            3: "Retry",
-                        }
-                        type_name = packet_types.get(packet_type, "Unknown")
-                        print(f"🔧 TRANSMIT: Long header packet type: {type_name}")
-
-                        # Look for CRYPTO frame indicators
                         # CRYPTO frame type is 0x06
                         crypto_frame_found = False
                         for offset in range(len(datagram)):
-                            if datagram[offset] == 0x06:  # CRYPTO frame type
+                            if datagram[offset] == 0x06:
                                 crypto_frame_found = True
-                                print(
-                                    f"✅ TRANSMIT: Found CRYPTO frame at offset {offset}"
-                                )
                                 break
 
                         if not crypto_frame_found:
@@ -1138,21 +874,11 @@ class QUICListener(IListener):
                                 elif frame_type == 0x06:  # CRYPTO
                                     frame_types_found.add("CRYPTO")
 
-                            print(
-                                f"🔧 TRANSMIT: Frame types detected: {frame_types_found}"
-                            )
-
-                    # Show first few bytes for debugging
-                    preview_bytes = min(32, len(datagram))
-                    hex_preview = " ".join(f"{b:02x}" for b in datagram[:preview_bytes])
-                    print(f"🔧 TRANSMIT: First {preview_bytes} bytes: {hex_preview}")
-
-                # Actually send the datagram
                 if self._socket:
                     try:
-                        print(f"🔧 TRANSMIT: Sending datagram {i} via socket...")
+                        print(f" TRANSMIT: Sending datagram {i} via socket...")
                         await self._socket.sendto(datagram, addr)
-                        print(f"✅ TRANSMIT: Successfully sent datagram {i}")
+                        print(f"TRANSMIT: Successfully sent datagram {i}")
                     except Exception as send_error:
                         print(f"❌ TRANSMIT: Socket send failed: {send_error}")
                 else:
@@ -1160,10 +886,9 @@ class QUICListener(IListener):
 
             # Check if there are more datagrams after sending
             remaining_datagrams = quic_conn.datagrams_to_send(now=time.time())
-            print(
-                f"🔧 TRANSMIT: After sending, {len(remaining_datagrams)} datagrams remain"
+            logger.debug(
+                f" TRANSMIT: After sending, {len(remaining_datagrams)} datagrams remain"
             )
-            print("------END OF THIS DATAGRAM LOG-----")
 
         except Exception as e:
             print(f"❌ TRANSMIT: Transmission error: {e}")
@@ -1184,6 +909,7 @@ class QUICListener(IListener):
             logger.debug("Using transport background nursery for listener")
         elif nursery:
             active_nursery = nursery
+            self._transport._background_nursery = nursery
             logger.debug("Using provided nursery for listener")
         else:
             raise QUICListenError("No nursery available")
@@ -1299,8 +1025,10 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Error closing listener: {e}")
 
-    async def _remove_connection_by_object(self, connection_obj) -> None:
-        """Remove a connection by object reference (called when connection terminates)."""
+    async def _remove_connection_by_object(
+        self, connection_obj: QUICConnection
+    ) -> None:
+        """Remove a connection by object reference."""
         try:
             # Find the connection ID for this object
             connection_cid = None
@@ -1311,19 +1039,12 @@ class QUICListener(IListener):
 
             if connection_cid:
                 await self._remove_connection(connection_cid)
-                logger.debug(
-                    f"✅ TERMINATION: Removed connection {connection_cid.hex()} by object reference"
-                )
-                print(
-                    f"✅ TERMINATION: Removed connection {connection_cid.hex()} by object reference"
-                )
+                logger.debug(f"Removed connection {connection_cid.hex()}")
             else:
-                logger.warning("⚠️ TERMINATION: Connection object not found in tracking")
-                print("⚠️ TERMINATION: Connection object not found in tracking")
+                logger.warning("Connection object not found in tracking")
 
         except Exception as e:
-            logger.error(f"❌ TERMINATION: Error removing connection by object: {e}")
-            print(f"❌ TERMINATION: Error removing connection by object: {e}")
+            logger.error(f"Error removing connection by object: {e}")
 
     def get_addresses(self) -> list[Multiaddr]:
         """Get the bound addresses."""
@@ -1376,63 +1097,3 @@ class QUICListener(IListener):
         stats["active_connections"] = len(self._connections)
         stats["pending_connections"] = len(self._pending_connections)
         return stats
-
-    async def _debug_handshake_state(self, quic_conn: QuicConnection, dest_cid: bytes):
-        """Debug why handshake might be stuck."""
-        try:
-            print(f"🔧 HANDSHAKE_DEBUG: Analyzing stuck handshake for {dest_cid.hex()}")
-
-            # Check TLS handshake state
-            if hasattr(quic_conn, "tls") and quic_conn.tls:
-                tls = quic_conn.tls
-                print(
-                    f"🔧 HANDSHAKE_DEBUG: TLS state: {getattr(tls, 'state', 'Unknown')}"
-                )
-
-                # Check for TLS errors
-                if hasattr(tls, "_error") and tls._error:
-                    print(f"❌ HANDSHAKE_DEBUG: TLS error: {tls._error}")
-
-                # Check certificate validation
-                if hasattr(tls, "_peer_certificate"):
-                    if tls._peer_certificate:
-                        print("✅ HANDSHAKE_DEBUG: Peer certificate received")
-                    else:
-                        print("❌ HANDSHAKE_DEBUG: No peer certificate")
-
-                # Check ALPN negotiation
-                if hasattr(tls, "_alpn_protocols"):
-                    if tls._alpn_protocols:
-                        print(
-                            f"✅ HANDSHAKE_DEBUG: ALPN negotiated: {tls._alpn_protocols}"
-                        )
-                    else:
-                        print("❌ HANDSHAKE_DEBUG: No ALPN protocol negotiated")
-
-            # Check QUIC connection state
-            if hasattr(quic_conn, "_state"):
-                state = quic_conn._state
-                print(f"🔧 HANDSHAKE_DEBUG: QUIC state: {state}")
-
-                # Check specific states that might indicate problems
-                if "FIRSTFLIGHT" in str(state):
-                    print("⚠️  HANDSHAKE_DEBUG: Connection stuck in FIRSTFLIGHT state")
-                elif "CONNECTED" in str(state):
-                    print(
-                        "⚠️  HANDSHAKE_DEBUG: Connection shows CONNECTED but handshake not complete"
-                    )
-
-            # Check for pending crypto data
-            if hasattr(quic_conn, "_cryptos") and quic_conn._cryptos:
-                print(
-                    f"🔧 HANDSHAKE_DEBUG: Crypto data present {len(quic_conn._cryptos.keys())}"
-                )
-
-            # Check loss detection state
-            if hasattr(quic_conn, "_loss") and quic_conn._loss:
-                loss_detection = quic_conn._loss
-                if hasattr(loss_detection, "_pto_count"):
-                    print(f"🔧 HANDSHAKE_DEBUG: PTO count: {loss_detection._pto_count}")
-
-        except Exception as e:
-            print(f"❌ HANDSHAKE_DEBUG: Error during debug: {e}")

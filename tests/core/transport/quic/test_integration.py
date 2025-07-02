@@ -16,7 +16,6 @@ import pytest
 import trio
 
 from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.peer.id import ID
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.transport import QUICTransport
@@ -68,7 +67,6 @@ class TestBasicQUICFlow:
 
         # Create server components
         server_transport = QUICTransport(server_key.private_key, server_config)
-        server_peer_id = ID.from_pubkey(server_key.public_key)
 
         # Track test state
         server_received_data = None
@@ -153,13 +151,12 @@ class TestBasicQUICFlow:
 
                 # Create client transport
                 client_transport = QUICTransport(client_key.private_key, client_config)
+                client_transport.set_background_nursery(nursery)
 
                 try:
                     # Connect to server
                     print(f"📞 CLIENT: Connecting to {server_addr}")
-                    connection = await client_transport.dial(
-                        server_addr, peer_id=server_peer_id, nursery=nursery
-                    )
+                    connection = await client_transport.dial(server_addr)
                     client_connected = True
                     print("✅ CLIENT: Connected to server")
 
@@ -248,7 +245,6 @@ class TestBasicQUICFlow:
         print("\n=== TESTING SERVER ACCEPT_STREAM TIMEOUT ===")
 
         server_transport = QUICTransport(server_key.private_key, server_config)
-        server_peer_id = ID.from_pubkey(server_key.public_key)
 
         accept_stream_called = False
         accept_stream_timeout = False
@@ -277,6 +273,7 @@ class TestBasicQUICFlow:
         try:
             async with trio.open_nursery() as nursery:
                 # Start server
+                server_transport.set_background_nursery(nursery)
                 success = await listener.listen(listen_addr, nursery)
                 assert success
 
@@ -284,24 +281,26 @@ class TestBasicQUICFlow:
                 print(f"🔧 SERVER: Listening on {server_addr}")
 
                 # Create client but DON'T open a stream
-                client_transport = QUICTransport(client_key.private_key, client_config)
-
-                try:
-                    print("📞 CLIENT: Connecting (but NOT opening stream)...")
-                    connection = await client_transport.dial(
-                        server_addr, peer_id=server_peer_id, nursery=nursery
+                async with trio.open_nursery() as client_nursery:
+                    client_transport = QUICTransport(
+                        client_key.private_key, client_config
                     )
-                    client_connected = True
-                    print("✅ CLIENT: Connected (no stream opened)")
+                    client_transport.set_background_nursery(client_nursery)
 
-                    # Wait for server timeout
-                    await trio.sleep(3.0)
+                    try:
+                        print("📞 CLIENT: Connecting (but NOT opening stream)...")
+                        connection = await client_transport.dial(server_addr)
+                        client_connected = True
+                        print("✅ CLIENT: Connected (no stream opened)")
 
-                    await connection.close()
-                    print("🔒 CLIENT: Connection closed")
+                        # Wait for server timeout
+                        await trio.sleep(3.0)
 
-                finally:
-                    await client_transport.close()
+                        await connection.close()
+                        print("🔒 CLIENT: Connection closed")
+
+                    finally:
+                        await client_transport.close()
 
                 nursery.cancel_scope.cancel()
 

@@ -472,6 +472,45 @@ class QUICStream(IMuxedStream):
 
             logger.debug(f"Stream {self.stream_id} received FIN")
 
+    async def handle_stop_sending(self, error_code: int) -> None:
+        """
+        Handle STOP_SENDING frame from remote peer.
+
+        When a STOP_SENDING frame is received, the peer is requesting that we
+        stop sending data on this stream. We respond by resetting the stream.
+
+        Args:
+            error_code: Error code from the STOP_SENDING frame
+
+        """
+        logger.debug(
+            f"Stream {self.stream_id} handling STOP_SENDING (error_code={error_code})"
+        )
+
+        self._write_closed = True
+
+        # Wake up any pending write operations
+        self._backpressure_event.set()
+
+        async with self._state_lock:
+            if self.direction == StreamDirection.OUTBOUND:
+                self._state = StreamState.CLOSED
+            elif self._read_closed:
+                self._state = StreamState.CLOSED
+            else:
+                # Only write side closed - add WRITE_CLOSED state if needed
+                self._state = StreamState.WRITE_CLOSED
+
+        # Send RESET_STREAM in response (QUIC protocol requirement)
+        try:
+            self._connection._quic.reset_stream(int(self.stream_id), error_code)
+            await self._connection._transmit()
+            logger.debug(f"Sent RESET_STREAM for stream {self.stream_id}")
+        except Exception as e:
+            logger.warning(
+                f"Could not send RESET_STREAM for stream {self.stream_id}: {e}"
+            )
+
     async def handle_reset(self, error_code: int) -> None:
         """
         Handle stream reset from remote peer.

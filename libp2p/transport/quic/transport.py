@@ -128,7 +128,7 @@ class QUICTransport(ITransport):
         self._background_nursery = nursery
         print("Transport background nursery set")
 
-    def set_swarm(self, swarm) -> None:
+    def set_swarm(self, swarm: Swarm) -> None:
         """Set the swarm for adding incoming connections."""
         self._swarm = swarm
 
@@ -232,12 +232,9 @@ class QUICTransport(ITransport):
         except Exception as e:
             raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
 
-    # type: ignore
     async def dial(
         self,
         maddr: multiaddr.Multiaddr,
-        peer_id: ID,
-        nursery: trio.Nursery | None = None,
     ) -> QUICConnection:
         """
         Dial a remote peer using QUIC transport with security verification.
@@ -260,9 +257,6 @@ class QUICTransport(ITransport):
 
         if not is_quic_multiaddr(maddr):
             raise QUICDialError(f"Invalid QUIC multiaddr: {maddr}")
-
-        if not peer_id:
-            raise QUICDialError("Peer id cannot be null")
 
         try:
             # Extract connection details from multiaddr
@@ -288,7 +282,7 @@ class QUICTransport(ITransport):
             connection = QUICConnection(
                 quic_connection=native_quic_connection,
                 remote_addr=(host, port),
-                remote_peer_id=peer_id,
+                remote_peer_id=None,
                 local_peer_id=self._peer_id,
                 is_initiator=True,
                 maddr=maddr,
@@ -297,25 +291,19 @@ class QUICTransport(ITransport):
             )
             print("QUIC Connection Created")
 
-            active_nursery = nursery or self._background_nursery
-
-            if active_nursery is None:
+            if self._background_nursery is None:
                 logger.error("No nursery set to execute background tasks")
                 raise QUICDialError("No nursery found to execute tasks")
 
-            await connection.connect(active_nursery)
+            await connection.connect(self._background_nursery)
 
             print("Starting to verify peer identity")
-            # Verify peer identity after TLS handshake
-            if peer_id:
-                await self._verify_peer_identity(connection, peer_id)
 
             print("Identity verification done")
             # Store connection for management
-            conn_id = f"{host}:{port}:{peer_id}"
+            conn_id = f"{host}:{port}"
             self._connections[conn_id] = connection
 
-            print(f"Successfully dialed secure QUIC connection to {peer_id}")
             return connection
 
         except Exception as e:
@@ -456,7 +444,7 @@ class QUICTransport(ITransport):
 
         print("QUIC transport closed")
 
-    async def _cleanup_terminated_connection(self, connection) -> None:
+    async def _cleanup_terminated_connection(self, connection: QUICConnection) -> None:
         """Clean up a terminated connection from all listeners."""
         try:
             for listener in self._listeners:

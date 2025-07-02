@@ -8,7 +8,6 @@ from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
 from libp2p.crypto.keys import PrivateKey
-from libp2p.peer.id import ID
 from libp2p.transport.quic.exceptions import (
     QUICDialError,
     QUICListenError,
@@ -105,7 +104,7 @@ class TestQUICTransport:
         await transport.close()
 
     @pytest.mark.trio
-    async def test_dial_closed_transport(self, transport):
+    async def test_dial_closed_transport(self, transport: QUICTransport) -> None:
         """Test dialing with closed transport raises error."""
         import multiaddr
 
@@ -114,10 +113,9 @@ class TestQUICTransport:
         with pytest.raises(QUICDialError, match="Transport is closed"):
             await transport.dial(
                 multiaddr.Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
-                ID.from_pubkey(create_new_key_pair().public_key),
             )
 
-    def test_create_listener_closed_transport(self, transport):
+    def test_create_listener_closed_transport(self, transport: QUICTransport) -> None:
         """Test creating listener with closed transport raises error."""
         transport._closed = True
 
