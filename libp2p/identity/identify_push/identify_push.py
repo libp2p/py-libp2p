@@ -136,7 +136,7 @@ async def push_identify_to_peer(
     host: IHost,
     peer_id: ID,
     observed_multiaddr: Multiaddr | None = None,
-    limit=trio.Semaphore(CONCURRENCY_LIMIT),    
+    limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
 ) -> bool:
     """
     Push an identify message to a specific peer.
