@@ -10,6 +10,7 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.abc import IHost
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
