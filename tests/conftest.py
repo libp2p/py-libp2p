@@ -1,5 +1,7 @@
 import pytest
 
+pytest_plugins = ["trio"]
+
 
 @pytest.fixture
 def security_protocol():
