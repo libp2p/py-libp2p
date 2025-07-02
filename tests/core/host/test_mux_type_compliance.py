@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -14,7 +14,10 @@ from libp2p.custom_types import StreamHandlerFn, TProtocol
 from libp2p.host.basic_host import BasicHost
 
 # For expected errors in negotiation tests
-from libp2p.protocol_muxer.exceptions import MultiselectError
+from libp2p.protocol_muxer.exceptions import (
+    MultiselectError,
+    MultiselectCommunicatorError,
+)
 from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.protocol_muxer.multiselect_client import (
     MultiselectClient,
@@ -143,7 +146,7 @@ def test_get_mux_interface_compliance(basic_host):
 
 # --- Functionality / Integration Tests ---
 
-
+@pytest.mark.trio
 async def test_get_mux_add_handler_and_get_protocols(basic_host):
     """
     Tests the functional behavior of add_handler and get_protocols methods
@@ -153,10 +156,7 @@ async def test_get_mux_add_handler_and_get_protocols(basic_host):
 
     # Initial state check - ensure default protocols are present
     initial_protocols = mux.get_protocols()
-    assert (
-        TProtocol("/multistream/1.0.0") in initial_protocols
-    )  # BasicHost adds default
-
+    # The multistream protocol is part of the handshake, not a default handler.
     # Ensure our test protocols aren't there yet
     assert TProtocol("/test/1.0.0") not in initial_protocols
     assert TProtocol("/another/protocol/1.0.0") not in initial_protocols
@@ -186,6 +186,7 @@ async def test_get_mux_add_handler_and_get_protocols(basic_host):
     )  # Should have added two new custom ones
 
 
+@pytest.mark.trio
 async def test_get_mux_negotiate_success(basic_host, mock_communicator):
     """
     Tests the successful negotiation flow using the muxer's negotiate method.
@@ -217,9 +218,9 @@ async def test_get_mux_negotiate_success(basic_host, mock_communicator):
     mock_communicator.write.assert_has_calls(
         [
             # Handshake response
-            pytest.call("/multistream/1.0.0"),
+            call("/multistream/1.0.0"),
             # Protocol acceptance
-            pytest.call(selected_protocol_str),
+            call(selected_protocol_str),
         ]
     )
     # Ensure no other writes occurred
@@ -227,6 +228,7 @@ async def test_get_mux_negotiate_success(basic_host, mock_communicator):
     assert mock_communicator.read.call_count == 2
 
 
+@pytest.mark.trio
 async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicator):
     """
     Tests the negotiation flow when the proposed protocol is not found.
@@ -241,6 +243,7 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     mock_communicator.read.side_effect = [
         "/multistream/1.0.0",  # Handshake response
         str(non_existent_protocol),  # Client proposes a non-existent protocol
+        MultiselectCommunicatorError("Mock is exhausted")
     ]
 
     # Expect a MultiselectError as the protocol won't be found
@@ -250,9 +253,10 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     # Verify handshake write and "na" (not available) write
     mock_communicator.write.assert_has_calls(
         [
-            pytest.call("/multistream/1.0.0"),
-            pytest.call("na"),  # Muxer should respond with "na"
+            call("/multistream/1.0.0"),
+            call("na"),  # Muxer should respond with "na"
         ]
     )
     assert mock_communicator.write.call_count == 2
-    assert mock_communicator.read.call_count == 2
+    # The read call count should be 3 due to the final loop attempt.
+    assert mock_communicator.read.call_count == 3
