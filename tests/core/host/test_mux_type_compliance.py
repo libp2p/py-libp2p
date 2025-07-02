@@ -15,25 +15,20 @@ from libp2p.host.basic_host import BasicHost
 
 # For expected errors in negotiation tests
 from libp2p.protocol_muxer.exceptions import (
-    MultiselectError,
     MultiselectCommunicatorError,
+    MultiselectError,
 )
 from libp2p.protocol_muxer.multiselect import Multiselect
-from libp2p.protocol_muxer.multiselect_client import (
-    MultiselectClient,
-)  # Needed for mock calls
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
-)  # Needed for mock calls
-
-# --- Fixtures for setting up the test environment ---
+)
 
 
 @pytest.fixture
 def mock_peer_id():
     """Provides a mock PeerID for testing purposes."""
     mock = MagicMock()
-    mock.__str__.return_value = "QmMockPeerId"
+    mock.__str__ = lambda: "QmMockPeerId"
     return mock
 
 
@@ -81,7 +76,8 @@ def basic_host(mock_network_service):
 def mock_communicator():
     """
     Provides a mock for IMultiselectCommunicator for negotiation tests.
-    By default, it will provide responses for a successful handshake and a protocol proposal.
+    By default, it will provide responses for a successful handshake and a protocol
+    proposal.
     Reset side_effect in specific tests if different behavior is needed.
     """
     mock = AsyncMock(
@@ -146,6 +142,7 @@ def test_get_mux_interface_compliance(basic_host):
 
 # --- Functionality / Integration Tests ---
 
+
 @pytest.mark.trio
 async def test_get_mux_add_handler_and_get_protocols(basic_host):
     """
@@ -203,7 +200,8 @@ async def test_get_mux_negotiate_success(basic_host, mock_communicator):
 
     # Configure the mock_communicator to simulate a successful negotiation sequence
     mock_communicator.read.side_effect = [
-        "/multistream/1.0.0",  # First read: Client sends its multistream protocol (handshake)
+        "/multistream/1.0.0",  # First read: Client sends its multistream
+        # protocol (handshake)
         selected_protocol_str,  # Second read: Client proposes the app protocol
     ]
 
@@ -239,11 +237,12 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     non_existent_protocol = TProtocol("/non-existent/protocol")
     assert non_existent_protocol not in mux.get_protocols()  # Ensure it's not present
 
-    # Configure the mock_communicator to simulate a handshake followed by a non-existent protocol
+    # Configure the mock_communicator to simulate a handshake followed by a non-existent
+    # protocol
     mock_communicator.read.side_effect = [
         "/multistream/1.0.0",  # Handshake response
         str(non_existent_protocol),  # Client proposes a non-existent protocol
-        MultiselectCommunicatorError("Mock is exhausted")
+        MultiselectCommunicatorError("Mock is exhausted"),
     ]
 
     # Expect a MultiselectError as the protocol won't be found
@@ -260,3 +259,37 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     assert mock_communicator.write.call_count == 2
     # The read call count should be 3 due to the final loop attempt.
     assert mock_communicator.read.call_count == 3
+
+
+@pytest.mark.trio
+async def test_mux_get_protocols_excludes_none(basic_host):
+    """
+    Tests that get_protocols() method on the muxer returned by get_mux()
+    correctly excludes None from the returned list of protocols,
+    even if a handler was internally associated with a None protocol.
+    """
+    mux = basic_host.get_mux()
+
+    # Ensure no None protocol initially (assuming default setup doesn't add None)
+    assert None not in mux.get_protocols()
+
+    # Artificially add a handler with None as the protocol.
+    # This simulates a scenario where None might exist as a key internally.
+    def dummy_none_handler(stream):
+        pass
+
+    mux.add_handler(None, dummy_none_handler)
+
+    # Now, retrieve the protocols and assert that None is NOT included
+    # in the list returned by get_protocols(), due to our fix.
+    retrieved_protocols = mux.get_protocols()
+    assert None not in retrieved_protocols
+
+    # Also, ensure that other valid protocols are still present
+    # (optional, but good check)
+    # Add a valid protocol to ensure the filter doesn't remove everything
+    test_protocol = TProtocol("/test/valid-protocol/1.0.0")
+    mux.add_handler(test_protocol, lambda s: None)
+    retrieved_protocols_after_valid = mux.get_protocols()
+    assert test_protocol in retrieved_protocols_after_valid
+    assert None not in retrieved_protocols_after_valid
