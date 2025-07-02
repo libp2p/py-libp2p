@@ -263,7 +263,12 @@ class Mplex(IMuxedConn):
             await self._handle_reset(stream_id)
         else:
             # Receives messages with an unknown flag
-            # TODO: logging
+            logger.warning(
+                "Received message with unknown flag %d for stream %s from peer %s. Resetting stream.",
+                flag,
+                stream_id,
+                self.peer_id,
+            )
             async with self.streams_lock:
                 if stream_id in self.streams:
                     stream = self.streams[stream_id]
