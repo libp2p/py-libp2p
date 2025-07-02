@@ -292,7 +292,12 @@ class Mplex(IMuxedConn):
             if stream_id not in self.streams:
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
-                # TODO: Warn and emit logs about this.
+                logger.warning(
+                    "Received message for unknown stream %s from peer %s (message length: %d)",
+                    stream_id,
+                    self.peer_id,
+                    len(message),
+                )
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
