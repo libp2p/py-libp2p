@@ -285,4 +285,3 @@ project_excludes = [
 
 [tool.poetry.group.dev.dependencies]
 pytest-trio = "^0.8.0"
-
