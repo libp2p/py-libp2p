@@ -303,10 +303,10 @@ class Mplex(IMuxedConn):
             send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
-                # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
                 logger.warning(
-                    "Received data from remote after stream %s was closed by them. (len = %d)",
+                    "Received data from remote after stream was closed by them. Stream: %s, Peer: %s, Data length: %d",
                     stream_id,
+                    self.peer_id,
                     len(message),
                 )
                 return
