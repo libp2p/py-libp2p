@@ -1,3 +1,5 @@
+import trio
+
 from libp2p.abc import (
     IMultiselectCommunicator,
     IMultiselectMuxer,
@@ -14,6 +16,7 @@ from .exceptions import (
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
+DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
 class Multiselect(IMultiselectMuxer):
@@ -60,47 +63,56 @@ class Multiselect(IMultiselectMuxer):
 
     # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
-        self, communicator: IMultiselectCommunicator
+        self,
+        communicator: IMultiselectCommunicator,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> tuple[TProtocol, StreamHandlerFn | None]:
         """
         Negotiate performs protocol selection.
 
         :param stream: stream to negotiate on
+        :param negotiate_timeout: timeout for negotiation
         :return: selected protocol name, handler function
         :raise MultiselectError: raised when negotiation failed
         """
-        await self.handshake(communicator)
+        try:
+            with trio.fail_after(negotiate_timeout):
+                await self.handshake(communicator)
 
-        while True:
-            try:
-                command = await communicator.read()
-            except MultiselectCommunicatorError as error:
-                raise MultiselectError() from error
-
-            if command == "ls":
-                supported_protocols = [p for p in self.handlers.keys() if p is not None]
-                response = "\n".join(supported_protocols) + "\n"
-
-                try:
-                    await communicator.write(response)
-                except MultiselectCommunicatorError as error:
-                    raise MultiselectError() from error
-
-            else:
-                protocol = TProtocol(command)
-                if protocol in self.handlers:
+                while True:
                     try:
-                        await communicator.write(protocol)
+                        command = await communicator.read()
                     except MultiselectCommunicatorError as error:
                         raise MultiselectError() from error
 
-                    return protocol, self.handlers[protocol]
-                try:
-                    await communicator.write(PROTOCOL_NOT_FOUND_MSG)
-                except MultiselectCommunicatorError as error:
-                    raise MultiselectError() from error
+                    if command == "ls":
+                        supported_protocols = [
+                            p for p in self.handlers.keys() if p is not None
+                        ]
+                        response = "\n".join(supported_protocols) + "\n"
 
-        raise MultiselectError("Negotiation failed: no matching protocol")
+                        try:
+                            await communicator.write(response)
+                        except MultiselectCommunicatorError as error:
+                            raise MultiselectError() from error
+
+                    else:
+                        protocol = TProtocol(command)
+                        if protocol in self.handlers:
+                            try:
+                                await communicator.write(protocol)
+                            except MultiselectCommunicatorError as error:
+                                raise MultiselectError() from error
+
+                            return protocol, self.handlers[protocol]
+                        try:
+                            await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                        except MultiselectCommunicatorError as error:
+                            raise MultiselectError() from error
+
+                raise MultiselectError("Negotiation failed: no matching protocol")
+        except trio.TooSlowError:
+            raise MultiselectError("handshake read timeout")
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
