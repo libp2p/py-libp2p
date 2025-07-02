@@ -30,6 +30,7 @@ downloads/
 wheels/
 MANIFEST
 pip-wheel-metadata
+.ruff_cache
 
 # Installer logs
 pip-log.txt

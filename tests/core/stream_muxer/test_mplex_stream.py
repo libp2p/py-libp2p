@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import AsyncMock
 import trio
 from trio.testing import (
     wait_all_tasks_blocked,
@@ -11,6 +12,8 @@ from libp2p.stream_muxer.mplex.exceptions import (
 )
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_MESSAGE_CHANNEL_SIZE,
+    HeaderTags,
+    StreamID,
 )
 from libp2p.tools.constants import (
     MAX_READ_LEN,
@@ -213,3 +216,90 @@ async def test_mplex_stream_reset(mplex_stream_pair):
     # `reset` should do nothing as well.
     await stream_0.reset()
     await stream_1.reset()
+
+
+@pytest.mark.trio
+async def test_send_message_return_type(mplex_conn_pair):
+    """
+    Tests that send_message returns an integer representing the bytes written.
+    """
+    mplex_conn = mplex_conn_pair[0]
+
+    # Mock the underlying connection's write method
+    mplex_conn.secured_conn.write = AsyncMock()
+
+    # Define some dummy data
+    dummy_data = b"hello"
+    # Header: 1 byte for stream ID 0, flag 0. Varint prefix for data: 1 byte for len 5.
+    expected_len = 1 + 1 + len(dummy_data)
+
+    # Call the function
+    bytes_written = await mplex_conn.send_message(
+        flag=HeaderTags.MessageInitiator,
+        data=dummy_data,
+        stream_id=StreamID(channel_id=0, is_initiator=True)
+    )
+
+    # Assert the type and a reasonable value
+    assert isinstance(bytes_written, int)
+    assert bytes_written == expected_len
+
+
+@pytest.mark.trio
+async def test_handle_incoming_logs_unknown_flag(mplex_conn_pair, capsys):
+    """
+    Tests that an unknown message flag is logged correctly.
+    """
+    mplex_conn = mplex_conn_pair[0]
+
+    # Mock the read_message to return an unknown flag (e.g., 99)
+    mplex_conn.read_message = AsyncMock(return_value=(0, 99, b"data"))
+
+    await mplex_conn._handle_incoming_message()
+
+    # ASSERT ON STDERR: Use capsys to read from the standard error stream.
+    captured = capsys.readouterr()
+    assert "Received message with unknown flag 99" in captured.err
+
+
+@pytest.mark.trio
+async def test_handle_message_logs_unknown_stream(mplex_conn_pair, capsys):
+    """
+    Tests that a message for an unknown stream is logged.
+    """
+    mplex_conn = mplex_conn_pair[0]
+
+    unknown_stream_id = StreamID(channel_id=123, is_initiator=True)
+
+    # Call directly, ensuring the stream ID is not in mplex_conn.streams
+    await mplex_conn._handle_message(unknown_stream_id, b"some data")
+
+    # ASSERT ON STDERR: Use capsys to read from the standard error stream.
+    captured = capsys.readouterr()
+    assert f"Received message for unknown stream {unknown_stream_id}" in captured.err
+
+
+@pytest.mark.trio
+async def test_handle_message_logs_data_after_close(mplex_conn_pair, capsys):
+    """
+    Tests that data received after a remote close is logged.
+    This test is refactored to be a direct unit test to avoid race conditions.
+    """
+    # 1. Use one connection for a controlled test environment.
+    mplex_conn = mplex_conn_pair[0]
+
+    # 2. Manually create a stream and add it to the connection.
+    stream_id = StreamID(channel_id=99, is_initiator=True)
+    stream = await mplex_conn._initialize_stream(stream_id, "test_stream_for_close")
+
+    # 3. Manually set the stream's state to "remote closed".
+    #    This simulates the event that the test wants to check for.
+    async with stream.close_lock:
+        stream.event_remote_closed.set()
+
+    # 4. Directly call the function to test its logic against the prepared state.
+    await mplex_conn._handle_message(stream.stream_id, b"late data")
+
+    # 5. ASSERT ON STDERR: Use capsys to read from the standard error stream.
+    captured = capsys.readouterr()
+    assert "Received data from remote after stream was closed by them" in captured.err
