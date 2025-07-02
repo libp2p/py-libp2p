@@ -32,7 +32,6 @@ dependencies = [
     "trio>=0.26.0",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
     "zeroconf (>=0.147.0,<0.148.0)",
-    "pytest-trio (>=0.8.0,<0.9.0)",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -282,6 +281,3 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
 ]
-
-[tool.poetry.group.dev.dependencies]
-pytest-trio = "^0.8.0"
