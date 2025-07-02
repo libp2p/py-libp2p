@@ -33,9 +33,6 @@ from libp2p.stream_muxer.yamux.yamux import (
 )
 from libp2p.transport.exceptions import MuxerUpgradeFailure
 
-# FIXME: add negotiate timeout to `MuxerMultistream`
-DEFAULT_NEGOTIATE_TIMEOUT = 60
-
 
 class MuxerMultistream:
     """
