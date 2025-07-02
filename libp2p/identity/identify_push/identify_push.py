@@ -41,7 +41,6 @@ ID_PUSH = TProtocol("/ipfs/id/push/1.0.0")
 PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
 CONCURRENCY_LIMIT = 10
-LIMIT = trio.Semaphore(CONCURRENCY_LIMIT)
 
 
 def identify_push_handler_for(host: IHost) -> StreamHandlerFn:
@@ -134,7 +133,10 @@ async def _update_peerstore_from_identify(
 
 
 async def push_identify_to_peer(
-    host: IHost, peer_id: ID, observed_multiaddr: Multiaddr | None = None
+    host: IHost,
+    peer_id: ID,
+    observed_multiaddr: Multiaddr | None = None,
+    limit=trio.Semaphore(CONCURRENCY_LIMIT),    
 ) -> bool:
     """
     Push an identify message to a specific peer.
@@ -148,7 +150,7 @@ async def push_identify_to_peer(
         True if the push was successful, False otherwise.
 
     """
-    async with LIMIT:
+    async with limit:
         try:
             # Create a new stream to the peer using the identify/push protocol
             stream = await host.new_stream(peer_id, [ID_PUSH])
