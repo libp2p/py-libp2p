@@ -17,6 +17,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.protocol_muxer.exceptions import MultiselectError
 from libp2p.protocol_muxer.multiselect import (
     Multiselect,
 )
@@ -30,6 +31,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     PROTOCOL_ID,
     Yamux,
 )
+from libp2p.transport.exceptions import MuxerUpgradeFailure
 
 # FIXME: add negotiate timeout to `MuxerMultistream`
 DEFAULT_NEGOTIATE_TIMEOUT = 60
@@ -76,14 +78,31 @@ class MuxerMultistream:
         :param conn: conn to choose a transport over
         :return: selected muxer transport
         """
-        protocol: TProtocol
+        # protocol can now be TProtocol | None
+        protocol: TProtocol | None  # <--- UPDATE TYPE HINT FOR 'protocol' VARIABLE
         communicator = MultiselectCommunicator(conn)
-        if conn.is_initiator:
-            protocol = await self.multiselect_client.select_one_of(
-                tuple(self.transports.keys()), communicator
-            )
-        else:
-            protocol, _ = await self.multiselect.negotiate(communicator)
+
+        try:
+            if conn.is_initiator:
+                # Calls multiselect_client.select_one_of
+                protocol = await self.multiselect_client.select_one_of(
+                    # Corrected from multistream_client
+                    tuple(self.transports.keys()),
+                    communicator,
+                )
+            else:
+                # Calls multiselect.negotiate; protocol can be None
+                protocol, _ = await self.multiselect.negotiate(communicator)
+        except MultiselectError as error:
+            # Re-raise general negotiation failure as MuxerUpgradeFailure
+            raise MuxerUpgradeFailure("failed to negotiate muxer protocol") from error
+
+        # --- NEW CODE: Handle case where protocol is None ---
+        if protocol is None:
+            raise MuxerUpgradeFailure("No muxer protocol selected during negotiation")
+        # --- END NEW CODE ---
+
+        # protocol is guaranteed to be TProtocol here
         return self.transports[protocol]
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:

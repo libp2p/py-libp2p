@@ -45,15 +45,16 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self, communicator: IMultiselectCommunicator
-    ) -> tuple[TProtocol, StreamHandlerFn | None]:
+    ) -> tuple[
+        TProtocol | None, StreamHandlerFn | None
+    ]:  # <--- CHANGED RETURN TYPE HERE
         """
         Negotiate performs protocol selection.
 
-        :param stream: stream to negotiate on
-        :return: selected protocol name, handler function
+        :param communicator: communicator to negotiate on
+        :return: selected protocol name (or None), handler function
         :raise MultiselectError: raised when negotiation failed
         """
         await self.handshake(communicator)
@@ -82,12 +83,25 @@ class Multiselect(IMultiselectMuxer):
                         raise MultiselectError() from error
 
                     return protocol, self.handlers[protocol]
+                # If the protocol is not in handlers, it currently raises an error.
+                # Per the analysis, we are primarily changing the *type hint* here
+                # to match the interface, even if current logic means it won't be None.
+                # The analysis stated: "Current logic: Filters out None protocols in
+                # ls command"
+                # and "Current implementation never returns None for the protocol".
+                # The primary goal of Option A is to make the *type hint* match the
+                # interface.
+                # The existing `raise MultiselectError` path implicitly means a non-None
+                # protocol
+                # is expected on success.
                 try:
-                    await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+                    await communicator.write(
+                        PROTOCOL_NOT_FOUND_MSG
+                    )  # This line is reached if protocol not in handlers
                 except MultiselectCommunicatorError as error:
                     raise MultiselectError() from error
 
-        raise MultiselectError("Negotiation failed: no matching protocol")
+            raise MultiselectError("Negotiation failed: no matching protocol")
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """

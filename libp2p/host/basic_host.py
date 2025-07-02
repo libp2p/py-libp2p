@@ -264,6 +264,7 @@ class BasicHost(IHost):
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
         try:
+            # The protocol returned here can now be None
             protocol, handler = await self.multiselect.negotiate(
                 MultiselectCommunicator(net_stream)
             )
@@ -274,6 +275,25 @@ class BasicHost(IHost):
             )
             await net_stream.reset()
             return
+
+        # --- NEW CODE: Handle case where protocol is None ---
+        if protocol is None:
+            peer_id = net_stream.muxed_conn.peer_id
+            logger.debug(
+                "No protocol selected by peer %s during negotiation. Resetting stream.",
+                peer_id,
+            )
+            await net_stream.reset()
+            # The BasicHost analysis suggested raising StreamFailure here.
+            # However, the current structure of _swarm_stream_handler
+            # just returns on failure, so let's maintain that pattern
+            # for now, unless further analysis suggests a raise is better.
+            # For strict adherence to the analysis, it might be:
+            # raise StreamFailure(f"No protocol selected from peer {peer_id}")
+            # But the 'return' is consistent with the `except` block's handling.
+            return
+        # --- END NEW CODE ---
+
         net_stream.set_protocol(protocol)
         if handler is None:
             logger.debug(
