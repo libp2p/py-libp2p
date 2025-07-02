@@ -182,18 +182,18 @@ class Mplex(IMuxedConn):
 
         _bytes = header + encode_varint_prefixed(data)
 
-        # type ignored TODO figure out return for this and write_to_stream
-        return await self.write_to_stream(_bytes)  # type: ignore
+        return await self.write_to_stream(_bytes)
 
-    async def write_to_stream(self, _bytes: bytes) -> None:
+    async def write_to_stream(self, _bytes: bytes) -> int:
         """
         Write a byte array to a secured connection.
 
         :param _bytes: byte array to write
-        :return: length written
+        :return: number of bytes written
         """
         try:
             await self.secured_conn.write(_bytes)
+            return len(_bytes)
         except RawConnError as e:
             raise MplexUnavailable(
                 "failed to write message to the underlying connection"
