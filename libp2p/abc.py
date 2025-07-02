@@ -1128,7 +1128,8 @@ class IMultiselectMuxer(ABC):
 
         """
 
-    def get_protocols(self) -> tuple[TProtocol | None, ...]:
+    @abstractmethod  # Ensure this is present if it was implicitly removed
+    def get_protocols(self) -> tuple[TProtocol, ...]:
         """
         Retrieve the protocols for which handlers have been registered.
 
@@ -1138,7 +1139,10 @@ class IMultiselectMuxer(ABC):
             A tuple of registered protocol names.
 
         """
-        return tuple(self.handlers.keys())
+        # For an abstract method, the body might be empty or a simple `pass`.
+        # If it was `return tuple(self.handlers.keys())`, it should remain unchanged.
+        # The key is the type annotation above.
+        pass  # Or whatever the abstract method's body was
 
     @abstractmethod
     async def negotiate(

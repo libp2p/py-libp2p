@@ -30,7 +30,7 @@ from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicat
 def mock_peer_id():
     """Provides a mock PeerID for testing purposes."""
     mock = MagicMock()
-    mock.__str__.return_value = "QmMockPeerId"
+    mock.__str__ = lambda: "QmMockPeerId"
     return mock
 
 
@@ -258,3 +258,37 @@ async def test_get_mux_negotiate_protocol_not_found(basic_host, mock_communicato
     assert mock_communicator.write.call_count == 2
     # The read call count should be 3 due to the final loop attempt.
     assert mock_communicator.read.call_count == 3
+
+
+@pytest.mark.trio
+async def test_mux_get_protocols_excludes_none(basic_host):
+    """
+    Tests that get_protocols() method on the muxer returned by get_mux()
+    correctly excludes None from the returned list of protocols,
+    even if a handler was internally associated with a None protocol.
+    """
+    mux = basic_host.get_mux()
+
+    # Ensure no None protocol initially (assuming default setup doesn't add None)
+    assert None not in mux.get_protocols()
+
+    # Artificially add a handler with None as the protocol.
+    # This simulates a scenario where None might exist as a key internally.
+    def dummy_none_handler(stream):
+        pass
+
+    mux.add_handler(None, dummy_none_handler)
+
+    # Now, retrieve the protocols and assert that None is NOT included
+    # in the list returned by get_protocols(), due to our fix.
+    retrieved_protocols = mux.get_protocols()
+    assert None not in retrieved_protocols
+
+    # Also, ensure that other valid protocols are still present
+    # (optional, but good check)
+    # Add a valid protocol to ensure the filter doesn't remove everything
+    test_protocol = TProtocol("/test/valid-protocol/1.0.0")
+    mux.add_handler(test_protocol, lambda s: None)
+    retrieved_protocols_after_valid = mux.get_protocols()
+    assert test_protocol in retrieved_protocols_after_valid
+    assert None not in retrieved_protocols_after_valid

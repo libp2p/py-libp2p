@@ -45,6 +45,19 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
+    def get_protocols(self) -> tuple[TProtocol, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names.
+
+        """
+        # Filter out None values, as they are not considered valid "protocols"
+        return tuple(p for p in self.handlers.keys() if p is not None)
+
     # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self, communicator: IMultiselectCommunicator
