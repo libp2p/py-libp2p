@@ -84,6 +84,8 @@ DEFAULT_MUXER = "YAMUX"
 # Multiplexer options
 MUXER_YAMUX = "YAMUX"
 MUXER_MPLEX = "MPLEX"
+DEFAULT_NEGOTIATE_TIMEOUT = 5
+
 
 
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
@@ -250,6 +252,7 @@ def new_host(
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_mDNS: bool = False,
     bootstrap: list[str] | None = None,
+    negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -276,6 +279,6 @@ def new_host(
 
     if disc_opt is not None:
         return RoutedHost(swarm, disc_opt, enable_mDNS, bootstrap)
-    return BasicHost(swarm, enable_mDNS, bootstrap)
+    return BasicHost(network=swarm,enable_mDNS=enable_mDNS , bootstrap=bootstrap, negotitate_timeout=negotiate_timeout)
 
 __version__ = __version("libp2p")

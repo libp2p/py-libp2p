@@ -72,6 +72,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger("libp2p.network.basic_host")
+DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
 class BasicHost(IHost):
@@ -94,10 +95,12 @@ class BasicHost(IHost):
         enable_mDNS: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
+        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
+        self.negotiate_timeout = negotitate_timeout
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))
@@ -198,7 +201,10 @@ class BasicHost(IHost):
         self.multiselect.add_handler(protocol_id, stream_handler)
 
     async def new_stream(
-        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+        self,
+        peer_id: ID,
+        protocol_ids: Sequence[TProtocol],
+        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
@@ -210,7 +216,9 @@ class BasicHost(IHost):
         # Perform protocol muxing to determine protocol to use
         try:
             selected_protocol = await self.multiselect_client.select_one_of(
-                list(protocol_ids), MultiselectCommunicator(net_stream)
+                list(protocol_ids),
+                MultiselectCommunicator(net_stream),
+                negotitate_timeout,
             )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
@@ -220,7 +228,12 @@ class BasicHost(IHost):
         net_stream.set_protocol(selected_protocol)
         return net_stream
 
-    async def send_command(self, peer_id: ID, command: str) -> list[str]:
+    async def send_command(
+        self,
+        peer_id: ID,
+        command: str,
+        response_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+    ) -> list[str]:
         """
         Send a multistream-select command to the specified peer and return
         the response.
@@ -234,7 +247,7 @@ class BasicHost(IHost):
 
         try:
             response = await self.multiselect_client.query_multistream_command(
-                MultiselectCommunicator(new_stream), command
+                MultiselectCommunicator(new_stream), command, response_timeout
             )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
@@ -273,7 +286,7 @@ class BasicHost(IHost):
         # Perform protocol muxing to determine protocol to use
         try:
             protocol, handler = await self.multiselect.negotiate(
-                MultiselectCommunicator(net_stream)
+                MultiselectCommunicator(net_stream), self.negotiate_timeout
             )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
