@@ -20,7 +20,7 @@ from libp2p.protocol_muxer.exceptions import (
 )
 from libp2p.protocol_muxer.multiselect import Multiselect
 
-# Needed for mock calls
+
 from libp2p.protocol_muxer.multiselect_communicator import MultiselectCommunicator
 
 # --- Fixtures for setting up the test environment ---
