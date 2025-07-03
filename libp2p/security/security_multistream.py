@@ -17,6 +17,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.protocol_muxer.exceptions import MultiselectError
 from libp2p.protocol_muxer.multiselect import (
     Multiselect,
 )
@@ -26,6 +27,7 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+from libp2p.transport.exceptions import SecurityUpgradeFailure
 
 """
 Represents a secured connection object, which includes a connection and details about
@@ -96,23 +98,36 @@ class SecurityMultistream(ABC):
     async def select_transport(
         self, conn: IRawConnection, is_initiator: bool
     ) -> ISecureTransport:
-        """
-        Select a transport that both us and the node on the other end of conn
-        support and agree on.
-
-        :param conn: conn to choose a transport over
-        :param is_initiator: true if we are the initiator, false otherwise
-        :return: selected secure transport
-        """
-        protocol: TProtocol
+        # Note: protocol is TProtocol | None here due to negotiate's new type hint
+        protocol: TProtocol | None  # <--- UPDATE TYPE HINT FOR 'protocol' VARIABLE
         communicator = MultiselectCommunicator(conn)
-        if is_initiator:
-            # Select protocol if initiator
-            protocol = await self.multiselect_client.select_one_of(
-                list(self.transports.keys()), communicator
+
+        # Use a try-except block to catch MultiselectError from negotiate
+        try:
+            if is_initiator:
+                # Select protocol if initiator (multiselect_client.select_one_of should
+                # raise if no protocol)
+                protocol = await self.multiselect_client.select_one_of(
+                    list(self.transports.keys()), communicator
+                )
+            else:
+                # Select protocol if non-initiator
+                # protocol can now be None if negotiate doesn't find a suitable one
+                protocol, _ = await self.multiselect.negotiate(communicator)
+        except MultiselectError as error:
+            # Catch errors from both select_one_of and negotiate, and re-raise as
+            # SecurityUpgradeFailure
+            raise SecurityUpgradeFailure(
+                "failed to negotiate security protocol"
+            ) from error
+
+        # --- NEW CODE: Handle case where protocol is None after negotiation ---
+        if protocol is None:
+            raise SecurityUpgradeFailure(
+                "No security protocol selected during negotiation"
             )
-        else:
-            # Select protocol if non-initiator
-            protocol, _ = await self.multiselect.negotiate(communicator)
-        # Return transport from protocol
+        # --- END NEW CODE ---
+
+        # protocol is guaranteed to be TProtocol here, so no TProtocol(protocol) cast
+        # needed
         return self.transports[protocol]
