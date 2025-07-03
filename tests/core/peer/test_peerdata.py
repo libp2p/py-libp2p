@@ -51,6 +51,16 @@ def test_remove_protocols():
     assert peer_data.get_protocols() == ["protocol2"]
 
 
+# Test case when clearing the protocol list:
+def test_clear_protocol_data():
+    peer_data = PeerData()
+    protocols: Sequence[str] = ["protocol1", "protocol2"]
+    peer_data.set_protocols(protocols)
+
+    peer_data.clear_protocol_data()
+    assert peer_data.get_protocols() == []
+
+
 # Test case when supports protocols:
 def test_supports_protocols():
     peer_data = PeerData()
@@ -82,16 +92,6 @@ def test_first_supported_protocol_none():
     first = peer_data.first_supported_protocol(input_protocols)
 
     assert first == "None supported"
-
-
-# Test case for clearing protocol data
-def test_clear_protocol_data():
-    peer_data = PeerData()
-    peer_data.set_protocols(["proto1", "proto2"])
-
-    peer_data.clear_protocol_data()
-
-    assert peer_data.get_protocols() == []
 
 
 # Test case when adding addresses
