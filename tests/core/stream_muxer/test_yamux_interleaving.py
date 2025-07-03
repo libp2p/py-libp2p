@@ -16,7 +16,6 @@ from libp2p.peer.id import (
 from libp2p.security.insecure.transport import (
     InsecureTransport,
 )
-from libp2p.stream_muxer.exceptions import MuxedStreamEOF
 from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
@@ -125,8 +124,8 @@ async def yamux_pair(secure_conn_pair, peer_id):
 @pytest.mark.trio
 async def test_yamux_race_condition_without_locks(yamux_pair):
     """
-    Test for race-around/interleaving in Yamux streams when read/write
-    locks are disabled.
+    Test for race-around/interleaving in Yamux streams,when reading in
+    segments of data.
     This launches concurrent writers/readers on both sides of a stream.
     If there is no proper locking, the received data may be interleaved
     or corrupted.
@@ -140,8 +139,8 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
     client_yamux, server_yamux = yamux_pair
     client_stream: YamuxStream = await client_yamux.open_stream()
     server_stream: YamuxStream = await server_yamux.accept_stream()
-    MSG_COUNT = 1
-    MSG_SIZE = 512 * 1024
+    MSG_COUNT = 10
+    MSG_SIZE = 256 * 1024  # At max,only DEFAULT_WINDOW_SIZE bytes can be read
     client_msgs = [
         f"CLIENT-MSG-{i:03d}-".encode().ljust(MSG_SIZE, b"C") for i in range(MSG_COUNT)
     ]
@@ -161,17 +160,11 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
 
     async def reader(stream, received, name):
         """Read messages and store them for verification."""
-        try:
-            data = await stream.read()
-            if data:
-                received.append(data)
-        except MuxedStreamEOF:
-            pass
-        # for i in range(MSG_COUNT):
-        #     data = await stream.read()
-        #     received.append(data)
-        #     if i % 3 == 0:
-        #         await trio.sleep(0.001)
+        for i in range(MSG_COUNT):
+            data = await stream.read(MSG_SIZE)
+            received.append(data)
+            if i % 3 == 0:
+                await trio.sleep(0.001)
 
     # Running all operations concurrently
     async with trio.open_nursery() as nursery:
@@ -180,12 +173,12 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
         nursery.start_soon(reader, client_stream, client_received, "client")
         nursery.start_soon(reader, server_stream, server_received, "server")
 
-    # assert len(client_received) == MSG_COUNT, (
-    #     f"Client received {len(client_received)} messages, expected {MSG_COUNT}"
-    # )
-    # assert len(server_received) == MSG_COUNT, (
-    #     f"Server received {len(server_received)} messages, expected {MSG_COUNT}"
-    # )
+    assert len(client_received) == MSG_COUNT, (
+        f"Client received {len(client_received)} messages, expected {MSG_COUNT}"
+    )
+    assert len(server_received) == MSG_COUNT, (
+        f"Server received {len(server_received)} messages, expected {MSG_COUNT}"
+    )
     assert client_received == server_msgs, (
         "Client did not receive server messages in order or intact!"
     )
@@ -193,8 +186,6 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
         "Server did not receive client messages in order or intact!"
     )
     for i, msg in enumerate(client_received):
-        # logging.debug(f"datatype of msg: {type(msg)}, length: {len(msg)}")
-        # logging.debug(f"datatype of msg: {type(b"SERVER-MSG-")}")
         assert len(msg) == MSG_SIZE, (
             f"Client message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
         )
