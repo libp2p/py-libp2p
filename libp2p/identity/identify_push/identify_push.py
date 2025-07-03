@@ -178,6 +178,7 @@ async def push_identify_to_peers(
     observed_multiaddr: Multiaddr | None = None,
     counter: dict[str, int] | None = None,
     lock: trio.Lock | None = None,
+    limit: int = CONCURRENCY_LIMIT,
 ) -> int:  # <-- return the max concurrency
     """
     Push an identify message to multiple peers in parallel.
