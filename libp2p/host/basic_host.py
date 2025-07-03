@@ -16,6 +16,7 @@ import multiaddr
 
 from libp2p.abc import (
     IHost,
+    IMultiselectMuxer,
     INetConn,
     INetStream,
     INetworkService,
@@ -130,7 +131,7 @@ class BasicHost(IHost):
         """
         return self.peerstore
 
-    def get_mux(self) -> Multiselect:
+    def get_mux(self) -> IMultiselectMuxer:
         """
         :return: mux instance of host
         """
