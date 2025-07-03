@@ -1,0 +1,1 @@
+Fixed security vulnerabilities in Circuit Relay v2 by implementing proper voucher verification and enforcing data transfer limits, preventing unauthorized relay usage and resource exhaustion attacks.
