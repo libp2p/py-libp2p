@@ -176,10 +176,7 @@ async def push_identify_to_peers(
     host: IHost,
     peer_ids: set[ID] | None = None,
     observed_multiaddr: Multiaddr | None = None,
-    counter: dict[str, int] | None = None,
-    lock: trio.Lock | None = None,
-    limit: int = CONCURRENCY_LIMIT,
-) -> int:  # <-- return the max concurrency
+) -> None:
     """
     Push an identify message to multiple peers in parallel.
 
@@ -193,6 +190,4 @@ async def push_identify_to_peers(
     # limiting concurrent connections to 10
     async with trio.open_nursery() as nursery:
         for peer_id in peer_ids:
-            nursery.start_soon(limited_push, peer_id)
-
-    return counter["max"] if counter else 0
+            nursery.start_soon(push_identify_to_peer, host, peer_id, observed_multiaddr)
