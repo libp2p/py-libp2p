@@ -2,6 +2,7 @@ from collections import (
     defaultdict,
 )
 from collections.abc import (
+    AsyncIterable,
     Sequence,
 )
 from typing import (
@@ -11,6 +12,8 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
+import trio
+from trio import MemoryReceiveChannel, MemorySendChannel
 
 from libp2p.abc import (
     IPeerStore,
@@ -40,6 +43,7 @@ class PeerStore(IPeerStore):
 
     def __init__(self) -> None:
         self.peer_data_map = defaultdict(PeerData)
+        self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -178,6 +182,13 @@ class PeerStore(IPeerStore):
         peer_data.set_ttl(ttl)
         peer_data.update_last_identified()
 
+        if peer_id in self.addr_update_channels:
+            for addr in addrs:
+                try:
+                    self.addr_update_channels[peer_id].send_nowait(addr)
+                except trio.WouldBlock:
+                    pass  # Or consider logging / dropping / replacing stream
+
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
         :param peer_id: peer ID to get addrs for
@@ -216,6 +227,25 @@ class PeerStore(IPeerStore):
                 else:
                     peer_data.clear_addrs()
         return output
+
+    async def addr_stream(self, peer_id: ID) -> AsyncIterable[Multiaddr]:
+        """
+        Returns an async stream of newly added addresses for the given peer.
+
+        This function allows consumers to subscribe to address updates for a peer
+        and receive each new address as it is added via `add_addr` or `add_addrs`.
+
+        :param peer_id: The ID of the peer to monitor address updates for.
+        :return: An async iterator yielding Multiaddr instances as they are added.
+        """
+        send: MemorySendChannel[Multiaddr]
+        receive: MemoryReceiveChannel[Multiaddr]
+
+        send, receive = trio.open_memory_channel(0)
+        self.addr_update_channels[peer_id] = send
+
+        async for addr in receive:
+            yield addr
 
     # -------KEY-BOOK---------
 
