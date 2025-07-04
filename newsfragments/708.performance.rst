@@ -1,2 +1,1 @@
-Limit concurrency in `push_identify_to_peers` to prevent resource exhaustion under high peer counts.
-This makes peer communication more stable and efficient, especially at scale.
+Added extra tests for identify push concurrency cap under high peer load
