@@ -99,9 +99,6 @@ async def test_addr_stream_yields_new_addrs():
     addr1 = Multiaddr("/ip4/127.0.0.1/tcp/4001")
     addr2 = Multiaddr("/ip4/127.0.0.1/tcp/4002")
 
-    # 🔧 Pre-initialize peer in peer_data_map
-    # store.add_addr(peer_id, Multiaddr("/ip4/127.0.0.1/tcp/0"), ttl=1)
-
     collected = []
 
     async def consume_addrs():
