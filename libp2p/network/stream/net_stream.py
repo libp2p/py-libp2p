@@ -1,7 +1,6 @@
 from enum import (
     Enum,
 )
-import inspect
 
 import trio
 
@@ -165,25 +164,20 @@ class NetStream(INetStream):
             data = await self.muxed_stream.read(n)
             return data
         except MuxedStreamEOF as error:
-            print("NETSTREAM: READ ERROR, RECEIVED EOF")
             async with self._state_lock:
                 if self.__stream_state == StreamState.CLOSE_WRITE:
                     self.__stream_state = StreamState.CLOSE_BOTH
-                    print("NETSTREAM: READ ERROR, REMOVING STREAM")
                     await self._remove()
                 elif self.__stream_state == StreamState.OPEN:
-                    print("NETSTREAM: READ ERROR, NEW STATE -> CLOSE_READ")
                     self.__stream_state = StreamState.CLOSE_READ
             raise StreamEOF() from error
         except (MuxedStreamReset, QUICStreamClosedError, QUICStreamResetError) as error:
-            print("NETSTREAM: READ ERROR, MUXED STREAM RESET")
             async with self._state_lock:
                 if self.__stream_state in [
                     StreamState.OPEN,
                     StreamState.CLOSE_READ,
                     StreamState.CLOSE_WRITE,
                 ]:
-                    print("NETSTREAM: READ ERROR, NEW STATE -> RESET")
                     self.__stream_state = StreamState.RESET
                     await self._remove()
             raise StreamReset() from error
@@ -222,8 +216,6 @@ class NetStream(INetStream):
 
     async def close(self) -> None:
         """Close stream for writing."""
-        print("NETSTREAM: CLOSING STREAM, CURRENT STATE: ", self.__stream_state)
-        print("CALLED BY: ", inspect.stack()[1].function)
         async with self._state_lock:
             if self.__stream_state in [
                 StreamState.CLOSE_BOTH,
@@ -243,7 +235,6 @@ class NetStream(INetStream):
 
     async def reset(self) -> None:
         """Reset stream, closing both ends."""
-        print("NETSTREAM: RESETING STREAM")
         async with self._state_lock:
             if self.__stream_state == StreamState.RESET:
                 return

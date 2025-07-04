@@ -11,7 +11,7 @@ Fixed to properly separate client and server modes - clients don't start listene
 import argparse
 import logging
 
-import multiaddr
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
@@ -33,13 +33,13 @@ async def _echo_stream_handler(stream: INetStream) -> None:
         print(f"Echo handler error: {e}")
         try:
             await stream.close()
-        except:
+        except:  # noqa: E722
             pass
 
 
 async def run_server(port: int, seed: int | None = None) -> None:
     """Run echo server with QUIC transport."""
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic")
+    listen_addr = Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic")
 
     if seed:
         import random
@@ -116,7 +116,7 @@ async def run_client(destination: str, seed: int | None = None) -> None:
     async with host.run(listen_addrs=[]):  # Empty listen_addrs for client
         print(f"I am {host.get_id().to_string()}")
 
-        maddr = multiaddr.Multiaddr(destination)
+        maddr = Multiaddr(destination)
         info = info_from_p2p_addr(maddr)
 
         # Connect to server

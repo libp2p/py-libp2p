@@ -299,7 +299,9 @@ class BasicHost(IHost):
             )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
-            print("failed to accept a stream from peer %s, error=%s", peer_id, error)
+            logger.debug(
+                "failed to accept a stream from peer %s, error=%s", peer_id, error
+            )
             await net_stream.reset()
             return
         if protocol is None:

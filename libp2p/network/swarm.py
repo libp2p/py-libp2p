@@ -59,7 +59,6 @@ from .exceptions import (
 )
 
 logging.basicConfig(
-    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -182,7 +181,13 @@ class Swarm(Service, INetworkService):
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
         Try to create a connection to peer_id with addr.
+        :param addr: the address we want to connect with
+        :param peer_id: the peer we want to connect to
+        :raises SwarmException: raised when an error occurs
+        :return: network connection
         """
+        # Dial peer (connection to peer does not yet exist)
+        # Transport dials peer (gets back a raw conn)
         try:
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
@@ -191,9 +196,19 @@ class Swarm(Service, INetworkService):
                 f"fail to open connection to peer {peer_id}"
             ) from error
 
+        if isinstance(self.transport, QUICTransport) and isinstance(
+            raw_conn, IMuxedConn
+        ):
+            logger.info(
+                "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
+            )
+            swarm_conn = await self.add_conn(raw_conn)
+            return swarm_conn
+
         logger.debug("dialed peer %s over base transport", peer_id)
 
-        # Standard TCP flow - security then mux upgrade
+        # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
+        # the conn and then mux the conn
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
         except SecurityUpgradeFailure as error:
@@ -227,6 +242,9 @@ class Swarm(Service, INetworkService):
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
+        dd = "Yes" if swarm_conn is None else "No"
+
+        print(f"Is swarm conn None: {dd}")
 
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
@@ -249,7 +267,7 @@ class Swarm(Service, INetworkService):
               - Map multiaddr to listener
         """
         # We need to wait until `self.listener_nursery` is created.
-        logger.debug("SWARM LISTEN CALLED")
+        logger.debug("Starting to listen")
         await self.event_listener_nursery_created.wait()
 
         success_count = 0

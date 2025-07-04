@@ -282,7 +282,6 @@ def new_host(
     :param transport_opt: optional dictionary of properties of transport
     :return: return a host instance
     """
-    print("INIT")
     swarm = new_swarm(
         key_pair=key_pair,
         muxer_opt=muxer_opt,
