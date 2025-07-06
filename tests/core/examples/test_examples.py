@@ -209,18 +209,7 @@ async def ping_demo(host_a, host_b):
 
 
 async def pubsub_demo(host_a, host_b):
-    gossipsub_a = GossipSub(
-        [GOSSIPSUB_PROTOCOL_ID],
-        3,
-        2,
-        4,
-    )
-    gossipsub_b = GossipSub(
-        [GOSSIPSUB_PROTOCOL_ID],
-        3,
-        2,
-        4,
-    )
+    # Initialize GossipSub with appropriate parameters
     gossipsub_a = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, None, 1, 1)
     gossipsub_b = GossipSub([GOSSIPSUB_PROTOCOL_ID], 3, 2, 4, None, 1, 1)
     pubsub_a = Pubsub(host_a, gossipsub_a)

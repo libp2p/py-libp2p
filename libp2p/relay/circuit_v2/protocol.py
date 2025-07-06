@@ -530,7 +530,7 @@ class CircuitV2Protocol(Service):
             try:
                 # Try to get peer addresses from the host's peerstore
                 # Most host implementations have a peerstore attribute
-                peer_addrs = self.host.peerstore.addrs(peer_id)  # type: ignore
+                peer_addrs = self.host.get_peerstore().addrs(peer_id)
                 # Convert addresses to bytes for the protocol buffer
                 addrs = [addr.to_bytes() for addr in peer_addrs]
                 logger.debug(
@@ -611,6 +611,30 @@ class CircuitV2Protocol(Service):
         peer_id = ID(msg.peer)
         dst_stream: INetStream | None = None
         logger.debug("Handling connect request to peer %s", peer_id)
+
+        # Get the remote peer ID to check if it's a relay
+        try:
+            # Cast to extended interface with get_remote_peer_id
+            stream_with_peer_id = cast(INetStreamWithExtras, stream)
+            remote_peer_id = stream_with_peer_id.get_remote_peer_id()
+
+            # Check if the remote peer is a relay - prevent multi-hop relaying
+            # This is similar to the Go implementation which prevents chaining relays
+            protocols = self.host.get_peerstore().get_protocols(remote_peer_id)
+            if str(PROTOCOL_ID) in protocols:
+                logger.warning(
+                    "Rejecting relay connection from another relay %s", remote_peer_id
+                )
+                await self._send_status(
+                    stream,
+                    StatusCode.PERMISSION_DENIED,
+                    "Relay connections from other relays are not allowed",
+                )
+                await stream.reset()
+                return
+        except Exception as e:
+            # If we can't determine if it's a relay, proceed with caution
+            logger.debug("Could not check if peer is a relay: %s", str(e))
 
         # Verify reservation if provided
         if msg.HasField("reservation"):
