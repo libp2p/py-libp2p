@@ -284,8 +284,6 @@ class RelayDiscovery(Service):
                 return None
 
             mux = self.host.get_mux()
-            if not hasattr(mux, "protocols"):
-                return None
 
             peer_protocols = set()
             # Get protocols from mux with proper type safety
