@@ -32,6 +32,9 @@ from libp2p.custom_types import (
     TProtocol,
     TSecurityOptions,
 )
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -81,6 +84,8 @@ DEFAULT_MUXER = "YAMUX"
 # Multiplexer options
 MUXER_YAMUX = "YAMUX"
 MUXER_MPLEX = "MPLEX"
+DEFAULT_NEGOTIATE_TIMEOUT = 5
+
 
 
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
@@ -200,7 +205,9 @@ def new_swarm(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair),
+        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
+            key_pair, peerstore=peerstore_opt
+        ),
     }
 
     # Use given muxer preference if provided, otherwise use global default
@@ -243,6 +250,8 @@ def new_host(
     disc_opt: IPeerRouting | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    enable_mDNS: bool = False,
+    negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -254,6 +263,7 @@ def new_host(
     :param disc_opt: optional discovery
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
+    :param enable_mDNS: whether to enable mDNS discovery
     :return: return a host instance
     """
     swarm = new_swarm(
@@ -266,8 +276,7 @@ def new_host(
     )
 
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt)
-    return BasicHost(swarm)
-
+        return RoutedHost(swarm, disc_opt, enable_mDNS)
+    return BasicHost(network=swarm,enable_mDNS=enable_mDNS , negotitate_timeout=negotiate_timeout)
 
 __version__ = __version("libp2p")

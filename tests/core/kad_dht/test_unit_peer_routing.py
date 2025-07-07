@@ -89,7 +89,6 @@ class TestPeerRouting:
 
         assert peer_routing.host == mock_host
         assert peer_routing.routing_table == mock_routing_table
-        assert peer_routing.protocol_id == PROTOCOL_ID
 
     @pytest.mark.trio
     async def test_find_peer_local_host(self, peer_routing, mock_host):

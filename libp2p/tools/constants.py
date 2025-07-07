@@ -26,6 +26,7 @@ LISTEN_MADDR = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID = gossipsub.PROTOCOL_ID
+GOSSIPSUB_PROTOCOL_ID_V1 = gossipsub.PROTOCOL_ID_V11
 
 
 class GossipsubParams(NamedTuple):
@@ -40,6 +41,10 @@ class GossipsubParams(NamedTuple):
     heartbeat_interval: float = 0.5
     direct_connect_initial_delay: float = 0.1
     direct_connect_interval: int = 300
+    do_px: bool = False
+    px_peers_count: int = 16
+    prune_back_off: int = 60
+    unsubscribe_back_off: int = 10
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()
