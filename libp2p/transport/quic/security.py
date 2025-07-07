@@ -492,6 +492,7 @@ class QUICTLSSecurityConfig:
     # TLS verification settings
     verify_mode: ssl.VerifyMode = ssl.CERT_NONE
     check_hostname: bool = False
+    request_client_certificate: bool = False
 
     # Optional peer ID for validation
     peer_id: ID | None = None
@@ -657,8 +658,9 @@ def create_server_tls_config(
         peer_id=peer_id,
         is_client_config=False,
         config_name="server",
-        verify_mode=ssl.CERT_NONE,  # Server doesn't verify client certs in libp2p
+        verify_mode=ssl.CERT_NONE,
         check_hostname=False,
+        request_client_certificate=True,
         **kwargs,
     )
 
@@ -688,7 +690,7 @@ def create_client_tls_config(
         peer_id=peer_id,
         is_client_config=True,
         config_name="client",
-        verify_mode=ssl.CERT_NONE,  # Client doesn't verify server certs in libp2p
+        verify_mode=ssl.CERT_NONE,
         check_hostname=False,
         **kwargs,
     )

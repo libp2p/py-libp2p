@@ -222,9 +222,6 @@ class QUICTransport(ITransport):
             config.private_key = tls_config.private_key
             config.certificate_chain = tls_config.certificate_chain
             config.alpn_protocols = tls_config.alpn_protocols
-
-            config.verify_mode = tls_config.verify_mode
-
             config.verify_mode = ssl.CERT_NONE
 
             print("Successfully applied TLS configuration to QUIC config")
@@ -297,9 +294,6 @@ class QUICTransport(ITransport):
 
             await connection.connect(self._background_nursery)
 
-            print("Starting to verify peer identity")
-
-            print("Identity verification done")
             # Store connection for management
             conn_id = f"{host}:{port}"
             self._connections[conn_id] = connection

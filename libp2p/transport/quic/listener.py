@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logging.basicConfig(
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -724,7 +725,8 @@ class QUICListener(IListener):
 
             if self._security_manager:
                 try:
-                    await connection._verify_peer_identity_with_security()
+                    peer_id = await connection._verify_peer_identity_with_security()
+                    connection.peer_id = peer_id
                     logger.info(
                         f"Security verification successful for {dest_cid.hex()}"
                     )

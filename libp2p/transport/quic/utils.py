@@ -353,6 +353,8 @@ def create_server_config_from_base(
                     server_config.certificate_chain = server_tls_config.certificate_chain
                 if server_tls_config.alpn_protocols:
                     server_config.alpn_protocols = server_tls_config.alpn_protocols
+                print("Setting request client certificate to True")
+                server_tls_config.request_client_certificate = True
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")
