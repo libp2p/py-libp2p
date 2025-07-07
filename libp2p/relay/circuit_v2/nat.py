@@ -6,10 +6,6 @@ This module provides utilities for NAT traversal and reachability detection.
 
 import ipaddress
 import logging
-from typing import (
-    Optional,
-    Union,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -242,7 +238,7 @@ class ReachabilityChecker:
 
         # Check if the peer is connected
         network = self.host.get_network()
-        connections: Optional[Union[INetConn, list[INetConn]]] = network.connections.get(peer_id)
+        connections: INetConn | list[INetConn] | None = network.connections.get(peer_id)
         if not connections:
             # Not connected, can't determine reachability
             return False
