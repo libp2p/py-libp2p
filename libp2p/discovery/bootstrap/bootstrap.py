@@ -32,7 +32,7 @@ class BootstrapDiscovery:
             try:
                 self._process_bootstrap_addr(addr_str)
             except Exception as e:
-                logger.warning(f"Failed to process bootstrap address {addr_str}: {e}")
+                logger.debug(f"Failed to process bootstrap address {addr_str}: {e}")
 
     def stop(self) -> None:
         """Clean up bootstrap discovery resources."""
@@ -41,11 +41,18 @@ class BootstrapDiscovery:
 
     def _process_bootstrap_addr(self, addr_str: str) -> None:
         """Convert string address to PeerInfo and add to peerstore."""
-        # Convert string to Multiaddr
-        multiaddr = Multiaddr(addr_str)
+        try:
+            multiaddr = Multiaddr(addr_str)
+        except Exception as e:
+            logger.debug(f"Invalid multiaddr format '{addr_str}': {e}")
+            return
 
         # Extract peer info from multiaddr
-        peer_info = info_from_p2p_addr(multiaddr)
+        try:
+            peer_info = info_from_p2p_addr(multiaddr)
+        except Exception as e:
+            logger.debug(f"Failed to extract peer info from '{addr_str}': {e}")
+            return
 
         # Skip if it's our own peer
         if peer_info.peer_id == self.swarm.get_peer_id():
@@ -65,5 +72,3 @@ class BootstrapDiscovery:
 
         # Emit peer discovery event
         peerDiscovery.emit_peer_discovered(peer_info)
-
-        logger.info(f"Discovered bootstrap peer: {peer_info.peer_id}")
