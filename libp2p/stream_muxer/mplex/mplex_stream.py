@@ -35,26 +35,26 @@ if TYPE_CHECKING:
 class ReadWriteLock:
     def __init__(self) -> None:
         self._readers = 0
-        self._lock = trio.Lock()  # Protects _readers
-        self._write_lock = trio.Lock()
+        self._readers_lock = trio.Lock()  # Protects readers count
+        self._writer_lock = trio.Semaphore(1)  # Acts like a task-transferable lock
 
     async def acquire_read(self) -> None:
-        async with self._lock:
+        async with self._readers_lock:
             self._readers += 1
             if self._readers == 1:
-                await self._write_lock.acquire()
+                await self._writer_lock.acquire()
 
     async def release_read(self) -> None:
-        async with self._lock:
+        async with self._readers_lock:
             self._readers -= 1
             if self._readers == 0:
-                self._write_lock.release()
+                self._writer_lock.release()
 
     async def acquire_write(self) -> None:
-        await self._write_lock.acquire()
+        await self._writer_lock.acquire()
 
     def release_write(self) -> None:
-        self._write_lock.release()
+        self._writer_lock.release()
 
 
 class MplexStream(IMuxedStream):
