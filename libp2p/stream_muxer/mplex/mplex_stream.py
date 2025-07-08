@@ -33,27 +33,27 @@ if TYPE_CHECKING:
 
 
 class ReadWriteLock:
-    def __init__(self):
+    def __init__(self) -> None:
         self._readers = 0
         self._lock = trio.Lock()  # Protects _readers
         self._write_lock = trio.Lock()
 
-    async def acquire_read(self):
+    async def acquire_read(self) -> None:
         async with self._lock:
             self._readers += 1
             if self._readers == 1:
                 await self._write_lock.acquire()
 
-    async def release_read(self):
+    async def release_read(self) -> None:
         async with self._lock:
             self._readers -= 1
             if self._readers == 0:
                 self._write_lock.release()
 
-    async def acquire_write(self):
+    async def acquire_write(self) -> None:
         await self._write_lock.acquire()
 
-    def release_write(self):
+    def release_write(self) -> None:
         self._write_lock.release()
 
 
@@ -152,8 +152,8 @@ class MplexStream(IMuxedStream):
                 return await self._read_until_eof()
             if len(self._buf) == 0:
                 data: bytes
-                # Peek whether there is data available. If yes, we just read until there is
-                # no data, then return.
+                # Peek whether there is data available. If yes, we just read until
+                # there is no data, then return.
                 try:
                     data = self.incoming_data_channel.receive_nowait()
                     self._buf.extend(data)
@@ -185,6 +185,7 @@ class MplexStream(IMuxedStream):
             return bytes(payload)
         finally:
             await self.rw_lock.release_read()
+            return b""
 
     async def write(self, data: bytes) -> None:
         """
