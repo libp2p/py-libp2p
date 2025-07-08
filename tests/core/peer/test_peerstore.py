@@ -2,6 +2,7 @@ import time
 
 import pytest
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import (
@@ -89,3 +90,33 @@ def test_peers():
     store.add_addr(ID(b"peer3"), Multiaddr("/ip4/127.0.0.1/tcp/4001"), 10)
 
     assert set(store.peer_ids()) == {ID(b"peer1"), ID(b"peer2"), ID(b"peer3")}
+
+
+@pytest.mark.trio
+async def test_addr_stream_yields_new_addrs():
+    store = PeerStore()
+    peer_id = ID(b"peer1")
+    addr1 = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    addr2 = Multiaddr("/ip4/127.0.0.1/tcp/4002")
+
+    collected = []
+
+    async def consume_addrs():
+        async for addr in store.addr_stream(peer_id):
+            collected.append(addr)
+            if len(collected) == 2:
+                break
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(consume_addrs)
+        await trio.sleep(2)  # Give time for the stream to start
+
+        store.add_addr(peer_id, addr1, ttl=10)
+        await trio.sleep(0.2)
+        store.add_addr(peer_id, addr2, ttl=10)
+        await trio.sleep(0.2)
+
+        # After collecting expected addresses, cancel the stream
+        nursery.cancel_scope.cancel()
+
+    assert collected == [addr1, addr2]
