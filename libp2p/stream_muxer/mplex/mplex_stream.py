@@ -140,6 +140,7 @@ class MplexStream(IMuxedStream):
         :return: bytes actually read
         """
         await self.rw_lock.acquire_read()
+        payload: bytes = b""
         try:
             if n is not None and n < 0:
                 raise ValueError(
@@ -180,12 +181,12 @@ class MplexStream(IMuxedStream):
                             "This should never happen."
                         ) from error
             self._buf.extend(self._read_return_when_blocked())
-            payload = self._buf[:n]
-            self._buf = self._buf[len(payload) :]
-            return bytes(payload)
+            chunk = self._buf[:n]
+            self._buf = self._buf[len(chunk) :]
+            payload = bytes(chunk)
         finally:
             await self.rw_lock.release_read()
-            return b""
+        return payload
 
     async def write(self, data: bytes) -> None:
         """
