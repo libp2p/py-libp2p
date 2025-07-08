@@ -24,16 +24,22 @@ def make_pubsub_msg(
     )
 
 
-# TODO: Implement sparse connect
 async def dense_connect(hosts: Sequence[IHost]) -> None:
     await connect_some(hosts, 10)
 
 
-# FIXME: `degree` is not used at all
 async def connect_some(hosts: Sequence[IHost], degree: int) -> None:
+    """
+    Connect each host to up to 'degree' number of other hosts.
+    Creates a sparse network topology where each node has limited connections.
+    """
     for i, host in enumerate(hosts):
-        for host2 in hosts[i + 1 :]:
-            await connect(host, host2)
+        connections_made = 0
+        for j in range(i + 1, len(hosts)):
+            if connections_made >= degree:
+                break
+            await connect(host, hosts[j])
+            connections_made += 1
 
 
 async def one_to_all_connect(hosts: Sequence[IHost], central_host_index: int) -> None:

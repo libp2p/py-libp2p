@@ -1,4 +1,7 @@
 import logging
+from unittest.mock import (
+    patch,
+)
 
 import pytest
 import multiaddr
@@ -17,6 +20,7 @@ from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
 from libp2p.identity.identify_push.identify_push import (
+    CONCURRENCY_LIMIT,
     ID_PUSH,
     _update_peerstore_from_identify,
     identify_push_handler_for,
@@ -28,6 +32,11 @@ from libp2p.peer.peerinfo import (
 )
 from tests.utils.factories import (
     host_pair_factory,
+)
+from tests.utils.utils import (
+    create_mock_connections,
+    run_host_forever,
+    wait_until_listening,
 )
 
 logger = logging.getLogger("libp2p.identity.identify-push-test")
@@ -175,6 +184,7 @@ async def test_identify_push_to_peers(security_protocol):
         host_c = new_host(key_pair=key_pair_c)
 
         # Set up the identify/push handlers
+        host_a.set_stream_handler(ID_PUSH, identify_push_handler_for(host_a))
         host_b.set_stream_handler(ID_PUSH, identify_push_handler_for(host_b))
         host_c.set_stream_handler(ID_PUSH, identify_push_handler_for(host_c))
 
@@ -203,6 +213,20 @@ async def test_identify_push_to_peers(security_protocol):
 
             # Check that the peer is in the peerstore
             assert peer_id_a in peerstore_c.peer_ids()
+
+            # Test for push_identify to only connected peers and not all peers
+            # Disconnect a from c.
+            await host_c.disconnect(host_a.get_id())
+
+            await push_identify_to_peers(host_c)
+
+            # Wait a bit for the push to complete
+            await trio.sleep(0.1)
+
+            # Check that host_a's peerstore has not been updated with host_c's info
+            assert host_c.get_id() not in host_a.get_peerstore().peer_ids()
+            # Check that host_b's peerstore has been updated with host_c's info
+            assert host_c.get_id() in host_b.get_peerstore().peer_ids()
 
 
 @pytest.mark.trio
@@ -412,3 +436,160 @@ async def test_partial_update_peerstore_from_identify(security_protocol):
         host_a_public_key = host_a.get_public_key().serialize()
         peerstore_public_key = peerstore.pubkey(peer_id).serialize()
         assert host_a_public_key == peerstore_public_key
+
+
+@pytest.mark.trio
+async def test_push_identify_to_peers_respects_concurrency_limit():
+    """
+    Test bounded concurrency for the identify/push protocol to prevent
+    network congestion.
+
+    This test verifies:
+    1. The number of concurrent tasks executing the identify push is always
+       less than or equal to CONCURRENCY_LIMIT.
+    2. An error is raised if concurrency exceeds the defined limit.
+
+    It mocks `push_identify_to_peer` to simulate delay using sleep,
+    allowing the test to measure and assert actual concurrency behavior.
+    """
+    state = {
+        "concurrency_counter": 0,
+        "max_observed": 0,
+    }
+    lock = trio.Lock()
+
+    async def mock_push_identify_to_peer(
+        host, peer_id, observed_multiaddr=None, limit=trio.Semaphore(CONCURRENCY_LIMIT)
+    ) -> bool:
+        """
+        Mock function to test concurrency by simulating an identify message.
+
+        This function patches push_identify_to_peer for testing purpose
+
+        Returns
+        -------
+        bool
+            True if the push was successful, False otherwise.
+
+        """
+        async with limit:
+            async with lock:
+                state["concurrency_counter"] += 1
+                if state["concurrency_counter"] > CONCURRENCY_LIMIT:
+                    raise RuntimeError(
+                        f"Concurrency limit exceeded: {state['concurrency_counter']}"
+                    )
+                state["max_observed"] = max(
+                    state["max_observed"], state["concurrency_counter"]
+                )
+
+            logger.debug("Successfully pushed identify to peer %s", peer_id)
+            await trio.sleep(0.05)
+
+            async with lock:
+                state["concurrency_counter"] -= 1
+
+            return True
+
+    # Create a mock host.
+    key_pair_host = create_new_key_pair()
+    host = new_host(key_pair=key_pair_host)
+
+    # Create a mock network and add mock connections to the host
+    host.get_network().connections = create_mock_connections()
+    with patch(
+        "libp2p.identity.identify_push.identify_push.push_identify_to_peer",
+        new=mock_push_identify_to_peer,
+    ):
+        await push_identify_to_peers(host)
+    assert state["max_observed"] <= CONCURRENCY_LIMIT, (
+        f"Max concurrency observed: {state['max_observed']}"
+    )
+
+
+@pytest.mark.trio
+async def test_all_peers_receive_identify_push_with_semaphore(security_protocol):
+    dummy_peers = []
+
+    async with host_pair_factory(security_protocol=security_protocol) as (host_a, _):
+        # Create dummy peers
+        for _ in range(50):
+            key_pair = create_new_key_pair()
+            dummy_host = new_host(key_pair=key_pair)
+            dummy_host.set_stream_handler(
+                ID_PUSH, identify_push_handler_for(dummy_host)
+            )
+            listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+            dummy_peers.append((dummy_host, listen_addr))
+
+        async with trio.open_nursery() as nursery:
+            # Start all dummy hosts
+            for host, listen_addr in dummy_peers:
+                nursery.start_soon(run_host_forever, host, listen_addr)
+
+            # Wait for all hosts to finish setting up listeners
+            for host, _ in dummy_peers:
+                await wait_until_listening(host)
+
+            # Now connect host_a → dummy peers
+            for host, _ in dummy_peers:
+                await host_a.connect(info_from_p2p_addr(host.get_addrs()[0]))
+
+            await push_identify_to_peers(
+                host_a,
+            )
+
+            await trio.sleep(0.5)
+
+            peer_id_a = host_a.get_id()
+            for host, _ in dummy_peers:
+                dummy_peerstore = host.get_peerstore()
+                assert peer_id_a in dummy_peerstore.peer_ids()
+
+            nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_load(
+    security_protocol,
+):
+    dummy_peers = []
+
+    async with host_pair_factory(security_protocol=security_protocol) as (host_a, _):
+        # Create dummy peers
+        # Breaking with more than 500 peers
+        # Trio have a async tasks limit of 1000
+        for _ in range(499):
+            key_pair = create_new_key_pair()
+            dummy_host = new_host(key_pair=key_pair)
+            dummy_host.set_stream_handler(
+                ID_PUSH, identify_push_handler_for(dummy_host)
+            )
+            listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+            dummy_peers.append((dummy_host, listen_addr))
+
+        async with trio.open_nursery() as nursery:
+            # Start all dummy hosts
+            for host, listen_addr in dummy_peers:
+                nursery.start_soon(run_host_forever, host, listen_addr)
+
+            # Wait for all hosts to finish setting up listeners
+            for host, _ in dummy_peers:
+                await wait_until_listening(host)
+
+            # Now connect host_a → dummy peers
+            for host, _ in dummy_peers:
+                await host_a.connect(info_from_p2p_addr(host.get_addrs()[0]))
+
+            await push_identify_to_peers(
+                host_a,
+            )
+
+            await trio.sleep(0.5)
+
+            peer_id_a = host_a.get_id()
+            for host, _ in dummy_peers:
+                dummy_peerstore = host.get_peerstore()
+                assert peer_id_a in dummy_peerstore.peer_ids()
+
+            nursery.cancel_scope.cancel()
