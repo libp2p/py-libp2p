@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         Mplex,
     )
 
+
 class ReadWriteLock:
     def __init__(self):
         self._readers = 0
@@ -54,6 +55,7 @@ class ReadWriteLock:
 
     def release_write(self):
         self._write_lock.release()
+
 
 class MplexStream(IMuxedStream):
     """
