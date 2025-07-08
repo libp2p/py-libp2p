@@ -634,6 +634,8 @@ async def test_flood_publish():
             assert msg.data == msg_content, (
                 f"node did not receive expected message: {msg.data}"
             )
+
+
 async def test_connect_some_with_fewer_hosts_than_degree():
     """Test connect_some when there are fewer hosts than degree."""
     # Create 3 hosts with degree=5
