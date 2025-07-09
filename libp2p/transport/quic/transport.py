@@ -33,6 +33,8 @@ from libp2p.peer.id import (
 )
 from libp2p.transport.quic.security import QUICTLSSecurityConfig
 from libp2p.transport.quic.utils import (
+    create_client_config_from_base,
+    create_server_config_from_base,
     get_alpn_protocols,
     is_quic_multiaddr,
     multiaddr_to_quic_version,
@@ -162,12 +164,16 @@ class QUICTransport(ITransport):
             self._apply_tls_configuration(base_client_config, client_tls_config)
 
             # QUIC v1 (RFC 9000) configurations
-            quic_v1_server_config = copy.copy(base_server_config)
+            quic_v1_server_config = create_server_config_from_base(
+                base_server_config, self._security_manager, self._config
+            )
             quic_v1_server_config.supported_versions = [
                 quic_version_to_wire_format(QUIC_V1_PROTOCOL)
             ]
 
-            quic_v1_client_config = copy.copy(base_client_config)
+            quic_v1_client_config = create_client_config_from_base(
+                base_client_config, self._security_manager, self._config
+            )
             quic_v1_client_config.supported_versions = [
                 quic_version_to_wire_format(QUIC_V1_PROTOCOL)
             ]
@@ -269,9 +275,21 @@ class QUICTransport(ITransport):
 
             config.is_client = True
             config.quic_logger = QuicLogger()
-            print(f"Dialing QUIC connection to {host}:{port} (version: {quic_version})")
 
-            print("Start QUIC Connection")
+            # Ensure client certificate is properly set for mutual authentication
+            if not config.certificate or not config.private_key:
+                logger.warning(
+                    "Client config missing certificate - applying TLS config"
+                )
+                client_tls_config = self._security_manager.create_client_config()
+                self._apply_tls_configuration(config, client_tls_config)
+
+            # Debug log to verify certificate is present
+            logger.info(
+                f"Dialing QUIC connection to {host}:{port} (version: {{quic_version}})"
+            )
+
+            logger.debug("Starting QUIC Connection")
             # Create QUIC connection using aioquic's sans-IO core
             native_quic_connection = NativeQUICConnection(configuration=config)
 

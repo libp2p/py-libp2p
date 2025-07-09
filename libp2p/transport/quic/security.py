@@ -136,21 +136,23 @@ class LibP2PExtensionHandler:
         Parse the libp2p Public Key Extension with enhanced debugging.
         """
         try:
-            print(f"🔍 Extension type: {type(extension)}")
-            print(f"🔍 Extension.value type: {type(extension.value)}")
+            logger.debug(f"🔍 Extension type: {type(extension)}")
+            logger.debug(f"🔍 Extension.value type: {type(extension.value)}")
 
             # Extract the raw bytes from the extension
             if isinstance(extension.value, UnrecognizedExtension):
                 # Use the .value property to get the bytes
                 raw_bytes = extension.value.value
-                print("🔍 Extension is UnrecognizedExtension, using .value property")
+                logger.debug(
+                    "🔍 Extension is UnrecognizedExtension, using .value property"
+                )
             else:
                 # Fallback if it's already bytes somehow
                 raw_bytes = extension.value
-                print("🔍 Extension.value is already bytes")
+                logger.debug("🔍 Extension.value is already bytes")
 
-            print(f"🔍 Total extension length: {len(raw_bytes)} bytes")
-            print(f"🔍 Extension hex (first 50 bytes): {raw_bytes[:50].hex()}")
+            logger.debug(f"🔍 Total extension length: {len(raw_bytes)} bytes")
+            logger.debug(f"🔍 Extension hex (first 50 bytes): {raw_bytes[:50].hex()}")
 
             if not isinstance(raw_bytes, bytes):
                 raise QUICCertificateError(f"Expected bytes, got {type(raw_bytes)}")
@@ -164,16 +166,16 @@ class LibP2PExtensionHandler:
             public_key_length = int.from_bytes(
                 raw_bytes[offset : offset + 4], byteorder="big"
             )
-            print(f"🔍 Public key length: {public_key_length} bytes")
+            logger.debug(f"🔍 Public key length: {public_key_length} bytes")
             offset += 4
 
             if len(raw_bytes) < offset + public_key_length:
                 raise QUICCertificateError("Extension too short for public key data")
 
             public_key_bytes = raw_bytes[offset : offset + public_key_length]
-            print(f"🔍 Public key data: {public_key_bytes.hex()}")
+            logger.debug(f"🔍 Public key data: {public_key_bytes.hex()}")
             offset += public_key_length
-            print(f"🔍 Offset after public key: {offset}")
+            logger.debug(f"🔍 Offset after public key: {offset}")
 
             # Parse signature length and data
             if len(raw_bytes) < offset + 4:
@@ -182,17 +184,17 @@ class LibP2PExtensionHandler:
             signature_length = int.from_bytes(
                 raw_bytes[offset : offset + 4], byteorder="big"
             )
-            print(f"🔍 Signature length: {signature_length} bytes")
+            logger.debug(f"🔍 Signature length: {signature_length} bytes")
             offset += 4
-            print(f"🔍 Offset after signature length: {offset}")
+            logger.debug(f"🔍 Offset after signature length: {offset}")
 
             if len(raw_bytes) < offset + signature_length:
                 raise QUICCertificateError("Extension too short for signature data")
 
             signature = raw_bytes[offset : offset + signature_length]
-            print(f"🔍 Extracted signature length: {len(signature)} bytes")
-            print(f"🔍 Signature hex (first 20 bytes): {signature[:20].hex()}")
-            print(
+            logger.debug(f"🔍 Extracted signature length: {len(signature)} bytes")
+            logger.debug(f"🔍 Signature hex (first 20 bytes): {signature[:20].hex()}")
+            logger.debug(
                 f"🔍 Signature starts with DER header: {signature[:2].hex() == '3045'}"
             )
 
@@ -220,27 +222,27 @@ class LibP2PExtensionHandler:
 
             # Check if we have extra data
             expected_total = 4 + public_key_length + 4 + signature_length
-            print(f"🔍 Expected total length: {expected_total}")
-            print(f"🔍 Actual total length: {len(raw_bytes)}")
+            logger.debug(f"🔍 Expected total length: {expected_total}")
+            logger.debug(f"🔍 Actual total length: {len(raw_bytes)}")
 
             if len(raw_bytes) > expected_total:
                 extra_bytes = len(raw_bytes) - expected_total
-                print(f"⚠️  Extra {extra_bytes} bytes detected!")
-                print(f"🔍 Extra data: {raw_bytes[expected_total:].hex()}")
+                logger.debug(f"⚠️  Extra {extra_bytes} bytes detected!")
+                logger.debug(f"🔍 Extra data: {raw_bytes[expected_total:].hex()}")
 
             # Deserialize the public key
             public_key = LibP2PKeyConverter.deserialize_public_key(public_key_bytes)
-            print(f"🔍 Successfully deserialized public key: {type(public_key)}")
+            logger.debug(f"🔍 Successfully deserialized public key: {type(public_key)}")
 
-            print(f"🔍 Final signature to return: {len(signature)} bytes")
+            logger.debug(f"🔍 Final signature to return: {len(signature)} bytes")
 
             return public_key, signature
 
         except Exception as e:
-            print(f"❌ Extension parsing failed: {e}")
+            logger.debug(f"❌ Extension parsing failed: {e}")
             import traceback
 
-            print(f"❌ Traceback: {traceback.format_exc()}")
+            logger.debug(f"❌ Traceback: {traceback.format_exc()}")
             raise QUICCertificateError(
                 f"Failed to parse signed key extension: {e}"
             ) from e
@@ -424,11 +426,11 @@ class PeerAuthenticator:
                 raise QUICPeerVerificationError("Certificate missing libp2p extension")
 
             assert libp2p_extension.value is not None
-            print(f"Extension type: {type(libp2p_extension)}")
-            print(f"Extension value type: {type(libp2p_extension.value)}")
+            logger.debug(f"Extension type: {type(libp2p_extension)}")
+            logger.debug(f"Extension value type: {type(libp2p_extension.value)}")
             if hasattr(libp2p_extension.value, "__len__"):
-                print(f"Extension value length: {len(libp2p_extension.value)}")
-            print(f"Extension value: {libp2p_extension.value}")
+                logger.debug(f"Extension value length: {len(libp2p_extension.value)}")
+            logger.debug(f"Extension value: {libp2p_extension.value}")
             # Parse the extension to get public key and signature
             public_key, signature = self.extension_handler.parse_signed_key_extension(
                 libp2p_extension
@@ -455,8 +457,8 @@ class PeerAuthenticator:
 
             # Verify against expected peer ID if provided
             if expected_peer_id and derived_peer_id != expected_peer_id:
-                print(f"Expected Peer id: {expected_peer_id}")
-                print(f"Derived Peer ID: {derived_peer_id}")
+                logger.debug(f"Expected Peer id: {expected_peer_id}")
+                logger.debug(f"Derived Peer ID: {derived_peer_id}")
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {expected_peer_id}, "
                     f"got {derived_peer_id}"
@@ -615,22 +617,24 @@ class QUICTLSSecurityConfig:
         except Exception as e:
             return {"error": str(e)}
 
-    def debug_print(self) -> None:
-        """Print debugging information about this configuration."""
-        print(f"=== TLS Security Config Debug ({self.config_name or 'unnamed'}) ===")
-        print(f"Is client config: {self.is_client_config}")
-        print(f"ALPN protocols: {self.alpn_protocols}")
-        print(f"Verify mode: {self.verify_mode}")
-        print(f"Check hostname: {self.check_hostname}")
-        print(f"Certificate chain length: {len(self.certificate_chain)}")
+    def debug_config(self) -> None:
+        """logger.debug debugging information about this configuration."""
+        logger.debug(
+            f"=== TLS Security Config Debug ({self.config_name or 'unnamed'}) ==="
+        )
+        logger.debug(f"Is client config: {self.is_client_config}")
+        logger.debug(f"ALPN protocols: {self.alpn_protocols}")
+        logger.debug(f"Verify mode: {self.verify_mode}")
+        logger.debug(f"Check hostname: {self.check_hostname}")
+        logger.debug(f"Certificate chain length: {len(self.certificate_chain)}")
 
         cert_info: dict[Any, Any] = self.get_certificate_info()
         for key, value in cert_info.items():
-            print(f"Certificate {key}: {value}")
+            logger.debug(f"Certificate {key}: {value}")
 
-        print(f"Private key type: {type(self.private_key).__name__}")
+        logger.debug(f"Private key type: {type(self.private_key).__name__}")
         if hasattr(self.private_key, "key_size"):
-            print(f"Private key size: {self.private_key.key_size}")
+            logger.debug(f"Private key size: {self.private_key.key_size}")
 
 
 def create_server_tls_config(
@@ -727,8 +731,7 @@ class QUICTLSConfigManager:
             peer_id=self.peer_id,
         )
 
-        print("🔧 SECURITY: Created server config")
-        config.debug_print()
+        logger.debug("🔧 SECURITY: Created server config")
         return config
 
     def create_client_config(self) -> QUICTLSSecurityConfig:
@@ -745,8 +748,7 @@ class QUICTLSConfigManager:
             peer_id=self.peer_id,
         )
 
-        print("🔧 SECURITY: Created client config")
-        config.debug_print()
+        logger.debug("🔧 SECURITY: Created client config")
         return config
 
     def verify_peer_identity(

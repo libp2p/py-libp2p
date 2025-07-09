@@ -350,11 +350,18 @@ def create_server_config_from_base(
                 if server_tls_config.private_key:
                     server_config.private_key = server_tls_config.private_key
                 if server_tls_config.certificate_chain:
-                    server_config.certificate_chain = server_tls_config.certificate_chain
+                    server_config.certificate_chain = (
+                        server_tls_config.certificate_chain
+                    )
                 if server_tls_config.alpn_protocols:
                     server_config.alpn_protocols = server_tls_config.alpn_protocols
-                print("Setting request client certificate to True")
                 server_tls_config.request_client_certificate = True
+                if getattr(server_tls_config, "request_client_certificate", False):
+                    server_config._libp2p_request_client_cert = True  # type: ignore
+                else:
+                    logger.error(
+                        "🔧 Failed to set request_client_certificate in server config"
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")
@@ -378,4 +385,82 @@ def create_server_config_from_base(
 
     except Exception as e:
         logger.error(f"Failed to create server config: {e}")
+        raise
+
+
+def create_client_config_from_base(
+    base_config: QuicConfiguration,
+    security_manager: QUICTLSConfigManager | None = None,
+    transport_config: QUICTransportConfig | None = None,
+) -> QuicConfiguration:
+    """
+    Create a client configuration without using deepcopy.
+    """
+    try:
+        # Create new client configuration from scratch
+        client_config = QuicConfiguration(is_client=True)
+        client_config.verify_mode = ssl.CERT_NONE
+
+        # Copy basic configuration attributes
+        copyable_attrs = [
+            "alpn_protocols",
+            "verify_mode",
+            "max_datagram_frame_size",
+            "idle_timeout",
+            "max_concurrent_streams",
+            "supported_versions",
+            "max_data",
+            "max_stream_data",
+            "quantum_readiness_test",
+        ]
+
+        for attr in copyable_attrs:
+            if hasattr(base_config, attr):
+                value = getattr(base_config, attr)
+                if value is not None:
+                    setattr(client_config, attr, value)
+
+        # Handle cryptography objects - these need direct reference, not copying
+        crypto_attrs = [
+            "certificate",
+            "private_key",
+            "certificate_chain",
+            "ca_certs",
+        ]
+
+        for attr in crypto_attrs:
+            if hasattr(base_config, attr):
+                value = getattr(base_config, attr)
+                if value is not None:
+                    setattr(client_config, attr, value)
+
+        # Apply security manager configuration if available
+        if security_manager:
+            try:
+                client_tls_config = security_manager.create_client_config()
+
+                # Override with security manager's TLS configuration
+                if client_tls_config.certificate:
+                    client_config.certificate = client_tls_config.certificate
+                if client_tls_config.private_key:
+                    client_config.private_key = client_tls_config.private_key
+                if client_tls_config.certificate_chain:
+                    client_config.certificate_chain = (
+                        client_tls_config.certificate_chain
+                    )
+                if client_tls_config.alpn_protocols:
+                    client_config.alpn_protocols = client_tls_config.alpn_protocols
+
+            except Exception as e:
+                logger.warning(f"Failed to apply security manager config: {e}")
+
+        # Ensure we have ALPN protocols
+        if not client_config.alpn_protocols:
+            client_config.alpn_protocols = ["libp2p"]
+
+        logger.debug("Successfully created client config without deepcopy")
+        return client_config
+
+    except Exception as e:
+        logger.error(f"Failed to create client config: {e}")
         raise

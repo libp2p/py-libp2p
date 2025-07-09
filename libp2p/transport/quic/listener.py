@@ -47,6 +47,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class QUICPacketInfo:
@@ -368,10 +369,7 @@ class QUICListener(IListener):
             await self._transmit_for_connection(quic_conn, addr)
 
             # Check if handshake completed (with minimal locking)
-            if (
-                hasattr(quic_conn, "_handshake_complete")
-                and quic_conn._handshake_complete
-            ):
+            if quic_conn._handshake_complete:
                 logger.debug("PENDING: Handshake completed, promoting connection")
                 await self._promote_pending_connection(quic_conn, addr, dest_cid)
             else:
@@ -497,6 +495,15 @@ class QUICListener(IListener):
 
             # Process initial packet
             quic_conn.receive_datagram(data, addr, now=time.time())
+            if quic_conn.tls:
+                if self._security_manager:
+                    try:
+                        quic_conn.tls._request_client_certificate = True
+                        logger.debug(
+                            "request_client_certificate set to True in server TLS context"
+                        )
+                    except Exception as e:
+                        logger.error(f"FAILED to apply request_client_certificate: {e}")
 
             # Process events and send response
             await self._process_quic_events(quic_conn, addr, destination_cid)
@@ -686,12 +693,10 @@ class QUICListener(IListener):
             self._pending_connections.pop(dest_cid, None)
 
             if dest_cid in self._connections:
-                connection = self._connections[dest_cid]
                 logger.debug(
-                    f"Using existing QUICConnection {id(connection)} "
-                    f"for {dest_cid.hex()}"
+                    f"⚠️ PROMOTE: Connection {dest_cid.hex()} already exists in _connections!"
                 )
-
+                connection = self._connections[dest_cid]
             else:
                 from .connection import QUICConnection
 
@@ -726,7 +731,8 @@ class QUICListener(IListener):
             if self._security_manager:
                 try:
                     peer_id = await connection._verify_peer_identity_with_security()
-                    connection.peer_id = peer_id
+                    if peer_id:
+                        connection.peer_id = peer_id
                     logger.info(
                         f"Security verification successful for {dest_cid.hex()}"
                     )
