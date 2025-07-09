@@ -1,52 +1,53 @@
-import time
 import threading
-from typing import Optional
+import time
+
+from multiaddr import Multiaddr
+
 from libp2p.abc import IPeerRecord
-import libp2p.peer.pb.peer_record_pb2 as pb
-
-from  multiaddr import Multiaddr
-from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.id import ID
-
+import libp2p.peer.pb.peer_record_pb2 as pb
+from libp2p.peer.peerinfo import PeerInfo
 
 PEER_RECORD_ENVELOPE_DOMAIN = "libp2p-peer-record"
-PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = b'\x03\x01'
+PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = b"\x03\x01"
 
 _last_timestamp_lock = threading.Lock()
-_last_timestamp: int = 0    
+_last_timestamp: int = 0
+
 
 class PeerRecord(IPeerRecord):
     """
     A record that contains metatdata about a peer in the libp2p network.
-    
+
     This includes:
     - `peer_id`: The peer's globally unique indentifier.
     - `addrs`: A list of the peer's publicly reachable multiaddrs.
-    - `seq`: A strictly monotonically increasing timestamp used 
+    - `seq`: A strictly monotonically increasing timestamp used
             to order records over time.
-            
+
     PeerRecords are designed to be signed and transmitted in libp2p routing Envelopes.
     """
+
     peer_id: ID
     addrs: list[Multiaddr]
     seq: int
-    
+
     def __init__(
         self,
-        peer_id: Optional[ID] = None,
-        addrs: Optional[list[Multiaddr]] = None,
-        seq: Optional[int] = None,
-    ) -> None:        
+        peer_id: ID | None = None,
+        addrs: list[Multiaddr] | None = None,
+        seq: int | None = None,
+    ) -> None:
         """
         Initialize a new PeerRecord.
-        If `seq` is not provided, a timestamp-based strictly increasing sequence 
+        If `seq` is not provided, a timestamp-based strictly increasing sequence
         number will be generated.
-        
+
         :param peer_id: ID of the peer this record refers to.
         :param addrs: Public multiaddrs of the peer.
         :param seq: Monotonic sequence number.
-        
-        """    
+
+        """
         if peer_id is not None:
             self.peer_id = peer_id
         self.addrs = addrs or []
@@ -54,27 +55,27 @@ class PeerRecord(IPeerRecord):
             self.seq = seq
         else:
             self.seq = timestamp_seq()
-        
+
     def domain(self) -> str:
         """
         Return the domain string associated with this PeerRecord.
-        
+
         Used during record signing and envelope validation to identify the record type.
         """
         return PEER_RECORD_ENVELOPE_DOMAIN
-    
+
     def codec(self) -> bytes:
         """
         Return the codec identifier for PeerRecords.
-        
+
         This binary perfix helps distinguish PeerRecords in serialized envelopes.
         """
         return PEER_RECORD_ENVELOPE_PAYLOAD_TYPE
-    
+
     def to_protobuf(self) -> pb.PeerRecord:
         """
         Convert the current PeerRecord into a ProtoBuf PeerRecord message.
-        
+
         :raises ValueError: if peer_id serialization fails.
         :return: A ProtoBuf-encoded PeerRecord message object.
         """
@@ -82,36 +83,36 @@ class PeerRecord(IPeerRecord):
             id_bytes = self.peer_id.to_bytes()
         except Exception as e:
             raise ValueError(f"failed to marshal peer_id: {e}")
-        
+
         msg = pb.PeerRecord()
         msg.peer_id = id_bytes
         msg.seq = self.seq
         msg.addresses.extend(addrs_to_protobuf(self.addrs))
         return msg
-    
+
     def marshal_record(self) -> bytes:
         """
         Serialize a PeerRecord into raw bytes suitable for embedding in an Envelope.
-        
+
         This is typically called during the process of signing or sealing the record.
         :raises ValueError: if serialization to protobuf fails.
-        :return: Serialized PeerRecord bytes. 
+        :return: Serialized PeerRecord bytes.
         """
         try:
             msg = self.to_protobuf()
             return msg.SerializeToString()
         except Exception as e:
             raise ValueError(f"failed to marshal PeerRecord: {e}")
-        
+
     def equal(self, other) -> bool:
         """
         Check if this PeerRecord is identical to another.
-        
+
         Two PeerRecords are considered equal if:
         - Their peer IDs match.
         - Their sequence numbers are identical.
         - Their address lists are identical and in the same order.
-        
+
         :param other: Another PeerRecord instance.
         :return: True if all fields mathch, False otherwise.
         """
@@ -122,45 +123,47 @@ class PeerRecord(IPeerRecord):
                         for a1, a2 in zip(self.addrs, other.addrs):
                             if a1 == a2:
                                 continue
-                            else: 
+                            else:
                                 return False
                         return True
         return False
-        
+
+
 def unmarshal_record(data: bytes) -> PeerRecord:
     """
     Deserialize a PeerRecord from its serialized byte representation.
-    
+
     Typically used when receiveing a PeerRecord inside a signed routing Envelope.
-    
+
     :param data: Serialized protobuf-encoded bytes.
     :raises ValueError: if parsing or conversion fails.
     :reurn: A valid PeerRecord instance.
     """
     if data is None:
         raise ValueError("cannot unmarshal PeerRecord from None")
-    
+
     msg = pb.PeerRecord()
     try:
         msg.ParseFromString(data)
     except Exception as e:
         raise ValueError(f"Failed to parse PeerRecord protobuf: {e}")
-    
+
     try:
         record = peer_record_from_protobuf(msg)
     except Exception as e:
         raise ValueError(f"Failed to convert protobuf to PeerRecord: {e}")
-    
+
     return record
+
 
 def timestamp_seq() -> int:
     """
-    Generate a strictly increasing timestamp-based sequence number. 
-    
-    Ensures that even if multiple PeerRecords are generated in the same nanosecond, 
-    their `seq` values will still be strictly increasing by using a lock to track the 
+    Generate a strictly increasing timestamp-based sequence number.
+
+    Ensures that even if multiple PeerRecords are generated in the same nanosecond,
+    their `seq` values will still be strictly increasing by using a lock to track the
     last value.
-    
+
     :return: A strictly increasing integer timestamp.
     """
     global _last_timestamp
@@ -171,11 +174,11 @@ def timestamp_seq() -> int:
         _last_timestamp = now
     return now
 
-   
+
 def peer_record_from_peer_info(info: PeerInfo) -> PeerRecord:
     """
     Create a PeerRecord from a PeerInfo object.
-    
+
     This automatically assigns a timestamp-based sequence number to the record.
     :param info: A PeerInfo instance (contains peer_id and addrs).
     :return: A PeerRecord instance.
@@ -184,6 +187,7 @@ def peer_record_from_peer_info(info: PeerInfo) -> PeerRecord:
     record.peer_id = info.peer_id
     record.addrs = info.addrs
     return record
+
 
 def peer_record_from_protobuf(msg: pb.PeerRecord) -> PeerRecord:
     """
@@ -220,6 +224,7 @@ def addrs_from_protobuf(addrs: list[pb.PeerRecord.AddressInfo]) -> list[Multiadd
             continue
     return out
 
+
 def addrs_to_protobuf(addrs: list[Multiaddr]) -> list[pb.PeerRecord.AddressInfo]:
     """
     Convert a list of Multiaddr objects into their protobuf representation.
@@ -230,6 +235,6 @@ def addrs_to_protobuf(addrs: list[Multiaddr]) -> list[pb.PeerRecord.AddressInfo]
     out = []
     for addr in addrs:
         addr_info = pb.PeerRecord.AddressInfo()
-        addr_info.multiaddr = addr.to_bytes()  
+        addr_info.multiaddr = addr.to_bytes()
         out.append(addr_info)
-    return out 
+    return out
