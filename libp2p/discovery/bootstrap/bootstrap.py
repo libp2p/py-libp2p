@@ -3,6 +3,7 @@ import logging
 from multiaddr import Multiaddr
 
 from libp2p.abc import INetworkService
+from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
@@ -27,6 +28,9 @@ class BootstrapDiscovery:
             f"Starting bootstrap discovery with "
             f"{len(self.bootstrap_addrs)} bootstrap addresses"
         )
+
+        # Validate and filter bootstrap addresses
+        self.bootstrap_addrs = validate_bootstrap_addresses(self.bootstrap_addrs)
 
         for addr_str in self.bootstrap_addrs:
             try:
