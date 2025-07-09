@@ -41,6 +41,7 @@ from libp2p.io.abc import (
 from libp2p.peer.id import (
     ID,
 )
+import libp2p.peer.pb.peer_record_pb2 as pb
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
@@ -1686,6 +1687,68 @@ class IHost(ABC):
         """
         Close the host and all underlying connections and services.
 
+        """
+
+
+# -------------------------- peer-record interface.py --------------------------
+class IPeerRecord(ABC):
+    """
+    Interface for a libp2p PeerRecord object.
+
+    A PeerRecord contains metadata about a peer such as its ID, public addresses,
+    and a strictly increasing sequence number for versioning.
+
+    PeerRecords are used in signed routing Envelopes for secure peer data propagation.
+    """
+
+    @abstractmethod
+    def domain(self) -> str:
+        """
+        Return the domain string for this record type.
+
+        Used in envelope validation to distinguish different record types.
+        """
+
+    @abstractmethod
+    def codec(self) -> bytes:
+        """
+        Return a binary codec prefix that identifies the PeerRecord type.
+
+        This is prepended in signed envelopes to allow type-safe decoding.
+        """
+
+    @abstractmethod
+    def to_protobuf(self) -> pb.PeerRecord:
+        """
+        Convert this PeerRecord into its Protobuf representation.
+
+        :raises ValueError: if serialization fails (e.g., invalid peer ID).
+        :return: A populated protobuf `PeerRecord` message.
+        """
+
+    @abstractmethod
+    def marshal_record(self) -> bytes:
+        """
+        Serialize this PeerRecord into a byte string.
+
+        Used when signing or sealing the record in an envelope.
+
+        :raises ValueError: if protobuf serialization fails.
+        :return: Byte-encoded PeerRecord.
+        """
+
+    @abstractmethod
+    def equal(self, other: object) -> bool:
+        """
+        Compare this PeerRecord with another for equality.
+
+        Two PeerRecords are considered equal if:
+        - They have the same `peer_id`
+        - Their `seq` numbers match
+        - Their address lists are identical and ordered
+
+        :param other: Object to compare with.
+        :return: True if equal, False otherwise.
         """
 
 
