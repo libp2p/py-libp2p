@@ -47,6 +47,7 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
+    from libp2p.peer.peer_record import PeerRecord
     from libp2p.pubsub.pubsub import (
         Pubsub,
     )
@@ -1748,6 +1749,59 @@ class IPeerRecord(ABC):
         - Their address lists are identical and ordered
 
         :param other: Object to compare with.
+        :return: True if equal, False otherwise.
+        """
+
+
+# -------------------------- envelope interface.py --------------------------
+class IEnvelope(ABC):
+    @abstractmethod
+    def marshal_envelope(self) -> bytes:
+        """
+        Serialize this Envelope into its protobuf wire format.
+
+        Converts all envelope fields into a `pb.Envelope` protobuf message
+        and returns the serialized bytes.
+
+        :return: Serialized envelope as bytes.
+        """
+
+    @abstractmethod
+    def validate(self, domain: str) -> None:
+        """
+        Verify the envelope's signature within the given domain scope.
+
+        This ensures that the envelope has not been tampered with
+        and was signed under the correct usage context.
+
+        :param domain: Domain string that contextualizes the signature.
+        :raises ValueError: If the signature is invalid.
+        """
+
+    @abstractmethod
+    def record(self) -> "PeerRecord":
+        """
+        Lazily decode and return the embedded PeerRecord.
+
+        This method unmarshals the payload bytes into a `PeerRecord` instance,
+        using the registered codec to identify the type. The decoded result
+        is cached for future use.
+
+        :return: Decoded PeerRecord object.
+        :raises Exception: If decoding fails or payload type is unsupported.
+        """
+
+    @abstractmethod
+    def equal(self, other: Any) -> bool:
+        """
+        Compare this Envelope with another for structural equality.
+
+        Two envelopes are considered equal if:
+        - They have the same public key
+        - The payload type and payload bytes match
+        - Their signatures are identical
+
+        :param other: Another object to compare.
         :return: True if equal, False otherwise.
         """
 
