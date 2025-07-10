@@ -102,6 +102,9 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
+MAX_CONCURRENT_VALIDATORS = 10
+
+
 class Pubsub(Service, IPubsub):
     host: IHost
 
@@ -680,15 +683,15 @@ class Pubsub(Service, IPubsub):
             if not validator(msg_forwarder, msg):
                 raise ValidationError(f"Validation failed for msg={msg}")
 
-        # TODO: Implement throttle on async validators
-
         if len(async_topic_validators) > 0:
             # Appends to lists are thread safe in CPython
             results = []
+            semaphore = trio.Semaphore(MAX_CONCURRENT_VALIDATORS)
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                result = await func(msg_forwarder, msg)
-                results.append(result)
+                async with semaphore:
+                    result = await func(msg_forwarder, msg)
+                    results.append(result)
 
             async with trio.open_nursery() as nursery:
                 for async_validator in async_topic_validators:
