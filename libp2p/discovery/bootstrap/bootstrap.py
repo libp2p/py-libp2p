@@ -50,19 +50,19 @@ class BootstrapDiscovery:
         except Exception as e:
             logger.debug(f"Invalid multiaddr format '{addr_str}': {e}")
             return
-        if (self.is_dns_addr(multiaddr)):
+        if self.is_dns_addr(multiaddr):
             resolved_addrs = await multiaddr.resolve()
             for resolved_addr in resolved_addrs:
                 if resolved_addr == multiaddr:
                     return
-                self.add_addr(Multiaddr(resolved_addr)) 
-        
+                self.add_addr(Multiaddr(resolved_addr))
+
         self.add_addr(multiaddr)
 
     def is_dns_addr(self, addr: Multiaddr) -> bool:
         """Check if the address is a DNS address."""
         return any(protocol.name == "dnsaddr" for protocol in addr.protocols())
-    
+
     def add_addr(self, addr: Multiaddr) -> None:
         """Add a peer to the peerstore and emit discovery event."""
         # Extract peer info from multiaddr
