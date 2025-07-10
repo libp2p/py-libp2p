@@ -8,20 +8,16 @@ DCUtR enables peers behind NAT to establish direct connections
 using hole punching techniques.
 """
 
-from enum import IntEnum
 import logging
 import time
-from typing import (
-    Any,
-)
+from typing import Any, cast
 
-from multiaddr import (
-    Multiaddr,
-)
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
     IHost,
+    INetConn,
     INetStream,
 )
 from libp2p.custom_types import (
@@ -33,48 +29,41 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.relay.circuit_v2.nat import (
+    ReachabilityChecker,
+)
+from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
+    HolePunch,
+)
 from libp2p.tools.async_service import (
     Service,
 )
 
-from .nat import (
-    ReachabilityChecker,
-)
-from .pb.dcutr_pb2 import (
-    HolePunch,
-)
-
-logger = logging.getLogger("libp2p.relay.circuit_v2.dcutr")
+logger = logging.getLogger(__name__)
 
 # Protocol ID for DCUtR
 PROTOCOL_ID = TProtocol("/libp2p/dcutr")
 
-# Timeout constants
-DIAL_TIMEOUT = 15  # seconds
-SYNC_TIMEOUT = 5  # seconds
-HOLE_PUNCH_TIMEOUT = 30  # seconds
-CONNECTION_CHECK_TIMEOUT = 10  # seconds
-STREAM_READ_TIMEOUT = 10  # seconds
-STREAM_WRITE_TIMEOUT = 10  # seconds
+# Maximum message size for DCUtR (4KiB as per spec)
+MAX_MESSAGE_SIZE = 4 * 1024
+
+# Timeouts
+STREAM_READ_TIMEOUT = 30  # seconds
+STREAM_WRITE_TIMEOUT = 30  # seconds
+DIAL_TIMEOUT = 10  # seconds
+
+# Maximum number of hole punch attempts per peer
+MAX_HOLE_PUNCH_ATTEMPTS = 5
+
+# Delay between retry attempts
+HOLE_PUNCH_RETRY_DELAY = 30  # seconds
 
 # Maximum observed addresses to exchange
 MAX_OBSERVED_ADDRS = 20
 
-# Maximum message size (4KiB as per spec)
-MAX_MESSAGE_SIZE = 4 * 1024
-
-# Maximum hole punch attempts per peer
-MAX_HOLE_PUNCH_ATTEMPTS = 3
-
-# Delay between hole punch attempts
-HOLE_PUNCH_RETRY_DELAY = 30  # seconds
-
-
-class MessageType(IntEnum):
-    """Message types for the DCUtR protocol."""
-
-    CONNECT = 100
-    SYNC = 300
+# Define the enum values for clarity
+CONNECT_TYPE = 100  # HolePunch.CONNECT value
+SYNC_TYPE = 300  # HolePunch.SYNC value
 
 
 class DCUtRProtocol(Service):
@@ -184,7 +173,7 @@ class DCUtRProtocol(Service):
                 connect_msg.ParseFromString(msg_bytes)
 
                 # Verify it's a CONNECT message
-                if connect_msg.type != MessageType.CONNECT.value:
+                if connect_msg.type != CONNECT_TYPE:  # HolePunch.Type.CONNECT value
                     logger.warning("Expected CONNECT message, got %s", connect_msg.type)
                     await stream.close()
                     return
@@ -208,7 +197,7 @@ class DCUtRProtocol(Service):
                 # Send our CONNECT message with our observed addresses
                 our_addrs = await self._get_observed_addrs()
                 response = HolePunch()
-                response.type = MessageType.CONNECT.value
+                response.type = cast(HolePunch.Type, CONNECT_TYPE)
                 response.ObsAddrs.extend(our_addrs)
 
                 with trio.fail_after(STREAM_WRITE_TIMEOUT):
@@ -229,7 +218,7 @@ class DCUtRProtocol(Service):
                 sync_msg.ParseFromString(sync_bytes)
 
                 # Verify it's a SYNC message
-                if sync_msg.type != MessageType.SYNC.value:
+                if sync_msg.type != SYNC_TYPE:  # HolePunch.Type.SYNC value
                     logger.warning("Expected SYNC message, got %s", sync_msg.type)
                     await stream.close()
                     return
@@ -311,7 +300,7 @@ class DCUtRProtocol(Service):
                 # Send our CONNECT message with our observed addresses
                 our_addrs = await self._get_observed_addrs()
                 connect_msg = HolePunch()
-                connect_msg.type = MessageType.CONNECT.value
+                connect_msg.type = cast(HolePunch.Type, CONNECT_TYPE)
                 connect_msg.ObsAddrs.extend(our_addrs)
 
                 start_time = time.time()
@@ -336,7 +325,7 @@ class DCUtRProtocol(Service):
                 resp.ParseFromString(resp_bytes)
 
                 # Verify it's a CONNECT message
-                if resp.type != MessageType.CONNECT.value:
+                if resp.type != CONNECT_TYPE:  # HolePunch.Type.CONNECT value
                     logger.warning("Expected CONNECT message, got %s", resp.type)
                     return False
 
@@ -362,7 +351,7 @@ class DCUtRProtocol(Service):
                 punch_time = time.time() + (2 * rtt) + 1  # Add 1 second buffer
 
                 sync_msg = HolePunch()
-                sync_msg.type = MessageType.SYNC.value
+                sync_msg.type = cast(HolePunch.Type, SYNC_TYPE)
 
                 with trio.fail_after(STREAM_WRITE_TIMEOUT):
                     await stream.write(sync_msg.SerializeToString())
@@ -403,6 +392,9 @@ class DCUtRProtocol(Service):
             return False
         finally:
             self._in_progress.discard(peer_id)
+
+        # This should never be reached, but add explicit return for type checking
+        return False
 
     async def _perform_hole_punch(
         self, peer_id: ID, addrs: list[Multiaddr], punch_time: float | None = None
@@ -514,9 +506,14 @@ class DCUtRProtocol(Service):
 
         # Check if the peer is connected
         network = self.host.get_network()
-        connections = network.connections.get(peer_id, [])
-        if not connections:
+        conn_or_conns = network.connections.get(peer_id)
+        if not conn_or_conns:
             return False
+
+        # Handle both single connection and list of connections
+        connections: list[INetConn] = (
+            [conn_or_conns] if not isinstance(conn_or_conns, list) else conn_or_conns
+        )
 
         # Check if any connection is direct (not relayed)
         for conn in connections:

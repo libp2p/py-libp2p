@@ -249,7 +249,8 @@ class ReachabilityChecker:
                 # Get the transport addresses
                 addrs = conn.get_transport_addresses()
 
-                # If any address doesn't start with /p2p-circuit, it's a direct connection
+                # If any address doesn't start with /p2p-circuit,
+                # it's a direct connection
                 if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
                     self._peer_reachability[peer_id] = True
                     return True

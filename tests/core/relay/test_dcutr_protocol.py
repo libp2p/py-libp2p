@@ -1,6 +1,7 @@
 """Tests for the Direct Connection Upgrade through Relay (DCUtR) protocol."""
 
 import logging
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,8 +11,9 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.relay.circuit_v2.dcutr import (
+    CONNECT_TYPE,
+    SYNC_TYPE,
     DCUtRProtocol,
-    MessageType,
 )
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
     HolePunch,
@@ -84,14 +86,14 @@ async def test_dcutr_message_exchange():
 
     # Set up mock read responses
     connect_response = HolePunch()
-    # Use MessageType enum value directly
-    connect_response.type = MessageType.CONNECT.value
+    # Use HolePunch.Type enum value directly
+    connect_response.type = cast(HolePunch.Type, CONNECT_TYPE)
     connect_response.ObsAddrs.append(b"/ip4/192.168.1.1/tcp/1234")
     connect_response.ObsAddrs.append(b"/ip4/10.0.0.1/tcp/4321")
 
     sync_response = HolePunch()
-    # Use MessageType enum value directly
-    sync_response.type = MessageType.SYNC.value
+    # Use HolePunch.Type enum value directly
+    sync_response.type = cast(HolePunch.Type, SYNC_TYPE)
 
     # Configure the mock stream to return our responses
     mock_stream.read.side_effect = [
@@ -100,7 +102,10 @@ async def test_dcutr_message_exchange():
     ]
 
     # Mock peer ID with proper bytes
-    peer_id_bytes = b"\x12\x20\x8a\xb7\x89\xa5\x84\x54\xb4\x9b\x14\x93\x7c\xda\x1a\xb8\x2e\x36\x33\x0f\x31\x10\x95\x39\x93\x9c\xee\x99\x62\x72\x6e\x5c\x1d"
+    peer_id_bytes = (
+        b"\x12\x20\x8a\xb7\x89\xa5\x84\x54\xb4\x9b\x14\x93\x7c\xda\x1a\xb8"
+        b"\x2e\x36\x33\x0f\x31\x10\x95\x39\x93\x9c\xee\x99\x62\x72\x6e\x5c\x1d"
+    )
     mock_peer_id = ID(peer_id_bytes)
     mock_stream.muxed_conn.peer_id = mock_peer_id
 
