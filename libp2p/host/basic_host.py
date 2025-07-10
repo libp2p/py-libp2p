@@ -178,7 +178,7 @@ class BasicHost(IHost):
                     self.mDNS.start()
                 if hasattr(self, "bootstrap") and self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
-                    self.bootstrap.start()
+                    await self.bootstrap.start()
                 try:
                     yield
                 finally:

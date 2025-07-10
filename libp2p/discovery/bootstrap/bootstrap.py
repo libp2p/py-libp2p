@@ -22,7 +22,7 @@ class BootstrapDiscovery:
         self.bootstrap_addrs = bootstrap_addrs or []
         self.discovered_peers: set[str] = set()
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Process bootstrap addresses and emit peer discovery events."""
         logger.debug(
             f"Starting bootstrap discovery with "
@@ -34,7 +34,7 @@ class BootstrapDiscovery:
 
         for addr_str in self.bootstrap_addrs:
             try:
-                self._process_bootstrap_addr(addr_str)
+                await self._process_bootstrap_addr(addr_str)
             except Exception as e:
                 logger.debug(f"Failed to process bootstrap address {addr_str}: {e}")
 
@@ -43,19 +43,33 @@ class BootstrapDiscovery:
         logger.debug("Stopping bootstrap discovery")
         self.discovered_peers.clear()
 
-    def _process_bootstrap_addr(self, addr_str: str) -> None:
+    async def _process_bootstrap_addr(self, addr_str: str) -> None:
         """Convert string address to PeerInfo and add to peerstore."""
         try:
             multiaddr = Multiaddr(addr_str)
         except Exception as e:
             logger.debug(f"Invalid multiaddr format '{addr_str}': {e}")
             return
+        if (self.is_dns_addr(multiaddr)):
+            resolved_addrs = await multiaddr.resolve()
+            for resolved_addr in resolved_addrs:
+                if resolved_addr == multiaddr:
+                    return
+                self.add_addr(Multiaddr(resolved_addr)) 
+        
+        self.add_addr(multiaddr)
 
+    def is_dns_addr(self, addr: Multiaddr) -> bool:
+        """Check if the address is a DNS address."""
+        return any(protocol.name == "dnsaddr" for protocol in addr.protocols())
+    
+    def add_addr(self, addr: Multiaddr) -> None:
+        """Add a peer to the peerstore and emit discovery event."""
         # Extract peer info from multiaddr
         try:
-            peer_info = info_from_p2p_addr(multiaddr)
+            peer_info = info_from_p2p_addr(addr)
         except Exception as e:
-            logger.debug(f"Failed to extract peer info from '{addr_str}': {e}")
+            logger.debug(f"Failed to extract peer info from '{addr}': {e}")
             return
 
         # Skip if it's our own peer
