@@ -83,3 +83,47 @@ def test_seal_and_consume_envelope_roundtrip():
     assert rec.peer_id == peer_id
     assert rec.seq == seq
     assert rec.addrs == addrs
+
+
+def test_envelope_equal():
+    # Create a new keypair
+    keypair = create_new_key_pair()
+    private_key = keypair.private_key
+
+    # Create a mock PeerRecord
+    record = PeerRecord(
+        peer_id=ID.from_base58("QmNM23MiU1Kd7yfiKVdUnaDo8RYca8By4zDmr7uSaVV8Px"),
+        seq=1,
+        addrs=[Multiaddr("/ip4/127.0.0.1/tcp/4001")],
+    )
+
+    # Seal it into an Envelope
+    env1 = seal_record(record, private_key)
+
+    # Create a second identical envelope
+    env2 = Envelope(
+        public_key=env1.public_key,
+        payload_type=env1.payload_type,
+        raw_payload=env1.raw_payload,
+        signature=env1.signature,
+    )
+
+    # They should be equal
+    assert env1.equal(env2)
+
+    # Now change something — payload type
+    env2.payload_type = b"\x99\x99"
+    assert not env1.equal(env2)
+
+    # Restore payload_type but change signature
+    env2.payload_type = env1.payload_type
+    env2.signature = b"wrong-signature"
+    assert not env1.equal(env2)
+
+    # Restore signature but change payload
+    env2.signature = env1.signature
+    env2.raw_payload = b"tampered"
+    assert not env1.equal(env2)
+
+    # Finally, test with a non-envelope object
+    assert not env1.equal("not-an-envelope")
