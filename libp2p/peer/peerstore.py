@@ -23,6 +23,7 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.peer.envelope import Envelope
 
 from .id import (
     ID,
@@ -38,12 +39,24 @@ from .peerinfo import (
 PERMANENT_ADDR_TTL = 0
 
 
+# TODO: Set up an async task for periodic peer-store cleanup
+# for expired addresses and records.
+class PeerRecordState:
+    envelope: Envelope
+    seq: int
+
+    def __init__(self, envelope: Envelope, seq: int):
+        self.envelope = envelope
+        self.seq = seq
+
+
 class PeerStore(IPeerStore):
     peer_data_map: dict[ID, PeerData]
 
     def __init__(self) -> None:
         self.peer_data_map = defaultdict(PeerData)
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
+        self.peer_record_map: dict[ID, PeerRecordState] = {}
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -165,6 +178,76 @@ class PeerStore(IPeerStore):
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_metadata()
 
+    # -----CERT-ADDR-BOOK-----
+
+    # TODO: Make proper use of this function
+    def maybe_delete_peer_record(self, peer_id: ID) -> None:
+        """
+        Delete the signed peer record for a peer if it has no know
+        (non-expired) addresses.
+
+        This is a garbage collection mechanism: if all addresses for a peer have expired
+        or been cleared, there's no point holding onto its signed `Envelope`
+
+        :param peer_id: The peer whose record we may delete/
+        """
+        if not self.addrs(peer_id):
+            self.peer_record_map.pop(peer_id, None)
+
+    def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
+        """
+        Accept and store a signed PeerRecord, unless it's older than
+        the one already stored.
+
+        This function:
+        - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if it's older (lower seq)
+        - Updates the stored peer record and replaces associated addresses if accepted
+
+        :param envelope: Signed envelope containing a PeerRecord.
+        :param ttl: Time-to-live for the included multiaddrs (in seconds).
+        :return: True if the record was accepted and stored; False if it was rejected.
+        """
+        record = envelope.record()
+        peer_id = record.peer_id
+
+        # TODO: Put up a limit on the number of records to be stored ?
+        existing = self.peer_record_map.get(peer_id)
+        if existing and existing.seq > record.seq:
+            return False  # reject older record
+
+        # TODO: In case of overwriting a record, what should be do with the
+        # old addresses, do we overwrite them with the new addresses too ?
+        self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
+        self.add_addrs(peer_id, record.addrs, ttl)
+
+        return True
+
+    def get_peer_record(self, peer_id: ID) -> Envelope | None:
+        """
+        Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
+        and is still relevant.
+
+        First, it runs cleanup via `maybe_delete_peer_record` to purge stale data.
+        Then it checks whether the peer has valid, unexpired addresses before
+        returning the associated envelope.
+
+        :param peer_id: The peer to look up.
+        :return: The signed Envelope if the peer is known and has valid
+        addresses; None otherwise.
+        """
+        self.maybe_delete_peer_record(peer_id)
+
+        # Check if the peer has any valid addresses
+        if (
+            peer_id in self.peer_data_map
+            and not self.peer_data_map[peer_id].is_expired()
+        ):
+            state = self.peer_record_map.get(peer_id)
+            if state is not None:
+                return state.envelope
+        return None
+
     # -------ADDR-BOOK--------
 
     def add_addr(self, peer_id: ID, addr: Multiaddr, ttl: int = 0) -> None:
@@ -192,6 +275,8 @@ class PeerStore(IPeerStore):
                     self.addr_update_channels[peer_id].send_nowait(addr)
                 except trio.WouldBlock:
                     pass  # Or consider logging / dropping / replacing stream
+
+        self.maybe_delete_peer_record(peer_id)
 
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
