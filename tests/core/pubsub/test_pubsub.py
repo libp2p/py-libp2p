@@ -4,11 +4,14 @@ from contextlib import (
 import inspect
 from typing import (
     NamedTuple,
+    cast,
 )
+from unittest.mock import patch
 
 import pytest
 import trio
 
+from libp2p.custom_types import AsyncValidatorFn, SyncValidatorFn
 from libp2p.exceptions import (
     ValidationError,
 )
@@ -285,6 +288,124 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
         else:
             with pytest.raises(ValidationError):
                 await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
+
+
+@pytest.mark.parametrize(
+    "is_topic_1_val_passed, is_topic_2_val_passed",
+    ((False, True), (True, False), (True, True)),
+)
+@pytest.mark.trio
+async def test_validate_msg_respects_concurrency_limit(
+    is_topic_1_val_passed, is_topic_2_val_passed
+):
+    MAX_CONCURRENCY = 5
+
+    state = {
+        "concurrency_counter": 0,
+        "max_observed": 0,
+    }
+    lock = trio.Lock()
+
+    async def mock_validate_msg(
+        self,
+        msg_forwarder: ID,
+        msg: rpc_pb2.Message,
+        limit: trio.Semaphore = trio.Semaphore(MAX_CONCURRENCY),
+    ) -> None:
+        """
+        Mock function to test concurrency limit.
+        This function patches validate_msg for testing purpose
+        """
+        sync_topic_validators: list[SyncValidatorFn] = []
+        async_topic_validators: list[AsyncValidatorFn] = []
+        for topic_validator in self.get_msg_validators(msg):
+            if topic_validator.is_async:
+                async_topic_validators.append(
+                    cast(AsyncValidatorFn, topic_validator.validator)
+                )
+            else:
+                sync_topic_validators.append(
+                    cast(SyncValidatorFn, topic_validator.validator)
+                )
+
+        for validator in sync_topic_validators:
+            if not validator(msg_forwarder, msg):
+                raise ValidationError(f"Validation failed for msg={msg}")
+
+        if len(async_topic_validators) > 0:
+            # Appends to lists are thread safe in CPython
+            results = []
+
+            async def run_async_validator(func: AsyncValidatorFn) -> None:
+                async with limit:
+                    async with lock:
+                        state["concurrency_counter"] += 1
+                        if state["concurrency_counter"] > state["max_observed"]:
+                            state["max_observed"] = state["concurrency_counter"]
+
+                    try:
+                        result = await func(msg_forwarder, msg)
+                        results.append(result)
+                    finally:
+                        async with lock:
+                            state["concurrency_counter"] -= 1
+
+            async with trio.open_nursery() as nursery:
+                for async_validator in async_topic_validators:
+                    nursery.start_soon(run_async_validator, async_validator)
+
+            if not all(results):
+                raise ValidationError(f"Validation failed for msg={msg}")
+
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+
+        def passed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+            return True
+
+        def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+            return False
+
+        async def passed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+            await trio.lowlevel.checkpoint()
+            return True
+
+        async def failed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
+            await trio.lowlevel.checkpoint()
+            return False
+
+        topic_1 = "TEST_SYNC_VALIDATOR"
+        topic_2 = "TEST_ASYNC_VALIDATOR"
+
+        if is_topic_1_val_passed:
+            pubsubs_fsub[0].set_topic_validator(topic_1, passed_sync_validator, False)
+        else:
+            pubsubs_fsub[0].set_topic_validator(topic_1, failed_sync_validator, False)
+
+        if is_topic_2_val_passed:
+            pubsubs_fsub[0].set_topic_validator(topic_2, passed_async_validator, True)
+        else:
+            pubsubs_fsub[0].set_topic_validator(topic_2, failed_async_validator, True)
+
+        msg = make_pubsub_msg(
+            origin_id=pubsubs_fsub[0].my_id,
+            topic_ids=[topic_1, topic_2],
+            data=b"1234",
+            seqno=b"\x00" * 8,
+        )
+
+        with patch(
+            "libp2p.pubsub.pubsub.Pubsub.validate_msg",
+            new=mock_validate_msg,
+        ):
+            if is_topic_1_val_passed and is_topic_2_val_passed:
+                await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
+            else:
+                with pytest.raises(ValidationError):
+                    await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
+
+    assert state["max_observed"] <= MAX_CONCURRENCY, (
+        f"Max concurrency observed: {state['max_observed']}"
+    )
 
 
 @pytest.mark.trio
