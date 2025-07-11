@@ -501,7 +501,7 @@ class ICertifiedAddrBook(ABC):
     """
 
     @abstractmethod
-    def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
+    def consume_peer_record(self, envelope: "Envelope", ttl: int) -> bool:
         """
         Accept and store a signed PeerRecord, unless it's older than
         the one already stored.
@@ -962,7 +962,7 @@ class IPeerStore(
     # --------CERTIFIED-ADDR-BOOK----------
 
     @abstractmethod
-    def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
+    def consume_peer_record(self, envelope: "Envelope", ttl: int) -> bool:
         """
         Accept and store a signed PeerRecord, unless it's older
         than the one already stored.
