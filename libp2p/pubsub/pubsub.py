@@ -660,7 +660,12 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("successfully published message %s", msg)
 
-    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
+    async def validate_msg(
+        self,
+        msg_forwarder: ID,
+        msg: rpc_pb2.Message,
+        limit: trio.Semaphore = trio.Semaphore(MAX_CONCURRENT_VALIDATORS),
+    ) -> None:
         """
         Validate the received message.
 
@@ -686,10 +691,9 @@ class Pubsub(Service, IPubsub):
         if len(async_topic_validators) > 0:
             # Appends to lists are thread safe in CPython
             results = []
-            semaphore = trio.Semaphore(MAX_CONCURRENT_VALIDATORS)
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                async with semaphore:
+                async with limit:
                     result = await func(msg_forwarder, msg)
                     results.append(result)
 
