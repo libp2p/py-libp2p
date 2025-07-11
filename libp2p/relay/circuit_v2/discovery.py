@@ -234,7 +234,8 @@ class RelayDiscovery(Service):
 
             if not callable(proto_getter):
                 return None
-
+            if peer_id not in peerstore.peer_ids():
+                return None
             try:
                 # Try to get protocols
                 proto_result = proto_getter(peer_id)
@@ -283,8 +284,6 @@ class RelayDiscovery(Service):
                 return None
 
             mux = self.host.get_mux()
-            if not hasattr(mux, "protocols"):
-                return None
 
             peer_protocols = set()
             # Get protocols from mux with proper type safety
