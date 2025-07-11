@@ -47,15 +47,12 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
+    from libp2p.protocol_muxer.multiselect import Multiselect
+    from libp2p.peer.envelope import Envelope
     from libp2p.peer.peer_record import PeerRecord
     from libp2p.pubsub.pubsub import (
         Pubsub,
     )
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from libp2p.protocol_muxer.multiselect import Multiselect
 
 from libp2p.pubsub.pb import (
     rpc_pb2,
@@ -495,6 +492,71 @@ class IAddrBook(ABC):
         """
 
 
+# ------------------ certified-addr-book interface.py ---------------------
+class ICertifiedAddrBook(ABC):
+    """
+    Interface for a certified address book.
+
+    Provides methods for managing signed peer records
+    """
+
+    @abstractmethod
+    def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
+        """
+        Accept and store a signed PeerRecord, unless it's older than
+        the one already stored.
+
+        This function:
+        - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if it's older (lower seq)
+        - Updates the stored peer record and replaces associated
+        addresses if accepted
+
+
+        Parameters
+        ----------
+        envelope:
+            Signed envelope containing a PeerRecord.
+        ttl:
+            Time-to-live for the included multiaddrs (in seconds).
+
+        """
+
+    @abstractmethod
+    def get_peer_record(self, peer_id: ID) -> Envelope | None:
+        """
+        Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
+        and is still relevant.
+
+        First, it runs cleanup via `maybe_delete_peer_record` to purge stale data.
+        Then it checks whether the peer has valid, unexpired addresses before
+        returning the associated envelope.
+
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to look up.
+
+        """
+
+    @abstractmethod
+    def maybe_delete_peer_record(self, peer_id: ID) -> None:
+        """
+        Delete the signed peer record for a peer if it has no know
+        (non-expired) addresses.
+
+        This is a garbage collection mechanism: if all addresses for a peer have expired
+        or been cleared, there's no point holding onto its signed `Envelope`
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose record we may delete.
+
+        """
+
+
 # -------------------------- keybook interface.py --------------------------
 
 
@@ -760,7 +822,9 @@ class IProtoBook(ABC):
 # -------------------------- peerstore interface.py --------------------------
 
 
-class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
+class IPeerStore(
+    IPeerMetadata, IAddrBook, ICertifiedAddrBook, IKeyBook, IMetrics, IProtoBook
+):
     """
     Interface for a peer store.
 
@@ -895,7 +959,65 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
         """
 
+    # --------CERTIFIED-ADDR-BOOK----------
+
+    @abstractmethod
+    def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
+        """
+        Accept and store a signed PeerRecord, unless it's older
+        than the one already stored.
+
+        This function:
+        - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if it's older (lower seq)
+        - Updates the stored peer record and replaces associated addresses if accepted
+
+
+        Parameters
+        ----------
+        envelope:
+            Signed envelope containing a PeerRecord.
+        ttl:
+            Time-to-live for the included multiaddrs (in seconds).
+
+        """
+
+    @abstractmethod
+    def get_peer_record(self, peer_id: ID) -> Envelope | None:
+        """
+        Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
+        and is still relevant.
+
+        First, it runs cleanup via `maybe_delete_peer_record` to purge stale data.
+        Then it checks whether the peer has valid, unexpired addresses before
+        returning the associated envelope.
+
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to look up.
+
+        """
+
+    @abstractmethod
+    def maybe_delete_peer_record(self, peer_id: ID) -> None:
+        """
+        Delete the signed peer record for a peer if it has no
+        know (non-expired) addresses.
+
+        This is a garbage collection mechanism: if all addresses for a peer have expired
+        or been cleared, there's no point holding onto its signed `Envelope`
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose record we may delete.
+
+        """
+
     # --------KEY-BOOK----------
+
     @abstractmethod
     def pubkey(self, peer_id: ID) -> PublicKey:
         """
