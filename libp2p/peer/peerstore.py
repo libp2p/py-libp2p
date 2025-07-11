@@ -234,7 +234,8 @@ class PeerStore(IPeerStore):
 
         :param peer_id: The peer to look up.
         :return: The signed Envelope if the peer is known and has valid
-        addresses; None otherwise.
+            addresses; None otherwise.
+
         """
         self.maybe_delete_peer_record(peer_id)
 
