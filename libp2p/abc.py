@@ -16,6 +16,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -523,7 +524,7 @@ class ICertifiedAddrBook(ABC):
         """
 
     @abstractmethod
-    def get_peer_record(self, peer_id: ID) -> Envelope | None:
+    def get_peer_record(self, peer_id: ID) -> Optional["Envelope"]:
         """
         Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
         and is still relevant.
@@ -983,7 +984,7 @@ class IPeerStore(
         """
 
     @abstractmethod
-    def get_peer_record(self, peer_id: ID) -> Envelope | None:
+    def get_peer_record(self, peer_id: ID) -> Optional["Envelope"]:
         """
         Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
         and is still relevant.
