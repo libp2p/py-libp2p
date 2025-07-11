@@ -292,7 +292,9 @@ class RelayDiscovery(Service):
                 # Get protocols with proper typing
                 mux_protocols = mux.get_protocols()
                 if isinstance(mux_protocols, (list, tuple)):
-                    available_protocols = list(mux_protocols)
+                    available_protocols = [
+                        p for p in mux.get_protocols() if p is not None
+                    ]
 
             for protocol in available_protocols:
                 try:
@@ -312,7 +314,7 @@ class RelayDiscovery(Service):
 
             self._protocol_cache[peer_id] = peer_protocols
             protocol_str = str(PROTOCOL_ID)
-            for protocol in peer_protocols:
+            for protocol in map(TProtocol, peer_protocols):
                 if protocol == protocol_str:
                     return True
             return False
