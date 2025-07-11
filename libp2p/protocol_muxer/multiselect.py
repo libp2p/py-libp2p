@@ -48,7 +48,6 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self,
         communicator: IMultiselectCommunicator,
