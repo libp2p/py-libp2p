@@ -160,15 +160,21 @@ class TCP(ITransport):
 
         try:
             # trio.open_tcp_stream requires host to be str or bytes, not None.
+            logger.debug("=== OPENING TCP STREAM ===")
+            logger.debug("Host: %s", host_str)
+            logger.debug("Port: %d", port_int)
             stream = await trio.open_tcp_stream(host_str, port_int)
+            logger.debug("Successfully opened TCP stream")
         except OSError as error:
             # OSError is common for network issues like "Connection refused"
             # or "Host unreachable".
+            logger.error("Failed to open TCP stream: %s", error)
             raise OpenConnectionError(
                 f"Failed to open TCP stream to {maddr}: {error}"
             ) from error
         except Exception as error:
             # Catch other potential errors from trio.open_tcp_stream and wrap them.
+            logger.error("Unexpected error opening TCP stream: %s", error)
             raise OpenConnectionError(
                 f"An unexpected error occurred when dialing {maddr}: {error}"
             ) from error

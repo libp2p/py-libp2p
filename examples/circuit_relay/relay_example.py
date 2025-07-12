@@ -33,7 +33,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.relay.circuit_v2.config import RelayConfig
 from libp2p.relay.circuit_v2.discovery import RelayDiscovery
-from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol, PROTOCOL_ID as RELAY_PROTOCOL_ID
+from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol, PROTOCOL_ID, STOP_PROTOCOL_ID
 from libp2p.relay.circuit_v2.resources import RelayLimits
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
 from libp2p.tools.async_service import background_trio_service
@@ -109,8 +109,11 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
         for addr in addrs:
             logger.info(f"Listening on: {addr}")
             
-        # Register our example protocol handler
+        # Register protocol handlers
         host.set_stream_handler(EXAMPLE_PROTOCOL_ID, handle_example_protocol)
+        host.set_stream_handler(PROTOCOL_ID, protocol._handle_hop_stream)
+        host.set_stream_handler(STOP_PROTOCOL_ID, protocol._handle_stop_stream)
+        logger.debug("Protocol handlers registered")
         
         # Start the relay protocol service
         async with background_trio_service(protocol):
@@ -166,8 +169,11 @@ async def setup_destination_node(port: int, relay_addr: str, seed: int | None = 
         for addr in addrs:
             logger.info(f"Listening on: {addr}")
         
-        # Register our example protocol handler
+        # Register protocol handlers
         host.set_stream_handler(EXAMPLE_PROTOCOL_ID, handle_example_protocol)
+        host.set_stream_handler(PROTOCOL_ID, protocol._handle_hop_stream)
+        host.set_stream_handler(STOP_PROTOCOL_ID, protocol._handle_stop_stream)
+        logger.debug("Protocol handlers registered")
         
         # Start the relay protocol service
         async with background_trio_service(protocol):
