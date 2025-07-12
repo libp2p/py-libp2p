@@ -102,6 +102,9 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
+MAX_CONCURRENT_VALIDATORS = 10
+
+
 class Pubsub(Service, IPubsub):
     host: IHost
 
@@ -109,6 +112,7 @@ class Pubsub(Service, IPubsub):
 
     peer_receive_channel: trio.MemoryReceiveChannel[ID]
     dead_peer_receive_channel: trio.MemoryReceiveChannel[ID]
+    _validator_semaphore: trio.Semaphore
 
     seen_messages: LastSeenCache
 
@@ -143,6 +147,7 @@ class Pubsub(Service, IPubsub):
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
+        max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -168,6 +173,7 @@ class Pubsub(Service, IPubsub):
         # Therefore, we can only close from the receive side.
         self.peer_receive_channel = peer_receive
         self.dead_peer_receive_channel = dead_peer_receive
+        self._validator_semaphore = trio.Semaphore(max_concurrent_validator_count)
         # Register a notifee
         self.host.get_network().register_notifee(
             PubsubNotifee(peer_send, dead_peer_send)
@@ -657,7 +663,11 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("successfully published message %s", msg)
 
-    async def validate_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
+    async def validate_msg(
+        self,
+        msg_forwarder: ID,
+        msg: rpc_pb2.Message,
+    ) -> None:
         """
         Validate the received message.
 
@@ -680,15 +690,14 @@ class Pubsub(Service, IPubsub):
             if not validator(msg_forwarder, msg):
                 raise ValidationError(f"Validation failed for msg={msg}")
 
-        # TODO: Implement throttle on async validators
-
         if len(async_topic_validators) > 0:
             # Appends to lists are thread safe in CPython
             results = []
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                result = await func(msg_forwarder, msg)
-                results.append(result)
+                async with self._validator_semaphore:
+                    result = await func(msg_forwarder, msg)
+                    results.append(result)
 
             async with trio.open_nursery() as nursery:
                 for async_validator in async_topic_validators:
