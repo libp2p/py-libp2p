@@ -64,7 +64,11 @@ class PeerStore(IPeerStore):
         return list(self.peer_data_map.keys())
 
     def clear_peerdata(self, peer_id: ID) -> None:
-        """Clears the peer data of the peer"""
+        """Clears all data associated with the given peer_id."""
+        if peer_id in self.peer_data_map:
+            del self.peer_data_map[peer_id]
+        else:
+            raise PeerStoreError("peer ID not found")
 
     def valid_peer_ids(self) -> list[ID]:
         """
