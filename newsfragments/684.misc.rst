@@ -1,1 +1,0 @@
-Uses the `decapsulate` method of the `Multiaddr` class to clean up the observed address.

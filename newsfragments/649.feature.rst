@@ -1,1 +1,0 @@
-Added support for ``Multicast DNS`` in py-libp2p
