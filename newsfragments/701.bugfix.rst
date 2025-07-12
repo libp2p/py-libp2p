@@ -1,1 +1,0 @@
-align stream creation logic with yamux specification
