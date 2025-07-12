@@ -298,7 +298,7 @@ async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
 async def test_validate_msg_respects_concurrency_limit(
     is_topic_1_val_passed, is_topic_2_val_passed
 ):
-    MAX_CONCURRENCY = 5
+    CONCURRENCY_LIMIT = 10
 
     state = {
         "concurrency_counter": 0,
@@ -310,7 +310,6 @@ async def test_validate_msg_respects_concurrency_limit(
         self,
         msg_forwarder: ID,
         msg: rpc_pb2.Message,
-        limit: trio.Semaphore = trio.Semaphore(MAX_CONCURRENCY),
     ) -> None:
         """
         Mock function to test concurrency limit.
@@ -337,7 +336,7 @@ async def test_validate_msg_respects_concurrency_limit(
             results = []
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                async with limit:
+                async with self._validator_semaphore:
                     async with lock:
                         state["concurrency_counter"] += 1
                         if state["concurrency_counter"] > state["max_observed"]:
@@ -403,7 +402,7 @@ async def test_validate_msg_respects_concurrency_limit(
                 with pytest.raises(ValidationError):
                     await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
 
-    assert state["max_observed"] <= MAX_CONCURRENCY, (
+    assert state["max_observed"] <= CONCURRENCY_LIMIT, (
         f"Max concurrency observed: {state['max_observed']}"
     )
 
