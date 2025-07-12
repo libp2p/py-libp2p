@@ -50,6 +50,11 @@ if TYPE_CHECKING:
         Pubsub,
     )
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from libp2p.protocol_muxer.multiselect import Multiselect
+
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -1553,9 +1558,8 @@ class IHost(ABC):
 
         """
 
-    # FIXME: Replace with correct return type
     @abstractmethod
-    def get_mux(self) -> Any:
+    def get_mux(self) -> "Multiselect":
         """
         Retrieve the muxer instance for the host.
 
@@ -2166,6 +2170,7 @@ class IMultiselectMuxer(ABC):
 
         """
 
+    @abstractmethod
     def get_protocols(self) -> tuple[TProtocol | None, ...]:
         """
         Retrieve the protocols for which handlers have been registered.
@@ -2176,7 +2181,6 @@ class IMultiselectMuxer(ABC):
             A tuple of registered protocol names.
 
         """
-        return tuple(self.handlers.keys())
 
     @abstractmethod
     async def negotiate(
