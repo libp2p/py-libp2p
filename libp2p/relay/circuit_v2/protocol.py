@@ -304,7 +304,9 @@ class CircuitV2Protocol(Service):
                     logger.error("Timeout reading from hop stream from %s", remote_id)
                     return
                 except Exception as e:
-                    logger.error("Error reading from hop stream from %s: %s", remote_id, str(e))
+                    logger.error(
+                        "Error reading from hop stream from %s: %s", remote_id, str(e)
+                    )
                     return
 
                 # Parse the message
@@ -312,7 +314,9 @@ class CircuitV2Protocol(Service):
                     hop_msg = HopMessage()
                     hop_msg.ParseFromString(msg_bytes)
                 except Exception as e:
-                    logger.error("Error parsing hop message from %s: %s", remote_id, str(e))
+                    logger.error(
+                        "Error parsing hop message from %s: %s", remote_id, str(e)
+                    )
                     await self._send_status(
                         stream,
                         StatusCode.MALFORMED_MESSAGE,
@@ -331,7 +335,9 @@ class CircuitV2Protocol(Service):
                     # CONNECT establishes a circuit, so we're done with this stream
                     return
                 else:
-                    logger.error("Invalid message type %d from %s", hop_msg.type, remote_id)
+                    logger.error(
+                        "Invalid message type %d from %s", hop_msg.type, remote_id
+                    )
                     await self._send_status(
                         stream,
                         StatusCode.MALFORMED_MESSAGE,
@@ -340,7 +346,9 @@ class CircuitV2Protocol(Service):
                     return
 
         except Exception as e:
-            logger.error("Unexpected error handling hop stream from %s: %s", remote_id, str(e))
+            logger.error(
+                "Unexpected error handling hop stream from %s: %s", remote_id, str(e)
+            )
             try:
                 await self._send_status(
                     stream,
@@ -348,7 +356,9 @@ class CircuitV2Protocol(Service):
                     f"Internal error: {str(e)}",
                 )
             except Exception as e2:
-                logger.error("Failed to send error response to %s: %s", remote_id, str(e2))
+                logger.error(
+                    "Failed to send error response to %s: %s", remote_id, str(e2)
+                )
 
     async def _handle_stop_stream(self, stream: INetStream) -> None:
         """

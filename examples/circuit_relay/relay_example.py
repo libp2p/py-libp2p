@@ -20,7 +20,6 @@ Usage:
 import argparse
 import logging
 import sys
-from typing import Any
 
 import multiaddr
 import trio
@@ -33,7 +32,11 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.relay.circuit_v2.config import RelayConfig
 from libp2p.relay.circuit_v2.discovery import RelayDiscovery
-from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol, PROTOCOL_ID, STOP_PROTOCOL_ID
+from libp2p.relay.circuit_v2.protocol import (
+    PROTOCOL_ID,
+    STOP_PROTOCOL_ID,
+    CircuitV2Protocol,
+)
 from libp2p.relay.circuit_v2.resources import RelayLimits
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
 from libp2p.tools.async_service import background_trio_service
@@ -52,17 +55,19 @@ MAX_READ_LEN = 2**16  # 64KB
 
 async def handle_example_protocol(stream: INetStream) -> None:
     """Handle incoming messages on our example protocol."""
-    remote_peer_id = stream.get_protocol().remote_peer_id
+    remote_peer_id = stream.muxed_conn.peer_id
     logger.info(f"New stream from peer: {remote_peer_id}")
-    
+
     try:
         # Read the incoming message
         msg = await stream.read(MAX_READ_LEN)
         if msg:
             logger.info(f"Received message: {msg.decode()}")
-            
+
         # Send a response
-        response = f"Hello! This is {stream.get_protocol().local_peer_id}".encode()
+        # Get the local peer ID from the secure connection
+        local_peer_id = stream.muxed_conn.peer_id
+        response = f"Hello! This is {local_peer_id}".encode()
         await stream.write(response)
         logger.info(f"Sent response to {remote_peer_id}")
     except Exception as e:
@@ -74,11 +79,11 @@ async def handle_example_protocol(stream: INetStream) -> None:
 async def setup_relay_node(port: int, seed: int | None = None) -> None:
     """Set up and run a relay node."""
     logger.info("Starting relay node...")
-    
+
     # Create host with a fixed key if seed is provided
     key_pair = create_new_key_pair(generate_fixed_private_key(seed) if seed else None)
     host = new_host(key_pair=key_pair)
-    
+
     # Configure the relay
     limits = RelayLimits(
         duration=3600,  # 1 hour
@@ -86,59 +91,61 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
         max_circuit_conns=10,
         max_reservations=5,
     )
-    
+
     relay_config = RelayConfig(
         enable_hop=True,  # Act as a relay
         enable_stop=True,  # Accept relayed connections
         enable_client=True,  # Use other relays if needed
         limits=limits,
     )
-    
+
     # Initialize the protocol
     protocol = CircuitV2Protocol(host, limits=limits, allow_hop=True)
-    
+
     # Start the host
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    
+
     async with host.run(listen_addrs=[listen_addr]):
         # Print information about this node
         peer_id = host.get_id()
         logger.info(f"Relay node started with ID: {peer_id}")
-        
+
         addrs = host.get_addrs()
         for addr in addrs:
             logger.info(f"Listening on: {addr}")
-            
+
         # Register protocol handlers
         host.set_stream_handler(EXAMPLE_PROTOCOL_ID, handle_example_protocol)
         host.set_stream_handler(PROTOCOL_ID, protocol._handle_hop_stream)
         host.set_stream_handler(STOP_PROTOCOL_ID, protocol._handle_stop_stream)
         logger.debug("Protocol handlers registered")
-        
+
         # Start the relay protocol service
         async with background_trio_service(protocol):
             logger.info("Circuit relay protocol started")
-            
+
             # Create and register the transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info("Circuit relay transport initialized")
-            
+
             print("\nRelay node is running. Use the following address to connect:")
             print(f"{addrs[0]}/p2p/{peer_id}")
             print("\nPress Ctrl+C to exit\n")
-            
+
             # Keep the relay running
             await trio.sleep_forever()
 
 
-async def setup_destination_node(port: int, relay_addr: str, seed: int | None = None) -> None:
+async def setup_destination_node(
+    port: int, relay_addr: str, seed: int | None = None
+) -> None:
     """Set up and run a destination node that accepts incoming connections."""
     logger.info("Starting destination node...")
-    
+
     # Create host with a fixed key if seed is provided
     key_pair = create_new_key_pair(generate_fixed_private_key(seed) if seed else None)
     host = new_host(key_pair=key_pair)
-    
+
     # Configure the circuit relay client
     limits = RelayLimits(
         duration=3600,  # 1 hour
@@ -146,50 +153,50 @@ async def setup_destination_node(port: int, relay_addr: str, seed: int | None = 
         max_circuit_conns=10,
         max_reservations=5,
     )
-    
+
     relay_config = RelayConfig(
         enable_hop=False,  # Not acting as a relay
         enable_stop=True,  # Accept relayed connections
         enable_client=True,  # Use relays for dialing
         limits=limits,
     )
-    
+
     # Initialize the protocol
     protocol = CircuitV2Protocol(host, limits=limits, allow_hop=False)
-    
+
     # Start the host
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    
+
     async with host.run(listen_addrs=[listen_addr]):
         # Print information about this node
         peer_id = host.get_id()
         logger.info(f"Destination node started with ID: {peer_id}")
-        
+
         addrs = host.get_addrs()
         for addr in addrs:
             logger.info(f"Listening on: {addr}")
-        
+
         # Register protocol handlers
         host.set_stream_handler(EXAMPLE_PROTOCOL_ID, handle_example_protocol)
         host.set_stream_handler(PROTOCOL_ID, protocol._handle_hop_stream)
         host.set_stream_handler(STOP_PROTOCOL_ID, protocol._handle_stop_stream)
         logger.debug("Protocol handlers registered")
-        
+
         # Start the relay protocol service
         async with background_trio_service(protocol):
             logger.info("Circuit relay protocol started")
-            
+
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
-            
+
             # Create discovery service
             discovery = RelayDiscovery(host, auto_reserve=True)
             transport.discovery = discovery
-            
+
             # Start discovery service
             async with background_trio_service(discovery):
                 logger.info("Relay discovery service started")
-                
+
                 # Connect to the relay
                 if relay_addr:
                     logger.info(f"Connecting to relay at {relay_addr}")
@@ -202,39 +209,50 @@ async def setup_destination_node(port: int, relay_addr: str, seed: int | None = 
                         else:
                             # Assume it's just a peer ID
                             relay_peer_id = ID.from_base58(relay_addr)
-                            relay_info = PeerInfo(relay_peer_id, [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/8000/p2p/{relay_addr}")])
-                            logger.info(f"Using constructed address: {relay_info.addrs[0]}")
-                        
+                            relay_info = PeerInfo(
+                                relay_peer_id,
+                                [
+                                    multiaddr.Multiaddr(
+                                        f"/ip4/127.0.0.1/tcp/8000/p2p/{relay_addr}"
+                                    )
+                                ],
+                            )
+                            logger.info(
+                                f"Using constructed address: {relay_info.addrs[0]}"
+                            )
+
                         await host.connect(relay_info)
                         logger.info(f"Connected to relay {relay_info.peer_id}")
                     except Exception as e:
                         logger.error(f"Failed to connect to relay: {e}")
                         return
-        
+
         print("\nDestination node is running with peer ID:")
         print(f"{peer_id}")
         print("\nPress Ctrl+C to exit\n")
-        
+
         # Keep the node running
         await trio.sleep_forever()
 
 
-async def setup_source_node(relay_addr: str, dest_id: str, seed: int | None = None) -> None:
+async def setup_source_node(
+    relay_addr: str, dest_id: str, seed: int | None = None
+) -> None:
     """Set up and run a source node that connects to the destination through the relay."""
     logger.info("Starting source node...")
-    
+
     if not relay_addr:
         logger.error("Relay address is required for source mode")
         return
-    
+
     if not dest_id:
         logger.error("Destination peer ID is required for source mode")
         return
-    
+
     # Create host with a fixed key if seed is provided
     key_pair = create_new_key_pair(generate_fixed_private_key(seed) if seed else None)
     host = new_host(key_pair=key_pair)
-    
+
     # Configure the circuit relay client
     limits = RelayLimits(
         duration=3600,  # 1 hour
@@ -242,43 +260,45 @@ async def setup_source_node(relay_addr: str, dest_id: str, seed: int | None = No
         max_circuit_conns=10,
         max_reservations=5,
     )
-    
+
     relay_config = RelayConfig(
         enable_hop=False,  # Not acting as a relay
         enable_stop=True,  # Accept relayed connections
         enable_client=True,  # Use relays for dialing
         limits=limits,
     )
-    
+
     # Initialize the protocol
     protocol = CircuitV2Protocol(host, limits=limits, allow_hop=False)
-    
+
     # Start the host
-    async with host.run(listen_addrs=[multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/0")]):  # Use ephemeral port
+    async with host.run(
+        listen_addrs=[multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")]
+    ):  # Use ephemeral port
         # Print information about this node
         peer_id = host.get_id()
         logger.info(f"Source node started with ID: {peer_id}")
-        
+
         # Get assigned address for debugging
         addrs = host.get_addrs()
         if addrs:
             logger.info(f"Source node listening on: {addrs[0]}")
-        
+
         # Start the relay protocol service
         async with background_trio_service(protocol):
             logger.info("Circuit relay protocol started")
-            
+
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
-            
+
             # Create discovery service
             discovery = RelayDiscovery(host, auto_reserve=True)
             transport.discovery = discovery
-            
+
             # Start discovery service
             async with background_trio_service(discovery):
                 logger.info("Relay discovery service started")
-                
+
                 # Connect to the relay
                 logger.info(f"Connecting to relay at {relay_addr}")
                 try:
@@ -290,58 +310,77 @@ async def setup_source_node(relay_addr: str, dest_id: str, seed: int | None = No
                     else:
                         # Assume it's just a peer ID
                         relay_peer_id = ID.from_base58(relay_addr)
-                        relay_info = PeerInfo(relay_peer_id, [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/8000/p2p/{relay_addr}")])
+                        relay_info = PeerInfo(
+                            relay_peer_id,
+                            [
+                                multiaddr.Multiaddr(
+                                    f"/ip4/127.0.0.1/tcp/8000/p2p/{relay_addr}"
+                                )
+                            ],
+                        )
                         logger.info(f"Using constructed address: {relay_info.addrs[0]}")
-                    
+
                     await host.connect(relay_info)
                     logger.info(f"Connected to relay {relay_info.peer_id}")
-                    
+
                     # Wait for relay discovery to find the relay
                     await trio.sleep(2)
-                    
+
                     # Convert destination ID string to peer ID
                     dest_peer_id = ID.from_base58(dest_id)
-                    
+
                     # Try to connect to the destination through the relay
-                    logger.info(f"Connecting to destination {dest_peer_id} through relay")
-                    
+                    logger.info(
+                        f"Connecting to destination {dest_peer_id} through relay"
+                    )
+
                     # Create peer info with relay
                     relay_peer_id = relay_info.peer_id
                     logger.info(f"This is the relay peer id: {relay_peer_id}")
-                    
+
                     # Create a proper peer info with a relay address
                     # The destination peer should be reachable through a p2p-circuit address
                     # Format: /p2p-circuit/p2p/DESTINATION_PEER_ID
                     circuit_addr = multiaddr.Multiaddr(f"/p2p-circuit/p2p/{dest_id}")
                     dest_peer_info = PeerInfo(dest_peer_id, [circuit_addr])
                     logger.info(f"This is the dest peer info: {dest_peer_info}")
-                    
+
                     # Dial through the relay
                     try:
-                        logger.info(f"Attempting to dial destination {dest_peer_id} through relay {relay_peer_id}")
-                                                                        
+                        logger.info(
+                            f"Attempting to dial destination {dest_peer_id} through relay {relay_peer_id}"
+                        )
+
                         connection = await transport.dial_peer_info(
                             dest_peer_info, relay_peer_id=relay_peer_id
                         )
-                        
+
                         logger.info(f"This is the dial connection: {connection}")
-                        
-                        logger.info(f"Successfully connected to destination through relay!")
-                        
+
+                        logger.info(
+                            "Successfully connected to destination through relay!"
+                        )
+
                         # Open a stream to our example protocol
-                        stream = await host.new_stream(dest_peer_id, [EXAMPLE_PROTOCOL_ID])
+                        stream = await host.new_stream(
+                            dest_peer_id, [EXAMPLE_PROTOCOL_ID]
+                        )
                         if stream:
-                            logger.info(f"Opened stream to destination with protocol {EXAMPLE_PROTOCOL_ID}")
-                            
+                            logger.info(
+                                f"Opened stream to destination with protocol {EXAMPLE_PROTOCOL_ID}"
+                            )
+
                             # Send a message
                             msg = f"Hello from {peer_id}!".encode()
                             await stream.write(msg)
-                            logger.info(f"Sent message to destination")
-                            
+                            logger.info("Sent message to destination")
+
                             # Wait for response
                             response = await stream.read(MAX_READ_LEN)
-                            logger.info(f"Received response: {response.decode() if response else 'No response'}")
-                            
+                            logger.info(
+                                f"Received response: {response.decode() if response else 'No response'}"
+                            )
+
                             # Close the stream
                             await stream.close()
                         else:
@@ -350,21 +389,23 @@ async def setup_source_node(relay_addr: str, dest_id: str, seed: int | None = No
                         logger.error(f"Failed to dial through relay: {str(e)}")
                         logger.error(f"Exception type: {type(e).__name__}")
                         raise
-                    
+
                 except Exception as e:
                     logger.error(f"Error: {e}")
-                
+
                 print("\nSource operation completed")
                 # Keep running for a bit to allow messages to be processed
                 await trio.sleep(5)
 
 
-def generate_fixed_private_key(seed: int) -> bytes:
+def generate_fixed_private_key(seed: int | None) -> bytes:
     """Generate a fixed private key from a seed for reproducible peer IDs."""
-    if seed is None:
-        return None
-    
     import random
+
+    if seed is None:
+        # Generate random bytes if no seed provided
+        return random.getrandbits(32 * 8).to_bytes(length=32, byteorder="big")
+
     random.seed(seed)
     return random.getrandbits(32 * 8).to_bytes(length=32, byteorder="big")
 
@@ -405,14 +446,14 @@ def main() -> None:
         action="store_true",
         help="Enable debug logging",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Set log level
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.getLogger("libp2p").setLevel(logging.DEBUG)
-    
+
     try:
         if args.role == "relay":
             trio.run(setup_relay_node, args.port, args.seed)
@@ -432,4 +473,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main() 
+    main()
