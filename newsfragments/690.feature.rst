@@ -1,1 +1,0 @@
-added peer exchange and backoff logic as part of Gossipsub v1.1 upgrade
