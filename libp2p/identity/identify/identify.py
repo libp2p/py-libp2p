@@ -59,7 +59,7 @@ def _mk_identify_protobuf(
 ) -> Identify:
     public_key = host.get_public_key()
     laddrs = host.get_addrs()
-    protocols = host.get_mux().get_protocols()
+    protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
 
     observed_addr = observed_multiaddr.to_bytes() if observed_multiaddr else b""
     return Identify(

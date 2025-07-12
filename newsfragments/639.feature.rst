@@ -1,6 +1,0 @@
-Fixed several flow-control and concurrency issues in the `YamuxStream` class. Previously, stress-testing revealed that transferring data over `DEFAULT_WINDOW_SIZE` would break the stream due to inconsistent window update handling and lock management. The fixes include:
-
-- Removed sending of window updates during writes to maintain correct flow-control.
-- Added proper timeout handling when releasing and acquiring locks to prevent concurrency errors.
-- Corrected the `read` function to properly handle window updates for both `read_until_EOF` and `read_n_bytes`.
-- Added event logging at `send_window_updates` and `waiting_for_window_updates` for better observability.
