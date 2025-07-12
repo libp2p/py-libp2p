@@ -112,6 +112,7 @@ class Pubsub(Service, IPubsub):
 
     peer_receive_channel: trio.MemoryReceiveChannel[ID]
     dead_peer_receive_channel: trio.MemoryReceiveChannel[ID]
+    _validator_semaphore: trio.Semaphore
 
     seen_messages: LastSeenCache
 
@@ -146,6 +147,7 @@ class Pubsub(Service, IPubsub):
         msg_id_constructor: Callable[
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
+        max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -171,6 +173,7 @@ class Pubsub(Service, IPubsub):
         # Therefore, we can only close from the receive side.
         self.peer_receive_channel = peer_receive
         self.dead_peer_receive_channel = dead_peer_receive
+        self._validator_semaphore = trio.Semaphore(max_concurrent_validator_count)
         # Register a notifee
         self.host.get_network().register_notifee(
             PubsubNotifee(peer_send, dead_peer_send)
@@ -664,7 +667,6 @@ class Pubsub(Service, IPubsub):
         self,
         msg_forwarder: ID,
         msg: rpc_pb2.Message,
-        limit: trio.Semaphore = trio.Semaphore(MAX_CONCURRENT_VALIDATORS),
     ) -> None:
         """
         Validate the received message.
@@ -693,7 +695,7 @@ class Pubsub(Service, IPubsub):
             results = []
 
             async def run_async_validator(func: AsyncValidatorFn) -> None:
-                async with limit:
+                async with self._validator_semaphore:
                     result = await func(msg_forwarder, msg)
                     results.append(result)
 
