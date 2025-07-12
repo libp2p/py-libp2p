@@ -48,9 +48,9 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
-    from libp2p.protocol_muxer.multiselect import Multiselect
     from libp2p.peer.envelope import Envelope
     from libp2p.peer.peer_record import PeerRecord
+    from libp2p.protocol_muxer.multiselect import Multiselect
     from libp2p.pubsub.pubsub import (
         Pubsub,
     )
