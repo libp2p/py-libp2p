@@ -223,6 +223,7 @@ class Swarm(Service, INetworkService):
         swarm_conn = await self.dial_peer(peer_id)
 
         net_stream = await swarm_conn.new_stream()
+
         logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
 
