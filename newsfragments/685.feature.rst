@@ -1,1 +1,0 @@
-Optimized pubsub publishing to send multiple topics in a single message instead of separate messages per topic.

@@ -1,7 +1,0 @@
-Store public key and peer ID in peerstore during handshake
-
-Modified the InsecureTransport class to accept an optional peerstore parameter and updated the handshake process to store the received public key and peer ID in the peerstore when available.
-
-Added test cases to verify:
-1. The peerstore remains unchanged when handshake fails due to peer ID mismatch
-2. The handshake correctly adds a public key to a peer ID that already exists in the peerstore but doesn't have a public key yet
