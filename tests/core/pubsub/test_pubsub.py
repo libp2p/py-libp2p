@@ -246,56 +246,7 @@ async def test_get_msg_validators():
     ((False, True), (True, False), (True, True)),
 )
 @pytest.mark.trio
-async def test_validate_msg(is_topic_1_val_passed, is_topic_2_val_passed):
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
-
-        def passed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
-            return True
-
-        def failed_sync_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
-            return False
-
-        async def passed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
-            await trio.lowlevel.checkpoint()
-            return True
-
-        async def failed_async_validator(peer_id: ID, msg: rpc_pb2.Message) -> bool:
-            await trio.lowlevel.checkpoint()
-            return False
-
-        topic_1 = "TEST_SYNC_VALIDATOR"
-        topic_2 = "TEST_ASYNC_VALIDATOR"
-
-        if is_topic_1_val_passed:
-            pubsubs_fsub[0].set_topic_validator(topic_1, passed_sync_validator, False)
-        else:
-            pubsubs_fsub[0].set_topic_validator(topic_1, failed_sync_validator, False)
-
-        if is_topic_2_val_passed:
-            pubsubs_fsub[0].set_topic_validator(topic_2, passed_async_validator, True)
-        else:
-            pubsubs_fsub[0].set_topic_validator(topic_2, failed_async_validator, True)
-
-        msg = make_pubsub_msg(
-            origin_id=pubsubs_fsub[0].my_id,
-            topic_ids=[topic_1, topic_2],
-            data=b"1234",
-            seqno=b"\x00" * 8,
-        )
-
-        if is_topic_1_val_passed and is_topic_2_val_passed:
-            await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
-        else:
-            with pytest.raises(ValidationError):
-                await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
-
-
-@pytest.mark.parametrize(
-    "is_topic_1_val_passed, is_topic_2_val_passed",
-    ((False, True), (True, False), (True, True)),
-)
-@pytest.mark.trio
-async def test_validate_msg_respects_concurrency_limit(
+async def test_validate_msg_with_throttle_condition(
     is_topic_1_val_passed, is_topic_2_val_passed
 ):
     CONCURRENCY_LIMIT = 10
