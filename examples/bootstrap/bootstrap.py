@@ -19,14 +19,19 @@ handler.setFormatter(
 )
 logger.addHandler(handler)
 
-# Set root logger to DEBUG to capture all logs
-logging.getLogger().setLevel(logging.DEBUG)
+# Configure root logger to only show warnings and above to reduce noise
+# This prevents verbose DEBUG messages from multiaddr, DNS, etc.
+logging.getLogger().setLevel(logging.WARNING)
+
+# Specifically silence noisy libraries
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("root").setLevel(logging.WARNING)
 
 
 def on_peer_discovery(peer_info: PeerInfo) -> None:
     """Handler for peer discovery events."""
     logger.info(f"🔍 Discovered peer: {peer_info.peer_id}")
-    logger.info(f"   Addresses: {[str(addr) for addr in peer_info.addrs]}")
+    logger.debug(f"   Addresses: {[str(addr) for addr in peer_info.addrs]}")
 
 
 # Example bootstrap peers

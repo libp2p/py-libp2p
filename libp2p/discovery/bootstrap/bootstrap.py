@@ -1,13 +1,15 @@
 import logging
 
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 
-from libp2p.abc import INetworkService
+from libp2p.abc import ID, INetworkService, PeerInfo
 from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 logger = logging.getLogger("libp2p.discovery.bootstrap")
+resolver = DNSResolver()
 
 
 class BootstrapDiscovery:
@@ -51,27 +53,24 @@ class BootstrapDiscovery:
             logger.debug(f"Invalid multiaddr format '{addr_str}': {e}")
             return
         if self.is_dns_addr(multiaddr):
-            resolved_addrs = await multiaddr.resolve()
-            for resolved_addr in resolved_addrs:
-                if resolved_addr == multiaddr:
-                    return
-                self.add_addr(Multiaddr(resolved_addr))
-
-        self.add_addr(multiaddr)
+            resolved_addrs = await resolver.resolve(multiaddr)
+            peer_id_str = multiaddr.get_peer_id()
+            if peer_id_str is None:
+                logger.warning(f"Missing peer ID in DNS address: {addr_str}")
+                return
+            peer_id = ID.from_base58(peer_id_str)
+            addrs = [addr for addr in resolved_addrs]
+            peer_info = PeerInfo(peer_id, addrs)
+            self.add_addr(peer_info)
+        else:
+            self.add_addr(info_from_p2p_addr(multiaddr))
 
     def is_dns_addr(self, addr: Multiaddr) -> bool:
         """Check if the address is a DNS address."""
         return any(protocol.name == "dnsaddr" for protocol in addr.protocols())
 
-    def add_addr(self, addr: Multiaddr) -> None:
+    def add_addr(self, peer_info: PeerInfo) -> None:
         """Add a peer to the peerstore and emit discovery event."""
-        # Extract peer info from multiaddr
-        try:
-            peer_info = info_from_p2p_addr(addr)
-        except Exception as e:
-            logger.debug(f"Failed to extract peer info from '{addr}': {e}")
-            return
-
         # Skip if it's our own peer
         if peer_info.peer_id == self.swarm.get_peer_id():
             logger.debug(f"Skipping own peer ID: {peer_info.peer_id}")
