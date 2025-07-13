@@ -701,10 +701,27 @@ class Pubsub(Service, IPubsub):
 
             async with trio.open_nursery() as nursery:
                 for async_validator in async_topic_validators:
-                    nursery.start_soon(run_async_validator, async_validator)
+                    nursery.start_soon(
+                        self._run_async_validator,
+                        async_validator,
+                        msg_forwarder,
+                        msg,
+                        results,
+                    )
 
             if not all(results):
                 raise ValidationError(f"Validation failed for msg={msg}")
+
+    async def _run_async_validator(
+        self,
+        func: AsyncValidatorFn,
+        msg_forwarder: ID,
+        msg: rpc_pb2.Message,
+        results: list[bool],
+    ) -> None:
+        async with self._validator_semaphore:
+            result = await func(msg_forwarder, msg)
+            results.append(result)
 
     async def push_msg(self, msg_forwarder: ID, msg: rpc_pb2.Message) -> None:
         """
