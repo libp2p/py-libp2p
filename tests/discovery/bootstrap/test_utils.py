@@ -12,8 +12,8 @@ from libp2p.discovery.bootstrap.utils import (
 def test_validate_addresses():
     """Test validation with a mix of valid and invalid addresses in one list."""
     addresses = [
-        # Valid
-        "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SznbYGzPwp8qDrq",
+        # Valid - using proper peer IDs
+        "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
         "/ip4/104.236.179.241/tcp/4001/p2p/QmSoLPppuBtQSGwKDZT2M73ULpjvfd3aZ6ha4oFGL1KrGM",
         # Invalid
         "invalid-address",
@@ -22,7 +22,7 @@ def test_validate_addresses():
         "/ip4/127.0.0.1/tcp/4001/p2p/InvalidPeerID",  # Bad peer ID
     ]
     valid_expected = [
-        "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SznbYGzPwp8qDrq",
+        "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
         "/ip4/104.236.179.241/tcp/4001/p2p/QmSoLPppuBtQSGwKDZT2M73ULpjvfd3aZ6ha4oFGL1KrGM",
     ]
     validated = validate_bootstrap_addresses(addresses)
