@@ -25,6 +25,10 @@ from libp2p.peer.id import (
 )
 from libp2p.utils import (
     get_agent_version,
+    varint,
+)
+from libp2p.utils.varint import (
+    decode_varint_from_bytes,
 )
 
 from ..identify.identify import (
@@ -55,8 +59,29 @@ def identify_push_handler_for(host: IHost) -> StreamHandlerFn:
         peer_id = stream.muxed_conn.peer_id
 
         try:
-            # Read the identify message from the stream
-            data = await stream.read()
+            # Read length-prefixed identify message from the stream
+            # First read the varint length prefix
+            length_bytes = b""
+            while True:
+                b = await stream.read(1)
+                if not b:
+                    break
+                length_bytes += b
+                if b[0] & 0x80 == 0:
+                    break
+
+            if not length_bytes:
+                logger.warning("No length prefix received from peer %s", peer_id)
+                return
+
+            msg_length = decode_varint_from_bytes(length_bytes)
+
+            # Read the protobuf message
+            data = await stream.read(msg_length)
+            if len(data) != msg_length:
+                logger.warning("Incomplete message received from peer %s", peer_id)
+                return
+
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
 
@@ -159,7 +184,8 @@ async def push_identify_to_peer(
             identify_msg = _mk_identify_protobuf(host, observed_multiaddr)
             response = identify_msg.SerializeToString()
 
-            # Send the identify message
+            # Send length-prefixed identify message
+            await stream.write(varint.encode_uvarint(len(response)))
             await stream.write(response)
 
             # Close the stream

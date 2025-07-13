@@ -8,9 +8,9 @@ import trio
 from libp2p import (
     new_host,
 )
-from libp2p.identity.identify.identify import ID as IDENTIFY_PROTOCOL_ID
-from libp2p.identity.identify.pb.identify_pb2 import (
-    Identify,
+from libp2p.identity.identify.identify import (
+    ID as IDENTIFY_PROTOCOL_ID,
+    parse_identify_response,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -84,11 +84,18 @@ async def run(port: int, destination: str) -> None:
 
             try:
                 print("Starting identify protocol...")
-                response = await stream.read()
+
+                # Read the complete response (could be either format)
+                # Read a larger chunk to get all the data before stream closes
+                response = await stream.read(8192)  # Read enough data in one go
+
                 await stream.close()
-                identify_msg = Identify()
-                identify_msg.ParseFromString(response)
+
+                # Parse the response using the robust protocol-level function
+                # This handles both old and new formats automatically
+                identify_msg = parse_identify_response(response)
                 print_identify_response(identify_msg)
+
             except Exception as e:
                 print(f"Identify protocol error: {e}")
 
