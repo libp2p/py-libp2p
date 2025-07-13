@@ -132,8 +132,20 @@ class BasicHost(IHost):
 
     def get_mux(self) -> Multiselect:
         """
-        :return: mux instance of host
+        Retrieve the muxer instance for the host.
+
+        Returns
+        -------
+        Multiselect
+            The muxer instance of the host. Never returns None.
+
+        Raises
+        ------
+        RuntimeError
+            If the multiselect instance is not initialized.
         """
+        if not hasattr(self, "multiselect") or self.multiselect is None:
+            raise RuntimeError("Multiselect instance not initialized")
         return self.multiselect
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
