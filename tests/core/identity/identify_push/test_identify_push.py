@@ -459,7 +459,11 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     lock = trio.Lock()
 
     async def mock_push_identify_to_peer(
-        host, peer_id, observed_multiaddr=None, limit=trio.Semaphore(CONCURRENCY_LIMIT)
+        host,
+        peer_id,
+        observed_multiaddr=None,
+        limit=trio.Semaphore(CONCURRENCY_LIMIT),
+        use_varint_format=True,
     ) -> bool:
         """
         Mock function to test concurrency by simulating an identify message.

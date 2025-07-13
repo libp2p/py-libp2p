@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 def get_default_protocols(host: IHost) -> "OrderedDict[TProtocol, StreamHandlerFn]":
     return OrderedDict(
         (
-            (IdentifyID, identify_handler_for(host, use_varint_format=False)),
+            (IdentifyID, identify_handler_for(host, use_varint_format=True)),
             (PingID, handle_ping),
         )
     )
