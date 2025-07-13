@@ -58,8 +58,7 @@ def identify_push_handler_for(
 
     Args:
         host: The libp2p host.
-        use_varint_format: If True, expect length-prefixed format; if False,
-            expect raw protobuf.
+        use_varint_format: True=length-prefixed, False=raw protobuf.
 
     """
 
@@ -192,8 +191,7 @@ async def push_identify_to_peer(
         peer_id: The peer ID to push to.
         observed_multiaddr: The observed multiaddress (optional).
         limit: Semaphore for concurrency control.
-        use_varint_format: If True, send length-prefixed format; if False,
-            send raw protobuf.
+        use_varint_format: True=length-prefixed, False=raw protobuf.
 
     Returns:
         bool: True if the push was successful, False otherwise.
@@ -241,8 +239,7 @@ async def push_identify_to_peers(
         host: The libp2p host.
         peer_ids: Set of peer IDs to push to (if None, push to all connected peers).
         observed_multiaddr: The observed multiaddress (optional).
-        use_varint_format: If True, send length-prefixed format; if False,
-            send raw protobuf.
+        use_varint_format: True=length-prefixed, False=raw protobuf.
 
     """
     if peer_ids is None:
