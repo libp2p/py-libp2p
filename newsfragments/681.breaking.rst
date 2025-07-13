@@ -1,2 +1,0 @@
-Reordered the arguments to `upgrade_security` to place `is_initiator` before `peer_id`, and made `peer_id` optional.
-This allows the method to reflect the fact that peer identity is not required for inbound connections.
