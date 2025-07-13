@@ -3,6 +3,7 @@ import pytest
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.protocol_muxer.multiselect import Multiselect
 from libp2p.tools.utils import (
     create_echo_stream_handler,
 )
@@ -138,3 +139,23 @@ async def test_multistream_command(security_protocol):
         # Dialer asks for unspoorted command
         with pytest.raises(ValueError, match="Command not supported"):
             await dialer.send_command(listener.get_id(), "random")
+
+
+@pytest.mark.trio
+async def test_get_protocols_returns_all_registered_protocols():
+    ms = Multiselect()
+
+    async def dummy_handler(stream):
+        pass
+
+    p1 = TProtocol("/echo/1.0.0")
+    p2 = TProtocol("/foo/1.0.0")
+    p3 = TProtocol("/bar/1.0.0")
+
+    ms.add_handler(p1, dummy_handler)
+    ms.add_handler(p2, dummy_handler)
+    ms.add_handler(p3, dummy_handler)
+
+    protocols = ms.get_protocols()
+
+    assert set(protocols) == {p1, p2, p3}
