@@ -500,7 +500,7 @@ class QUICListener(IListener):
                     try:
                         quic_conn.tls._request_client_certificate = True
                         logger.debug(
-                            "request_client_certificate set to True in server TLS context"
+                            "request_client_certificate set to True in server TLS"
                         )
                     except Exception as e:
                         logger.error(f"FAILED to apply request_client_certificate: {e}")
@@ -694,7 +694,7 @@ class QUICListener(IListener):
 
             if dest_cid in self._connections:
                 logger.debug(
-                    f"⚠️ PROMOTE: Connection {dest_cid.hex()} already exists in _connections!"
+                    f"⚠️ Connection {dest_cid.hex()} already exists in _connections!"
                 )
                 connection = self._connections[dest_cid]
             else:

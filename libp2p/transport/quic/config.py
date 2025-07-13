@@ -1,5 +1,3 @@
-from typing import Literal
-
 """
 Configuration classes for QUIC transport.
 """
@@ -9,7 +7,7 @@ from dataclasses import (
     field,
 )
 import ssl
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from libp2p.custom_types import TProtocol
 

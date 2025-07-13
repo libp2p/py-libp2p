@@ -292,15 +292,15 @@ class LibP2PExtensionHandler:
                 return signature
             else:
                 logger.debug(
-                    f"❌ Cannot extract 64 bytes from {len(signature_data)} byte signature"
+                    f"Cannot extract 64 bytes from {len(signature_data)} byte signature"
                 )
                 return signature_data
 
     @staticmethod
     def _extract_secp256k1_signature(signature_data: bytes) -> bytes:
         """
-        Extract Secp256k1 signature.
-        Secp256k1 can use either DER-encoded or raw format depending on the implementation.
+        Extract Secp256k1 signature. Secp256k1 can use either DER-encoded
+        or raw format depending on the implementation.
         """
         logger.debug("🔧 Extracting Secp256k1 signature")
 
@@ -445,11 +445,12 @@ class LibP2PExtensionHandler:
             return signature
         elif len(signature) > expected_total_length:
             logger.debug(
-                f"🔧 Truncating DER signature from {len(signature)} to {expected_total_length} bytes"
+                "Truncating DER signature from "
+                f"{len(signature)} to {expected_total_length} bytes"
             )
             return signature[:expected_total_length]
         else:
-            logger.debug(f"⚠️  DER signature is shorter than expected, using as-is")
+            logger.debug("DER signature is shorter than expected, using as-is")
             return signature
 
 
@@ -823,7 +824,7 @@ class QUICTLSSecurityConfig:
             return {"error": str(e)}
 
     def debug_config(self) -> None:
-        """print debugging information about this configuration."""
+        """Print debugging information about this configuration."""
         print(f"=== TLS Security Config Debug ({self.config_name or 'unnamed'}) ===")
         print(f"Is client config: {self.is_client_config}")
         print(f"ALPN protocols: {self.alpn_protocols}")
