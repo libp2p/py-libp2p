@@ -1,8 +1,5 @@
 """
-QUIC Transport implementation for py-libp2p with integrated security.
-Uses aioquic's sans-IO core with trio for native async support.
-Based on aioquic library with interface consistency to go-libp2p and js-libp2p.
-Updated to include Module 5 security integration.
+QUIC Transport implementation
 """
 
 import copy
@@ -79,13 +76,7 @@ logger = logging.getLogger(__name__)
 
 class QUICTransport(ITransport):
     """
-    QUIC Transport implementation following libp2p transport interface.
-
-    Uses aioquic's sans-IO core with trio for native async support.
-    Supports both QUIC v1 (RFC 9000) and draft-29 for compatibility with
-    go-libp2p and js-libp2p implementations.
-
-    Includes integrated libp2p TLS security with peer identity verification.
+    QUIC Stream implementation following libp2p IMuxedStream interface.
     """
 
     def __init__(

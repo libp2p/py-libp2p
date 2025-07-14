@@ -1,10 +1,8 @@
-from typing import Any, Literal
+"""
+QUIC Transport exceptions
+"""
 
-"""
-QUIC Transport exceptions for py-libp2p.
-Comprehensive error handling for QUIC transport, connection, and stream operations.
-Based on patterns from go-libp2p and js-libp2p implementations.
-"""
+from typing import Any, Literal
 
 
 class QUICError(Exception):

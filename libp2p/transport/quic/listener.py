@@ -70,13 +70,7 @@ class QUICPacketInfo:
 
 class QUICListener(IListener):
     """
-    Enhanced QUIC Listener with proper connection ID handling and protocol negotiation.
-
-    Key improvements:
-    - Proper QUIC packet parsing to extract connection IDs
-    - Version negotiation following RFC 9000
-    - Connection routing based on destination connection ID
-    - Support for connection migration
+    QUIC Listener with connection ID handling and protocol negotiation.
     """
 
     def __init__(

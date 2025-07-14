@@ -1,7 +1,5 @@
 """
-QUIC Security implementation for py-libp2p Module 5.
-Implements libp2p TLS specification for QUIC transport with peer identity integration.
-Based on go-libp2p and js-libp2p security patterns.
+QUIC Security helpers implementation
 """
 
 from dataclasses import dataclass, field
@@ -854,7 +852,7 @@ def create_server_tls_config(
         certificate: X.509 certificate
         private_key: Private key corresponding to certificate
         peer_id: Optional peer ID for validation
-        **kwargs: Additional configuration parameters
+        kwargs: Additional configuration parameters
 
     Returns:
         Server TLS configuration
@@ -886,7 +884,7 @@ def create_client_tls_config(
         certificate: X.509 certificate
         private_key: Private key corresponding to certificate
         peer_id: Optional peer ID for validation
-        **kwargs: Additional configuration parameters
+        kwargs: Additional configuration parameters
 
     Returns:
         Client TLS configuration
@@ -935,7 +933,6 @@ class QUICTLSConfigManager:
             peer_id=self.peer_id,
         )
 
-        print("🔧 SECURITY: Created server config")
         return config
 
     def create_client_config(self) -> QUICTLSSecurityConfig:
@@ -952,7 +949,6 @@ class QUICTLSConfigManager:
             peer_id=self.peer_id,
         )
 
-        print("🔧 SECURITY: Created client config")
         return config
 
     def verify_peer_identity(
@@ -1011,14 +1007,3 @@ def generate_libp2p_tls_config(private_key: PrivateKey, peer_id: ID) -> TLSConfi
     """
     generator = CertificateGenerator()
     return generator.generate_certificate(private_key, peer_id)
-
-
-def cleanup_tls_config(config: TLSConfig) -> None:
-    """
-    Clean up TLS configuration.
-
-    For the new implementation, this is mostly a no-op since we don't use
-    temporary files, but kept for compatibility.
-    """
-    # New implementation doesn't use temporary files
-    print("TLS config cleanup completed")
