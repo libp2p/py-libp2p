@@ -1,11 +1,8 @@
+import functools
 import hashlib
 
 import base58
 import multihash
-
-from functools import (
-    cached_property,
-)
 
 from libp2p.crypto.keys import (
     PublicKey,
@@ -44,11 +41,11 @@ class ID:
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes
 
-    @cached_property
+    @functools.cached_property
     def xor_id(self) -> int:
         return int(sha256_digest(self._bytes).hex(), 16)
 
-    @cached_property
+    @functools.cached_property
     def base58(self) -> str:
         return base58.b58encode(self._bytes).decode()
 
