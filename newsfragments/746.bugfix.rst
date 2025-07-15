@@ -1,0 +1,3 @@
+Improved type safety in `get_mux()` and `get_protocols()` by returning properly typed values instead
+of `Any`. Also updated `identify.py` and `discovery.py` to handle `None` values safely and
+compare protocols correctly.
