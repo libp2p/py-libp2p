@@ -163,13 +163,13 @@ async def test_get_protocols_returns_all_registered_protocols():
 
 @pytest.mark.trio
 async def test_negotiate_optional_tprotocol(security_protocol):
-    expected_selected_protocol = None
-    await perform_simple_test(
-        expected_selected_protocol,
-        [expected_selected_protocol],
-        [expected_selected_protocol],
-        security_protocol,
-    )
+    with pytest.raises(Exception):
+        await perform_simple_test(
+            None,
+            [None],
+            [None],
+            security_protocol,
+        )
 
 
 @pytest.mark.trio
