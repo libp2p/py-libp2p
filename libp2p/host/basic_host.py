@@ -286,6 +286,13 @@ class BasicHost(IHost):
             )
             await net_stream.reset()
             return
+        if protocol is None:
+            logger.debug(
+                "no protocol negotiated, closing stream from peer %s",
+                net_stream.muxed_conn.peer_id,
+            )
+            await net_stream.reset()
+            return
         net_stream.set_protocol(protocol)
         if handler is None:
             logger.debug(
