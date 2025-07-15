@@ -1,4 +1,0 @@
-Add timeout wrappers in:
-1. multiselect.py: `negotiate` function
-2. multiselect_client.py: `select_one_of` , `query_multistream_command` functions
-to prevent indefinite hangs when a remote peer does not respond.
