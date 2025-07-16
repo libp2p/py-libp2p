@@ -57,18 +57,56 @@ from libp2p.peer.peerinfo import (
 logger = logging.getLogger("libp2p.identity.identify-push-example")
 
 
-def custom_identify_push_handler_for(host):
+def custom_identify_push_handler_for(host, use_varint_format: bool = True):
     """
     Create a custom handler for the identify/push protocol that logs and prints
     the identity information received from the dialer.
+
+    Args:
+        host: The libp2p host
+        use_varint_format: If True, expect length-prefixed format; if False, expect
+            raw protobuf
+
     """
 
     async def handle_identify_push(stream: INetStream) -> None:
         peer_id = stream.muxed_conn.peer_id
 
         try:
-            # Read the identify message from the stream
-            data = await stream.read()
+            if use_varint_format:
+                # Read length-prefixed identify message from the stream
+                from libp2p.utils.varint import decode_varint_from_bytes
+
+                # First read the varint length prefix
+                length_bytes = b""
+                while True:
+                    b = await stream.read(1)
+                    if not b:
+                        break
+                    length_bytes += b
+                    if b[0] & 0x80 == 0:
+                        break
+
+                if not length_bytes:
+                    logger.warning("No length prefix received from peer %s", peer_id)
+                    return
+
+                msg_length = decode_varint_from_bytes(length_bytes)
+
+                # Read the protobuf message
+                data = await stream.read(msg_length)
+                if len(data) != msg_length:
+                    logger.warning("Incomplete message received from peer %s", peer_id)
+                    return
+            else:
+                # Read raw protobuf message from the stream
+                data = b""
+                while True:
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
 
@@ -129,9 +167,13 @@ def custom_identify_push_handler_for(host):
     return handle_identify_push
 
 
-async def run_listener(port: int) -> None:
+async def run_listener(port: int, use_varint_format: bool = True) -> None:
     """Run a host in listener mode."""
-    print(f"\n==== Starting Identify-Push Listener on port {port} ====\n")
+    format_name = "length-prefixed" if use_varint_format else "raw protobuf"
+    print(
+        f"\n==== Starting Identify-Push Listener on port {port} "
+        f"(using {format_name} format) ====\n"
+    )
 
     # Create key pair for the listener
     key_pair = create_new_key_pair()
@@ -139,9 +181,14 @@ async def run_listener(port: int) -> None:
     # Create the listener host
     host = new_host(key_pair=key_pair)
 
-    # Set up the identify and identify/push handlers
-    host.set_stream_handler(ID_IDENTIFY, identify_handler_for(host))
-    host.set_stream_handler(ID_IDENTIFY_PUSH, custom_identify_push_handler_for(host))
+    # Set up the identify and identify/push handlers with specified format
+    host.set_stream_handler(
+        ID_IDENTIFY, identify_handler_for(host, use_varint_format=use_varint_format)
+    )
+    host.set_stream_handler(
+        ID_IDENTIFY_PUSH,
+        identify_push_handler_for(host, use_varint_format=use_varint_format),
+    )
 
     # Start listening
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
@@ -165,9 +212,15 @@ async def run_listener(port: int) -> None:
         await trio.sleep_forever()
 
 
-async def run_dialer(port: int, destination: str) -> None:
+async def run_dialer(
+    port: int, destination: str, use_varint_format: bool = True
+) -> None:
     """Run a host in dialer mode that connects to a listener."""
-    print(f"\n==== Starting Identify-Push Dialer on port {port} ====\n")
+    format_name = "length-prefixed" if use_varint_format else "raw protobuf"
+    print(
+        f"\n==== Starting Identify-Push Dialer on port {port} "
+        f"(using {format_name} format) ====\n"
+    )
 
     # Create key pair for the dialer
     key_pair = create_new_key_pair()
@@ -175,9 +228,14 @@ async def run_dialer(port: int, destination: str) -> None:
     # Create the dialer host
     host = new_host(key_pair=key_pair)
 
-    # Set up the identify and identify/push handlers
-    host.set_stream_handler(ID_IDENTIFY, identify_handler_for(host))
-    host.set_stream_handler(ID_IDENTIFY_PUSH, identify_push_handler_for(host))
+    # Set up the identify and identify/push handlers with specified format
+    host.set_stream_handler(
+        ID_IDENTIFY, identify_handler_for(host, use_varint_format=use_varint_format)
+    )
+    host.set_stream_handler(
+        ID_IDENTIFY_PUSH,
+        identify_push_handler_for(host, use_varint_format=use_varint_format),
+    )
 
     # Start listening on a different port
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
@@ -206,7 +264,9 @@ async def run_dialer(port: int, destination: str) -> None:
 
             try:
                 # Call push_identify_to_peer which returns a boolean
-                success = await push_identify_to_peer(host, peer_info.peer_id)
+                success = await push_identify_to_peer(
+                    host, peer_info.peer_id, use_varint_format=use_varint_format
+                )
 
                 if success:
                     logger.info("Identify push completed successfully!")
@@ -240,11 +300,10 @@ def main() -> None:
     This program demonstrates the libp2p identify/push protocol.
     Without arguments, it runs as a listener on random port.
     With -d parameter, it runs as a dialer on random port.
-    """
 
-    example = (
-        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
-    )
+    Use --raw-format to send raw protobuf messages (old format) instead of
+    length-prefixed protobuf messages (new format, default).
+    """
 
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
@@ -252,17 +311,29 @@ def main() -> None:
         "-d",
         "--destination",
         type=str,
-        help=f"destination multiaddr string, e.g. {example}",
+        help="destination multiaddr string",
+    )
+    parser.add_argument(
+        "--raw-format",
+        action="store_true",
+        help=(
+            "use raw protobuf format (old format) instead of "
+            "length-prefixed (new format)"
+        ),
     )
     args = parser.parse_args()
+
+    # Determine format: raw format if --raw-format is specified, otherwise
+    # length-prefixed
+    use_varint_format = not args.raw_format
 
     try:
         if args.destination:
             # Run in dialer mode with random available port if not specified
-            trio.run(run_dialer, args.port, args.destination)
+            trio.run(run_dialer, args.port, args.destination, use_varint_format)
         else:
             # Run in listener mode with random available port if not specified
-            trio.run(run_listener, args.port)
+            trio.run(run_listener, args.port, use_varint_format)
     except KeyboardInterrupt:
         print("\nInterrupted by user")
         logger.info("Interrupted by user")
