@@ -69,6 +69,7 @@ dev = [
     "tox>=4.0.0",
     "twine",
     "wheel",
+    "redis",
     "setuptools>=42",
     "sphinx>=6.0.0",
     "sphinx_rtd_theme>=1.0.0",
