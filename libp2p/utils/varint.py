@@ -44,7 +44,9 @@ async def decode_uvarint_from_stream(reader: Reader) -> int:
     res = 0
     for shift in itertools.count(0, 7):
         if shift > SHIFT_64_BIT_MAX:
-            raise ParseError("TODO: better exception msg: Integer is too large...")
+            raise ParseError(
+                "Varint decoding error: integer exceeds maximum size of 64 bits."
+            )
 
         byte = await read_exactly(reader, 1)
         value = byte[0]
