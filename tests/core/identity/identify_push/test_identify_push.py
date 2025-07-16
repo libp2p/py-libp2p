@@ -35,6 +35,8 @@ from tests.utils.factories import (
 )
 from tests.utils.utils import (
     create_mock_connections,
+    run_host_forever,
+    wait_until_listening,
 )
 
 logger = logging.getLogger("libp2p.identity.identify-push-test")
@@ -457,7 +459,11 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     lock = trio.Lock()
 
     async def mock_push_identify_to_peer(
-        host, peer_id, observed_multiaddr=None, limit=trio.Semaphore(CONCURRENCY_LIMIT)
+        host,
+        peer_id,
+        observed_multiaddr=None,
+        limit=trio.Semaphore(CONCURRENCY_LIMIT),
+        use_varint_format=True,
     ) -> bool:
         """
         Mock function to test concurrency by simulating an identify message.
@@ -503,3 +509,192 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
     assert state["max_observed"] <= CONCURRENCY_LIMIT, (
         f"Max concurrency observed: {state['max_observed']}"
     )
+
+
+@pytest.mark.trio
+async def test_all_peers_receive_identify_push_with_semaphore(security_protocol):
+    dummy_peers = []
+
+    async with host_pair_factory(security_protocol=security_protocol) as (host_a, _):
+        # Create dummy peers
+        for _ in range(50):
+            key_pair = create_new_key_pair()
+            dummy_host = new_host(key_pair=key_pair)
+            dummy_host.set_stream_handler(
+                ID_PUSH, identify_push_handler_for(dummy_host)
+            )
+            listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+            dummy_peers.append((dummy_host, listen_addr))
+
+        async with trio.open_nursery() as nursery:
+            # Start all dummy hosts
+            for host, listen_addr in dummy_peers:
+                nursery.start_soon(run_host_forever, host, listen_addr)
+
+            # Wait for all hosts to finish setting up listeners
+            for host, _ in dummy_peers:
+                await wait_until_listening(host)
+
+            # Now connect host_a → dummy peers
+            for host, _ in dummy_peers:
+                await host_a.connect(info_from_p2p_addr(host.get_addrs()[0]))
+
+            await push_identify_to_peers(
+                host_a,
+            )
+
+            await trio.sleep(0.5)
+
+            peer_id_a = host_a.get_id()
+            for host, _ in dummy_peers:
+                dummy_peerstore = host.get_peerstore()
+                assert peer_id_a in dummy_peerstore.peer_ids()
+
+            nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_load(
+    security_protocol,
+):
+    dummy_peers = []
+
+    async with host_pair_factory(security_protocol=security_protocol) as (host_a, _):
+        # Create dummy peers
+        # Breaking with more than 500 peers
+        # Trio have a async tasks limit of 1000
+        for _ in range(499):
+            key_pair = create_new_key_pair()
+            dummy_host = new_host(key_pair=key_pair)
+            dummy_host.set_stream_handler(
+                ID_PUSH, identify_push_handler_for(dummy_host)
+            )
+            listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+            dummy_peers.append((dummy_host, listen_addr))
+
+        async with trio.open_nursery() as nursery:
+            # Start all dummy hosts
+            for host, listen_addr in dummy_peers:
+                nursery.start_soon(run_host_forever, host, listen_addr)
+
+            # Wait for all hosts to finish setting up listeners
+            for host, _ in dummy_peers:
+                await wait_until_listening(host)
+
+            # Now connect host_a → dummy peers
+            for host, _ in dummy_peers:
+                await host_a.connect(info_from_p2p_addr(host.get_addrs()[0]))
+
+            await push_identify_to_peers(
+                host_a,
+            )
+
+            await trio.sleep(0.5)
+
+            peer_id_a = host_a.get_id()
+            for host, _ in dummy_peers:
+                dummy_peerstore = host.get_peerstore()
+                assert peer_id_a in dummy_peerstore.peer_ids()
+
+            nursery.cancel_scope.cancel()
+
+
+@pytest.mark.trio
+async def test_identify_push_default_varint_format(security_protocol):
+    """
+    Test that the identify/push protocol uses varint format by default.
+
+    This test verifies that:
+    1. The default behavior uses length-prefixed messages (varint format)
+    2. Messages are correctly encoded with varint length prefix
+    3. Messages are correctly decoded with varint length prefix
+    4. The peerstore is updated correctly with the received information
+    """
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        # Set up the identify/push handlers with default settings
+        # (use_varint_format=True)
+        host_b.set_stream_handler(ID_PUSH, identify_push_handler_for(host_b))
+
+        # Push identify information from host_a to host_b using default settings
+        success = await push_identify_to_peer(host_a, host_b.get_id())
+        assert success, "Identify push should succeed with default varint format"
+
+        # Wait a bit for the push to complete
+        await trio.sleep(0.1)
+
+        # Get the peerstore from host_b
+        peerstore = host_b.get_peerstore()
+        peer_id = host_a.get_id()
+
+        # Verify that the peerstore was updated correctly
+        assert peer_id in peerstore.peer_ids()
+
+        # Check that addresses have been updated
+        host_a_addrs = set(host_a.get_addrs())
+        peerstore_addrs = set(peerstore.addrs(peer_id))
+        assert all(addr in peerstore_addrs for addr in host_a_addrs)
+
+        # Check that protocols have been updated
+        host_a_protocols = set(host_a.get_mux().get_protocols())
+        peerstore_protocols = set(peerstore.get_protocols(peer_id))
+        assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
+
+        # Check that the public key has been updated
+        host_a_public_key = host_a.get_public_key().serialize()
+        peerstore_public_key = peerstore.pubkey(peer_id).serialize()
+        assert host_a_public_key == peerstore_public_key
+
+
+@pytest.mark.trio
+async def test_identify_push_legacy_raw_format(security_protocol):
+    """
+    Test that the identify/push protocol can use legacy raw format when specified.
+
+    This test verifies that:
+    1. When use_varint_format=False, messages are sent without length prefix
+    2. Raw protobuf messages are correctly encoded and decoded
+    3. The peerstore is updated correctly with the received information
+    4. The legacy format is backward compatible
+    """
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        # Set up the identify/push handlers with legacy format (use_varint_format=False)
+        host_b.set_stream_handler(
+            ID_PUSH, identify_push_handler_for(host_b, use_varint_format=False)
+        )
+
+        # Push identify information from host_a to host_b using legacy format
+        success = await push_identify_to_peer(
+            host_a, host_b.get_id(), use_varint_format=False
+        )
+        assert success, "Identify push should succeed with legacy raw format"
+
+        # Wait a bit for the push to complete
+        await trio.sleep(0.1)
+
+        # Get the peerstore from host_b
+        peerstore = host_b.get_peerstore()
+        peer_id = host_a.get_id()
+
+        # Verify that the peerstore was updated correctly
+        assert peer_id in peerstore.peer_ids()
+
+        # Check that addresses have been updated
+        host_a_addrs = set(host_a.get_addrs())
+        peerstore_addrs = set(peerstore.addrs(peer_id))
+        assert all(addr in peerstore_addrs for addr in host_a_addrs)
+
+        # Check that protocols have been updated
+        host_a_protocols = set(host_a.get_mux().get_protocols())
+        peerstore_protocols = set(peerstore.get_protocols(peer_id))
+        assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
+
+        # Check that the public key has been updated
+        host_a_public_key = host_a.get_public_key().serialize()
+        peerstore_public_key = peerstore.pubkey(peer_id).serialize()
+        assert host_a_public_key == peerstore_public_key

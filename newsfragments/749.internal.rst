@@ -1,0 +1,1 @@
+Add comprehensive tests for relay_discovery method in circuit_relay_v2
