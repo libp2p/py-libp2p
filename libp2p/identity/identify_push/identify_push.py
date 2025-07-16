@@ -91,12 +91,24 @@ def identify_push_handler_for(
                     return
             else:
                 # Read raw protobuf message from the stream
+                # For raw format, we need to read all data before the stream is closed
                 data = b""
-                while True:
-                    chunk = await stream.read(4096)
-                    if not chunk:
-                        break
-                    data += chunk
+                try:
+                    # Read all available data in a single operation
+                    data = await stream.read()
+                except StreamClosed:
+                    # Try to read any remaining data
+                    try:
+                        data = await stream.read()
+                    except Exception:
+                        pass
+
+                # If we got no data, log a warning and return
+                if not data:
+                    logger.warning(
+                        "No data received in raw format from peer %s", peer_id
+                    )
+                    return
 
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
