@@ -1,0 +1,1 @@
+Replace the libp2p.peer.ID cache attributes with functools.cached_property functional decorator.
