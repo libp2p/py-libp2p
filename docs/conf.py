@@ -90,7 +90,7 @@ release = __version__
 # directories to ignore when looking for source files.
 exclude_patterns = [
     "_build",
-    "modules.rst",
+    "modules.rst", 
     "libp2p.crypto.pb.rst",
 ]
 
@@ -290,7 +290,11 @@ texinfo_documents = [
 ]
 
 # Prevent autodoc from trying to import module from tests.factories
-autodoc_mock_imports = ["tests.factories"]
+autodoc_mock_imports = [
+    "tests.factories",
+    "libp2p.peer.envelope",
+    "libp2p.peer.record",
+]
 
 # Documents to append as an appendix to all manuals.
 # texinfo_appendices = []
@@ -333,6 +337,21 @@ MOCK_MODULES = [
     "fastecdsa",
     "fastecdsa.encoding",
     "fastecdsa.encoding.sec1",
+    "multiaddr",
+    "trio",
+    "trio.abc", 
+    "trio.lowlevel",
+    "trio_typing",
+    "google",
+    "google.protobuf",
+    "google.protobuf.message",
+    "google.protobuf.descriptor",
+    "google.protobuf.descriptor_pool",
+    "google.protobuf.symbol_database", 
+    "google.protobuf.internal",
+    "google.protobuf.internal.builder",
+    "google.protobuf.internal.containers",
+    "google.protobuf.internal.enum_type_wrapper",
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 # -- Extension configuration -------------------------------------------------
