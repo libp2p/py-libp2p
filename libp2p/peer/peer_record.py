@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import threading
 import time
 from typing import Any
@@ -73,7 +74,7 @@ class PeerRecord(IPeerRecord):
         """
         return PEER_RECORD_ENVELOPE_PAYLOAD_TYPE
 
-    def to_protobuf(self) -> pb.PeerRecord:  # type: ignore[attr-defined, name-defined]
+    def to_protobuf(self) -> pb.PeerRecord:
         """
         Convert the current PeerRecord into a ProtoBuf PeerRecord message.
 
@@ -85,7 +86,7 @@ class PeerRecord(IPeerRecord):
         except Exception as e:
             raise ValueError(f"failed to marshal peer_id: {e}")
 
-        msg = pb.PeerRecord()  # type: ignore[attr-defined]
+        msg = pb.PeerRecord()
         msg.peer_id = id_bytes
         msg.seq = self.seq
         msg.addresses.extend(addrs_to_protobuf(self.addrs))
@@ -143,7 +144,7 @@ def unmarshal_record(data: bytes) -> PeerRecord:
     if data is None:
         raise ValueError("cannot unmarshal PeerRecord from None")
 
-    msg = pb.PeerRecord()  # type: ignore[attr-defined]
+    msg = pb.PeerRecord()
     try:
         msg.ParseFromString(data)
     except Exception as e:
@@ -190,7 +191,7 @@ def peer_record_from_peer_info(info: PeerInfo) -> PeerRecord:
     return record
 
 
-def peer_record_from_protobuf(msg: pb.PeerRecord) -> PeerRecord:  # type: ignore[attr-defined, name-defined]
+def peer_record_from_protobuf(msg: pb.PeerRecord) -> PeerRecord:
     """
     Convert a protobuf PeerRecord message into a PeerRecord object.
 
@@ -209,7 +210,7 @@ def peer_record_from_protobuf(msg: pb.PeerRecord) -> PeerRecord:  # type: ignore
     return PeerRecord(peer_id, addrs, seq)
 
 
-def addrs_from_protobuf(addrs: list[pb.PeerRecord.AddressInfo]) -> list[Multiaddr]:  # type: ignore[attr-defined, name-defined]
+def addrs_from_protobuf(addrs: Sequence[pb.PeerRecord.AddressInfo]) -> list[Multiaddr]:
     """
     Convert a list of protobuf address records to Multiaddr objects.
 
@@ -226,7 +227,7 @@ def addrs_from_protobuf(addrs: list[pb.PeerRecord.AddressInfo]) -> list[Multiadd
     return out
 
 
-def addrs_to_protobuf(addrs: list[Multiaddr]) -> list[pb.PeerRecord.AddressInfo]:  # type: ignore[attr-defined, name-defined]
+def addrs_to_protobuf(addrs: list[Multiaddr]) -> list[pb.PeerRecord.AddressInfo]:
     """
     Convert a list of Multiaddr objects into their protobuf representation.
 
@@ -235,7 +236,7 @@ def addrs_to_protobuf(addrs: list[Multiaddr]) -> list[pb.PeerRecord.AddressInfo]
     """
     out = []
     for addr in addrs:
-        addr_info = pb.PeerRecord.AddressInfo()  # type: ignore[attr-defined]
+        addr_info = pb.PeerRecord.AddressInfo()
         addr_info.multiaddr = addr.to_bytes()
         out.append(addr_info)
     return out
