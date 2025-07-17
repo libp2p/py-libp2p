@@ -107,7 +107,7 @@ class MplexStream(IMuxedStream):
 
     name: str
     stream_id: StreamID
-    # NOTE: All methods used here are part of Mplex which is a derived
+    # NOTE: All methods used here are part of `Mplex` which is a derived
     # class of IMuxedConn. Ignoring this type assignment should not pose
     # any risk.
     muxed_conn: "Mplex"  # type: ignore[assignment]
@@ -117,7 +117,7 @@ class MplexStream(IMuxedStream):
     rw_lock: ReadWriteLock
     close_lock: trio.Lock
 
-    # NOTE: dataIn is size of 8 in Go implementation.
+    # NOTE: `dataIn` is size of 8 in Go implementation.
     incoming_data_channel: "trio.MemoryReceiveChannel[bytes]"
 
     event_local_closed: trio.Event
@@ -175,8 +175,8 @@ class MplexStream(IMuxedStream):
 
     async def read(self, n: int | None = None) -> bytes:
         """
-        Read up to n bytes. Read possibly returns fewer than n bytes, if
-        there are not enough bytes in the Mplex buffer. If n is None, read
+        Read up to n bytes. Read possibly returns fewer than `n` bytes, if
+        there are not enough bytes in the Mplex buffer. If `n is None`, read
         until EOF.
 
         :param n: number of bytes to read
@@ -185,8 +185,8 @@ class MplexStream(IMuxedStream):
         async with self.rw_lock.read_lock():
             if n is not None and n < 0:
                 raise ValueError(
-                    "the number of bytes to read n must be non-negative or "
-                    f"None to indicate read until EOF, got n={n}"
+                    "the number of bytes to read `n` must be non-negative or "
+                    f"`None` to indicate read until EOF, got n={n}"
                 )
             if self.event_reset.is_set():
                 raise MplexStreamReset
@@ -202,8 +202,8 @@ class MplexStream(IMuxedStream):
                 except trio.EndOfChannel:
                     raise MplexStreamEOF
                 except trio.WouldBlock:
-                    # We know receive will be blocked here. Wait for data here with
-                    # receive and catch all kinds of errors here.
+                    # We know `receive` will be blocked here. Wait for data here with
+                    # `receive` and catch all kinds of errors here.
                     try:
                         data = await self.incoming_data_channel.receive()
                         self._buf.extend(data)
@@ -213,12 +213,12 @@ class MplexStream(IMuxedStream):
                         if self.event_remote_closed.is_set():
                             raise MplexStreamEOF
                     except trio.ClosedResourceError as error:
-                        # Probably incoming_data_channel is closed in reset when we are
-                        # waiting for receive.
+                        # Probably `incoming_data_channel` is closed in `reset` when
+                        # we are waiting for `receive`.
                         if self.event_reset.is_set():
                             raise MplexStreamReset
                         raise Exception(
-                            "incoming_data_channel is closed but stream is not reset. "
+                            "`incoming_data_channel` is closed but stream is not reset."
                             "This should never happen."
                         ) from error
             self._buf.extend(self._read_return_when_blocked())
@@ -256,7 +256,7 @@ class MplexStream(IMuxedStream):
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
-        # TODO: Raise when muxed_conn.send_message fails and Mplex isn't shutdown.
+        # TODO: Raise when `muxed_conn.send_message` fails and `Mplex` isn't shutdown.
         await self.muxed_conn.send_message(flag, None, self.stream_id)
 
         _is_remote_closed: bool
