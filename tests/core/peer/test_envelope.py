@@ -19,11 +19,11 @@ DOMAIN = "libp2p-peer-record"
 
 
 def test_basic_protobuf_serialization_deserialization():
-    pubkey = crypto_pb.PublicKey()  # type: ignore[attr-defined]
-    pubkey.Type = crypto_pb.KeyType.Ed25519  # type: ignore[attr-defined]
+    pubkey = crypto_pb.PublicKey()
+    pubkey.Type = crypto_pb.KeyType.Ed25519
     pubkey.Data = b"\x01\x02\x03"
 
-    env = env_pb.Envelope()  # type: ignore[attr-defined]
+    env = env_pb.Envelope()
     env.public_key.CopyFrom(pubkey)
     env.payload_type = b"\x03\x01"
     env.payload = b"test-payload"
@@ -31,10 +31,10 @@ def test_basic_protobuf_serialization_deserialization():
 
     serialized = env.SerializeToString()
 
-    new_env = env_pb.Envelope()  # type: ignore[attr-defined]
+    new_env = env_pb.Envelope()
     new_env.ParseFromString(serialized)
 
-    assert new_env.public_key.Type == crypto_pb.KeyType.Ed25519  # type: ignore[attr-defined]
+    assert new_env.public_key.Type == crypto_pb.KeyType.Ed25519
     assert new_env.public_key.Data == b"\x01\x02\x03"
     assert new_env.payload_type == b"\x03\x01"
     assert new_env.payload == b"test-payload"
