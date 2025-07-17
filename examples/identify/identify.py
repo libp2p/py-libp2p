@@ -8,9 +8,10 @@ import trio
 from libp2p import (
     new_host,
 )
-from libp2p.identity.identify.identify import ID as IDENTIFY_PROTOCOL_ID
-from libp2p.identity.identify.pb.identify_pb2 import (
-    Identify,
+from libp2p.identity.identify.identify import (
+    ID as IDENTIFY_PROTOCOL_ID,
+    identify_handler_for,
+    parse_identify_response,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -50,7 +51,7 @@ def print_identify_response(identify_response):
     )
 
 
-async def run(port: int, destination: str) -> None:
+async def run(port: int, destination: str, use_varint_format: bool = True) -> None:
     localhost_ip = "0.0.0.0"
 
     if not destination:
@@ -58,11 +59,24 @@ async def run(port: int, destination: str) -> None:
         listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
         host_a = new_host()
 
+        # Set up identify handler with specified format
+        identify_handler = identify_handler_for(
+            host_a, use_varint_format=use_varint_format
+        )
+        host_a.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
+
         async with host_a.run(listen_addrs=[listen_addr]):
+            # Get the actual address and replace 0.0.0.0 with 127.0.0.1 for client
+            # connections
+            server_addr = str(host_a.get_addrs()[0])
+            client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
+
+            format_name = "length-prefixed" if use_varint_format else "raw protobuf"
             print(
-                "First host listening. Run this from another console:\n\n"
+                f"First host listening (using {format_name} format). "
+                f"Run this from another console:\n\n"
                 f"identify-demo "
-                f"-d {host_a.get_addrs()[0]}\n"
+                f"-d {client_addr}\n"
             )
             print("Waiting for incoming identify request...")
             await trio.sleep_forever()
@@ -84,11 +98,18 @@ async def run(port: int, destination: str) -> None:
 
             try:
                 print("Starting identify protocol...")
-                response = await stream.read()
+
+                # Read the complete response (could be either format)
+                # Read a larger chunk to get all the data before stream closes
+                response = await stream.read(8192)  # Read enough data in one go
+
                 await stream.close()
-                identify_msg = Identify()
-                identify_msg.ParseFromString(response)
+
+                # Parse the response using the robust protocol-level function
+                # This handles both old and new formats automatically
+                identify_msg = parse_identify_response(response)
                 print_identify_response(identify_msg)
+
             except Exception as e:
                 print(f"Identify protocol error: {e}")
 
@@ -98,9 +119,12 @@ async def run(port: int, destination: str) -> None:
 def main() -> None:
     description = """
     This program demonstrates the libp2p identify protocol.
-    First run identify-demo -p <PORT>' to start a listener.
+    First run 'identify-demo -p <PORT> [--raw-format]' to start a listener.
     Then run 'identify-demo <ANOTHER_PORT> -d <DESTINATION>'
     where <DESTINATION> is the multiaddress shown by the listener.
+
+    Use --raw-format to send raw protobuf messages (old format) instead of
+    length-prefixed protobuf messages (new format, default).
     """
 
     example_maddr = (
@@ -115,10 +139,22 @@ def main() -> None:
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
+    parser.add_argument(
+        "--raw-format",
+        action="store_true",
+        help=(
+            "use raw protobuf format (old format) instead of "
+            "length-prefixed (new format)"
+        ),
+    )
     args = parser.parse_args()
 
+    # Determine format: raw format if --raw-format is specified, otherwise
+    # length-prefixed
+    use_varint_format = not args.raw_format
+
     try:
-        trio.run(run, *(args.port, args.destination))
+        trio.run(run, *(args.port, args.destination, use_varint_format))
     except KeyboardInterrupt:
         pass
 
