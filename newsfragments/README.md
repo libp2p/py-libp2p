@@ -20,7 +20,7 @@ Each file should be named like `<ISSUE>.<TYPE>.rst`, where
 
 So for example: `1024.feature.rst`
 
-**Important**: Ensure the file ends with a newline character (``\n``) to pass GitHub tox linting checks.
+**Important**: Ensure the file ends with a newline character (`\n`) to pass GitHub tox linting checks.
 
 ```
 Added support for Ed25519 key generation in libp2p peer identity creation.
