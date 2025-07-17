@@ -1842,7 +1842,7 @@ class IPeerRecord(ABC):
         """
 
     @abstractmethod
-    def to_protobuf(self) -> pb.PeerRecord:  # type: ignore[name-defined, attr-defined]
+    def to_protobuf(self) -> pb.PeerRecord:
         """
         Convert this PeerRecord into its Protobuf representation.
 
