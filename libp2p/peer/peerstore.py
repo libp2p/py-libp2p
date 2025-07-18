@@ -270,6 +270,13 @@ class PeerStore(IPeerStore):
 
         return True
 
+    def consume_peer_records(self, envelopes: list[Envelope], ttl: int) -> list[bool]:
+        """Consume multiple peer records in a single operation."""
+        results = []
+        for envelope in envelopes:
+            results.append(self.consume_peer_record(envelope, ttl))
+        return results
+
     def get_peer_record(self, peer_id: ID) -> Envelope | None:
         """
         Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
