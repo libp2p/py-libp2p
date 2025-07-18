@@ -240,8 +240,6 @@ class PeerStore(IPeerStore):
         new_addrs = set(record.addrs)
         merged_addrs = list(existing_addrs.union(new_addrs))
 
-        # TODO: In case of overwriting a record, what should be do with the
-        # old addresses, do we overwrite them with the new addresses too ?
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
         self.clear_addrs(peer_id)
         self.add_addrs(peer_id, merged_addrs, ttl)
