@@ -29,6 +29,7 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 from libp2p.discovery.mdns.mdns import MDNSDiscovery
 from libp2p.host.defaults import (
     get_default_protocols,
@@ -92,6 +93,7 @@ class BasicHost(IHost):
         self,
         network: INetworkService,
         enable_mDNS: bool = False,
+        bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
@@ -105,6 +107,8 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         if enable_mDNS:
             self.mDNS = MDNSDiscovery(network)
+        if bootstrap:
+            self.bootstrap = BootstrapDiscovery(network, bootstrap)
 
     def get_id(self) -> ID:
         """
@@ -172,11 +176,16 @@ class BasicHost(IHost):
                 if hasattr(self, "mDNS") and self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()
+                if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                    logger.debug("Starting Bootstrap Discovery")
+                    await self.bootstrap.start()
                 try:
                     yield
                 finally:
                     if hasattr(self, "mDNS") and self.mDNS is not None:
                         self.mDNS.stop()
+                    if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                        self.bootstrap.stop()
 
         return _run()
 
