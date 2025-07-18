@@ -692,12 +692,7 @@ class Pubsub(Service, IPubsub):
 
         if len(async_topic_validators) > 0:
             # Appends to lists are thread safe in CPython
-            results = []
-
-            async def run_async_validator(func: AsyncValidatorFn) -> None:
-                async with self._validator_semaphore:
-                    result = await func(msg_forwarder, msg)
-                    results.append(result)
+            results: list[bool] = []
 
             async with trio.open_nursery() as nursery:
                 for async_validator in async_topic_validators:
