@@ -20,6 +20,7 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -150,6 +151,19 @@ async def _update_peerstore_from_identify(
             peerstore.add_addr(peer_id, observed_addr, 7200)
         except Exception as e:
             logger.error("Error updating observed address for peer %s: %s", peer_id, e)
+    if identify_msg.HasField("signedPeerRecord"):
+        try:
+            # Convert the signed-peer-record(Envelope) from prtobuf bytes
+            envelope, _ = consume_envelope(
+                identify_msg.signedPeerRecord, "libp2p-peer-record"
+            )
+            # Use a default TTL of 2 hours (7200 seconds)
+            if not peerstore.consume_peer_record(envelope, 7200):
+                logger.error("Updating Certified-Addr-Book was unsuccessful")
+        except Exception as e:
+            logger.error(
+                "Error updating the certified addr book for peer %s: %s", peer_id, e
+            )
 
 
 async def push_identify_to_peer(
