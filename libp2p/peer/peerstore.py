@@ -53,10 +53,11 @@ class PeerRecordState:
 class PeerStore(IPeerStore):
     peer_data_map: dict[ID, PeerData]
 
-    def __init__(self) -> None:
+    def __init__(self, max_records: int = 10000) -> None:
         self.peer_data_map = defaultdict(PeerData)
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
+        self.max_records = max_records
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """
@@ -94,6 +95,18 @@ class PeerStore(IPeerStore):
             else:
                 peer_data.clear_addrs()
         return valid_peer_ids
+
+    def _enforce_record_limit(self) -> None:
+        """Enforce maximum number of stored records."""
+        if len(self.peer_record_map) > self.max_records:
+            # Record oldest records based on seequence number
+            sorted_records = sorted(
+                self.peer_record_map.items(), key=lambda x: x[1].seq
+            )
+            records_to_remove = len(self.peer_record_map) - self.max_records
+            for peer_id, _ in sorted_records[:records_to_remove]:
+                self.maybe_delete_peer_record(peer_id)
+                del self.peer_record_map[peer_id]
 
     # --------PROTO-BOOK--------
 
@@ -211,15 +224,27 @@ class PeerStore(IPeerStore):
         record = envelope.record()
         peer_id = record.peer_id
 
-        # TODO: Put up a limit on the number of records to be stored ?
         existing = self.peer_record_map.get(peer_id)
         if existing and existing.seq > record.seq:
             return False  # reject older record
 
+        # Merge new addresses with existing ones if peer exists
+        if peer_id in self.peer_data_map:
+            try:
+                existing_addrs = set(self.addrs(peer_id))
+            except PeerStoreError:
+                existing_addrs = set()
+        else:
+            existing_addrs = set()
+
+        new_addrs = set(record.addrs)
+        merged_addrs = list(existing_addrs.union(new_addrs))
+
         # TODO: In case of overwriting a record, what should be do with the
         # old addresses, do we overwrite them with the new addresses too ?
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.add_addrs(peer_id, record.addrs, ttl)
+        self.clear_addrs(peer_id)
+        self.add_addrs(peer_id, merged_addrs, ttl)
 
         return True
 

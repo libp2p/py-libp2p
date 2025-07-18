@@ -106,8 +106,8 @@ def test_ceritified_addr_book():
 
     result = store.consume_peer_record(envelope, ttl)
     assert result is True
-
     # Retrieve the record
+
     retrieved = store.get_peer_record(peer_id)
     assert retrieved is not None
     assert isinstance(retrieved, Envelope)
@@ -132,4 +132,8 @@ def test_ceritified_addr_book():
     latest = store.get_peer_record(peer_id)
     assert isinstance(latest, Envelope)
     assert latest.record().seq == 23
-    assert set(new_addrs).issubset(set(store.addrs(peer_id)))
+
+    # Merged addresses = old addres + new_addrs
+    expected_addrs = set(addrs).union(set(new_addrs))
+    actual_addrs = set(store.addrs(peer_id))
+    assert actual_addrs == expected_addrs
