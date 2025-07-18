@@ -7,7 +7,11 @@ from libp2p.crypto.secp256k1 import Secp256k1PublicKey
 import libp2p.peer.pb.crypto_pb2 as cryto_pb
 import libp2p.peer.pb.envelope_pb2 as pb
 import libp2p.peer.pb.peer_record_pb2 as record_pb
-from libp2p.peer.peer_record import PeerRecord, peer_record_from_protobuf
+from libp2p.peer.peer_record import (
+    PeerRecord,
+    peer_record_from_protobuf,
+    unmarshal_record,
+)
 from libp2p.utils.varint import encode_uvarint
 
 ENVELOPE_DOMAIN = "libp2p-peer-record"
@@ -251,3 +255,17 @@ def make_unsigned(domain: str, payload_type: bytes, payload: bytes) -> bytes:
         buf.extend(field)
 
     return bytes(buf)
+
+
+def debug_dump_envelope(env: Envelope) -> None:
+    print("\n=== Envelope ===")
+    print(f"Payload Type: {env.payload_type!r}")
+    print(f"Signature: {env.signature.hex()} ({len(env.signature)} bytes)")
+    print(f"Raw Payload: {env.raw_payload.hex()} ({len(env.raw_payload)} bytes)")
+
+    try:
+        peer_record = unmarshal_record(env.raw_payload)
+        print("\n=== Parsed PeerRecord ===")
+        print(peer_record)
+    except Exception as e:
+        print("Failed to parse PeerRecord:", e)

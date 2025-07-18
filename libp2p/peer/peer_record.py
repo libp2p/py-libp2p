@@ -58,6 +58,15 @@ class PeerRecord(IPeerRecord):
         else:
             self.seq = timestamp_seq()
 
+    def __repr__(self) -> str:
+        return (
+            f"PeerRecord(\n"
+            f"  peer_id={self.peer_id},\n"
+            f"  multiaddrs={[str(m) for m in self.addrs]},\n"
+            f"  seq={self.seq}\n"
+            f")"
+        )
+
     def domain(self) -> str:
         """
         Return the domain string associated with this PeerRecord.
