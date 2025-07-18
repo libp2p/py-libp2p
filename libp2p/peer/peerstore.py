@@ -84,6 +84,10 @@ class PeerStore(IPeerStore):
         else:
             raise PeerStoreError("peer ID not found")
 
+        # Clear the peer records
+        if peer_id in self.peer_record_map:
+            self.peer_record_map.pop(peer_id, None)
+
     def valid_peer_ids(self) -> list[ID]:
         """
         :return: all of the valid peer IDs stored in peer store
@@ -107,6 +111,26 @@ class PeerStore(IPeerStore):
             for peer_id, _ in sorted_records[:records_to_remove]:
                 self.maybe_delete_peer_record(peer_id)
                 del self.peer_record_map[peer_id]
+
+    async def start_cleanup_task(self, cleanup_interval: int = 3600) -> None:
+        """Start periodic cleanup of expired peer records and addresses."""
+        while True:
+            await trio.sleep(cleanup_interval)
+            self._cleanup_expired_records()
+
+    def _cleanup_expired_records(self) -> None:
+        """Remove expired peer records and addresses"""
+        expired_peers = []
+
+        for peer_id, peer_data in self.peer_data_map.items():
+            if peer_data.is_expired():
+                expired_peers.append(peer_id)
+
+        for peer_id in expired_peers:
+            self.maybe_delete_peer_record(peer_id)
+            del self.peer_data_map[peer_id]
+
+        self._enforce_record_limit()
 
     # --------PROTO-BOOK--------
 
@@ -204,8 +228,9 @@ class PeerStore(IPeerStore):
 
         :param peer_id: The peer whose record we may delete/
         """
-        if not self.addrs(peer_id):
-            self.peer_record_map.pop(peer_id, None)
+        if peer_id in self.peer_record_map:
+            if not self.addrs(peer_id):
+                self.peer_record_map.pop(peer_id, None)
 
     def consume_peer_record(self, envelope: Envelope, ttl: int) -> bool:
         """
@@ -241,7 +266,6 @@ class PeerStore(IPeerStore):
         merged_addrs = list(existing_addrs.union(new_addrs))
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.clear_addrs(peer_id)
         self.add_addrs(peer_id, merged_addrs, ttl)
 
         return True
@@ -324,6 +348,8 @@ class PeerStore(IPeerStore):
         # Only clear addresses if the peer is in peer map
         if peer_id in self.peer_data_map:
             self.peer_data_map[peer_id].clear_addrs()
+
+        self.maybe_delete_peer_record(peer_id)
 
     def peers_with_addrs(self) -> list[ID]:
         """
