@@ -158,7 +158,7 @@ def pub_key_from_protobuf(pb_key: cryto_pb.PublicKey) -> PublicKey:
         return RSAPublicKey.from_bytes(pb_key.Data)
     elif pb_key.Type == cryto_pb.KeyType.Secp256k1:
         return Secp256k1PublicKey.from_bytes(pb_key.Data)
-    # TODO: Add suport fot ECDSA parsing also
+    # libp2p.crypto.ecdsa not implemented
     else:
         raise ValueError(f"Unknown key type: {pb_key.Type}")
 
