@@ -11,9 +11,7 @@ from libp2p.identity.identify.identify import (
     PROTOCOL_VERSION,
     _mk_identify_protobuf,
     _multiaddr_to_bytes,
-)
-from libp2p.identity.identify.pb.identify_pb2 import (
-    Identify,
+    parse_identify_response,
 )
 from tests.utils.factories import (
     host_pair_factory,
@@ -29,14 +27,18 @@ async def test_identify_protocol(security_protocol):
         host_b,
     ):
         # Here, host_b is the requester and host_a is the responder.
-        # observed_addr represent host_b’s address as observed by host_a
-        # (i.e., the address from which host_b’s request was received).
+        # observed_addr represent host_b's address as observed by host_a
+        # (i.e., the address from which host_b's request was received).
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read()
+
+        # Read the response (could be either format)
+        # Read a larger chunk to get all the data before stream closes
+        response = await stream.read(8192)  # Read enough data in one go
+
         await stream.close()
 
-        identify_response = Identify()
-        identify_response.ParseFromString(response)
+        # Parse the response (handles both old and new formats)
+        identify_response = parse_identify_response(response)
 
         logger.debug("host_a: %s", host_a.get_addrs())
         logger.debug("host_b: %s", host_b.get_addrs())
@@ -62,8 +64,9 @@ async def test_identify_protocol(security_protocol):
 
         logger.debug("observed_addr: %s", Multiaddr(identify_response.observed_addr))
         logger.debug("host_b.get_addrs()[0]: %s", host_b.get_addrs()[0])
-        logger.debug("cleaned_addr= %s", cleaned_addr)
-        assert identify_response.observed_addr == _multiaddr_to_bytes(cleaned_addr)
+
+        # The observed address should match the cleaned address
+        assert Multiaddr(identify_response.observed_addr) == cleaned_addr
 
         # Check protocols
         assert set(identify_response.protocols) == set(host_a.get_mux().get_protocols())
