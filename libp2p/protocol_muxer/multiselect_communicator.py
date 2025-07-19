@@ -1,3 +1,5 @@
+from builtins import AssertionError
+
 from libp2p.abc import (
     IMultiselectCommunicator,
 )
@@ -33,7 +35,8 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         msg_bytes = encode_delim(msg_str.encode())
         try:
             await self.read_writer.write(msg_bytes)
-        except IOException as error:
+        # Handle for connection close during ongoing negotiation in QUIC
+        except (IOException, AssertionError, ValueError) as error:
             raise MultiselectCommunicatorError(
                 "fail to write to multiselect communicator"
             ) from error

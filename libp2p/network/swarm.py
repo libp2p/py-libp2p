@@ -1,4 +1,6 @@
 import logging
+import sys
+from typing import cast
 
 from multiaddr import (
     Multiaddr,
@@ -35,6 +37,8 @@ from libp2p.transport.exceptions import (
     OpenConnectionError,
     SecurityUpgradeFailure,
 )
+from libp2p.transport.quic.connection import QUICConnection
+from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -52,6 +56,10 @@ from .exceptions import (
     SwarmException,
 )
 
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 logger = logging.getLogger("libp2p.network.swarm")
 
 
@@ -104,6 +112,11 @@ class Swarm(Service, INetworkService):
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
             self.event_listener_nursery_created.set()
+
+            if isinstance(self.transport, QUICTransport):
+                self.transport.set_background_nursery(nursery)
+                self.transport.set_swarm(self)
+
             try:
                 await self.manager.wait_finished()
             finally:
@@ -166,7 +179,6 @@ class Swarm(Service, INetworkService):
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
         Try to create a connection to peer_id with addr.
-
         :param addr: the address we want to connect with
         :param peer_id: the peer we want to connect to
         :raises SwarmException: raised when an error occurs
@@ -181,6 +193,15 @@ class Swarm(Service, INetworkService):
             raise SwarmException(
                 f"fail to open connection to peer {peer_id}"
             ) from error
+
+        if isinstance(self.transport, QUICTransport) and isinstance(
+            raw_conn, IMuxedConn
+        ):
+            logger.info(
+                "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
+            )
+            swarm_conn = await self.add_conn(raw_conn)
+            return swarm_conn
 
         logger.debug("dialed peer %s over base transport", peer_id)
 
@@ -207,9 +228,7 @@ class Swarm(Service, INetworkService):
         logger.debug("upgraded mux for peer %s", peer_id)
 
         swarm_conn = await self.add_conn(muxed_conn)
-
         logger.debug("successfully dialed peer %s", peer_id)
-
         return swarm_conn
 
     async def new_stream(self, peer_id: ID) -> INetStream:
@@ -221,6 +240,9 @@ class Swarm(Service, INetworkService):
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
+        dd = "Yes" if swarm_conn is None else "No"
+
+        print(f"Is swarm conn None: {dd}")
 
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
@@ -243,6 +265,7 @@ class Swarm(Service, INetworkService):
               - Map multiaddr to listener
         """
         # We need to wait until `self.listener_nursery` is created.
+        logger.debug("Starting to listen")
         await self.event_listener_nursery_created.wait()
 
         for maddr in multiaddrs:
@@ -253,6 +276,16 @@ class Swarm(Service, INetworkService):
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
                 raw_conn = RawConnection(read_write_closer, False)
+
+                # No need to upgrade QUIC Connection
+                if isinstance(self.transport, QUICTransport):
+                    quic_conn = cast(QUICConnection, raw_conn)
+                    await self.add_conn(quic_conn)
+                    # NOTE: This is a intentional barrier to prevent from the handler
+                    # exiting and closing the connection.
+                    await self.manager.wait_finished()
+                    print("Connection Connected")
+                    return
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
                 # secure the conn and then mux the conn
@@ -360,7 +393,7 @@ class Swarm(Service, INetworkService):
             muxed_conn,
             self,
         )
-
+        print("add_conn called")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
         self.manager.run_task(swarm_conn.start)
