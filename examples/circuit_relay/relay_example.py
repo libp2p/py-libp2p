@@ -14,7 +14,9 @@ Usage:
     python relay_example.py --role destination --port 8001 --relay-addr RELAY_PEER_ID
 
     # Third terminal - start the source:
-    python relay_example.py --role source --relay-addr RELAY_PEER_ID --dest-id DESTINATION_PEER_ID
+    python relay_example.py --role source \
+        --relay-addr RELAY_PEER_ID \
+        --dest-id DESTINATION_PEER_ID
 """
 
 import argparse
@@ -125,7 +127,7 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
             logger.info("Circuit relay protocol started")
 
             # Create and register the transport
-            transport = CircuitV2Transport(host, protocol, relay_config)
+            CircuitV2Transport(host, protocol, relay_config)
             logger.info("Circuit relay transport initialized")
 
             print("\nRelay node is running. Use the following address to connect:")
@@ -238,7 +240,10 @@ async def setup_destination_node(
 async def setup_source_node(
     relay_addr: str, dest_id: str, seed: int | None = None
 ) -> None:
-    """Set up and run a source node that connects to the destination through the relay."""
+    """
+    Set up and run a source node that connects to the destination
+    through the relay.
+    """
     logger.info("Starting source node...")
 
     if not relay_addr:
@@ -339,8 +344,8 @@ async def setup_source_node(
                     logger.info(f"This is the relay peer id: {relay_peer_id}")
 
                     # Create a proper peer info with a relay address
-                    # The destination peer should be reachable through a p2p-circuit address
-                    # Format: /p2p-circuit/p2p/DESTINATION_PEER_ID
+                    # The destination peer should be reachable through a
+                    # p2p-circuit address
                     circuit_addr = multiaddr.Multiaddr(f"/p2p-circuit/p2p/{dest_id}")
                     dest_peer_info = PeerInfo(dest_peer_id, [circuit_addr])
                     logger.info(f"This is the dest peer info: {dest_peer_info}")
@@ -348,7 +353,8 @@ async def setup_source_node(
                     # Dial through the relay
                     try:
                         logger.info(
-                            f"Attempting to dial destination {dest_peer_id} through relay {relay_peer_id}"
+                            f"Attempting to dial destination {dest_peer_id} "
+                            f"through relay {relay_peer_id}"
                         )
 
                         connection = await transport.dial_peer_info(
@@ -367,7 +373,8 @@ async def setup_source_node(
                         )
                         if stream:
                             logger.info(
-                                f"Opened stream to destination with protocol {EXAMPLE_PROTOCOL_ID}"
+                                f"Opened stream to destination with protocol "
+                                f"{EXAMPLE_PROTOCOL_ID}"
                             )
 
                             # Send a message
@@ -378,7 +385,8 @@ async def setup_source_node(
                             # Wait for response
                             response = await stream.read(MAX_READ_LEN)
                             logger.info(
-                                f"Received response: {response.decode() if response else 'No response'}"
+                                f"Received response: "
+                                f"{response.decode() if response else 'No response'}"
                             )
 
                             # Close the stream
