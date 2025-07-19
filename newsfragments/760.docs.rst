@@ -1,0 +1,1 @@
+Improve error message under the function decode_uvarint_from_stream in libp2p/utils/varint.py file

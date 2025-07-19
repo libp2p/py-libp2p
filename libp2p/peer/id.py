@@ -1,3 +1,4 @@
+import functools
 import hashlib
 
 import base58
@@ -36,25 +37,23 @@ if ENABLE_INLINING:
 
 class ID:
     _bytes: bytes
-    _xor_id: int | None = None
-    _b58_str: str | None = None
 
     def __init__(self, peer_id_bytes: bytes) -> None:
         self._bytes = peer_id_bytes
 
-    @property
+    @functools.cached_property
     def xor_id(self) -> int:
-        if not self._xor_id:
-            self._xor_id = int(sha256_digest(self._bytes).hex(), 16)
-        return self._xor_id
+        return int(sha256_digest(self._bytes).hex(), 16)
+
+    @functools.cached_property
+    def base58(self) -> str:
+        return base58.b58encode(self._bytes).decode()
 
     def to_bytes(self) -> bytes:
         return self._bytes
 
     def to_base58(self) -> str:
-        if not self._b58_str:
-            self._b58_str = base58.b58encode(self._bytes).decode()
-        return self._b58_str
+        return self.base58
 
     def __repr__(self) -> str:
         return f"<libp2p.peer.id.ID ({self!s})>"
