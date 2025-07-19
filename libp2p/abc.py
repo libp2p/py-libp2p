@@ -1327,6 +1327,10 @@ class IPeerStore(
     def clear_peerdata(self, peer_id: ID) -> None:
         """clear_peerdata"""
 
+    @abstractmethod
+    async def start_cleanup_task(self, cleanup_interval: int = 3600) -> None:
+        """Start periodic cleanup of expired peer records and addresses."""
+
 
 # -------------------------- listener interface.py --------------------------
 
