@@ -18,12 +18,19 @@ Each file should be named like `<ISSUE>.<TYPE>.rst`, where
 - `performance`
 - `removal`
 
-So for example: `123.feature.rst`, `456.bugfix.rst`
+So for example: `1024.feature.rst`
+
+**Important**: Ensure the file ends with a newline character (`\n`) to pass GitHub tox linting checks.
+
+```
+Added support for Ed25519 key generation in libp2p peer identity creation.
+
+```
 
 If the PR fixes an issue, use that number here. If there is no issue,
 then open up the PR first and use the PR number for the newsfragment.
 
-Note that the `towncrier` tool will automatically
+**Note** that the `towncrier` tool will automatically
 reflow your text, so don't try to do any fancy formatting. Run
 `towncrier build --draft` to get a preview of what the release notes entry
 will look like in the final release notes.
