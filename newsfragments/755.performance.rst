@@ -1,0 +1,2 @@
+Added throttling for async topic validators in validate_msg, enforcing a
+concurrency limit to prevent resource exhaustion under heavy load.
