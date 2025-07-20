@@ -1,9 +1,7 @@
 import json
 import logging
 from typing import (
-    Optional,
     Any,
-    Awaitable,
 )
 
 from aiortc import (
@@ -49,12 +47,12 @@ class WebRTCListener(IListener):
     WebRTC Listener Implementation.
     Handles incoming WebRTC connections for both WebRTC and WebRTC-Direct protocols.
     """
-    
+
     def __init__(self) -> None:
-        self.host: Optional[IHost] = None
-        self.handler: Optional[THandler] = None
+        self.host: IHost | None = None
+        self.handler: THandler | None = None
         self.transport: Any = None
-        self.peer_id: Optional[ID] = None
+        self.peer_id: ID | None = None
         self._processed_connections: set[str] = set()
         self.accept_queue: Any = None
         self._is_listening = False
@@ -80,20 +78,20 @@ class WebRTCListener(IListener):
         pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         if self.peer_id is None:
             raise RuntimeError("peer_id is not set in WebRTCListener")
-        
+
         def on_datachannel(channel: RTCDataChannel) -> None:
             if self.peer_id is None:
                 raise RuntimeError("peer_id is not set in WebRTCListener (datachannel)")
             conn = WebRTCRawConnection(self.peer_id, pc, channel)
             self.conn_send_channel.send_nowait(conn)
-        
+
         # Register datachannel handler
         pc.on("datachannel", on_datachannel)
-        
+
         async def on_connectionstatechange() -> None:
             if pc.connectionState == "failed":
                 await pc.close()
-        
+
         # Register connection state handler
         pc.on("connectionstatechange", on_connectionstatechange)
 
@@ -121,16 +119,22 @@ class WebRTCListener(IListener):
             try:
                 await trio.sleep(0.1)
                 if self.transport is not None:
-                    for peer_id, channel in getattr(self.transport.connection_pool, 'channels', {}).items():
+                    for peer_id, channel in getattr(
+                        self.transport.connection_pool, "channels", {}
+                    ).items():
                         if (
-                            getattr(channel, 'readyState', None) == "open"
+                            getattr(channel, "readyState", None) == "open"
                             and peer_id not in self._processed_connections
                         ):
                             self._processed_connections.add(peer_id)
                             if self.peer_id is None:
-                                logger.error("peer_id is not set, cannot create connection")
+                                logger.error(
+                                    "peer_id is not set, cannot create connection"
+                                )
                                 continue
-                            raw_conn = WebRTCRawConnection(self.peer_id, self.transport, channel)
+                            raw_conn = WebRTCRawConnection(
+                                self.peer_id, self.transport, channel
+                            )
                             if self.accept_queue is not None:
                                 await self.accept_queue.put(raw_conn)
             except Exception as e:
@@ -155,28 +159,28 @@ class WebRTCListener(IListener):
         channel_ready = Event()
         if self.host is None:
             raise RuntimeError("Host is not initialized in WebRTCListener")
-        
+
         def on_datachannel(channel: RTCDataChannel) -> None:
             logger.info(f"DataChannel received: {channel.label}")
-            
+
             def on_open() -> None:
                 logger.info("DataChannel opened.")
                 channel_ready.set()
-            
+
             # Register channel open handler
             channel.on("open", on_open)
-            
+
             host_id = self.host.get_id() if self.host is not None else None
             if host_id is None:
                 raise RuntimeError("Host ID is not set in WebRTCListener (datachannel)")
             self.conn_send_channel.send_nowait(
                 WebRTCRawConnection(host_id, pc, channel)
             )
-        
+
         # Register datachannel handler
         pc.on("datachannel", on_datachannel)
-        
-        async def on_ice_candidate(candidate: Optional[RTCIceCandidate]) -> None:
+
+        async def on_ice_candidate(candidate: RTCIceCandidate | None) -> None:
             if candidate:
                 msg = {
                     "type": "ice",
@@ -193,7 +197,7 @@ class WebRTCListener(IListener):
                     await stream.send_all(json.dumps(msg).encode())
                 except Exception as e:
                     logger.warning(f"Failed to send ICE candidate: {e}")
-        
+
         # Register ICE candidate handler
         pc.on("icecandidate", on_ice_candidate)
         offer_data = await stream.receive_some(4096)

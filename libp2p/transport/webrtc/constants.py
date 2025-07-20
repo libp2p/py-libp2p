@@ -3,7 +3,7 @@ DEFAULT_ICE_SERVERS = [
     {"urls": "stun:stun.l.google.com:19302"},
     {"urls": "stun:global.stun.twilio.com:3478"},
     {"urls": "stun:stun.cloudflare.com:3478"},
-    {"urls": "stun:stun.services.mozilla.com:3478"}
+    {"urls": "stun:stun.services.mozilla.com:3478"},
 ]
 
 # WebRTC signaling protocol
@@ -12,10 +12,10 @@ SIGNALING_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
 # WebRTC muxer protocol
 MUXER_PROTOCOL = "/webrtc"
 
-# Multicodec codes 
+# Multicodec codes
 CODEC_WEBRTC = 0x0119  # WebRTC protocol code
 CODEC_WEBRTC_DIRECT = 0x0118  # WebRTC-Direct protocol code
-CODEC_CERTHASH = 0x01d2  # Certificate hash code
+CODEC_CERTHASH = 0x01D2  # Certificate hash code
 
 # Multiaddr protocol codes
 PROTOCOL_WEBRTC = "webrtc"
@@ -50,11 +50,11 @@ MESSAGE_OVERHEAD = PROTOBUF_OVERHEAD + 4  # Include length prefix
 # Connection states
 WEBRTC_CONNECTION_STATES = {
     "new": "new",
-    "connecting": "connecting", 
+    "connecting": "connecting",
     "connected": "connected",
     "disconnected": "disconnected",
     "failed": "failed",
-    "closed": "closed"
+    "closed": "closed",
 }
 
 # Data channel states
@@ -62,29 +62,40 @@ DATA_CHANNEL_STATES = {
     "connecting": "connecting",
     "open": "open",
     "closing": "closing",
-    "closed": "closed"
+    "closed": "closed",
 }
+
 
 # Error codes
 class WebRTCError(Exception):
     """Base WebRTC transport error"""
+
     pass
+
 
 class SDPHandshakeError(WebRTCError):
     """SDP handshake failed"""
+
     pass
+
 
 class ConnectionStateError(WebRTCError):
     """Invalid connection state"""
+
     pass
+
 
 class CertificateError(WebRTCError):
     """Certificate related error"""
+
     pass
+
 
 class STUNError(WebRTCError):
     """STUN protocol error"""
+
     pass
+
 
 # WebRTC transport types
 TRANSPORT_TYPE_WEBRTC = "webrtc"
@@ -115,18 +126,18 @@ MULTIADDR_PROTOCOLS = {
         "code": CODEC_WEBRTC,
         "size": 0,
         "name": "webrtc",
-        "resolvable": False
+        "resolvable": False,
     },
     PROTOCOL_WEBRTC_DIRECT: {
         "code": CODEC_WEBRTC_DIRECT,
         "size": 0,
         "name": "webrtc-direct",
-        "resolvable": False
+        "resolvable": False,
     },
     PROTOCOL_CERTHASH: {
         "code": CODEC_CERTHASH,
         "size": 0,
         "name": "certhash",
-        "resolvable": False
-    }
+        "resolvable": False,
+    },
 }

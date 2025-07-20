@@ -6,7 +6,8 @@ to enable proper encoding and decoding of multiaddr components.
 """
 
 import base64
-from typing import ByteString, LiteralString
+from collections.abc import ByteString
+from typing import LiteralString
 
 
 def webrtc_encode(s: LiteralString) -> ByteString:
@@ -16,7 +17,7 @@ def webrtc_encode(s: LiteralString) -> ByteString:
 
 
 def webrtc_decode(b: ByteString) -> LiteralString:
-    """Decode WebRTC protocol component.""" 
+    """Decode WebRTC protocol component."""
     # WebRTC protocol has no value, return empty string
     return ""
 
@@ -37,42 +38,42 @@ def certhash_encode(s: LiteralString) -> ByteString:
     """Encode certificate hash component."""
     if not s:
         return b""
-    
+
     # Remove multibase prefix if present
-    if s.startswith('uEi'):
+    if s.startswith("uEi"):
         s = s[3:]
-    elif s.startswith('u'):
+    elif s.startswith("u"):
         s = s[1:]
-    
+
     # Decode base64url encoded hash
     try:
         # Ensure s is bytes for base64 decoding
-        s_bytes = s.encode('ascii') if isinstance(s, str) else s
+        s_bytes = s.encode("ascii") if isinstance(s, str) else s
         # Add padding if needed
         padding = 4 - (len(s_bytes) % 4)
         if padding != 4:
-            s_bytes += b'=' * padding
+            s_bytes += b"=" * padding
         return base64.urlsafe_b64decode(s_bytes)
     except Exception:
         # Fallback to raw bytes
-        return s.encode('utf-8')
+        return s.encode("utf-8")
 
 
 def certhash_decode(b: ByteString) -> LiteralString:
     """Decode certificate hash component."""
     if not b:
         return ""
-    
+
     # Encode as base64url and add multibase prefix
-    b64_hash = base64.urlsafe_b64encode(b).decode().rstrip('=')
+    b64_hash = base64.urlsafe_b64encode(b).decode().rstrip("=")
     return f"uEi{b64_hash}"
 
 
 __all__ = [
-    'webrtc_encode',
-    'webrtc_decode', 
-    'webrtc_direct_encode',
-    'webrtc_direct_decode',
-    'certhash_encode',
-    'certhash_decode'
-] 
+    "webrtc_encode",
+    "webrtc_decode",
+    "webrtc_direct_encode",
+    "webrtc_direct_decode",
+    "certhash_encode",
+    "certhash_decode",
+]
