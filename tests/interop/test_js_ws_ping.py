@@ -26,13 +26,13 @@ PLAINTEXT_PROTOCOL_ID = "/plaintext/1.0.0"
 async def test_ping_with_js_node():
     # Path to the JS node script
     js_node_dir = os.path.join(os.path.dirname(__file__), "js_libp2p", "js_node", "src")
-    script_name = "ws_ping_node.mjs"
+    script_name = "./ws_ping_node.mjs"
 
     # Launch the JS libp2p node (long-running)
     proc = await open_process(
         ["node", script_name],
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         cwd=js_node_dir,
     )
     try:
@@ -45,7 +45,17 @@ async def test_ping_with_js_node():
                     break
                 buffer += chunk
 
-        lines = buffer.decode().strip().split("\n")
+        # Split and filter out any empty lines
+        lines = [line for line in buffer.decode().splitlines() if line.strip()]
+        if len(lines) < 2:
+            stderr_output = ""
+            if proc.stderr is not None:
+                stderr_output = (await proc.stderr.receive_some(2048)).decode()
+            pytest.fail(
+                "JS node did not produce expected PeerID and multiaddr.\n"
+                f"Stdout: {buffer.decode()!r}\n"
+                f"Stderr: {stderr_output!r}"
+            )
         peer_id_line, addr_line = lines[0], lines[1]
         peer_id = ID.from_base58(peer_id_line)
         maddr = Multiaddr(addr_line)
