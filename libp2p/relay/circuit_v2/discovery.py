@@ -43,10 +43,11 @@ from .protocol_buffer import (
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
-# Constants
+# === Constants for relay discovery ===
 MAX_RELAYS_TO_TRACK = 10
 DEFAULT_DISCOVERY_INTERVAL = 60  # seconds
 STREAM_TIMEOUT = 10  # seconds
+PEER_PROTOCOL_TIMEOUT = 5  # seconds
 
 
 # Extended interfaces for type checking
@@ -166,19 +167,19 @@ class RelayDiscovery(Service):
                     continue
 
                 # Check if peer supports the relay protocol
-                with trio.move_on_after(5):  # Don't wait too long for protocol info
+                with trio.move_on_after(PEER_PROTOCOL_TIMEOUT):  # Don't wait too long for protocol info
                     if await self._supports_relay_protocol(peer_id):
                         await self._add_relay(peer_id)
 
             # Limit number of relays we track
-            if len(self._discovered_relays) > self.max_relays:
+            if len(self._discovered_relays) > MAX_RELAYS_TO_TRACK:
                 # Sort by last seen time and keep only the most recent ones
                 sorted_relays = sorted(
                     self._discovered_relays.items(),
                     key=lambda x: x[1].last_seen,
                     reverse=True,
                 )
-                to_remove = sorted_relays[self.max_relays :]
+                to_remove = sorted_relays[MAX_RELAYS_TO_TRACK :]
                 for peer_id, _ in to_remove:
                     del self._discovered_relays[peer_id]
 
@@ -234,7 +235,8 @@ class RelayDiscovery(Service):
 
             if not callable(proto_getter):
                 return None
-
+            if peer_id not in peerstore.peer_ids():
+                return None
             try:
                 # Try to get protocols
                 proto_result = proto_getter(peer_id)
@@ -283,8 +285,6 @@ class RelayDiscovery(Service):
                 return None
 
             mux = self.host.get_mux()
-            if not hasattr(mux, "protocols"):
-                return None
 
             peer_protocols = set()
             # Get protocols from mux with proper type safety
@@ -293,11 +293,13 @@ class RelayDiscovery(Service):
                 # Get protocols with proper typing
                 mux_protocols = mux.get_protocols()
                 if isinstance(mux_protocols, (list, tuple)):
-                    available_protocols = list(mux_protocols)
+                    available_protocols = [
+                        p for p in mux.get_protocols() if p is not None
+                    ]
 
             for protocol in available_protocols:
                 try:
-                    with trio.fail_after(2):  # Quick check
+                    with trio.fail_after(PEER_PROTOCOL_TIMEOUT):  # Quick check
                         # Ensure we have a proper protocol object
                         # Use string representation since we can't use isinstance
                         is_tprotocol = str(type(protocol)) == str(type(TProtocol))
@@ -313,7 +315,7 @@ class RelayDiscovery(Service):
 
             self._protocol_cache[peer_id] = peer_protocols
             protocol_str = str(PROTOCOL_ID)
-            for protocol in peer_protocols:
+            for protocol in map(TProtocol, peer_protocols):
                 if protocol == protocol_str:
                     return True
             return False
@@ -462,7 +464,7 @@ class RelayDiscovery(Service):
 
         for peer_id, relay_info in self._discovered_relays.items():
             # Check if relay hasn't been seen in a while (3x discovery interval)
-            if now - relay_info.last_seen > self.discovery_interval * 3:
+            if now - relay_info.last_seen > DEFAULT_DISCOVERY_INTERVAL * 3:
                 to_remove.append(peer_id)
                 continue
 

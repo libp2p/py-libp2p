@@ -19,6 +19,10 @@ from libp2p.peer.id import (
 # Import the protobuf definitions
 from .pb.circuit_pb2 import Reservation as PbReservation
 
+# === Constants for resource management ===
+RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
+TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
+
 
 @dataclass
 class RelayLimits:
@@ -68,8 +72,8 @@ class Reservation:
         # - Peer ID to bind it to the specific peer
         # - Timestamp for uniqueness
         # - Hash everything for a fixed size output
-        random_bytes = os.urandom(16)  # 128 bits of randomness
-        timestamp = str(int(self.created_at * 1000000)).encode()
+        random_bytes = os.urandom(RANDOM_BYTES_LENGTH)  # 128 bits of randomness
+        timestamp = str(int(self.created_at * TIMESTAMP_MULTIPLIER)).encode()
         peer_bytes = self.peer_id.to_bytes()
 
         # Combine all elements and hash them
