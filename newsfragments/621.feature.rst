@@ -1,1 +1,0 @@
-Limit concurrency in `push_identify_to_peers` to prevent resource congestion under high peer counts.
