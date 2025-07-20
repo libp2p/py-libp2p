@@ -29,7 +29,11 @@ class UpnpManager:
             try:
                 num_devices = await trio.to_thread.run_sync(self._gateway.discover)
             except Exception as e:
-                if str(e) == "Success":
+                # The miniupnpc library has a known quirk where `discover()` can
+                # raise an exception with the message "Success" on some platforms
+                # (e.g., Windows) instead of returning a number of devices. We treat
+                # this as a successful discovery of 1 device.
+                if str(e) == "Success":  # type: ignore
                     num_devices = 1
                 else:
                     logger.exception("UPnP discovery exception")
@@ -69,6 +73,15 @@ class UpnpManager:
         :param protocol: the protocol to map (TCP or UDP)
         :return: True on success, False otherwise
         """
+        if not 0 < port < 65536:
+            logger.error(f"Invalid port number for mapping: {port}")
+            return False
+        if port < 1024:
+            logger.warning(
+                f"Mapping a well-known (privileged) port ({port}) may fail or "
+                "require root."
+            )
+
         if not self._lan_addr:
             logger.error(
                 "Cannot add port mapping: discovery has not been run successfully."
@@ -99,6 +112,10 @@ class UpnpManager:
         :param protocol: the protocol (TCP or UDP)
         :return: True on success, False otherwise
         """
+        if not 0 < port < 65536:
+            logger.error(f"Invalid port number for removal: {port}")
+            return False
+
         logger.debug(f"Removing UPnP mapping for {protocol} port {port}...")
         try:
             await trio.to_thread.run_sync(

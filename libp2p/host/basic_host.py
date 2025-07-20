@@ -30,6 +30,7 @@ from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.discovery.mdns.mdns import MDNSDiscovery
+from libp2p.discovery.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )
@@ -85,6 +86,9 @@ class BasicHost(IHost):
     _network: INetworkService
     peerstore: IPeerStore
 
+    mDNS: MDNSDiscovery | None
+    upnp: UpnpManager | None
+
     multiselect: Multiselect
     multiselect_client: MultiselectClient
 
@@ -92,6 +96,7 @@ class BasicHost(IHost):
         self,
         network: INetworkService,
         enable_mDNS: bool = False,
+        enable_upnp: bool = False,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
@@ -103,8 +108,13 @@ class BasicHost(IHost):
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))
         self.multiselect_client = MultiselectClient()
+        self.mDNS = None
         if enable_mDNS:
             self.mDNS = MDNSDiscovery(network)
+
+        self.upnp = None
+        if enable_upnp:
+            self.upnp = UpnpManager()
 
     def get_id(self) -> ID:
         """
@@ -172,11 +182,24 @@ class BasicHost(IHost):
                 if hasattr(self, "mDNS") and self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()
+                if self.upnp:
+                    upnp_manager = self.upnp
+                    logger.debug("Starting UPnP discovery and port mapping")
+                    if await upnp_manager.discover():
+                        for addr in self.get_addrs():
+                            if port := addr.value_for_protocol("tcp"):
+                                await upnp_manager.add_port_mapping(port, "TCP")
                 try:
                     yield
                 finally:
                     if hasattr(self, "mDNS") and self.mDNS is not None:
                         self.mDNS.stop()
+                    if self.upnp and self.upnp.get_external_ip():
+                        upnp_manager = self.upnp
+                        logger.debug("Removing UPnP port mappings")
+                        for addr in self.get_addrs():
+                            if port := addr.value_for_protocol("tcp"):
+                                await upnp_manager.remove_port_mapping(port, "TCP")
 
         return _run()
 
