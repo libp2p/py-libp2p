@@ -56,10 +56,10 @@ class WebRTCStream(INetStream):
         """Get the underlying muxed connection."""
         return cast(IMuxedConn, self.connection)
 
-    def set_protocol(self, protocol: TProtocol) -> None:
+    def set_protocol(self, protocol_id: TProtocol) -> None:
         """Set the protocol for this stream."""
-        self.protocol = protocol
-        logger.debug(f"Stream {self.stream_id} set protocol: {protocol}")
+        self.protocol = protocol_id
+        logger.debug(f"Stream {self.stream_id} set protocol: {protocol_id}")
 
     def get_protocol(self) -> TProtocol | None:
         """Get the protocol for this stream."""

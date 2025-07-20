@@ -186,7 +186,7 @@ class WebRTCDirectTransport(ITransport):
             peer_id = (
                 peer_id_str
                 if isinstance(peer_id_str, ID)
-                else ID.from_base58(peer_id_str)
+                else ID.from_base58(str(peer_id_str))
             )
 
             # Extract port from multiaddr

@@ -38,7 +38,8 @@ class WebRTCAsyncBridge:
         """Enter async context manager"""
         if not self._in_context:
             self._loop_context = open_loop()
-            await self._loop_context.__aenter__()
+            if self._loop_context:
+                await self._loop_context.__aenter__()
             self._in_context = True
         return self
 
