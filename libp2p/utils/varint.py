@@ -39,12 +39,38 @@ def encode_uvarint(number: int) -> bytes:
     return buf
 
 
+def decode_varint_from_bytes(data: bytes) -> int:
+    """
+    Decode a varint from bytes and return the value.
+
+    This is a synchronous version of decode_uvarint_from_stream for already-read bytes.
+    """
+    res = 0
+    for shift in itertools.count(0, 7):
+        if shift > SHIFT_64_BIT_MAX:
+            raise ParseError("Integer is too large...")
+
+        if not data:
+            raise ParseError("Unexpected end of data")
+
+        value = data[0]
+        data = data[1:]
+
+        res += (value & LOW_MASK) << shift
+
+        if not value & HIGH_MASK:
+            break
+    return res
+
+
 async def decode_uvarint_from_stream(reader: Reader) -> int:
     """https://en.wikipedia.org/wiki/LEB128."""
     res = 0
     for shift in itertools.count(0, 7):
         if shift > SHIFT_64_BIT_MAX:
-            raise ParseError("TODO: better exception msg: Integer is too large...")
+            raise ParseError(
+                "Varint decoding error: integer exceeds maximum size of 64 bits."
+            )
 
         byte = await read_exactly(reader, 1)
         value = byte[0]
@@ -54,6 +80,33 @@ async def decode_uvarint_from_stream(reader: Reader) -> int:
         if not value & HIGH_MASK:
             break
     return res
+
+
+def decode_varint_with_size(data: bytes) -> tuple[int, int]:
+    """
+    Decode a varint from bytes and return (value, bytes_consumed).
+    Returns (0, 0) if the data doesn't start with a valid varint.
+    """
+    try:
+        # Calculate how many bytes the varint consumes
+        varint_size = 0
+        for i, byte in enumerate(data):
+            varint_size += 1
+            if (byte & 0x80) == 0:
+                break
+
+        if varint_size == 0:
+            return 0, 0
+
+        # Extract just the varint bytes
+        varint_bytes = data[:varint_size]
+
+        # Decode the varint
+        value = decode_varint_from_bytes(varint_bytes)
+
+        return value, varint_size
+    except Exception:
+        return 0, 0
 
 
 def encode_varint_prefixed(msg_bytes: bytes) -> bytes:
