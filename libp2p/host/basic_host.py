@@ -275,6 +275,10 @@ class BasicHost(IHost):
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
+        """
+        Handles incoming network streams by performing protocol negotiation
+        and dispatching to the appropriate handler.
+        """
         # Perform protocol muxing to determine protocol to use
         try:
             # The protocol returned here can now be None
@@ -289,7 +293,7 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
 
-        # --- NEW CODE: Handle case where protocol is None ---
+        # Handle case where protocol is None
         if protocol is None:
             peer_id = net_stream.muxed_conn.peer_id
             logger.debug(
@@ -305,7 +309,6 @@ class BasicHost(IHost):
             # raise StreamFailure(f"No protocol selected from peer {peer_id}")
             # But the 'return' is consistent with the `except` block's handling.
             return
-        # --- END NEW CODE ---
 
         net_stream.set_protocol(protocol)
         if handler is None:

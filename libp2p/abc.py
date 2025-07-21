@@ -50,6 +50,11 @@ if TYPE_CHECKING:
         Pubsub,
     )
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from libp2p.protocol_muxer.multiselect import Multiselect
+
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -2194,6 +2199,68 @@ class IMultiselectClient(ABC):
         """
 
 
+# -------------------------- multiselect_muxer interface.py --------------------------
+
+
+class IMultiselectMuxer(ABC):
+    """
+    Multiselect module for protocol negotiation.
+
+    Responsible for responding to a multiselect client by selecting a protocol
+    and its corresponding handler for communication.
+    """
+
+    handlers: dict[TProtocol | None, StreamHandlerFn | None]
+
+    @abstractmethod
+    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
+        """
+        Store a handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol : TProtocol
+            The protocol name.
+        handler : StreamHandlerFn
+            The handler function associated with the protocol.
+
+        """
+
+    @abstractmethod
+    def get_protocols(self) -> tuple[TProtocol | None, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names.
+
+        """
+
+    @abstractmethod
+    async def negotiate(
+        self, communicator: IMultiselectCommunicator
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
+        """
+        Negotiate a protocol selection with a multiselect client.
+
+        Parameters
+        ----------
+        communicator : IMultiselectCommunicator
+            The communicator used to negotiate the protocol.
+
+        Returns
+        -------
+        tuple[TProtocol, StreamHandlerFn]
+            A tuple containing the selected protocol and its handler.
+
+        Raises
+        ------
+        Exception
+            If negotiation fails.
+
+        """
 # -------------------------- routing interface.py --------------------------
 
 
