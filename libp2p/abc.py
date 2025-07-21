@@ -1649,6 +1649,7 @@ class IHost(ABC):
 
     @abstractmethod
     def get_mux(self) -> IMultiselectMuxer:
+
         """
         Retrieve the muxer instance for the host.
 
