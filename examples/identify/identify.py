@@ -1,6 +1,7 @@
 import argparse
 import base64
 import logging
+import sys
 
 import multiaddr
 import trio
@@ -112,7 +113,12 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
             # Replace the handler with our custom one
             host_a.set_stream_handler(IDENTIFY_PROTOCOL_ID, custom_identify_handler)
 
-            await trio.sleep_forever()
+            try:
+                await trio.sleep_forever()
+            except KeyboardInterrupt:
+                print("\n🛑 Shutting down listener...")
+                logger.info("Listener interrupted by user")
+                return
 
     else:
         # Create second host (dialer)
@@ -147,38 +153,13 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
             try:
                 print("Starting identify protocol...")
 
-                # Read the response properly based on the format
-                if use_varint_format:
-                    # For length-prefixed format, read varint length first
-                    from libp2p.utils.varint import decode_varint_from_bytes
+                # Read the response using the utility function
+                from libp2p.utils.varint import read_length_prefixed_protobuf
 
-                    # Read varint length prefix
-                    length_bytes = b""
-                    while True:
-                        b = await stream.read(1)
-                        if not b:
-                            raise Exception("Stream closed while reading varint length")
-                        length_bytes += b
-                        if b[0] & 0x80 == 0:
-                            break
-
-                    msg_length = decode_varint_from_bytes(length_bytes)
-                    print(f"Expected message length: {msg_length} bytes")
-
-                    # Read the protobuf message
-                    response = await stream.read(msg_length)
-                    if len(response) != msg_length:
-                        raise Exception(
-                            f"Incomplete message: expected {msg_length} bytes, "
-                            f"got {len(response)}"
-                        )
-
-                    # Combine length prefix and message
-                    full_response = length_bytes + response
-                else:
-                    # For raw format, read all available data
-                    response = await stream.read(8192)
-                    full_response = response
+                response = await read_length_prefixed_protobuf(
+                    stream, use_varint_format
+                )
+                full_response = response
 
                 await stream.close()
 
@@ -254,6 +235,7 @@ def main() -> None:
             "length-prefixed (new format)"
         ),
     )
+
     args = parser.parse_args()
 
     # Determine format: raw format if --raw-format is specified, otherwise
@@ -261,9 +243,19 @@ def main() -> None:
     use_varint_format = not args.raw_format
 
     try:
-        trio.run(run, *(args.port, args.destination, use_varint_format))
+        if args.destination:
+            # Run in dialer mode
+            trio.run(run, *(args.port, args.destination, use_varint_format))
+        else:
+            # Run in listener mode
+            trio.run(run, *(args.port, args.destination, use_varint_format))
     except KeyboardInterrupt:
-        pass
+        print("\n👋 Goodbye!")
+        logger.info("Application interrupted by user")
+    except Exception as e:
+        print(f"\n❌ Error: {str(e)}")
+        logger.error("Error: %s", str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
