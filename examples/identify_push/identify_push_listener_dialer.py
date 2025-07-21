@@ -41,6 +41,9 @@ from libp2p.identity.identify import (
     ID as ID_IDENTIFY,
     identify_handler_for,
 )
+from libp2p.identity.identify.identify import (
+    _remote_address_to_multiaddr,
+)
 from libp2p.identity.identify.pb.identify_pb2 import (
     Identify,
 )
@@ -72,40 +75,30 @@ def custom_identify_push_handler_for(host, use_varint_format: bool = True):
     async def handle_identify_push(stream: INetStream) -> None:
         peer_id = stream.muxed_conn.peer_id
 
+        # Get remote address information
         try:
-            if use_varint_format:
-                # Read length-prefixed identify message from the stream
-                from libp2p.utils.varint import decode_varint_from_bytes
+            remote_address = stream.get_remote_address()
+            if remote_address:
+                observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+                logger.info(
+                    "Connection from remote peer %s, address: %s, multiaddr: %s",
+                    peer_id,
+                    remote_address,
+                    observed_multiaddr,
+                )
+                print(f"\n🔗 Received identify/push request from peer: {peer_id}")
+                # Add the peer ID to create a complete multiaddr
+                complete_multiaddr = f"{observed_multiaddr}/p2p/{peer_id}"
+                print(f"   Remote address: {complete_multiaddr}")
+        except Exception as e:
+            logger.error("Error getting remote address: %s", e)
+            print(f"\n🔗 Received identify/push request from peer: {peer_id}")
 
-                # First read the varint length prefix
-                length_bytes = b""
-                while True:
-                    b = await stream.read(1)
-                    if not b:
-                        break
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
+        try:
+            # Use the utility function to read the protobuf message
+            from libp2p.utils.varint import read_length_prefixed_protobuf
 
-                if not length_bytes:
-                    logger.warning("No length prefix received from peer %s", peer_id)
-                    return
-
-                msg_length = decode_varint_from_bytes(length_bytes)
-
-                # Read the protobuf message
-                data = await stream.read(msg_length)
-                if len(data) != msg_length:
-                    logger.warning("Incomplete message received from peer %s", peer_id)
-                    return
-            else:
-                # Read raw protobuf message from the stream
-                data = b""
-                while True:
-                    chunk = await stream.read(4096)
-                    if not chunk:
-                        break
-                    data += chunk
+            data = await read_length_prefixed_protobuf(stream, use_varint_format)
 
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
@@ -155,11 +148,41 @@ def custom_identify_push_handler_for(host, use_varint_format: bool = True):
             await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
 
             logger.info("Successfully processed identify/push from peer %s", peer_id)
-            print(f"\nSuccessfully processed identify/push from peer {peer_id}")
+            print(f"✅ Successfully processed identify/push from peer {peer_id}")
 
         except Exception as e:
-            logger.error("Error processing identify/push from %s: %s", peer_id, e)
-            print(f"\nError processing identify/push from {peer_id}: {e}")
+            error_msg = str(e)
+            logger.error(
+                "Error processing identify/push from %s: %s", peer_id, error_msg
+            )
+            print(f"\nError processing identify/push from {peer_id}: {error_msg}")
+
+            # Check for specific format mismatch errors
+            if (
+                "Error parsing message" in error_msg
+                or "DecodeError" in error_msg
+                or "ParseFromString" in error_msg
+            ):
+                print("\n" + "=" * 60)
+                print("FORMAT MISMATCH DETECTED!")
+                print("=" * 60)
+                if use_varint_format:
+                    print(
+                        "You are using length-prefixed format (default) but the "
+                        "dialer is using raw protobuf format."
+                    )
+                    print("\nTo fix this, run the dialer with the --raw-format flag:")
+                    print(
+                        "identify-push-listener-dialer-demo --raw-format -d <ADDRESS>"
+                    )
+                else:
+                    print("You are using raw protobuf format but the dialer")
+                    print("is using length-prefixed format (default).")
+                    print(
+                        "\nTo fix this, run the dialer without the --raw-format flag:"
+                    )
+                    print("identify-push-listener-dialer-demo -d <ADDRESS>")
+                print("=" * 60)
         finally:
             # Close the stream after processing
             await stream.close()
@@ -167,7 +190,9 @@ def custom_identify_push_handler_for(host, use_varint_format: bool = True):
     return handle_identify_push
 
 
-async def run_listener(port: int, use_varint_format: bool = True) -> None:
+async def run_listener(
+    port: int, use_varint_format: bool = True, raw_format_flag: bool = False
+) -> None:
     """Run a host in listener mode."""
     format_name = "length-prefixed" if use_varint_format else "raw protobuf"
     print(
@@ -187,29 +212,41 @@ async def run_listener(port: int, use_varint_format: bool = True) -> None:
     )
     host.set_stream_handler(
         ID_IDENTIFY_PUSH,
-        identify_push_handler_for(host, use_varint_format=use_varint_format),
+        custom_identify_push_handler_for(host, use_varint_format=use_varint_format),
     )
 
     # Start listening
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-    async with host.run([listen_addr]):
-        addr = host.get_addrs()[0]
-        logger.info("Listener host ready!")
-        print("Listener host ready!")
+    try:
+        async with host.run([listen_addr]):
+            addr = host.get_addrs()[0]
+            logger.info("Listener host ready!")
+            print("Listener host ready!")
 
-        logger.info(f"Listening on: {addr}")
-        print(f"Listening on: {addr}")
+            logger.info(f"Listening on: {addr}")
+            print(f"Listening on: {addr}")
 
-        logger.info(f"Peer ID: {host.get_id().pretty()}")
-        print(f"Peer ID: {host.get_id().pretty()}")
+            logger.info(f"Peer ID: {host.get_id().pretty()}")
+            print(f"Peer ID: {host.get_id().pretty()}")
 
-        print("\nRun dialer with command:")
-        print(f"identify-push-listener-dialer-demo -d {addr}")
-        print("\nWaiting for incoming connections... (Ctrl+C to exit)")
+            print("\nRun dialer with command:")
+            if raw_format_flag:
+                print(f"identify-push-listener-dialer-demo -d {addr} --raw-format")
+            else:
+                print(f"identify-push-listener-dialer-demo -d {addr}")
+            print("\nWaiting for incoming identify/push requests... (Ctrl+C to exit)")
 
-        # Keep running until interrupted
-        await trio.sleep_forever()
+            # Keep running until interrupted
+            try:
+                await trio.sleep_forever()
+            except KeyboardInterrupt:
+                print("\n🛑 Shutting down listener...")
+                logger.info("Listener interrupted by user")
+                return
+    except Exception as e:
+        logger.error(f"Listener error: {e}")
+        raise
 
 
 async def run_dialer(
@@ -256,7 +293,9 @@ async def run_dialer(
         try:
             await host.connect(peer_info)
             logger.info("Successfully connected to listener!")
-            print("Successfully connected to listener!")
+            print("✅ Successfully connected to listener!")
+            print(f"   Connected to: {peer_info.peer_id}")
+            print(f"   Full address: {destination}")
 
             # Push identify information to the listener
             logger.info("Pushing identify information to listener...")
@@ -270,7 +309,7 @@ async def run_dialer(
 
                 if success:
                     logger.info("Identify push completed successfully!")
-                    print("Identify push completed successfully!")
+                    print("✅ Identify push completed successfully!")
 
                     logger.info("Example completed successfully!")
                     print("\nExample completed successfully!")
@@ -281,17 +320,57 @@ async def run_dialer(
                     logger.warning("Example completed with warnings.")
                     print("Example completed with warnings.")
             except Exception as e:
-                logger.error(f"Error during identify push: {str(e)}")
-                print(f"\nError during identify push: {str(e)}")
+                error_msg = str(e)
+                logger.error(f"Error during identify push: {error_msg}")
+                print(f"\nError during identify push: {error_msg}")
+
+                # Check for specific format mismatch errors
+                if (
+                    "Error parsing message" in error_msg
+                    or "DecodeError" in error_msg
+                    or "ParseFromString" in error_msg
+                ):
+                    print("\n" + "=" * 60)
+                    print("FORMAT MISMATCH DETECTED!")
+                    print("=" * 60)
+                    if use_varint_format:
+                        print(
+                            "You are using length-prefixed format (default) but the "
+                            "listener is using raw protobuf format."
+                        )
+                        print(
+                            "\nTo fix this, run the dialer with the --raw-format flag:"
+                        )
+                        print(
+                            f"identify-push-listener-dialer-demo --raw-format -d "
+                            f"{destination}"
+                        )
+                    else:
+                        print("You are using raw protobuf format but the listener")
+                        print("is using length-prefixed format (default).")
+                        print(
+                            "\nTo fix this, run the dialer without the --raw-format "
+                            "flag:"
+                        )
+                        print(f"identify-push-listener-dialer-demo -d {destination}")
+                    print("=" * 60)
 
                 logger.error("Example completed with errors.")
                 print("Example completed with errors.")
                 # Continue execution despite the push error
 
         except Exception as e:
-            logger.error(f"Error during dialer operation: {str(e)}")
-            print(f"\nError during dialer operation: {str(e)}")
-            raise
+            error_msg = str(e)
+            if "unable to connect" in error_msg or "SwarmException" in error_msg:
+                print(f"\n❌ Cannot connect to peer: {peer_info.peer_id}")
+                print(f"   Address: {destination}")
+                print(f"   Error: {error_msg}")
+                print("\n💡 Make sure the peer is running and the address is correct.")
+                return
+            else:
+                logger.error(f"Error during dialer operation: {error_msg}")
+                print(f"\nError during dialer operation: {error_msg}")
+                raise
 
 
 def main() -> None:
@@ -301,12 +380,21 @@ def main() -> None:
     Without arguments, it runs as a listener on random port.
     With -d parameter, it runs as a dialer on random port.
 
+    Port 0 (default) means the OS will automatically assign an available port.
+    This prevents port conflicts when running multiple instances.
+
     Use --raw-format to send raw protobuf messages (old format) instead of
     length-prefixed protobuf messages (new format, default).
     """
 
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
+    parser.add_argument(
+        "-p",
+        "--port",
+        default=0,
+        type=int,
+        help="source port number (0 = random available port)",
+    )
     parser.add_argument(
         "-d",
         "--destination",
@@ -321,6 +409,7 @@ def main() -> None:
             "length-prefixed (new format)"
         ),
     )
+
     args = parser.parse_args()
 
     # Determine format: raw format if --raw-format is specified, otherwise
@@ -333,12 +422,12 @@ def main() -> None:
             trio.run(run_dialer, args.port, args.destination, use_varint_format)
         else:
             # Run in listener mode with random available port if not specified
-            trio.run(run_listener, args.port, use_varint_format)
+            trio.run(run_listener, args.port, use_varint_format, args.raw_format)
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
-        logger.info("Interrupted by user")
+        print("\n👋 Goodbye!")
+        logger.info("Application interrupted by user")
     except Exception as e:
-        print(f"\nError: {str(e)}")
+        print(f"\n❌ Error: {str(e)}")
         logger.error("Error: %s", str(e))
         sys.exit(1)
 
