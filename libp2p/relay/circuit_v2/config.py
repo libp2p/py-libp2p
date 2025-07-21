@@ -18,6 +18,14 @@ from .resources import (
     RelayLimits,
 )
 
+# === Constants for relay configuration ===
+DEFAULT_MIN_RELAYS = 3
+DEFAULT_MAX_RELAYS = 20
+DEFAULT_DISCOVERY_INTERVAL = 300  # seconds
+DEFAULT_RESERVATION_TTL = 3600  # seconds
+DEFAULT_MAX_CIRCUIT_DURATION = 3600  # seconds
+DEFAULT_MAX_CIRCUIT_BYTES = 1024 * 1024 * 1024  # 1GB
+
 
 @dataclass
 class RelayConfig:
@@ -33,14 +41,14 @@ class RelayConfig:
 
     # Discovery configuration
     bootstrap_relays: list[PeerInfo] = field(default_factory=list)
-    min_relays: int = 3
-    max_relays: int = 20
-    discovery_interval: int = 300  # seconds
+    min_relays: int = DEFAULT_MIN_RELAYS
+    max_relays: int = DEFAULT_MAX_RELAYS
+    discovery_interval: int = DEFAULT_DISCOVERY_INTERVAL  # seconds
 
     # Connection configuration
-    reservation_ttl: int = 3600  # seconds
-    max_circuit_duration: int = 3600  # seconds
-    max_circuit_bytes: int = 1024 * 1024 * 1024  # 1GB
+    reservation_ttl: int = DEFAULT_RESERVATION_TTL  # seconds
+    max_circuit_duration: int = DEFAULT_MAX_CIRCUIT_DURATION  # seconds
+    max_circuit_bytes: int = DEFAULT_MAX_CIRCUIT_BYTES  # 1GB
 
     def __post_init__(self) -> None:
         """Initialize default values."""
