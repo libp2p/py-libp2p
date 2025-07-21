@@ -113,7 +113,7 @@ def parse_identify_response(response: bytes) -> Identify:
 
 
 def identify_handler_for(
-    host: IHost, use_varint_format: bool = False
+    host: IHost, use_varint_format: bool = True
 ) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         # get observed address from ``stream``
