@@ -48,16 +48,15 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self,
         communicator: IMultiselectCommunicator,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-    ) -> tuple[TProtocol, StreamHandlerFn | None]:
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
         """
-        Negotiate performs protocol selection.
+        Negotiate performs protocol selection with a multiselect client.
 
-        :param stream: stream to negotiate on
+        :param communicator: The communicator used to negotiate the protocol.
         :param negotiate_timeout: timeout for negotiation
         :return: selected protocol name, handler function
         :raise MultiselectError: raised when negotiation failed

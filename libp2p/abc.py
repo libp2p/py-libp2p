@@ -1490,6 +1490,103 @@ class INotifee(ABC):
         """
 
 
+class IMultiselectCommunicator(ABC):
+    """
+    Communicator helper for multiselect.
+
+    Ensures that both the client and multistream module follow the same
+    multistream protocol.
+    """
+
+    @abstractmethod
+    async def write(self, msg_str: str) -> None:
+        """
+        Write a message to the stream.
+
+        Parameters
+        ----------
+        msg_str : str
+            The message string to write.
+
+        """
+
+    @abstractmethod
+    async def read(self) -> str:
+        """
+        Read a message from the stream until EOF.
+
+        Returns
+        -------
+        str
+            The message read from the stream.
+
+        """
+
+
+# -------------------------- multiselect_muxer interface.py --------------------------
+
+
+class IMultiselectMuxer(ABC):
+    """
+    Multiselect module for protocol negotiation.
+
+    Responsible for responding to a multiselect client by selecting a protocol
+    and its corresponding handler for communication.
+    """
+
+    handlers: dict[TProtocol | None, StreamHandlerFn | None]
+
+    @abstractmethod
+    def add_handler(self, protocol: TProtocol, handler: StreamHandlerFn) -> None:
+        """
+        Store a handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol : TProtocol
+            The protocol name.
+        handler : StreamHandlerFn
+            The handler function associated with the protocol.
+
+        """
+
+    def get_protocols(self) -> tuple[TProtocol | None, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names.
+
+        """
+        return tuple(self.handlers.keys())
+
+    @abstractmethod
+    async def negotiate(
+        self, communicator: IMultiselectCommunicator
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
+        """
+        Negotiate a protocol selection with a multiselect client.
+
+        Parameters
+        ----------
+        communicator : IMultiselectCommunicator
+            The communicator used to negotiate the protocol.
+
+        Returns
+        -------
+        tuple[TProtocol, StreamHandlerFn]
+            A tuple containing the selected protocol and its handler.
+
+        Raises
+        ------
+        Exception
+            If negotiation fails.
+
+        """
+
+
 # -------------------------- host interface.py --------------------------
 
 
@@ -1551,13 +1648,14 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    def get_mux(self) -> "Multiselect":
+    def get_mux(self) -> IMultiselectMuxer:
+
         """
         Retrieve the muxer instance for the host.
 
         Returns
         -------
-        Any
+        IMultiselectMuxer
             The muxer instance of the host.
 
         """
@@ -2020,39 +2118,6 @@ class IPeerData(ABC):
 # ------------------ multiselect_communicator interface.py ------------------
 
 
-class IMultiselectCommunicator(ABC):
-    """
-    Communicator helper for multiselect.
-
-    Ensures that both the client and multistream module follow the same
-    multistream protocol.
-    """
-
-    @abstractmethod
-    async def write(self, msg_str: str) -> None:
-        """
-        Write a message to the stream.
-
-        Parameters
-        ----------
-        msg_str : str
-            The message string to write.
-
-        """
-
-    @abstractmethod
-    async def read(self) -> str:
-        """
-        Read a message from the stream until EOF.
-
-        Returns
-        -------
-        str
-            The message read from the stream.
-
-        """
-
-
 # -------------------------- multiselect_client interface.py --------------------------
 
 
@@ -2197,8 +2262,6 @@ class IMultiselectMuxer(ABC):
             If negotiation fails.
 
         """
-
-
 # -------------------------- routing interface.py --------------------------
 
 
