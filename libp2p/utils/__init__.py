@@ -9,6 +9,7 @@ from libp2p.utils.varint import (
     read_varint_prefixed_bytes,
     decode_varint_from_bytes,
     decode_varint_with_size,
+    read_length_prefixed_protobuf,
 )
 from libp2p.utils.version import (
     get_agent_version,
@@ -24,4 +25,5 @@ __all__ = [
     "read_varint_prefixed_bytes",
     "decode_varint_from_bytes",
     "decode_varint_with_size",
+    "read_length_prefixed_protobuf",
 ]
