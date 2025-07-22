@@ -125,7 +125,7 @@ class WebRTCAsyncBridge:
             raise
 
     async def add_ice_candidate(
-        self, peer_connection: RTCPeerConnection, candidate: RTCIceCandidate
+        self, peer_connection: RTCPeerConnection, candidate: RTCIceCandidate | None
     ) -> None:
         """Add ICE candidate with proper async bridging"""
         try:

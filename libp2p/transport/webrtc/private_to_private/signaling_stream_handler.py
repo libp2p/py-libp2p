@@ -13,9 +13,10 @@ from trio_asyncio import aio_as_trio
 from libp2p.abc import INetStream, IRawConnection
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
-from .pb import Message
+
 from ..connection import WebRTCRawConnection
 from ..constants import WebRTCError
+from .pb import Message
 
 logger = logging.getLogger("webrtc.private.signaling_stream_handler")
 
@@ -72,12 +73,10 @@ async def handle_incoming_stream(
                 raise WebRTCError("No offer data received")
             offer_message = Message()
             offer_message.ParseFromString(offer_data)
-            if offer_message.get("type") != "offer":
-                raise WebRTCError(f"Expected offer, got: {offer_message.get('type')}")
+            if offer_message.type != Message.SDP_OFFER:
+                raise WebRTCError(f"Expected offer, got: {offer_message.type}")
 
-            offer = RTCSessionDescription(
-                sdp=offer_message["sdp"], type=offer_message["type"]
-            )
+            offer = RTCSessionDescription(sdp=offer_message.data, type="offer")
 
             logger.info("Received SDP offer")
 
@@ -86,7 +85,7 @@ async def handle_incoming_stream(
 
         # Set remote description
         await aio_as_trio(peer_connection.setRemoteDescription)(offer)
-        logger.info("Set remote description from offer")
+        logger.debug("Set remote description from offer")
 
         # Create and set local description (answer)
         answer = await aio_as_trio(peer_connection.createAnswer)()
@@ -98,7 +97,7 @@ async def handle_incoming_stream(
             answer_message = Message()
             answer_message.type = Message.SDP_ANSWER
             answer_message.data = answer.sdp
-            await stream.write(answer_message)
+            await stream.write(answer_message.SerializeToString())
             logger.info("Sent SDP answer")
 
         except Exception as e:

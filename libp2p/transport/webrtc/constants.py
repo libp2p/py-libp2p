@@ -1,3 +1,5 @@
+from libp2p.custom_types import TProtocol
+
 # Default ICE servers for NAT traversal
 DEFAULT_ICE_SERVERS = [
     {"urls": "stun:stun.l.google.com:19302"},
@@ -7,7 +9,7 @@ DEFAULT_ICE_SERVERS = [
 ]
 
 # WebRTC signaling protocol
-SIGNALING_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
+SIGNALING_PROTOCOL = TProtocol("/libp2p/webrtc/signal/1.0.0")
 
 # WebRTC muxer protocol
 MUXER_PROTOCOL = "/webrtc"
