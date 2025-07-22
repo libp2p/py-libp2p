@@ -1,7 +1,8 @@
 import json
 import logging
 from typing import Any
-
+from aiortc.rtcicetransport import candidate_from_aioice
+from aioice.candidate import Candidate
 from aiortc import (
     RTCConfiguration,
     RTCIceCandidate,
@@ -121,24 +122,8 @@ async def initiate_connection(
 
         # (Note: aiortc does not emit ice candidate event, per candidate (like js) 
         # but sends it along SDP. To maintain interop, we extract adn resend in given format )
+        await _send_ice_candidates(signaling_stream, peer_connection)
         
-        # get SDP from local_descriptor for extracting ice_candidates
-        sdp = peer_connection.localDescription.sdp
-        # extract ice_candidates from sdp
-        ice_candidate =Message()
-        ice_candidate.type = Message.ICE_CANDIDATE
-        for line in sdp.splitlines():
-            if line.startswith("a=candidate:"):
-                candidate_line = line[len("a="):]
-                # Need to make sure the candidate_line matches with expected cadidate in js
-                logger.Debug("Candidate sent to peer: ", candidate_line)
-                ice_candidate.data = candidate_line
-                await _send_signaling_message(signaling_stream, ice_candidate)
-        
-        ice_candidate.data = "" # Empty string signals
-        await _send_signaling_message(signaling_stream, ice_candidate)
-        logger.info("Sent offer and ICE candidates")
-
         # Wait for answer
         answer_msg = await _receive_signaling_message(signaling_stream, timeout)
         if answer_msg.type != Message.SDP_ANSWER:
@@ -245,13 +230,35 @@ async def _receive_signaling_message(
             logger.debug(f"Received signaling message: {deserealized_msg.type}")
             return deserealized_msg
 
-        if cancel_scope.cancelled_caught:
-            raise WebRTCError("Signaling message receive timeout")
-
     except Exception as e:
         logger.error(f"Failed to receive signaling message: {e}")
         raise
 
+
+async def _send_ice_candidates(stream, peer_connection):
+    # Get SDP offer from localDescription to extract ICE Candidate
+    sdp = peer_connection.localDescription.sdp
+    sdp_lines = sdp.splitlines()
+    
+    msg = Message()
+    msg.type = Message.ICE_CANDIDATE
+    # Extract ICE_Candidate and send each separately
+    for line in sdp_lines:
+        if line.startswith("a=candidate:"):
+            cand_str = line[len("a="):]
+            candidate_init = {
+                "candidate": cand_str,
+                "sdpMLineIndex": 0
+            }
+            data = json.dumps(candidate_init)
+            msg.data = data
+            await _send_signaling_message(stream, msg)
+            logger.debug("Sent ICE candidate init: %s", candidate_init)
+    # Mark end-of-candidates
+    msg = Message(type=Message.ICE_CANDIDATE, data=json.dumps(None))
+    await _send_signaling_message(stream, msg)        
+    logger.debug("Sent end-of-ICE marker")
+    
 
 async def _handle_incoming_ice_candidates(
     stream: INetStream, peer_connection: RTCPeerConnection, timeout: float
@@ -267,34 +274,44 @@ async def _handle_incoming_ice_candidates(
             if cancel_scope.cancelled_caught:
                 logger.warning("ICE candidate receive timeout")
                 break
+            
+            # stream ended or we became connected
+            if not message:
+                logger.error("Null message recieved")
+                break
+            
+            if message.type != Message.ICE_CANDIDATE:
+                logger.error("ICE candidate message expected. Exiting...")
+                raise WebRTCError("ICE candidate message expected.")
+                break    
+            
+            # Candidate init cannot be null
+            if message.data == '':
+                logger.debug("candidate received is empty")
+                continue
+            
+            logger.debug("Recieved new ICE Candidate")
+            try:
+                candidate_init = json.loads(message.data)
+            except json.JSONDecodeError:
+                logger.error("Invalid ICE candidate JSON: %s", message.data)
+                break
+            
+            bridge = TrioSafeWebRTCOperations._get_bridge()
+            
+            # None means ICE gathering is fully complete
+            if candidate_init is None:
+                logger.debug("Received ICE candidate null → end-of-ice signal")
+                async with bridge:
+                    await bridge.add_ice_candidate(peer_connection, None)
+                return
 
-            if message.get("type") == "ice-candidate":
-                # Add ICE candidate
-                candidate = RTCIceCandidate(
-                    component=message.get("component", 1),
-                    foundation=message.get("foundation", ""),
-                    ip=message.get("ip", ""),
-                    port=message.get("port", 0),
-                    priority=message.get("priority", 0),
-                    protocol=message.get("protocol", "udp"),
-                    type=message.get("candidateType", "host"),
-                    sdpMid=message.get("sdpMid"),
-                    sdpMLineIndex=message.get("sdpMLineIndex"),
-                )
-
-                bridge = TrioSafeWebRTCOperations._get_bridge()
+            # CandidateInit is expected to be a dict
+            if isinstance(candidate_init, dict) and "candidate" in candidate_init:
+                candidate = candidate_from_aioice(Candidate.from_sdp(candidate_init["candidate"]))
                 async with bridge:
                     await bridge.add_ice_candidate(peer_connection, candidate)
-
-                logger.debug(f"Added ICE candidate: {candidate.type}")
-
-            elif message.get("type") == "ice-candidate-end":
-                logger.debug("Received end of ICE candidates")
-                break
-            else:
-                logger.warning(
-                    f"Unexpected message during ICE exchange: {message.get('type')}"
-                )
+                logger.debug("Added ICE candidate: %r", candidate_init)
 
         except Exception as e:
             logger.warning(f"Error handling ICE candidate: {e}")
