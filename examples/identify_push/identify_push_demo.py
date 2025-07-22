@@ -11,10 +11,14 @@ This example shows how to:
 
 import logging
 
+import multiaddr
 import trio
 
 from libp2p import (
     new_host,
+)
+from libp2p.abc import (
+    INetStream,
 )
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
@@ -22,12 +26,11 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.identity.identify import (
-    identify_handler_for,
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify,
 )
 from libp2p.identity.identify_push import (
     ID_PUSH,
-    identify_push_handler_for,
     push_identify_to_peer,
 )
 from libp2p.peer.peerinfo import (
@@ -38,8 +41,145 @@ from libp2p.peer.peerinfo import (
 logger = logging.getLogger(__name__)
 
 
+def create_custom_identify_handler(host, host_name: str):
+    """Create a custom identify handler that displays received information."""
+
+    async def handle_identify(stream: INetStream) -> None:
+        peer_id = stream.muxed_conn.peer_id
+        print(f"\n🔍 {host_name} received identify request from peer: {peer_id}")
+
+        # Get the standard identify response using the existing function
+        from libp2p.identity.identify.identify import (
+            _mk_identify_protobuf,
+            _remote_address_to_multiaddr,
+        )
+
+        # Get observed address
+        observed_multiaddr = None
+        try:
+            remote_address = stream.get_remote_address()
+            if remote_address:
+                observed_multiaddr = _remote_address_to_multiaddr(remote_address)
+        except Exception:
+            pass
+
+        # Build the identify protobuf
+        identify_msg = _mk_identify_protobuf(host, observed_multiaddr)
+        response_data = identify_msg.SerializeToString()
+
+        print(f"   📋 {host_name} identify information:")
+        if identify_msg.HasField("protocol_version"):
+            print(f"      Protocol Version: {identify_msg.protocol_version}")
+        if identify_msg.HasField("agent_version"):
+            print(f"      Agent Version: {identify_msg.agent_version}")
+        if identify_msg.HasField("public_key"):
+            print(f"      Public Key: {identify_msg.public_key.hex()[:16]}...")
+        if identify_msg.listen_addrs:
+            print("      Listen Addresses:")
+            for addr_bytes in identify_msg.listen_addrs:
+                addr = multiaddr.Multiaddr(addr_bytes)
+                print(f"        - {addr}")
+        if identify_msg.protocols:
+            print("      Supported Protocols:")
+            for protocol in identify_msg.protocols:
+                print(f"        - {protocol}")
+
+        # Send the response
+        await stream.write(response_data)
+        await stream.close()
+
+    return handle_identify
+
+
+def create_custom_identify_push_handler(host, host_name: str):
+    """Create a custom identify/push handler that displays received information."""
+
+    async def handle_identify_push(stream: INetStream) -> None:
+        peer_id = stream.muxed_conn.peer_id
+        print(f"\n📤 {host_name} received identify/push from peer: {peer_id}")
+
+        try:
+            # Read the identify message using the utility function
+            from libp2p.utils.varint import read_length_prefixed_protobuf
+
+            data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+
+            # Parse the identify message
+            identify_msg = Identify()
+            identify_msg.ParseFromString(data)
+
+            print("   📋 Received identify information:")
+            if identify_msg.HasField("protocol_version"):
+                print(f"      Protocol Version: {identify_msg.protocol_version}")
+            if identify_msg.HasField("agent_version"):
+                print(f"      Agent Version: {identify_msg.agent_version}")
+            if identify_msg.HasField("public_key"):
+                print(f"      Public Key: {identify_msg.public_key.hex()[:16]}...")
+            if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
+                observed_addr = multiaddr.Multiaddr(identify_msg.observed_addr)
+                print(f"      Observed Address: {observed_addr}")
+            if identify_msg.listen_addrs:
+                print("      Listen Addresses:")
+                for addr_bytes in identify_msg.listen_addrs:
+                    addr = multiaddr.Multiaddr(addr_bytes)
+                    print(f"        - {addr}")
+            if identify_msg.protocols:
+                print("      Supported Protocols:")
+                for protocol in identify_msg.protocols:
+                    print(f"        - {protocol}")
+
+            # Update the peerstore with the new information
+            from libp2p.identity.identify_push.identify_push import (
+                _update_peerstore_from_identify,
+            )
+
+            await _update_peerstore_from_identify(
+                host.get_peerstore(), peer_id, identify_msg
+            )
+
+            print(f"   ✅ {host_name} updated peerstore with new information")
+
+        except Exception as e:
+            print(f"   ❌ Error processing identify/push: {e}")
+        finally:
+            await stream.close()
+
+    return handle_identify_push
+
+
+async def display_peerstore_info(host, host_name: str, peer_id, description: str):
+    """Display peerstore information for a specific peer."""
+    peerstore = host.get_peerstore()
+
+    try:
+        addrs = peerstore.addrs(peer_id)
+    except Exception:
+        addrs = []
+
+    try:
+        protocols = peerstore.get_protocols(peer_id)
+    except Exception:
+        protocols = []
+
+    print(f"\n📚 {host_name} peerstore for {description}:")
+    print(f"   Peer ID: {peer_id}")
+    if addrs:
+        print("   Addresses:")
+        for addr in addrs:
+            print(f"     - {addr}")
+    else:
+        print("   Addresses: None")
+
+    if protocols:
+        print("   Protocols:")
+        for protocol in protocols:
+            print(f"     - {protocol}")
+    else:
+        print("   Protocols: None")
+
+
 async def main() -> None:
-    print("\n==== Starting Identify-Push Example ====\n")
+    print("\n==== Starting Enhanced Identify-Push Example ====\n")
 
     # Create key pairs for the two hosts
     key_pair_1 = create_new_key_pair()
@@ -48,45 +188,49 @@ async def main() -> None:
     # Create the first host
     host_1 = new_host(key_pair=key_pair_1)
 
-    # Set up the identify and identify/push handlers
-    host_1.set_stream_handler(TProtocol("/ipfs/id/1.0.0"), identify_handler_for(host_1))
-    host_1.set_stream_handler(ID_PUSH, identify_push_handler_for(host_1))
+    # Set up custom identify and identify/push handlers
+    host_1.set_stream_handler(
+        TProtocol("/ipfs/id/1.0.0"), create_custom_identify_handler(host_1, "Host 1")
+    )
+    host_1.set_stream_handler(
+        ID_PUSH, create_custom_identify_push_handler(host_1, "Host 1")
+    )
 
     # Create the second host
     host_2 = new_host(key_pair=key_pair_2)
 
-    # Set up the identify and identify/push handlers
-    host_2.set_stream_handler(TProtocol("/ipfs/id/1.0.0"), identify_handler_for(host_2))
-    host_2.set_stream_handler(ID_PUSH, identify_push_handler_for(host_2))
+    # Set up custom identify and identify/push handlers
+    host_2.set_stream_handler(
+        TProtocol("/ipfs/id/1.0.0"), create_custom_identify_handler(host_2, "Host 2")
+    )
+    host_2.set_stream_handler(
+        ID_PUSH, create_custom_identify_push_handler(host_2, "Host 2")
+    )
 
     # Start listening on random ports using the run context manager
-    import multiaddr
-
     listen_addr_1 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
     listen_addr_2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 
     async with host_1.run([listen_addr_1]), host_2.run([listen_addr_2]):
         # Get the addresses of both hosts
         addr_1 = host_1.get_addrs()[0]
-        logger.info(f"Host 1 listening on {addr_1}")
-        print(f"Host 1 listening on {addr_1}")
-        print(f"Peer ID: {host_1.get_id().pretty()}")
-
         addr_2 = host_2.get_addrs()[0]
-        logger.info(f"Host 2 listening on {addr_2}")
-        print(f"Host 2 listening on {addr_2}")
-        print(f"Peer ID: {host_2.get_id().pretty()}")
 
-        print("\nConnecting Host 2 to Host 1...")
+        print("🏠 Host Configuration:")
+        print(f"   Host 1: {addr_1}")
+        print(f"   Host 1 Peer ID: {host_1.get_id().pretty()}")
+        print(f"   Host 2: {addr_2}")
+        print(f"   Host 2 Peer ID: {host_2.get_id().pretty()}")
+
+        print("\n🔗 Connecting Host 2 to Host 1...")
 
         # Connect host_2 to host_1
         peer_info = info_from_p2p_addr(addr_1)
         await host_2.connect(peer_info)
-        logger.info("Host 2 connected to Host 1")
-        print("Host 2 successfully connected to Host 1")
+        print("✅ Host 2 successfully connected to Host 1")
 
         # Run the identify protocol from host_2 to host_1
-        # (so Host 1 learns Host 2's address)
+        print("\n🔄 Running identify protocol (Host 2 → Host 1)...")
         from libp2p.identity.identify.identify import ID as IDENTIFY_PROTOCOL_ID
 
         stream = await host_2.new_stream(host_1.get_id(), (IDENTIFY_PROTOCOL_ID,))
@@ -94,64 +238,58 @@ async def main() -> None:
         await stream.close()
 
         # Run the identify protocol from host_1 to host_2
-        # (so Host 2 learns Host 1's address)
+        print("\n🔄 Running identify protocol (Host 1 → Host 2)...")
         stream = await host_1.new_stream(host_2.get_id(), (IDENTIFY_PROTOCOL_ID,))
         response = await stream.read()
         await stream.close()
 
-        # --- NEW CODE: Update Host 1's peerstore with Host 2's addresses ---
-        from libp2p.identity.identify.pb.identify_pb2 import (
-            Identify,
-        )
-
+        # Update Host 1's peerstore with Host 2's addresses
         identify_msg = Identify()
         identify_msg.ParseFromString(response)
         peerstore_1 = host_1.get_peerstore()
         peer_id_2 = host_2.get_id()
         for addr_bytes in identify_msg.listen_addrs:
             maddr = multiaddr.Multiaddr(addr_bytes)
-            # TTL can be any positive int
-            peerstore_1.add_addr(
-                peer_id_2,
-                maddr,
-                ttl=3600,
-            )
-        # --- END NEW CODE ---
+            peerstore_1.add_addr(peer_id_2, maddr, ttl=3600)
 
-        # Now Host 1's peerstore should have Host 2's address
-        peerstore_1 = host_1.get_peerstore()
-        peer_id_2 = host_2.get_id()
-        addrs_1_for_2 = peerstore_1.addrs(peer_id_2)
-        logger.info(
-            f"[DEBUG] Host 1 peerstore addresses for Host 2 before push: "
-            f"{addrs_1_for_2}"
-        )
-        print(
-            f"[DEBUG] Host 1 peerstore addresses for Host 2 before push: "
-            f"{addrs_1_for_2}"
+        # Display peerstore information before push
+        await display_peerstore_info(
+            host_1, "Host 1", peer_id_2, "Host 2 (before push)"
         )
 
         # Push identify information from host_1 to host_2
-        logger.info("Host 1 pushing identify information to Host 2")
-        print("\nHost 1 pushing identify information to Host 2...")
+        print("\n📤 Host 1 pushing identify information to Host 2...")
 
         try:
-            # Call push_identify_to_peer which now returns a boolean
             success = await push_identify_to_peer(host_1, host_2.get_id())
 
             if success:
-                logger.info("Identify push completed successfully")
-                print("Identify push completed successfully!")
+                print("✅ Identify push completed successfully!")
             else:
-                logger.warning("Identify push didn't complete successfully")
-                print("\nWarning: Identify push didn't complete successfully")
+                print("⚠️  Identify push didn't complete successfully")
 
         except Exception as e:
-            logger.error(f"Error during identify push: {str(e)}")
-            print(f"\nError during identify push: {str(e)}")
+            print(f"❌ Error during identify push: {str(e)}")
 
-        # Add this at the end of your async with block:
-        await trio.sleep(0.5)  # Give background tasks time to finish
+        # Give a moment for the identify/push processing to complete
+        await trio.sleep(0.5)
+
+        # Display peerstore information after push
+        await display_peerstore_info(host_1, "Host 1", peer_id_2, "Host 2 (after push)")
+        await display_peerstore_info(
+            host_2, "Host 2", host_1.get_id(), "Host 1 (after push)"
+        )
+
+        # Give more time for background tasks to finish and connections to stabilize
+        print("\n⏳ Waiting for background tasks to complete...")
+        await trio.sleep(1.0)
+
+        # Gracefully close connections to prevent connection errors
+        print("🔌 Closing connections...")
+        await host_2.disconnect(host_1.get_id())
+        await trio.sleep(0.2)
+
+        print("\n🎉 Example completed successfully!")
 
 
 if __name__ == "__main__":
