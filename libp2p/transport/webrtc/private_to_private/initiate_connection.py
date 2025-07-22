@@ -14,6 +14,7 @@ import trio
 from libp2p.abc import INetStream, IRawConnection
 from libp2p.peer.id import ID
 
+from .pb import Message
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
 from ..constants import (
@@ -23,13 +24,17 @@ from ..constants import (
     WebRTCError,
 )
 
+from libp2p.abc import (
+    IHost
+)
+
 logger = logging.getLogger("webrtc.private.initiate_connection")
 
 
 async def initiate_connection(
     maddr: Multiaddr,
     rtc_config: RTCConfiguration,
-    host: Any,
+    host: IHost,
     timeout: float = DEFAULT_DIAL_TIMEOUT,
 ) -> IRawConnection:
     """
@@ -80,30 +85,16 @@ async def initiate_connection(
 
         logger.info("Created RTCPeerConnection and data channel")
 
-        # Setup ICE candidate collection
-        ice_candidates: list[Any] = []
-        ice_gathering_complete = trio.Event()
-
-        def on_ice_candidate(candidate: Any) -> None:
-            if candidate:
-                ice_candidates.append(candidate)
-                logger.debug(f"Generated ICE candidate: {candidate.candidate}")
-            else:
-                # End of candidates signaled
-                ice_gathering_complete.set()
-                logger.debug("ICE gathering complete")
-
-        # Register ICE candidate handler
-        peer_connection.on("icecandidate", on_ice_candidate)
-
         # Setup data channel ready event
         data_channel_ready = trio.Event()
-
-        def on_data_channel_open() -> None:
+        
+        @data_channel.on("open")
+        def on_data_channel_open():
             logger.info("Data channel opened")
             data_channel_ready.set()
 
-        def on_data_channel_error(error: Any) -> None:
+        @data_channel.on("error")
+        def on_data_channel_error(error: Any):
             logger.error(f"Data channel error: {error}")
 
         # Register data channel event handlers
@@ -118,36 +109,44 @@ async def initiate_connection(
 
         # Wait for ICE gathering to complete
         with trio.move_on_after(timeout):
-            await ice_gathering_complete.wait()
+            while peer_connection.iceGatheringState != "complete":
+                await trio.sleep(0.05)
 
+        logger.debug("Sending  SDP_offer to peer as initiator")
         # Send offer with all ICE candidates
-        offer_msg = {"type": "offer", "sdp": offer.sdp, "sdpType": "offer"}
+        offer_msg = Message()
+        offer_msg.type = Message.SDP_OFFER
+        offer_msg.data = offer.sdp
         await _send_signaling_message(signaling_stream, offer_msg)
 
-        # Send ICE candidates
-        for candidate in ice_candidates:
-            candidate_msg = {
-                "type": "ice-candidate",
-                "candidate": candidate.candidate,
-                "sdpMid": candidate.sdpMid,
-                "sdpMLineIndex": candidate.sdpMLineIndex,
-            }
-            await _send_signaling_message(signaling_stream, candidate_msg)
-
-        # Signal end of candidates
-        end_msg = {"type": "ice-candidate-end"}
-        await _send_signaling_message(signaling_stream, end_msg)
-
+        # (Note: aiortc does not emit ice candidate event, per candidate (like js) 
+        # but sends it along SDP. To maintain interop, we extract adn resend in given format )
+        
+        # get SDP from local_descriptor for extracting ice_candidates
+        sdp = peer_connection.localDescription.sdp
+        # extract ice_candidates from sdp
+        ice_candidate =Message()
+        ice_candidate.type = Message.ICE_CANDIDATE
+        for line in sdp.splitlines():
+            if line.startswith("a=candidate:"):
+                candidate_line = line[len("a="):]
+                # Need to make sure the candidate_line matches with expected cadidate in js
+                logger.Debug("Candidate sent to peer: ", candidate_line)
+                ice_candidate.data = candidate_line
+                await _send_signaling_message(signaling_stream, ice_candidate)
+        
+        ice_candidate.data = "" # Empty string signals
+        await _send_signaling_message(signaling_stream, ice_candidate)
         logger.info("Sent offer and ICE candidates")
 
         # Wait for answer
         answer_msg = await _receive_signaling_message(signaling_stream, timeout)
-        if answer_msg.get("type") != "answer":
-            raise SDPHandshakeError(f"Expected answer, got: {answer_msg.get('type')}")
+        if answer_msg.type != Message.SDP_ANSWER:
+            raise SDPHandshakeError(f"Expected answer, got: {answer_msg.type}")
 
         # Set remote description
         answer = RTCSessionDescription(
-            sdp=answer_msg["sdp"], type=answer_msg["sdpType"]
+            sdp=answer_msg.data, type='answer'
         )
         bridge = TrioSafeWebRTCOperations._get_bridge()
         async with bridge:
@@ -162,7 +161,6 @@ async def initiate_connection(
 
         # Wait for data channel to be ready
         connection_failed = trio.Event()
-
         def on_connection_state_change() -> None:
             state = peer_connection.connectionState
             logger.debug(f"Connection state: {state}")
@@ -198,6 +196,9 @@ async def initiate_connection(
             is_initiator=True,
         )
 
+        logger.debug('initiator connected, closing init channel')
+        data_channel.close()
+        
         logger.info(f"Successfully established WebRTC connection to {target_peer_id}")
         return connection
 
@@ -220,13 +221,12 @@ async def initiate_connection(
         raise WebRTCError(f"Connection initiation failed: {e}") from e
 
 
-async def _send_signaling_message(stream: INetStream, message: dict[str, Any]) -> None:
+async def _send_signaling_message(stream: INetStream, message: Message) -> None:
     """Send a signaling message over the stream"""
     try:
-        message_data = json.dumps(message).encode("utf-8")
-        message_length = len(message_data).to_bytes(4, byteorder="big")
-        await stream.write(message_length + message_data)
-        logger.debug(f"Sent signaling message: {message['type']}")
+        # message_length = len(message_data).to_bytes(4, byteorder="big")
+        await stream.write(message.SerializeToString())
+        logger.debug(f"Sent signaling message: {message.type}")
     except Exception as e:
         logger.error(f"Failed to send signaling message: {e}")
         raise
@@ -234,25 +234,16 @@ async def _send_signaling_message(stream: INetStream, message: dict[str, Any]) -
 
 async def _receive_signaling_message(
     stream: INetStream, timeout: float
-) -> dict[str, Any]:
+) -> Message:
     """Receive a signaling message from the stream"""
     try:
         with trio.move_on_after(timeout) as cancel_scope:
-            # Read message length
-            length_data = await stream.read(4)
-            if len(length_data) != 4:
-                raise WebRTCError("Failed to read message length")
-
-            message_length = int.from_bytes(length_data, byteorder="big")
-
             # Read message data
-            message_data = await stream.read(message_length)
-            if len(message_data) != message_length:
-                raise WebRTCError("Failed to read complete message")
-
-            message = json.loads(message_data.decode("utf-8"))
-            logger.debug(f"Received signaling message: {message.get('type')}")
-            return message
+            message_data = await stream.read()
+            deserealized_msg = Message()
+            deserealized_msg.ParseFromString(message_data)
+            logger.debug(f"Received signaling message: {deserealized_msg.type}")
+            return deserealized_msg
 
         if cancel_scope.cancelled_caught:
             raise WebRTCError("Signaling message receive timeout")

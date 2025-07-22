@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Any
 
@@ -14,7 +13,7 @@ from trio_asyncio import aio_as_trio
 from libp2p.abc import INetStream, IRawConnection
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
-
+from .pb import Message
 from ..connection import WebRTCRawConnection
 from ..constants import WebRTCError
 
@@ -71,8 +70,8 @@ async def handle_incoming_stream(
             offer_data = await stream.read()
             if not offer_data:
                 raise WebRTCError("No offer data received")
-
-            offer_message = json.loads(offer_data.decode("utf-8"))
+            offer_message = Message()
+            offer_message.ParseFromString(offer_data)
             if offer_message.get("type") != "offer":
                 raise WebRTCError(f"Expected offer, got: {offer_message.get('type')}")
 
@@ -96,9 +95,10 @@ async def handle_incoming_stream(
 
         # Send answer back
         try:
-            answer_message = {"type": answer.type, "sdp": answer.sdp}
-            answer_data = json.dumps(answer_message).encode("utf-8")
-            await stream.write(answer_data)
+            answer_message = Message()
+            answer_message.type = Message.SDP_ANSWER
+            answer_message.data = answer.sdp
+            await stream.write(answer_message)
             logger.info("Sent SDP answer")
 
         except Exception as e:
