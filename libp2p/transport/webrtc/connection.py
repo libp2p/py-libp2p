@@ -147,7 +147,7 @@ class WebRTCRawConnection(IRawConnection):
 
         # Stream muxing
         self._streams: dict[int, WebRTCStream] = {}
-        self._next_stream_id = (
+        self._next_stream_id: int = (
             1 if is_initiator else 2
         )  # Odd for initiator, even for responder
         self._stream_lock = trio.Lock()

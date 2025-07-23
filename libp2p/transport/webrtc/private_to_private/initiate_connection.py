@@ -46,12 +46,11 @@ async def initiate_connection(
     logger.info(f"Initiating WebRTC connection to {maddr}")
 
     # Parse circuit relay multiaddr to get target peer ID
-    protocols = maddr.protocols()
+    protocols = [p for p in maddr.protocols() if p is not None]
     target_peer_id = None
     for i, protocol in enumerate(protocols):
         if protocol.name == "p2p":
             if i + 1 < len(protocols) and protocols[i + 1].name == "p2p-circuit":
-                # This is the relay peer, continue
                 continue
             else:
                 # This is the target peer
@@ -69,7 +68,20 @@ async def initiate_connection(
 
     try:
         # Establish signaling stream through circuit relay
-        signaling_stream = await host.new_stream(maddr, [SIGNALING_PROTOCOL])
+        # Note: new_stream expects peer_id, not multiaddr
+        # We need to extract the relay peer ID from the multiaddr
+        relay_peer_id = None
+        for i, protocol in enumerate(protocols):
+            if protocol.name == "p2p":
+                if i + 1 < len(protocols) and protocols[i + 1].name == "p2p-circuit":
+                    # This is the relay peer
+                    relay_peer_id = ID.from_base58(maddr.value_for_protocol("p2p"))
+                    break
+
+        if not relay_peer_id:
+            raise WebRTCError(f"Cannot extract relay peer ID from multiaddr: {maddr}")
+
+        signaling_stream = await host.new_stream(relay_peer_id, [SIGNALING_PROTOCOL])
         logger.info("Established signaling stream through circuit relay")
 
         # Create RTCPeerConnection and data channel using safe operations
@@ -143,13 +155,15 @@ async def initiate_connection(
         connection_failed = trio.Event()
 
         def on_connection_state_change() -> None:
-            state = peer_connection.connectionState
-            logger.debug(f"Connection state: {state}")
-            if state == "failed":
-                connection_failed.set()
+            if peer_connection is not None:
+                state = peer_connection.connectionState
+                logger.debug(f"Connection state: {state}")
+                if state == "failed":
+                    connection_failed.set()
 
         # Register connection state handler
-        peer_connection.on("connectionstatechange", on_connection_state_change)
+        if peer_connection is not None:
+            peer_connection.on("connectionstatechange", on_connection_state_change)
 
         # Wait for either success or failure
         with trio.move_on_after(timeout) as cancel_scope:

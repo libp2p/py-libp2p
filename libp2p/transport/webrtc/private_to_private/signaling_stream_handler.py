@@ -84,19 +84,19 @@ async def handle_incoming_stream(
             raise WebRTCError(f"Failed to receive or parse offer: {e}")
 
         # Set remote description
-        await aio_as_trio(peer_connection.setRemoteDescription)(offer)
+        await aio_as_trio(peer_connection.setRemoteDescription(offer))
         logger.debug("Set remote description from offer")
 
         # Create and set local description (answer)
-        answer = await aio_as_trio(peer_connection.createAnswer)()
-        await aio_as_trio(peer_connection.setLocalDescription)(answer)
+        answer = await aio_as_trio(peer_connection.createAnswer())
+        await aio_as_trio(peer_connection.setLocalDescription(answer))
         logger.info("Created and set local description (answer)")
 
         # Send answer back
         try:
             answer_message = Message()
             answer_message.type = Message.SDP_ANSWER
-            answer_message.data = answer.sdp
+            answer_message.data = answer_message.data
             await stream.write(answer_message.SerializeToString())
             logger.info("Sent SDP answer")
 
@@ -108,10 +108,11 @@ async def handle_incoming_stream(
             await event.wait()
 
         def on_connection_state_change() -> None:
-            state = peer_connection.connectionState
-            logger.debug(f"Connection state: {state}")
-            if state == "failed":
-                connection_failed.set()
+            if peer_connection is not None:
+                state = peer_connection.connectionState
+                logger.debug(f"Connection state: {state}")
+                if state == "failed":
+                    connection_failed.set()
 
         # Register connection state handler
         peer_connection.on("connectionstatechange", on_connection_state_change)
@@ -169,7 +170,7 @@ async def handle_incoming_stream(
 
         if peer_connection:
             try:
-                await aio_as_trio(peer_connection.close)()
+                await aio_as_trio(peer_connection.close())
             except Exception as cleanup_error:
                 logger.warning(f"Error during cleanup: {cleanup_error}")
         return None

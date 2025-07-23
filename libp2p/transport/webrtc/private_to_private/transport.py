@@ -81,9 +81,12 @@ class WebRTCTransport(ITransport):
                 self._asyncio_loop = asyncio.get_running_loop()
                 logger.debug("Using existing asyncio event loop")
             except RuntimeError:
-                self._asyncio_loop = open_loop()
+                # open_loop() returns an AsyncContextManager, not an
+                #  AbstractEventLoop, hence
+                # use it in context managers when needed
                 logger.debug(
-                    "No asyncio event loop, using trio_asyncio for aiortc operations"
+                    "No asyncio event loop"
+                    "-using trio_asyncio context managers for aiortc operations"
                 )
 
             # Register signaling protocol handler with the host
@@ -106,9 +109,6 @@ class WebRTCTransport(ITransport):
             return
 
         try:
-            # Note: py-libp2p host doesn't have a direct way
-            #  to unregister stream handlers
-            # but when the host is closed, all handlers are cleaned up automatically
             connection_ids = list(self.active_connections.keys())
             for conn_id in connection_ids:
                 await self._cleanup_connection(conn_id)
@@ -291,8 +291,7 @@ class WebRTCTransport(ITransport):
                 pc = self.pending_connections.pop(conn_id)
                 try:
                     async with open_loop():
-                        close_pc = aio_as_trio(pc.close)
-                        await close_pc()
+                        await aio_as_trio(pc.close())
                     logger.debug(f"Closed pending peer connection {conn_id}")
                 except Exception as e:
                     logger.warning(f"Error closing peer connection {conn_id}: {e}")

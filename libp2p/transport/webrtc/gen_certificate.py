@@ -2,6 +2,7 @@ import base64
 import datetime
 import hashlib
 import logging
+from typing import Any
 
 import base58
 from cryptography import (
@@ -59,9 +60,10 @@ class WebRTCCertificate:
         )
 
         # Create certificate
+        common_name: Any = "libp2p-webrtc"
         subject = issuer = x509.Name(
             [
-                x509.NameAttribute(NameOID.COMMON_NAME, "libp2p-webrtc"),
+                x509.NameAttribute(NameOID.COMMON_NAME, common_name),
             ]
         )
 
@@ -151,8 +153,9 @@ class WebRTCCertificate:
 
         # 3. Key-certificate matching (RSA-specific validation)
         cert_public_key = cert_obj.public_key()
-        if hasattr(cert_public_key, "public_numbers") and hasattr(
-            key_obj.public_key(), "public_numbers"
+        # Only check public_numbers for RSA keys
+        if isinstance(cert_public_key, rsa.RSAPublicKey) and isinstance(
+            key_obj.public_key(), rsa.RSAPublicKey
         ):
             if (
                 cert_public_key.public_numbers()
@@ -235,7 +238,7 @@ def create_webrtc_direct_multiaddr(ip: str, port: int, peer_id: ID) -> Multiaddr
     return Multiaddr(f"/ip4/{ip}/udp/{port}/webrtc-direct/p2p/{peer_id}")
 
 
-def parse_webrtc_maddr(maddr: Multiaddr) -> tuple[str, ID, str]:
+def parse_webrtc_maddr(maddr: Multiaddr | str) -> tuple[str, str, str]:
     """
     Parse a WebRTC multiaddr like:
     /ip4/147.28.186.157/udp/9095/webrtc-direct/certhash/uEiDFVmAomKdAbivdrcIKdXGyuij_ax8b8at0GY_MJXMlwg/p2p/12D3KooWFhXabKDwALpzqMbto94sB7rvmZ6M28hs9Y9xSopDKwQr/p2p-circuit
@@ -248,7 +251,8 @@ def parse_webrtc_maddr(maddr: Multiaddr) -> tuple[str, ID, str]:
         if isinstance(maddr, str):
             maddr = Multiaddr(maddr)
 
-        parts = maddr.to_string().split("/")
+        # Use str() instead of to_string() method
+        parts = str(maddr).split("/")
 
         # Get IP (after ip4 or ip6)
         ip_idx = parts.index("ip4" if "ip4" in parts else "ip6") + 1

@@ -7,34 +7,33 @@ to enable proper encoding and decoding of multiaddr components.
 
 import base64
 from collections.abc import ByteString
-from typing import LiteralString
 
 
-def webrtc_encode(s: LiteralString) -> ByteString:
+def webrtc_encode(s: str) -> ByteString:
     """Encode WebRTC protocol component."""
     # WebRTC protocol has no value, return empty bytes
     return b""
 
 
-def webrtc_decode(b: ByteString) -> LiteralString:
+def webrtc_decode(b: ByteString) -> str:
     """Decode WebRTC protocol component."""
     # WebRTC protocol has no value, return empty string
     return ""
 
 
-def webrtc_direct_encode(s: LiteralString) -> ByteString:
+def webrtc_direct_encode(s: str) -> ByteString:
     """Encode WebRTC-Direct protocol component."""
     # WebRTC-Direct protocol has no value, return empty bytes
     return b""
 
 
-def webrtc_direct_decode(b: ByteString) -> LiteralString:
+def webrtc_direct_decode(b: ByteString) -> str:
     """Decode WebRTC-Direct protocol component."""
     # WebRTC-Direct protocol has no value, return empty string
     return ""
 
 
-def certhash_encode(s: LiteralString) -> ByteString:
+def certhash_encode(s: str) -> ByteString:
     """Encode certificate hash component."""
     if not s:
         return b""
@@ -59,7 +58,7 @@ def certhash_encode(s: LiteralString) -> ByteString:
         return s.encode("utf-8")
 
 
-def certhash_decode(b: ByteString) -> LiteralString:
+def certhash_decode(b: ByteString) -> str:
     """Decode certificate hash component."""
     if not b:
         return ""

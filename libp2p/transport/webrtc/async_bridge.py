@@ -79,8 +79,7 @@ class WebRTCAsyncBridge:
     ) -> RTCSessionDescription:
         """Create SDP offer with proper async bridging"""
         try:
-            create_offer = aio_as_trio(peer_connection.createOffer)
-            offer = await create_offer()
+            offer = await aio_as_trio(peer_connection.createOffer())
             logger.debug("Successfully created SDP offer")
             return offer
         except Exception as e:
@@ -92,8 +91,7 @@ class WebRTCAsyncBridge:
     ) -> RTCSessionDescription:
         """Create SDP answer with proper async bridging"""
         try:
-            create_answer = aio_as_trio(peer_connection.createAnswer)
-            answer = await create_answer()
+            answer = await aio_as_trio(peer_connection.createAnswer())
             logger.debug("Successfully created SDP answer")
             return answer
         except Exception as e:
@@ -105,8 +103,7 @@ class WebRTCAsyncBridge:
     ) -> None:
         """Set local description with proper async bridging"""
         try:
-            set_local = aio_as_trio(peer_connection.setLocalDescription)
-            await set_local(description)
+            await aio_as_trio(peer_connection.setLocalDescription(description))
             logger.debug("Successfully set local description")
         except Exception as e:
             logger.error(f"Failed to set local description: {e}")
@@ -117,8 +114,7 @@ class WebRTCAsyncBridge:
     ) -> None:
         """Set remote description with proper async bridging"""
         try:
-            set_remote = aio_as_trio(peer_connection.setRemoteDescription)
-            await set_remote(description)
+            await aio_as_trio(peer_connection.setRemoteDescription(description))
             logger.debug("Successfully set remote description")
         except Exception as e:
             logger.error(f"Failed to set remote description: {e}")
@@ -129,8 +125,7 @@ class WebRTCAsyncBridge:
     ) -> None:
         """Add ICE candidate with proper async bridging"""
         try:
-            add_candidate = aio_as_trio(peer_connection.addIceCandidate)
-            await add_candidate(candidate)
+            await aio_as_trio(peer_connection.addIceCandidate(candidate))
             logger.debug("Successfully added ICE candidate")
         except Exception as e:
             logger.error(f"Failed to add ICE candidate: {e}")
@@ -139,8 +134,7 @@ class WebRTCAsyncBridge:
     async def close_peer_connection(self, peer_connection: RTCPeerConnection) -> None:
         """Close peer connection with proper async bridging"""
         try:
-            close_pc = aio_as_trio(peer_connection.close)
-            await close_pc()
+            await aio_as_trio(peer_connection.close())
             logger.debug("Successfully closed peer connection")
         except Exception as e:
             logger.error(f"Failed to close peer connection: {e}")
@@ -149,8 +143,7 @@ class WebRTCAsyncBridge:
     async def close_data_channel(self, data_channel: RTCDataChannel) -> None:
         """Close data channel with proper async bridging"""
         try:
-            close_channel = aio_as_trio(data_channel.close)
-            await close_channel()
+            await aio_as_trio(data_channel.close)
             logger.debug("Successfully closed data channel")
         except Exception as e:
             logger.error(f"Failed to close data channel: {e}")
@@ -159,8 +152,7 @@ class WebRTCAsyncBridge:
     async def send_data(self, data_channel: RTCDataChannel, data: bytes) -> None:
         """Send data through channel with proper async bridging"""
         try:
-            send_data = aio_as_trio(data_channel.send)
-            await send_data(data)
+            aio_as_trio(data_channel.send)(data)
             logger.debug(f"Successfully sent {len(data)} bytes")
         except Exception as e:
             logger.error(f"Failed to send data: {e}")
@@ -250,7 +242,6 @@ class TrioSafeWebRTCOperations:
                         elif isinstance(resource, RTCDataChannel):
                             await bridge.close_data_channel(resource)
                         else:
-                            close_fn = aio_as_trio(resource.close)
-                            await close_fn()
+                            await aio_as_trio(resource.close())
                 except Exception as e:
                     logger.warning(f"Error cleaning up resource {type(resource)}: {e}")

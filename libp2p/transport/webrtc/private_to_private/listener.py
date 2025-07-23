@@ -46,6 +46,7 @@ class WebRTCPeerListener(IListener):
         # WebRTC signaling components
         self.signal_service: SignalService | None = None
         self.signaling_protocol = TProtocol(SIGNALING_PROTOCOL)
+        self.rtc_config: RTCConfiguration | None = None  # Declare rtc_config attribute
 
         # Active connections and streams
         self.active_signaling_streams: dict[str, INetStream] = {}
@@ -83,7 +84,6 @@ class WebRTCPeerListener(IListener):
 
         except Exception as e:
             logger.error(f"Failed to start WebRTC peer listener: {e}")
-            await self._cleanup_on_error()
             return False
 
     async def _setup_circuit_relay(self) -> None:
@@ -169,10 +169,11 @@ class WebRTCPeerListener(IListener):
 
             for relay_id in relays[:3]:  # Try first 3 relays
                 try:
-                    success = await self.relay_discovery.make_reservation(relay_id)
-                    if success:
-                        reservation_count += 1
-                        logger.debug(f"Made reservation with relay {relay_id}")
+                    if self.relay_discovery is not None:
+                        success = await self.relay_discovery.make_reservation(relay_id)
+                        if success:
+                            reservation_count += 1
+                            logger.debug(f"Made reservation with relay {relay_id}")
                 except Exception as e:
                     logger.warning(f"Failed to make reservation with {relay_id}: {e}")
 
@@ -206,10 +207,7 @@ class WebRTCPeerListener(IListener):
 
         # Set up WebRTC configuration
         ice_servers = [RTCIceServer(**server) for server in DEFAULT_ICE_SERVERS]
-        rtc_config = RTCConfiguration(iceServers=ice_servers)
-
-        # Store config for use in connection handling
-        self.rtc_config = rtc_config
+        self.rtc_config = RTCConfiguration(iceServers=ice_servers)
 
         logger.debug("WebRTC listening configuration ready")
 
@@ -237,6 +235,10 @@ class WebRTCPeerListener(IListener):
             }
 
             # Handle the WebRTC signaling handshake
+            if self.rtc_config is None:
+                logger.error("RTCconfig is None, cannot handle signaling stream")
+                return
+
             connection = await handle_incoming_stream(
                 stream=stream,
                 rtc_config=self.rtc_config,
@@ -262,11 +264,9 @@ class WebRTCPeerListener(IListener):
         except Exception as e:
             logger.error(f"Error handling signaling stream from {peer_id}: {e}")
         finally:
-            # Clean up signaling stream
             if peer_id_str in self.active_signaling_streams:
                 del self.active_signaling_streams[peer_id_str]
 
-            # Clean up stream
             try:
                 await stream.close()
             except Exception as e:
@@ -280,20 +280,9 @@ class WebRTCPeerListener(IListener):
         logger.info("Closing WebRTC peer listener")
 
         try:
-            # Step 1: Unregister stream handlers
             await self._unregister_handlers()
-
-            # Step 2: Close active signaling streams
             await self._close_signaling_streams()
-
-            # Step 3: Close pending WebRTC connections
             await self._close_pending_connections()
-
-            # Step 4: Stop relay services
-            await self._stop_relay_services()
-
-            # Step 5: Clean up resources
-            await self._cleanup_resources()
 
             self._is_listening = False
             logger.info("WebRTC peer listener closed successfully")
@@ -305,12 +294,12 @@ class WebRTCPeerListener(IListener):
         """Unregister stream handlers."""
         try:
             # Remove signaling protocol handler
-            if hasattr(self.host, "get_mux") and hasattr(
-                self.host.get_mux(), "remove_handler"
-            ):
+            # using the multiselect interface
+            if hasattr(self.host, "get_mux"):
                 mux = self.host.get_mux()
-                if hasattr(mux, "remove_handler"):
-                    mux.remove_handler(self.signaling_protocol)
+                if hasattr(mux, "handlers") and isinstance(mux.handlers, dict):
+                    # Remove the handler by setting it to None
+                    mux.handlers[self.signaling_protocol] = None
                     logger.debug("Unregistered WebRTC signaling handler")
         except Exception as e:
             logger.warning(f"Error unregistering stream handlers: {e}")
@@ -348,69 +337,6 @@ class WebRTCPeerListener(IListener):
 
         self.pending_connections.clear()
 
-    async def _stop_relay_services(self) -> None:
-        """Stop relay discovery and protocol services."""
-        try:
-            # Stop relay discovery
-            if self.relay_discovery and hasattr(self.relay_discovery, "stop"):
-                await self.relay_discovery.stop()
-                logger.debug("Stopped relay discovery")
-
-            # Stop relay protocol service
-            if self.relay_protocol and hasattr(self.relay_protocol, "stop"):
-                await self.relay_protocol.stop()
-                logger.debug("Stopped relay protocol")
-
-        except Exception as e:
-            logger.warning(f"Error stopping relay services: {e}")
-
-    async def _cleanup_resources(self) -> None:
-        """Clean up remaining resources."""
-        try:
-            # Clear references
-            self.signal_service = None
-            self.relay_discovery = None
-            self.relay_protocol = None
-            self.relay_config = None
-            self._nursery = None
-
-            logger.debug("Cleaned up listener resources")
-
-        except Exception as e:
-            logger.warning(f"Error during resource cleanup: {e}")
-
-    async def _cleanup_on_error(self) -> None:
-        """Clean up resources when an error occurs during startup."""
-        logger.debug("Cleaning up due to startup error")
-
-        try:
-            if self.relay_discovery:
-                try:
-                    if hasattr(self.relay_discovery, "close"):
-                        await self.relay_discovery.close()
-                    elif hasattr(self.relay_discovery, "stop"):
-                        await self.relay_discovery.stop()
-                except Exception as e:
-                    logger.debug(f"Error cleaning up relay discovery: {e}")
-
-            if self.relay_protocol:
-                try:
-                    if hasattr(self.relay_protocol, "close"):
-                        await self.relay_protocol.close()
-                    elif hasattr(self.relay_protocol, "stop"):
-                        await self.relay_protocol.stop()
-                except Exception as e:
-                    logger.debug(f"Error cleaning up relay protocol: {e}")
-
-            # Clear references
-            self.signal_service = None
-            self.relay_discovery = None
-            self.relay_protocol = None
-            self._nursery = None
-
-        except Exception as e:
-            logger.warning(f"Error during error cleanup: {e}")
-
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """Get listener addresses as WebRTC multiaddrs."""
         if not self._is_listening:
@@ -425,7 +351,7 @@ class WebRTCPeerListener(IListener):
             # Get available relays for circuit addresses
             addrs = []
 
-            if self.relay_discovery:
+            if self.relay_discovery is not None:
                 relays = self.relay_discovery.get_relays()
 
                 # Create circuit relay multiaddrs through each relay

@@ -208,16 +208,16 @@ class WebRTCDirectTransport(ITransport):
             config = RTCConfiguration(iceServers=[])
 
             async with open_loop():
-                pc_create = aio_as_trio(RTCPeerConnection)
-                pc = await pc_create(config)
+                pc = await aio_as_trio(RTCPeerConnection(config))
 
                 # Store for cleanup
                 conn_id = str(peer_id)
                 self.pending_connections[conn_id] = pc
 
                 # Create data channel
-                channel_create = aio_as_trio(pc.createDataChannel)
-                channel = await channel_create("libp2p-webrtc-direct")
+                channel = await aio_as_trio(
+                    pc.createDataChannel("libp2p-webrtc-direct")
+                )
 
                 # Setup channel event handlers
                 channel_ready = trio.Event()
@@ -244,16 +244,14 @@ class WebRTCDirectTransport(ITransport):
                 pc.on("icecandidate", on_ice_candidate)
 
                 # Create offer
-                create_offer = aio_as_trio(pc.createOffer)
-                offer = await create_offer()
+                offer = await aio_as_trio(pc.createOffer())
 
                 # Munge SDP for direct connection
                 munged_sdp = SDPMunger.munge_offer(offer.sdp, local_ip, local_port)
                 offer = RTCSessionDescription(sdp=munged_sdp, type=offer.type)
 
                 # Set local description
-                set_local = aio_as_trio(pc.setLocalDescription)
-                await set_local(offer)
+                await aio_as_trio(pc.setLocalDescription(offer))
 
                 # Exchange offer/answer via pubsub (for direct connections)
                 await self._exchange_offer_answer_direct(peer_id, offer, certhash)
@@ -302,8 +300,7 @@ class WebRTCDirectTransport(ITransport):
             pc = self.pending_connections.pop(conn_id)
             try:
                 async with open_loop():
-                    close_pc = aio_as_trio(pc.close)
-                    await close_pc()
+                    await aio_as_trio(pc.close())
             except Exception as e:
                 logger.warning(f"Error closing peer connection {conn_id}: {e}")
 
