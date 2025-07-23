@@ -16,24 +16,38 @@ class WebsocketTransport(ITransport):
     """
 
     async def dial(self, maddr: Multiaddr) -> RawConnection:
-        text = str(maddr)
-        if text.endswith("/wss"):
+        # Handle addresses with /p2p/ PeerID suffix by truncating them at /ws
+        addr_text = str(maddr)
+        try:
+            ws_part_index = addr_text.index("/ws")
+            # Create a new Multiaddr containing only the transport part
+            transport_maddr = Multiaddr(addr_text[: ws_part_index + 3])
+        except ValueError:
+            raise ValueError(
+                f"WebsocketTransport requires a /ws protocol, not found in {maddr}"
+            ) from None
+
+        # Check for /wss, which is not supported yet
+        if str(transport_maddr).endswith("/wss"):
             raise NotImplementedError("/wss (TLS) not yet supported")
-        if not text.endswith("/ws"):
-            raise ValueError(f"WebsocketTransport only supports /ws, got {maddr}")
 
         host = (
-            maddr.value_for_protocol("ip4")
-            or maddr.value_for_protocol("ip6")
-            or maddr.value_for_protocol("dns")
-            or maddr.value_for_protocol("dns4")
-            or maddr.value_for_protocol("dns6")
+            transport_maddr.value_for_protocol("ip4")
+            or transport_maddr.value_for_protocol("ip6")
+            or transport_maddr.value_for_protocol("dns")
+            or transport_maddr.value_for_protocol("dns4")
+            or transport_maddr.value_for_protocol("dns6")
         )
         if host is None:
-            raise ValueError(f"No host protocol found in {maddr}")
+            raise ValueError(f"No host protocol found in {transport_maddr}")
 
-        port = int(maddr.value_for_protocol("tcp"))
-        uri = f"ws://{host}:{port}"
+        port_str = transport_maddr.value_for_protocol("tcp")
+        if port_str is None:
+            raise ValueError(f"No TCP port found in multiaddr: {transport_maddr}")
+        port = int(port_str)
+
+        host_str = f"[{host}]" if ":" in host else host
+        uri = f"ws://{host_str}:{port}"
 
         try:
             async with open_websocket_url(uri, ssl_context=None) as ws:

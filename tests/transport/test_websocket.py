@@ -12,7 +12,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
-from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
 
@@ -33,7 +33,7 @@ async def make_host(
         secure_transports_by_protocol={
             TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair)
         },
-        muxer_transports_by_protocol={TProtocol(MPLEX_PROTOCOL_ID): Mplex},
+        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
     )
 
     # Transport + Swarm + Host

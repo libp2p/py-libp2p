@@ -1,20 +1,20 @@
 import { createLibp2p }          from 'libp2p'
 import { webSockets }            from '@libp2p/websockets'
 import { ping }                  from '@libp2p/ping'
-import { plaintext }             from '@libp2p/insecure'
-import { mplex }                 from '@libp2p/mplex'
+import { plaintext }             from '@libp2p/plaintext'
+import { yamux }                 from '@chainsafe/libp2p-yamux'
 
 async function main() {
   const node = await createLibp2p({
     transports:           [ webSockets() ],
     connectionEncryption: [ plaintext() ],
-    streamMuxers:         [ mplex() ],
+    streamMuxers:         [ yamux() ],
     services: {
       // installs /ipfs/ping/1.0.0 handler
       ping: ping()
     },
     addresses: {
-      listen: ['/ip4/127.0.0.1/tcp/0/ws']
+      listen: ['/ip4/0.0.0.0/tcp/0/ws']
     }
   })
 

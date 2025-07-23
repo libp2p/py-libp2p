@@ -38,7 +38,10 @@ class WebsocketListener(IListener):
             or maddr.value_for_protocol("dns6")
             or "0.0.0.0"
         )
-        port = int(maddr.value_for_protocol("tcp"))
+        port_str = maddr.value_for_protocol("tcp")
+        if port_str is None:
+            raise ValueError(f"No TCP port found in multiaddr: {maddr}")
+        port = int(port_str)
 
         async def serve(
             task_status: TaskStatus[Any] = trio.TASK_STATUS_IGNORED,

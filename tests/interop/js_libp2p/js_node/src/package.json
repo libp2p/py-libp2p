@@ -12,6 +12,8 @@
   "dependencies": {
     "@libp2p/ping": "^2.0.36",
     "@libp2p/websockets": "^9.2.18",
+    "@chainsafe/libp2p-yamux": "^5.0.1",
+    "@libp2p/plaintext": "^2.0.7",
     "libp2p": "^2.9.0",
     "multiaddr": "^10.0.1"
   }
