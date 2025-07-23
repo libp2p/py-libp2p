@@ -178,3 +178,6 @@ env.bak/
 #lockfiles
 uv.lock
 poetry.lock
+
+# Temporary upload files
+.tmp.driveupload/
