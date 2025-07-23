@@ -60,6 +60,9 @@ class BootstrapDiscovery:
                 return
             peer_id = ID.from_base58(peer_id_str)
             addrs = [addr for addr in resolved_addrs]
+            if not addrs:
+                logger.warning(f"No addresses resolved for DNS address: {addr_str}")
+                return
             peer_info = PeerInfo(peer_id, addrs)
             self.add_addr(peer_info)
         else:
@@ -76,16 +79,16 @@ class BootstrapDiscovery:
             logger.debug(f"Skipping own peer ID: {peer_info.peer_id}")
             return
 
-        # Skip if already discovered
-        if str(peer_info.peer_id) in self.discovered_peers:
-            logger.debug(f"Peer already discovered: {peer_info.peer_id}")
-            return
-
-        # Add to peerstore with TTL (using same pattern as mDNS)
+        # Always add addresses to peerstore (allows multiple addresses for same peer)
         self.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 10)
 
-        # Track discovered peer
-        self.discovered_peers.add(str(peer_info.peer_id))
-
-        # Emit peer discovery event
-        peerDiscovery.emit_peer_discovered(peer_info)
+        # Only emit discovery event if this is the first time we see this peer
+        peer_id_str = str(peer_info.peer_id)
+        if peer_id_str not in self.discovered_peers:
+            # Track discovered peer
+            self.discovered_peers.add(peer_id_str)
+            # Emit peer discovery event
+            peerDiscovery.emit_peer_discovered(peer_info)
+            logger.debug(f"Peer discovered: {peer_info.peer_id}")
+        else:
+            logger.debug(f"Additional addresses added for peer: {peer_info.peer_id}")
