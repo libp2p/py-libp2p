@@ -10,7 +10,7 @@ using hole punching techniques.
 
 import logging
 import time
-from typing import Any, cast
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -60,10 +60,6 @@ HOLE_PUNCH_RETRY_DELAY = 30  # seconds
 
 # Maximum observed addresses to exchange
 MAX_OBSERVED_ADDRS = 20
-
-# Define the enum values for clarity
-CONNECT_TYPE = 100  # HolePunch.CONNECT value
-SYNC_TYPE = 300  # HolePunch.SYNC value
 
 
 class DCUtRProtocol(Service):
@@ -173,7 +169,7 @@ class DCUtRProtocol(Service):
                 connect_msg.ParseFromString(msg_bytes)
 
                 # Verify it's a CONNECT message
-                if connect_msg.type != CONNECT_TYPE:  # HolePunch.Type.CONNECT value
+                if connect_msg.type != HolePunch.CONNECT:
                     logger.warning("Expected CONNECT message, got %s", connect_msg.type)
                     await stream.close()
                     return
@@ -197,7 +193,7 @@ class DCUtRProtocol(Service):
                 # Send our CONNECT message with our observed addresses
                 our_addrs = await self._get_observed_addrs()
                 response = HolePunch()
-                response.type = cast(HolePunch.Type, CONNECT_TYPE)
+                response.type = HolePunch.CONNECT
                 response.ObsAddrs.extend(our_addrs)
 
                 with trio.fail_after(STREAM_WRITE_TIMEOUT):
@@ -218,7 +214,7 @@ class DCUtRProtocol(Service):
                 sync_msg.ParseFromString(sync_bytes)
 
                 # Verify it's a SYNC message
-                if sync_msg.type != SYNC_TYPE:  # HolePunch.Type.SYNC value
+                if sync_msg.type != HolePunch.SYNC:
                     logger.warning("Expected SYNC message, got %s", sync_msg.type)
                     await stream.close()
                     return
@@ -300,7 +296,7 @@ class DCUtRProtocol(Service):
                 # Send our CONNECT message with our observed addresses
                 our_addrs = await self._get_observed_addrs()
                 connect_msg = HolePunch()
-                connect_msg.type = cast(HolePunch.Type, CONNECT_TYPE)
+                connect_msg.type = HolePunch.CONNECT
                 connect_msg.ObsAddrs.extend(our_addrs)
 
                 start_time = time.time()
@@ -325,7 +321,7 @@ class DCUtRProtocol(Service):
                 resp.ParseFromString(resp_bytes)
 
                 # Verify it's a CONNECT message
-                if resp.type != CONNECT_TYPE:  # HolePunch.Type.CONNECT value
+                if resp.type != HolePunch.CONNECT:
                     logger.warning("Expected CONNECT message, got %s", resp.type)
                     return False
 
@@ -351,7 +347,7 @@ class DCUtRProtocol(Service):
                 punch_time = time.time() + (2 * rtt) + 1  # Add 1 second buffer
 
                 sync_msg = HolePunch()
-                sync_msg.type = cast(HolePunch.Type, SYNC_TYPE)
+                sync_msg.type = HolePunch.SYNC
 
                 with trio.fail_after(STREAM_WRITE_TIMEOUT):
                     await stream.write(sync_msg.SerializeToString())
