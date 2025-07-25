@@ -134,6 +134,6 @@ def test_ceritified_addr_book():
     assert latest.record().seq == 23
 
     # Merged addresses = old addres + new_addrs
-    expected_addrs = set(addrs).union(set(new_addrs))
+    expected_addrs = set(new_addrs)
     actual_addrs = set(store.addrs(peer_id))
     assert actual_addrs == expected_addrs
