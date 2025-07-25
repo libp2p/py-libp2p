@@ -253,20 +253,11 @@ class PeerStore(IPeerStore):
         if existing and existing.seq > record.seq:
             return False  # reject older record
 
-        # Merge new addresses with existing ones if peer exists
-        if peer_id in self.peer_data_map:
-            try:
-                existing_addrs = set(self.addrs(peer_id))
-            except PeerStoreError:
-                existing_addrs = set()
-        else:
-            existing_addrs = set()
-
         new_addrs = set(record.addrs)
-        merged_addrs = list(existing_addrs.union(new_addrs))
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.add_addrs(peer_id, merged_addrs, ttl)
+        self.peer_data_map[peer_id].clear_addrs()
+        self.add_addrs(peer_id, list(new_addrs), ttl)
 
         return True
 
