@@ -72,7 +72,13 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         )
         host_a.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
 
-        async with host_a.run(listen_addrs=[listen_addr]):
+        async with (
+            host_a.run(listen_addrs=[listen_addr]),
+            trio.open_nursery() as nursery,
+        ):
+            # Start the peer-store cleanup task
+            nursery.start_soon(host_a.get_peerstore().start_cleanup_task, 60)
+
             # Get the actual address and replace 0.0.0.0 with 127.0.0.1 for client
             # connections
             server_addr = str(host_a.get_addrs()[0])
@@ -131,7 +137,13 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
         host_b = new_host()
 
-        async with host_b.run(listen_addrs=[listen_addr]):
+        async with (
+            host_b.run(listen_addrs=[listen_addr]),
+            trio.open_nursery() as nursery,
+        ):
+            # Start the peer-store cleanup task
+            nursery.start_soon(host_b.get_peerstore().start_cleanup_task, 60)
+
             # Connect to the first host
             print(f"dialer (host_b) listening on {host_b.get_addrs()[0]}")
             maddr = multiaddr.Multiaddr(destination)

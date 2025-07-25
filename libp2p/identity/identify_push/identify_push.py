@@ -141,16 +141,6 @@ async def _update_peerstore_from_identify(
         except Exception as e:
             logger.error("Error updating protocols for peer %s: %s", peer_id, e)
 
-    # Update observed address if present
-    if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
-        try:
-            # Convert bytes to Multiaddr object
-            observed_addr = Multiaddr(identify_msg.observed_addr)
-            # Add the observed address to the peerstore
-            # Use a default TTL of 2 hours (7200 seconds)
-            peerstore.add_addr(peer_id, observed_addr, 7200)
-        except Exception as e:
-            logger.error("Error updating observed address for peer %s: %s", peer_id, e)
     if identify_msg.HasField("signedPeerRecord"):
         try:
             # Convert the signed-peer-record(Envelope) from prtobuf bytes
@@ -164,6 +154,16 @@ async def _update_peerstore_from_identify(
             logger.error(
                 "Error updating the certified addr book for peer %s: %s", peer_id, e
             )
+    # Update observed address if present
+    if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
+        try:
+            # Convert bytes to Multiaddr object
+            observed_addr = Multiaddr(identify_msg.observed_addr)
+            # Add the observed address to the peerstore
+            # Use a default TTL of 2 hours (7200 seconds)
+            peerstore.add_addr(peer_id, observed_addr, 7200)
+        except Exception as e:
+            logger.error("Error updating observed address for peer %s: %s", peer_id, e)
 
 
 async def push_identify_to_peer(
