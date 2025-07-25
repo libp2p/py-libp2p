@@ -1,4 +1,4 @@
-from libp2p.records.pb import record_pb2
+from libp2p.kad_dht.pb import kademlia_pb2 as record_pb2
 
 
 def make_put_record(key: str, value: bytes) -> record_pb2.Record:
