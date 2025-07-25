@@ -22,6 +22,7 @@ from libp2p.abc import (
     IHost,
 )
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
+from libp2p.custom_types import TProtocol
 from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -34,13 +35,17 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.pubkey import PublicKeyValidator
+from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
     Service,
 )
 
 from .common import (
     ALPHA,
+    BUCKET_SIZE,
     PROTOCOL_ID,
+    PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
 )
 from .pb.kademlia_pb2 import (
@@ -92,7 +97,16 @@ class KadDHT(Service):
 
     """
 
-    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
+    def __init__(
+        self,
+        host: IHost,
+        mode: DHTMode, enable_random_walk: bool = False,
+        validator: NamespacedValidator | None = None,
+        validator_changed: bool = False,
+        protocol_prefix: TProtocol = PROTOCOL_PREFIX,
+        enable_providers: bool = True,
+        enable_values: bool = True,
+    ):
         """
         Initialize a new Kademlia DHT node.
 
@@ -114,6 +128,16 @@ class KadDHT(Service):
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
+
+        self.protocol_prefix = protocol_prefix
+        self.enable_providers = enable_providers
+        self.enable_values = enable_values
+
+        self.validator = validator
+
+        # If true implies that the validator has been changed and that
+        # Defaults should not be used
+        self.validator_changed = validator_changed
 
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)
@@ -207,6 +231,84 @@ class KadDHT(Service):
             logger.info("RT Refresh Manager stopped")
         else:
             logger.info("RT Refresh Manager was not running (Random Walk disabled)")
+
+    async def apply_fallbacks(self, host: IHost) -> None:
+        """
+        Apply fallback validators if not explicitely changed by the user
+
+        This sets default validators like 'pk' and 'ipns' if they are missing and
+        the default validator set hasn't been overridden.
+        """
+        if not self.validator_changed:
+            if not isinstance(self.validator, NamespacedValidator):
+                raise ValueError(
+                    "Default validator was changed without marking it True"
+                )
+
+            if "pk" not in self.validator._validators:
+                self.validator._validators["pk"] = PublicKeyValidator()
+
+            # TODO: Do the same thing for ipns, but need to implement first.
+
+    def validate_config(self) -> None:
+        """
+        Validate the DHT config.
+        """
+        if self.protocol_prefix != PROTOCOL_PREFIX:
+            return  # Skip validation for non-standart prefixes
+
+        for bucket in self.routing_table.buckets:
+            if bucket.bucket_size != BUCKET_SIZE:
+                raise ValueError(
+                    f"{PROTOCOL_PREFIX} prefix must use bucket size {BUCKET_SIZE}"
+                )
+
+        if not self.enable_providers:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have providers enabled")
+
+        if not self.enable_values:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have values enabled")
+
+        if not isinstance(self.validator, NamespacedValidator):
+            raise ValueError(
+                f"{PROTOCOL_PREFIX} prefix must use a namespace type validator"
+            )
+
+        vmap = self.validator._validators
+
+        # TODO: Need to add ipns also in the check
+        if set(vmap.keys()) != {"pk"}:
+            raise ValueError(f"{PROTOCOL_PREFIX} must have 'pk' and 'ipns' validators")
+
+        pk_validator = vmap.get("pk")
+        if not isinstance(pk_validator, PublicKeyValidator):
+            raise TypeError("'pk' namesapce must use PublicKeyValidator")
+
+        # TODO: ipns checks
+
+    def set_validator(self, val: NamespacedValidator) -> None:
+        """
+        Set a custom validator for the DHT config.
+
+        This marks the validator as explicitly changed, so the default
+        validators (pk and ipns) will not be automatically applied later.
+        """
+        self.validator = val
+        self.validator_changed = True
+        return
+
+    def set_namespace_validator(self, ns: str, val: Validator) -> None:
+        """
+        Adds a validator under a specofic namespace to the current DHT config.
+
+        Raises an error if the current validator is not a NamespacedValidator
+        """
+        if not isinstance(self.validator, NamespacedValidator):
+            raise TypeError(
+                "Can only add namespaced validators to a NamespacedValidator"
+            )
+
+        self.validator._validators["ns"] = val
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -665,6 +767,23 @@ class KadDHT(Service):
         Store a value in the DHT.
         """
         logger.debug(f"Storing value for key {key.hex()}")
+
+        if self.validator is not None:
+            # Dont allow local users to put bad values
+            self.validator.validate(key.decode("utf-8"), value)
+
+            old = self.value_store.get(key)
+            if old is not None and old != value:
+                # Select which value is better
+                try:
+                    index = self.validator.select(key.decode("utf-8"), [value, old])
+                    if index != 0:
+                        raise ValueError(
+                            "Refusing to replace newer value with the older one"
+                        )
+                except Exception as e:
+                    logger.debug(f"Validation select error for key {key.hex()}: {e}")
+                    raise
 
         # 1. Store locally first
         self.value_store.put(key, value)

@@ -34,6 +34,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.records.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -67,6 +68,14 @@ async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
 
     # This should never be reached, but satisfies type checker
     raise RuntimeError("Retry function should not reach this point")
+
+
+class BlankValidator(Validator):
+    def validate(self, key: str, value: bytes) -> None:
+        return
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        return 0
 
 
 @pytest.fixture
