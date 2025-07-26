@@ -14,6 +14,8 @@ from libp2p.identity.identify.identify import (
     identify_handler_for,
     parse_identify_response,
 )
+from libp2p.identity.identify.pb.identify_pb2 import Identify
+from libp2p.peer.envelope import debug_dump_envelope, unmarshal_envelope
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -32,10 +34,11 @@ def decode_multiaddrs(raw_addrs):
     return decoded_addrs
 
 
-def print_identify_response(identify_response):
+def print_identify_response(identify_response: Identify):
     """Pretty-print Identify response."""
     public_key_b64 = base64.b64encode(identify_response.public_key).decode("utf-8")
     listen_addrs = decode_multiaddrs(identify_response.listen_addrs)
+    signed_peer_record = unmarshal_envelope(identify_response.signedPeerRecord)
     try:
         observed_addr_decoded = decode_multiaddrs([identify_response.observed_addr])
     except Exception:
@@ -51,6 +54,8 @@ def print_identify_response(identify_response):
         f"  Agent Version: {identify_response.agent_version}"
     )
 
+    debug_dump_envelope(signed_peer_record)
+
 
 async def run(port: int, destination: str, use_varint_format: bool = True) -> None:
     localhost_ip = "0.0.0.0"
@@ -61,12 +66,19 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         host_a = new_host()
 
         # Set up identify handler with specified format
+        # Set use_varint_format = False, if want to checkout the Signed-PeerRecord
         identify_handler = identify_handler_for(
             host_a, use_varint_format=use_varint_format
         )
         host_a.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
 
-        async with host_a.run(listen_addrs=[listen_addr]):
+        async with (
+            host_a.run(listen_addrs=[listen_addr]),
+            trio.open_nursery() as nursery,
+        ):
+            # Start the peer-store cleanup task
+            nursery.start_soon(host_a.get_peerstore().start_cleanup_task, 60)
+
             # Get the actual address and replace 0.0.0.0 with 127.0.0.1 for client
             # connections
             server_addr = str(host_a.get_addrs()[0])
@@ -125,7 +137,13 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
         host_b = new_host()
 
-        async with host_b.run(listen_addrs=[listen_addr]):
+        async with (
+            host_b.run(listen_addrs=[listen_addr]),
+            trio.open_nursery() as nursery,
+        ):
+            # Start the peer-store cleanup task
+            nursery.start_soon(host_b.get_peerstore().start_cleanup_task, 60)
+
             # Connect to the first host
             print(f"dialer (host_b) listening on {host_b.get_addrs()[0]}")
             maddr = multiaddr.Multiaddr(destination)
@@ -238,9 +256,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Determine format: raw format if --raw-format is specified, otherwise
-    # length-prefixed
-    use_varint_format = not args.raw_format
+    # Determine format: use varint (length-prefixed) if --raw-format is specified,
+    # otherwise use raw protobuf format (old format)
+    use_varint_format = args.raw_format
 
     try:
         if args.destination:
