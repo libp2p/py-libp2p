@@ -9,4 +9,5 @@ message Identify {
   repeated bytes listen_addrs = 2;
   optional bytes observed_addr = 4;
   repeated string protocols = 3;
+  optional bytes signedPeerRecord = 8;
 }
