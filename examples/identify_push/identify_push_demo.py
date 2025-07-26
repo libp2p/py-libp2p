@@ -211,7 +211,15 @@ async def main() -> None:
     listen_addr_1 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
     listen_addr_2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 
-    async with host_1.run([listen_addr_1]), host_2.run([listen_addr_2]):
+    async with (
+        host_1.run([listen_addr_1]),
+        host_2.run([listen_addr_2]),
+        trio.open_nursery() as nursery,
+    ):
+        # Start the peer-store cleanup task
+        nursery.start_soon(host_1.get_peerstore().start_cleanup_task, 60)
+        nursery.start_soon(host_2.get_peerstore().start_cleanup_task, 60)
+
         # Get the addresses of both hosts
         addr_1 = host_1.get_addrs()[0]
         addr_2 = host_2.get_addrs()[0]

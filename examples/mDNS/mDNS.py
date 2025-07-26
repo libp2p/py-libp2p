@@ -46,7 +46,10 @@ async def run(port: int) -> None:
 
     logger.info("Starting peer Discovery")
     host = new_host(key_pair=key_pair, enable_mDNS=True)
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        # Start the peer-store cleanup task
+        nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
         await trio.sleep_forever()
 
 
