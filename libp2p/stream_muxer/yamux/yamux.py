@@ -501,13 +501,30 @@ class Yamux(IMuxedConn):
             # Wait for data if stream is still open
             logger.debug(f"Waiting for data on stream {self.peer_id}:{stream_id}")
             try:
-                await self.stream_events[stream_id].wait()
-                self.stream_events[stream_id] = trio.Event()
+                await self._wait_for_stream_event(stream_id)
             except KeyError:
                 raise MuxedStreamEOF("Stream was removed")
 
         # This line should never be reached, but satisfies the type checker
         raise MuxedStreamEOF("Unexpected end of read_stream")
+
+    async def _wait_for_stream_event(self, stream_id: int) -> None:
+        async with self.streams_lock:
+            if stream_id not in self.stream_events or self.event_shutting_down.is_set():
+                return
+            event = self.stream_events[stream_id]
+
+        try:
+            await event.wait()
+        except trio.Cancelled:
+            raise
+
+        async with self.streams_lock:
+            if (
+                stream_id in self.stream_events
+                and not self.event_shutting_down.is_set()
+            ):
+                self.stream_events[stream_id] = trio.Event()
 
     async def handle_incoming(self) -> None:
         while not self.event_shutting_down.is_set():
