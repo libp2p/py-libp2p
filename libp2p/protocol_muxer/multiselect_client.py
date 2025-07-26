@@ -134,8 +134,10 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         :return: selected protocol
         """
+        # Represent `None` protocol as an empty string.
+        protocol_str = protocol if protocol is not None else ""
         try:
-            await communicator.write(protocol)
+            await communicator.write(protocol_str)
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
@@ -145,7 +147,7 @@ class MultiselectClient(IMultiselectClient):
         except MultiselectCommunicatorError as error:
             raise MultiselectClientError() from error
 
-        if response == protocol:
+        if response == protocol_str:
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
             raise MultiselectClientError("protocol not supported")
