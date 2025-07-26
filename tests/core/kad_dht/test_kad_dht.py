@@ -24,6 +24,7 @@ from libp2p.kad_dht.utils import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.records.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -36,6 +37,14 @@ logger = logging.getLogger("test.kad_dht")
 
 # Constants for the tests
 TEST_TIMEOUT = 5  # Timeout in seconds
+
+
+class BlankValidator(Validator):
+    def validate(self, key: str, value: bytes) -> None:
+        return
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        return 0
 
 
 @pytest.fixture
