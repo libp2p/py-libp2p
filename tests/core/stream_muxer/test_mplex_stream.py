@@ -8,6 +8,7 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
+    MuxedConnUnavailable,
 )
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_MESSAGE_CHANNEL_SIZE,
@@ -213,3 +214,39 @@ async def test_mplex_stream_reset(mplex_stream_pair):
     # `reset` should do nothing as well.
     await stream_0.reset()
     await stream_1.reset()
+
+
+@pytest.mark.trio
+async def test_mplex_stream_close_timeout(monkeypatch, mplex_stream_pair):
+    stream_0, stream_1 = mplex_stream_pair
+
+    # (simulate hanging)
+    async def fake_send_message(*args, **kwargs):
+        await trio.sleep_forever()
+
+    monkeypatch.setattr(stream_0.muxed_conn, "send_message", fake_send_message)
+
+    with pytest.raises(TimeoutError):
+        await stream_0.close()
+
+
+@pytest.mark.trio
+async def test_mplex_stream_close_mux_unavailable(monkeypatch, mplex_stream_pair):
+    stream_0, _ = mplex_stream_pair
+
+    # Patch send_message to raise MuxedConnUnavailable
+    def raise_unavailable(*args, **kwargs):
+        raise MuxedConnUnavailable("Simulated conn drop")
+
+    monkeypatch.setattr(stream_0.muxed_conn, "send_message", raise_unavailable)
+
+    # Case 1: Mplex is shutting down — should not raise
+    stream_0.muxed_conn.event_shutting_down.set()
+    await stream_0.close()  # Should NOT raise
+
+    # Case 2: Mplex is NOT shutting down — should raise RuntimeError
+    stream_0.event_local_closed = trio.Event()  # Reset since it was set in first call
+    stream_0.muxed_conn.event_shutting_down = trio.Event()  # Unset the shutdown flag
+
+    with pytest.raises(RuntimeError, match="Failed to send close message"):
+        await stream_0.close()
