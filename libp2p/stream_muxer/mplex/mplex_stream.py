@@ -247,8 +247,6 @@ class MplexStream(IMuxedStream):
         Closing a stream closes it for writing and closes the remote end for
         reading but allows writing in the other direction.
         """
-        # TODO error handling with timeout
-
         async with self.close_lock:
             if self.event_local_closed.is_set():
                 return
@@ -256,8 +254,17 @@ class MplexStream(IMuxedStream):
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
-        # TODO: Raise when `muxed_conn.send_message` fails and `Mplex` isn't shutdown.
-        await self.muxed_conn.send_message(flag, None, self.stream_id)
+
+        try:
+            with trio.fail_after(5):  # timeout in seconds
+                await self.muxed_conn.send_message(flag, None, self.stream_id)
+        except trio.TooSlowError:
+            raise TimeoutError("Timeout while trying to close the stream")
+        except MuxedConnUnavailable:
+            if not self.muxed_conn.event_shutting_down.is_set():
+                raise RuntimeError(
+                    "Failed to send close message and Mplex isn't shutting down"
+                )
 
         _is_remote_closed: bool
         async with self.close_lock:
