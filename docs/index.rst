@@ -18,6 +18,7 @@ The Python implementation of the libp2p networking stack
 
     Examples <examples>
     API <libp2p>
+    Interop <interop>
 
 .. toctree::
     :maxdepth: 1
