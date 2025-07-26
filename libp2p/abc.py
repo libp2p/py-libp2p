@@ -16,6 +16,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    Optional,
 )
 
 from multiaddr import (
@@ -41,19 +42,18 @@ from libp2p.io.abc import (
 from libp2p.peer.id import (
     ID,
 )
+import libp2p.peer.pb.peer_record_pb2 as pb
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 
 if TYPE_CHECKING:
+    from libp2p.peer.envelope import Envelope
+    from libp2p.peer.peer_record import PeerRecord
+    from libp2p.protocol_muxer.multiselect import Multiselect
     from libp2p.pubsub.pubsub import (
         Pubsub,
     )
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from libp2p.protocol_muxer.multiselect import Multiselect
 
 from libp2p.pubsub.pb import (
     rpc_pb2,
@@ -493,6 +493,71 @@ class IAddrBook(ABC):
         """
 
 
+# ------------------ certified-addr-book interface.py ---------------------
+class ICertifiedAddrBook(ABC):
+    """
+    Interface for a certified address book.
+
+    Provides methods for managing signed peer records
+    """
+
+    @abstractmethod
+    def consume_peer_record(self, envelope: "Envelope", ttl: int) -> bool:
+        """
+        Accept and store a signed PeerRecord, unless it's older than
+        the one already stored.
+
+        This function:
+        - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if it's older (lower seq)
+        - Updates the stored peer record and replaces associated
+        addresses if accepted
+
+
+        Parameters
+        ----------
+        envelope:
+            Signed envelope containing a PeerRecord.
+        ttl:
+            Time-to-live for the included multiaddrs (in seconds).
+
+        """
+
+    @abstractmethod
+    def get_peer_record(self, peer_id: ID) -> Optional["Envelope"]:
+        """
+        Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
+        and is still relevant.
+
+        First, it runs cleanup via `maybe_delete_peer_record` to purge stale data.
+        Then it checks whether the peer has valid, unexpired addresses before
+        returning the associated envelope.
+
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to look up.
+
+        """
+
+    @abstractmethod
+    def maybe_delete_peer_record(self, peer_id: ID) -> None:
+        """
+        Delete the signed peer record for a peer if it has no know
+        (non-expired) addresses.
+
+        This is a garbage collection mechanism: if all addresses for a peer have expired
+        or been cleared, there's no point holding onto its signed `Envelope`
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose record we may delete.
+
+        """
+
+
 # -------------------------- keybook interface.py --------------------------
 
 
@@ -758,7 +823,9 @@ class IProtoBook(ABC):
 # -------------------------- peerstore interface.py --------------------------
 
 
-class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
+class IPeerStore(
+    IPeerMetadata, IAddrBook, ICertifiedAddrBook, IKeyBook, IMetrics, IProtoBook
+):
     """
     Interface for a peer store.
 
@@ -893,7 +960,65 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
 
         """
 
+    # --------CERTIFIED-ADDR-BOOK----------
+
+    @abstractmethod
+    def consume_peer_record(self, envelope: "Envelope", ttl: int) -> bool:
+        """
+        Accept and store a signed PeerRecord, unless it's older
+        than the one already stored.
+
+        This function:
+        - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if it's older (lower seq)
+        - Updates the stored peer record and replaces associated addresses if accepted
+
+
+        Parameters
+        ----------
+        envelope:
+            Signed envelope containing a PeerRecord.
+        ttl:
+            Time-to-live for the included multiaddrs (in seconds).
+
+        """
+
+    @abstractmethod
+    def get_peer_record(self, peer_id: ID) -> Optional["Envelope"]:
+        """
+        Retrieve the most recent signed PeerRecord `Envelope` for a peer, if it exists
+        and is still relevant.
+
+        First, it runs cleanup via `maybe_delete_peer_record` to purge stale data.
+        Then it checks whether the peer has valid, unexpired addresses before
+        returning the associated envelope.
+
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to look up.
+
+        """
+
+    @abstractmethod
+    def maybe_delete_peer_record(self, peer_id: ID) -> None:
+        """
+        Delete the signed peer record for a peer if it has no
+        know (non-expired) addresses.
+
+        This is a garbage collection mechanism: if all addresses for a peer have expired
+        or been cleared, there's no point holding onto its signed `Envelope`
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose record we may delete.
+
+        """
+
     # --------KEY-BOOK----------
+
     @abstractmethod
     def pubkey(self, peer_id: ID) -> PublicKey:
         """
@@ -1201,6 +1326,10 @@ class IPeerStore(IPeerMetadata, IAddrBook, IKeyBook, IMetrics, IProtoBook):
     @abstractmethod
     def clear_peerdata(self, peer_id: ID) -> None:
         """clear_peerdata"""
+
+    @abstractmethod
+    async def start_cleanup_task(self, cleanup_interval: int = 3600) -> None:
+        """Start periodic cleanup of expired peer records and addresses."""
 
 
 # -------------------------- listener interface.py --------------------------
@@ -1686,6 +1815,121 @@ class IHost(ABC):
         """
         Close the host and all underlying connections and services.
 
+        """
+
+
+# -------------------------- peer-record interface.py --------------------------
+class IPeerRecord(ABC):
+    """
+    Interface for a libp2p PeerRecord object.
+
+    A PeerRecord contains metadata about a peer such as its ID, public addresses,
+    and a strictly increasing sequence number for versioning.
+
+    PeerRecords are used in signed routing Envelopes for secure peer data propagation.
+    """
+
+    @abstractmethod
+    def domain(self) -> str:
+        """
+        Return the domain string for this record type.
+
+        Used in envelope validation to distinguish different record types.
+        """
+
+    @abstractmethod
+    def codec(self) -> bytes:
+        """
+        Return a binary codec prefix that identifies the PeerRecord type.
+
+        This is prepended in signed envelopes to allow type-safe decoding.
+        """
+
+    @abstractmethod
+    def to_protobuf(self) -> pb.PeerRecord:
+        """
+        Convert this PeerRecord into its Protobuf representation.
+
+        :raises ValueError: if serialization fails (e.g., invalid peer ID).
+        :return: A populated protobuf `PeerRecord` message.
+        """
+
+    @abstractmethod
+    def marshal_record(self) -> bytes:
+        """
+        Serialize this PeerRecord into a byte string.
+
+        Used when signing or sealing the record in an envelope.
+
+        :raises ValueError: if protobuf serialization fails.
+        :return: Byte-encoded PeerRecord.
+        """
+
+    @abstractmethod
+    def equal(self, other: object) -> bool:
+        """
+        Compare this PeerRecord with another for equality.
+
+        Two PeerRecords are considered equal if:
+        - They have the same `peer_id`
+        - Their `seq` numbers match
+        - Their address lists are identical and ordered
+
+        :param other: Object to compare with.
+        :return: True if equal, False otherwise.
+        """
+
+
+# -------------------------- envelope interface.py --------------------------
+class IEnvelope(ABC):
+    @abstractmethod
+    def marshal_envelope(self) -> bytes:
+        """
+        Serialize this Envelope into its protobuf wire format.
+
+        Converts all envelope fields into a `pb.Envelope` protobuf message
+        and returns the serialized bytes.
+
+        :return: Serialized envelope as bytes.
+        """
+
+    @abstractmethod
+    def validate(self, domain: str) -> None:
+        """
+        Verify the envelope's signature within the given domain scope.
+
+        This ensures that the envelope has not been tampered with
+        and was signed under the correct usage context.
+
+        :param domain: Domain string that contextualizes the signature.
+        :raises ValueError: If the signature is invalid.
+        """
+
+    @abstractmethod
+    def record(self) -> "PeerRecord":
+        """
+        Lazily decode and return the embedded PeerRecord.
+
+        This method unmarshals the payload bytes into a `PeerRecord` instance,
+        using the registered codec to identify the type. The decoded result
+        is cached for future use.
+
+        :return: Decoded PeerRecord object.
+        :raises Exception: If decoding fails or payload type is unsupported.
+        """
+
+    @abstractmethod
+    def equal(self, other: Any) -> bool:
+        """
+        Compare this Envelope with another for structural equality.
+
+        Two envelopes are considered equal if:
+        - They have the same public key
+        - The payload type and payload bytes match
+        - Their signatures are identical
+
+        :param other: Another object to compare.
+        :return: True if equal, False otherwise.
         """
 
 
