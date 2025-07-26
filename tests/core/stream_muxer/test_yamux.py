@@ -51,6 +51,11 @@ class TrioStreamAdapter(IRawConnection):
             data = await self.receive_stream.receive_some(n)
             logging.debug(f"Read {len(data)} bytes")
             return data
+        # Raise IncompleteReadError on timeout to simulate connection closed
+        logging.debug("Read timed out after 2 seconds, raising IncompleteReadError")
+        from libp2p.io.exceptions import IncompleteReadError
+
+        raise IncompleteReadError({"requested_count": n, "received_count": 0})
 
     async def close(self) -> None:
         logging.debug("Closing stream")
