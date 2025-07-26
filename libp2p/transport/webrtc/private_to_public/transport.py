@@ -16,7 +16,7 @@ from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..connection import WebRTCRawConnection
-from ..constants import (
+from ...constants import (
     DEFAULT_HANDSHAKE_TIMEOUT,
     DEFAULT_ICE_SERVERS,
     WebRTCError,
@@ -122,16 +122,14 @@ class WebRTCDirectTransport(ITransport):
         self.ice_servers = self.config.get("ice_servers", DEFAULT_ICE_SERVERS)
         self.active_connections: dict[str, IRawConnection] = {}
         self.pending_connections: dict[str, RTCPeerConnection] = {}
-        self.supported_protocols: set[str] = {"webrtc-direct", "p2p"}
         self._started = False
         self.host: IHost | None = None
         self.hole_puncher: UDPHolePuncher | None = None
         self.connection_events: dict[str, trio.Event] = {}
         self.cert_mgr: WebRTCCertificate | None = None
-
         logger.info("WebRTC-Direct Transport initialized")
 
-    async def start(self) -> None:
+    async def start(self, nursery: trio.Nursery) -> None:
         """Start the WebRTC-Direct transport."""
         if self._started:
             return
@@ -141,9 +139,14 @@ class WebRTCDirectTransport(ITransport):
 
         # Generate certificate for this transport
         self.cert_mgr = WebRTCCertificate.generate()
-
+        
+        with trio.CancelScope() as scope:
+            self.cert_mgr.cancel_scope = scope
+            nursery.start_soon(self.cert_mgr.renewal_loop)
+        
+        
         # Initialize UDP hole puncher
-        self.hole_puncher = UDPHolePuncher()
+        # self.hole_puncher = UDPHolePuncher()
 
         self._started = True
         logger.info("WebRTC-Direct Transport started")
@@ -157,10 +160,12 @@ class WebRTCDirectTransport(ITransport):
         for conn_id in list(self.active_connections.keys()):
             await self._cleanup_connection(conn_id)
 
+        if self.cert_mgr and self.cert_mgr.cancel_scope:
+            self.cert_mgr.cancel_scope.cancel()
         # Clean up hole puncher
-        if self.hole_puncher:
-            # TODO: Implement proper cleanup
-            pass
+        # if self.hole_puncher:
+        #     # TODO: Implement proper cleanup
+        #     pass
 
         self._started = False
         logger.info("WebRTC-Direct Transport stopped")

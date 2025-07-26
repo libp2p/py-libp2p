@@ -19,7 +19,7 @@ from libp2p.transport.webrtc.async_bridge import (
     TrioSafeWebRTCOperations,
 )
 from libp2p.transport.webrtc.connection import WebRTCRawConnection
-from libp2p.transport.webrtc.constants import (
+from libp2p.transport.constants import (
     CODEC_CERTHASH,
     CODEC_WEBRTC,
     CODEC_WEBRTC_DIRECT,

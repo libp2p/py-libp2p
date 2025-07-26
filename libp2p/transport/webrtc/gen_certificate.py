@@ -3,7 +3,7 @@ import datetime
 import hashlib
 import logging
 from typing import Any
-
+import trio
 import base58
 from cryptography import (
     x509,
@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import (
     serialization,
 )
 from cryptography.hazmat.primitives.asymmetric import (
-    rsa,
+    ec,
 )
 from cryptography.hazmat.primitives.asymmetric.rsa import (
     RSAPrivateKey as CryptoRSAPrivateKey,
@@ -37,56 +37,43 @@ from libp2p.peer.id import (
     ID,
 )
 
+from ..constants import (
+    DEFAULT_CERTIFICATE_RENEWAL_THRESHOLD,
+    DEFAULT_CERTIFICATE_LIFESPAN
+)
 SIGNAL_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
 logger = logging.getLogger("libp2p.transport.webrtc.certificate")
 
-
+# TODO: Once Datastore is implemented in python, add cert and priv_key storage
+#       and management.
 class WebRTCCertificate:
     """WebRTC certificate for connections"""
 
-    def __init__(self, cert: x509.Certificate, private_key: rsa.RSAPrivateKey) -> None:
+    def __init__(self, cert: x509.Certificate, private_key: ec.EllipticCurvePrivateKey) -> None:
         self.cert = cert
-        self.private_key = private_key
+        self.private_key = private_key | None = None 
         self._fingerprint: str | None = None
         self._certhash: str | None = None
-
+        self.cancel_scope: trio.CancelScope = None
     @classmethod
     def generate(cls) -> "WebRTCCertificate":
         """Generate a new self-signed certificate for WebRTC"""
-        # Generate private key
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
-
+        # Create instance first with None private key
+        instance = cls.__new__(cls)
+        instance._fingerprint = None
+        instance._certhash = None
+        
+        # Generate private key using the instance method
+        private_key = instance.loadOrCreatePrivateKey()
+        
         # Create certificate
-        common_name: Any = "libp2p-webrtc"
-        subject = issuer = x509.Name(
-            [
-                x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-            ]
-        )
-
-        cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
-            .public_key(private_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.utcnow())
-            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
-            .add_extension(
-                x509.SubjectAlternativeName(
-                    [
-                        x509.DNSName("localhost"),
-                    ]
-                ),
-                critical=False,
-            )
-            .sign(private_key, hashes.SHA256())
-        )
-
-        return cls(cert, private_key)
+        cert, pem  = instance.loadOrCreateCertificate()
+        
+        # Set the certificate and private key on the instance
+        instance.cert = cert
+        instance.private_key = private_key
+        
+        return instance
 
     @property
     def fingerprint(self) -> str:
@@ -208,7 +195,111 @@ class WebRTCCertificate:
             raise ValueError("Invalid private key PEM footer")
 
         return True
+    
+    def _getCertRenewalTime(self) -> int:
+        # Calculate the renewal time in milliseconds until certificate expiry minus the renewal threshold.
+        renew_at = self.cert.not_valid_after - datetime.timedelta(milliseconds=DEFAULT_CERTIFICATE_RENEWAL_THRESHOLD)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        renewal_time_ms = int((renew_at - now).total_seconds() * 1000)
+        return renewal_time_ms if renewal_time_ms > 0 else 100
+        
+            
+    def loadOrCreatePrivateKey(self, forceRenew = False) -> ec.EllipticCurvePrivateKey:
+        """
+        Load the existing private key if available, or generate a new one.
 
+        Args:
+            forceRenew (bool): If True, always generate a new private key even if one already exists.
+                            If False, return the existing private key if present.
+
+        Returns:
+            ec.EllipticCurvePrivateKey: The loaded or newly generated elliptic curve private key.
+        """
+        # If private key is already present and not enforced to create new
+        if self.private_key != None and not forceRenew:
+            return self.private_key
+
+        # Create a new private key
+        self.private_key = ec.generate_private_key(ec.SECP256R1()) 
+        return self.private_key
+    
+    def loadOrCreateCertificate(
+        self,
+        private_key: ec.EllipticCurvePrivateKey | None,
+        forceRenew: bool = False
+    ) -> tuple[x509.Certificate, str, str]:
+        """
+        Generate or load a self-signed WebRTC certificate for libp2p direct connections.
+
+        If a valid certificate already exists and is not expired, and the public key matches,
+        it will be reused unless forceRenew is True. Otherwise, a new certificate is generated.
+
+        Args:
+            private_key (ec.EllipticCurvePrivateKey | None): The private key to use for signing the certificate.
+                If None, uses self.private_key.
+            forceRenew (bool): If True, always generate a new certificate even if the current one is valid.
+
+        Returns:
+            tuple[x509.Certificate, str, str]: The certificate object, its PEM-encoded string, and the base64url-encoded SHA-256 hash of the certificate.
+
+        Raises:
+            Exception: If no private key is available to issue a certificate.
+        """
+        if private_key is None:
+            if self.private_key is None:
+                raise Exception("Can't issue certificate without private key")
+            private_key = self.private_key
+
+        if self.cert is not None and not forceRenew:
+            # Check if certificate has to be renewed
+            renewal_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(milliseconds=DEFAULT_CERTIFICATE_RENEWAL_THRESHOLD)
+            isExpired = renewal_time >= self.cert.not_valid_after
+            if not isExpired:
+                # Check if the certificate's public key matches with provided key pair
+                if self.cert.public_key().public_numbers() == private_key.public_key().public_numbers():
+                    cert_pem, _ = self.to_pem()
+                    cert_hash = self.certhash()
+                    return (self.cert, cert_pem, cert_hash)
+
+        common_name: str = "libp2p-webrtc"
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+            ]
+        )
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+            .not_valid_after(
+                datetime.datetime.now(datetime.timezone.utc) +
+                datetime.timedelta(milliseconds=DEFAULT_CERTIFICATE_LIFESPAN)
+            )
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("localhost"),
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
+        self.cert = cert
+        pem = cert.public_bytes(Encoding.PEM).decode('utf-8')
+        cert_pem, _ = self.to_pem()
+        cert_hash = self.certhash()
+        return (cert, cert_pem, cert_hash)
+        
+    async def renewal_loop(self):
+        while True:
+            await trio.sleep(self._getCertRenewalTime)
+            logger.Debug("Renewing TLS certificate")
+            await self.loadOrCreateCertificate(self.private_key, True)
 
 def create_webrtc_multiaddr(
     ip: str, peer_id: ID, certhash: str, direct: bool = False

@@ -17,7 +17,7 @@ from libp2p.custom_types import THandler, TProtocol
 from libp2p.host.basic_host import IHost
 from libp2p.transport.exceptions import OpenConnectionError
 
-from ..constants import (
+from ...constants import (
     DEFAULT_DIAL_TIMEOUT,
     DEFAULT_ICE_SERVERS,
     SIGNALING_PROTOCOL,

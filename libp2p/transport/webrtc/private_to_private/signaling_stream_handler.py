@@ -15,7 +15,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 
 from ..connection import WebRTCRawConnection
-from ..constants import WebRTCError
+from ...constants import WebRTCError
 from .pb import Message
 
 logger = logging.getLogger("webrtc.private.signaling_stream_handler")
