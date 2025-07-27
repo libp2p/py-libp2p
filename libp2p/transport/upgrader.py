@@ -43,9 +43,37 @@ class TransportUpgrader:
         self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
         self.muxer_multistream = MuxerMultistream(muxer_transports_by_protocol)
 
-    def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
-        """Upgrade multiaddr listeners to libp2p-transport listeners."""
-        # TODO: Figure out what to do with this function.
+    def upgrade_listener(self, transport: ITransport, listener: IListener) -> IListener:
+        """
+        Wrap the listener's handler so that all incoming connections are upgraded (secured, then muxed)
+        before being passed to the original handler.
+        """
+        # This assumes the listener has a handler attribute (as in TCPListener)
+        original_handler = getattr(listener, "handler", None)
+        if original_handler is None:
+            raise ValueError("Listener does not have a handler attribute to wrap.")
+
+        async def upgraded_handler(raw_conn):
+            # Upgrade to secure connection
+            try:
+                secured_conn = await self.upgrade_security(raw_conn, is_initiator=False)
+            except Exception as e:
+                await raw_conn.close()
+                raise
+            # Get remote peer id from secure connection
+            peer_id = secured_conn.get_remote_peer()
+            # Upgrade to muxed connection
+            try:
+                muxed_conn = await self.upgrade_connection(secured_conn, peer_id)
+            except Exception as e:
+                await secured_conn.close()
+                raise
+            # Pass the muxed connection to the original handler
+            await original_handler(muxed_conn)
+
+        # Replace the handler on the listener
+        setattr(listener, "handler", upgraded_handler)
+        return listener
 
     async def upgrade_security(
         self,
