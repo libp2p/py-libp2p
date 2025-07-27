@@ -20,6 +20,7 @@ from libp2p.utils.logging import (
     log_queue,
     setup_logging,
 )
+from libp2p.utils.paths import get_log_file_path
 
 
 def _reset_logging():
@@ -190,10 +191,7 @@ async def test_default_log_file(clean_env):
         mock_datetime.now.return_value.strftime.return_value = "20240101_120000"
 
         # Remove the log file if it exists
-        if os.name == "nt":  # Windows
-            log_file = Path("C:/Windows/Temp/20240101_120000_py-libp2p.log")
-        else:  # Unix-like
-            log_file = Path("/tmp/20240101_120000_py-libp2p.log")
+        log_file = get_log_file_path("20240101_120000")
         log_file.unlink(missing_ok=True)
 
         setup_logging()
