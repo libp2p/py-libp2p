@@ -101,6 +101,17 @@ class Multiselect(IMultiselectMuxer):
         except trio.TooSlowError:
             raise MultiselectError("handshake read timeout")
 
+    def get_protocols(self) -> tuple[TProtocol, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names, excluding None values.
+        """
+        return tuple(p for p in self.handlers.keys() if p is not None)
+
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """
         Perform handshake to agree on multiselect protocol.

@@ -57,19 +57,43 @@ def _remote_address_to_multiaddr(
 def _mk_identify_protobuf(
     host: IHost, observed_multiaddr: Multiaddr | None
 ) -> Identify:
-    public_key = host.get_public_key()
-    laddrs = host.get_addrs()
-    protocols = host.get_mux().get_protocols()
+    """
+    Create an Identify protobuf message.
 
-    observed_addr = observed_multiaddr.to_bytes() if observed_multiaddr else b""
-    return Identify(
-        protocol_version=PROTOCOL_VERSION,
-        agent_version=AGENT_VERSION,
-        public_key=public_key.serialize(),
-        listen_addrs=map(_multiaddr_to_bytes, laddrs),
-        observed_addr=observed_addr,
-        protocols=protocols,
-    )
+    Parameters
+    ----------
+    host : IHost
+        The host to create the identify message for.
+    observed_multiaddr : Multiaddr | None
+        The observed multiaddr of the peer, if any.
+
+    Returns
+    -------
+    Identify
+        The identify protobuf message.
+
+    Raises
+    ------
+    RuntimeError
+        If required host information is not available.
+    """
+    try:
+        public_key = host.get_public_key()
+        laddrs = host.get_addrs()
+        mux = host.get_mux()
+        protocols = tuple(str(p) for p in mux.get_protocols())  # get_protocols() now excludes None
+
+        observed_addr = observed_multiaddr.to_bytes() if observed_multiaddr else b""
+        return Identify(
+            protocol_version=PROTOCOL_VERSION,
+            agent_version=AGENT_VERSION,
+            public_key=public_key.serialize(),
+            listen_addrs=map(_multiaddr_to_bytes, laddrs),
+            observed_addr=observed_addr,
+            protocols=protocols,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to create identify protobuf: {str(e)}")
 
 
 def identify_handler_for(host: IHost) -> StreamHandlerFn:
