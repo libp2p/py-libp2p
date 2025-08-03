@@ -107,7 +107,8 @@ async def test_dcutr_through_relay_connection():
                         peer_id for peer_id in peer2.get_network().connections.keys()
                     ]
 
-                    # Now test DCUtR: peer1 opens a DCUtR stream to peer2 through the relay
+                    # Now test DCUtR: peer1 opens a DCUtR stream to peer2 through the
+                    # relay
                     # This should trigger the DCUtR protocol for hole punching
                     try:
                         # Create a circuit relay multiaddr for peer2 through the relay
@@ -145,8 +146,8 @@ async def test_dcutr_through_relay_connection():
 
                     except Exception as e:
                         logger.info(
-                            "Expected error when trying to open DCUtR stream through relay: "
-                            "%s",
+                            "Expected error when trying to open DCUtR stream through "
+                            "relay: %s",
                             e,
                         )
                         # This might fail because we need more setup, but the important
@@ -275,8 +276,8 @@ async def test_dcutr_relay_to_direct_upgrade():
 
                     except Exception as e:
                         logger.info(
-                            "Expected error when trying to open DCUtR stream through relay: "
-                            "%s",
+                            "Expected error when trying to open DCUtR stream through "
+                            "relay: %s",
                             e,
                         )
 
@@ -334,11 +335,14 @@ async def test_dcutr_hole_punch_through_relay():
                     has_direct = await dcutr1._have_direct_connection(peer2.get_id())
                     assert not has_direct, "Peers should not have a direct connection"
 
-                    # Try to initiate a hole punch (this should work through the relay connection)
-                    # In a real scenario, this would be called after establishing a relay connection
+                    # Try to initiate a hole punch (this should work through the relay
+                    # connection)
+                    # In a real scenario, this would be called after establishing a
+                    # relay connection
                     result = await dcutr1.initiate_hole_punch(peer2.get_id())
 
-                    # This should attempt hole punching but likely fail due to no public addresses
+                    # This should attempt hole punching but likely fail due to no public
+                    # addresses
                     # The important thing is that the DCUtR protocol logic is executed
                     logger.info(
                         "Hole punch result: %s",

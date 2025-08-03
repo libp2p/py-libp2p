@@ -82,13 +82,13 @@ async def test_dcutr_error_handling(monkeypatch):
         class TimeoutStream(INetStream):
             def __init__(self):
                 self._protocol = None
-                self._muxed_conn = MagicMock(peer_id=ID(b"peer"))
+                self.muxed_conn = MagicMock(peer_id=ID(b"peer"))
 
-            async def read(self, *args, **kwargs):
+            async def read(self, n: int | None = None) -> bytes:
                 await trio.sleep(0.2)
                 raise trio.TooSlowError()
 
-            async def write(self, *args, **kwargs):
+            async def write(self, data: bytes) -> None:
                 return None
 
             async def close(self, *args, **kwargs):
@@ -105,10 +105,6 @@ async def test_dcutr_error_handling(monkeypatch):
 
             def get_remote_address(self):
                 return ("127.0.0.1", 1234)
-
-            @property
-            def muxed_conn(self):
-                return self._muxed_conn
 
         # Should not raise, just log and close
         await dcutr._handle_dcutr_stream(TimeoutStream())
@@ -117,12 +113,12 @@ async def test_dcutr_error_handling(monkeypatch):
         class MalformedStream(INetStream):
             def __init__(self):
                 self._protocol = None
-                self._muxed_conn = MagicMock(peer_id=ID(b"peer"))
+                self.muxed_conn = MagicMock(peer_id=ID(b"peer"))
 
-            async def read(self, *args, **kwargs):
+            async def read(self, n: int | None = None) -> bytes:
                 return b"not-a-protobuf"
 
-            async def write(self, *args, **kwargs):
+            async def write(self, data: bytes) -> None:
                 return None
 
             async def close(self, *args, **kwargs):
@@ -139,10 +135,6 @@ async def test_dcutr_error_handling(monkeypatch):
 
             def get_remote_address(self):
                 return ("127.0.0.1", 1234)
-
-            @property
-            def muxed_conn(self):
-                return self._muxed_conn
 
         await dcutr._handle_dcutr_stream(MalformedStream())
 

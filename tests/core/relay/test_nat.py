@@ -1,17 +1,17 @@
 """Tests for NAT traversal utilities."""
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
+import pytest
 from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.nat import (
+    ReachabilityChecker,
+    extract_ip_from_multiaddr,
     ip_to_int,
     is_ip_in_range,
     is_private_ip,
-    extract_ip_from_multiaddr,
-    ReachabilityChecker,
 )
 
 
@@ -41,7 +41,7 @@ def test_is_ip_in_range():
     # Test within range
     assert is_ip_in_range("192.168.1.5", "192.168.1.1", "192.168.1.10") is True
     assert is_ip_in_range("10.0.0.5", "10.0.0.0", "10.0.0.255") is True
-    
+
     # Test outside range
     assert is_ip_in_range("192.168.2.5", "192.168.1.1", "192.168.1.10") is False
     assert is_ip_in_range("8.8.8.8", "10.0.0.0", "10.0.0.255") is False
@@ -97,7 +97,7 @@ def test_reachability_checker_init():
     """Test ReachabilityChecker initialization."""
     mock_host = MagicMock()
     checker = ReachabilityChecker(mock_host)
-    
+
     assert checker.host == mock_host
     assert checker._peer_reachability == {}
     assert checker._known_public_peers == set()
@@ -294,4 +294,4 @@ async def test_check_peer_reachability_multiple_connections():
     result = await checker.check_peer_reachability(peer_id)
 
     assert result is True
-    assert checker._peer_reachability[peer_id] is True 
+    assert checker._peer_reachability[peer_id] is True
