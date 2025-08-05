@@ -17,9 +17,11 @@ from libp2p.transport.quic.exceptions import (
     QUICConnectionClosedError,
     QUICConnectionError,
     QUICConnectionTimeoutError,
+    QUICPeerVerificationError,
     QUICStreamLimitError,
     QUICStreamTimeoutError,
 )
+from libp2p.transport.quic.security import QUICTLSConfigManager
 from libp2p.transport.quic.stream import QUICStream, StreamDirection
 
 
@@ -499,3 +501,43 @@ class TestQUICConnection:
 
         mock_resource_scope.release_memory(2000)  # Should not go negative
         assert mock_resource_scope.memory_reserved == 0
+
+
+@pytest.mark.trio
+async def test_invalid_certificate_verification():
+    key_pair1 = create_new_key_pair()
+    key_pair2 = create_new_key_pair()
+
+    peer_id1 = ID.from_pubkey(key_pair1.public_key)
+    peer_id2 = ID.from_pubkey(key_pair2.public_key)
+
+    manager = QUICTLSConfigManager(
+        libp2p_private_key=key_pair1.private_key, peer_id=peer_id1
+    )
+
+    # Match the certificate against a different peer_id
+    with pytest.raises(QUICPeerVerificationError, match="Peer ID mismatch"):
+        manager.verify_peer_identity(manager.tls_config.certificate, peer_id2)
+
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    # --- Corrupt the certificate by tampering the DER bytes ---
+    cert_bytes = manager.tls_config.certificate.public_bytes(Encoding.DER)
+    corrupted_bytes = bytearray(cert_bytes)
+
+    # Flip some random bytes in the middle of the certificate
+    corrupted_bytes[len(corrupted_bytes) // 2] ^= 0xFF
+
+    from cryptography import x509
+    from cryptography.hazmat.backends import default_backend
+
+    # This will still parse (structurally valid), but the signature
+    # or fingerprint will break
+    corrupted_cert = x509.load_der_x509_certificate(
+        bytes(corrupted_bytes), backend=default_backend()
+    )
+
+    with pytest.raises(
+        QUICPeerVerificationError, match="Certificate verification failed"
+    ):
+        manager.verify_peer_identity(corrupted_cert, peer_id1)
