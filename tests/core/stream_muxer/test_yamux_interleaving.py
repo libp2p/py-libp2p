@@ -21,6 +21,9 @@ from libp2p.stream_muxer.yamux.yamux import (
     YamuxStream,
 )
 
+# Configure logger for this test module
+logger = logging.getLogger(__name__)
+
 
 class TrioStreamAdapter(IRawConnection):
     """Adapter to make trio memory streams work with libp2p."""
@@ -31,21 +34,26 @@ class TrioStreamAdapter(IRawConnection):
         self.is_initiator = is_initiator
 
     async def write(self, data: bytes) -> None:
-        logging.debug(f"Attempting to write {len(data)} bytes")
+        logger.debug(f"Attempting to write {len(data)} bytes")
         with trio.move_on_after(2):
             await self.send_stream.send_all(data)
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n <= 0:
             raise ValueError("Reading unbounded or zero bytes not supported")
-        logging.debug(f"Attempting to read {n} bytes")
+        logger.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
             data = await self.receive_stream.receive_some(n)
-            logging.debug(f"Read {len(data)} bytes")
+            logger.debug(f"Read {len(data)} bytes")
             return data
+        # Raise IncompleteReadError on timeout to simulate connection closed
+        logger.debug("Read timed out after 2 seconds, raising IncompleteReadError")
+        from libp2p.io.exceptions import IncompleteReadError
+
+        raise IncompleteReadError({"requested_count": n, "received_count": 0})
 
     async def close(self) -> None:
-        logging.debug("Closing stream")
+        logger.debug("Closing stream")
         await self.send_stream.aclose()
         await self.receive_stream.aclose()
 
@@ -67,7 +75,7 @@ def peer_id(key_pair):
 @pytest.fixture
 async def secure_conn_pair(key_pair, peer_id):
     """Create a pair of secure connections for testing."""
-    logging.debug("Setting up secure_conn_pair")
+    logger.debug("Setting up secure_conn_pair")
     client_send, server_receive = memory_stream_pair()
     server_send, client_receive = memory_stream_pair()
 
@@ -79,13 +87,13 @@ async def secure_conn_pair(key_pair, peer_id):
     async def run_outbound(nursery_results):
         with trio.move_on_after(5):
             client_conn = await insecure_transport.secure_outbound(client_rw, peer_id)
-            logging.debug("Outbound handshake complete")
+            logger.debug("Outbound handshake complete")
             nursery_results["client"] = client_conn
 
     async def run_inbound(nursery_results):
         with trio.move_on_after(5):
             server_conn = await insecure_transport.secure_inbound(server_rw)
-            logging.debug("Inbound handshake complete")
+            logger.debug("Inbound handshake complete")
             nursery_results["server"] = server_conn
 
     nursery_results = {}
@@ -100,14 +108,14 @@ async def secure_conn_pair(key_pair, peer_id):
     if client_conn is None or server_conn is None:
         raise RuntimeError("Handshake failed: client_conn or server_conn is None")
 
-    logging.debug("secure_conn_pair setup complete")
+    logger.debug("secure_conn_pair setup complete")
     return client_conn, server_conn
 
 
 @pytest.fixture
 async def yamux_pair(secure_conn_pair, peer_id):
     """Create a pair of Yamux multiplexers for testing."""
-    logging.debug("Setting up yamux_pair")
+    logger.debug("Setting up yamux_pair")
     client_conn, server_conn = secure_conn_pair
     client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
     server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
@@ -116,9 +124,9 @@ async def yamux_pair(secure_conn_pair, peer_id):
             nursery.start_soon(client_yamux.start)
             nursery.start_soon(server_yamux.start)
             await trio.sleep(0.1)
-            logging.debug("yamux_pair started")
+            logger.debug("yamux_pair started")
         yield client_yamux, server_yamux
-    logging.debug("yamux_pair cleanup")
+    logger.debug("yamux_pair cleanup")
 
 
 @pytest.mark.trio
