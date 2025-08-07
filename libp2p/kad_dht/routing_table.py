@@ -591,6 +591,20 @@ class RoutingTable:
             stale_peers.extend(bucket.get_stale_peers(stale_threshold_seconds))
         return stale_peers
 
+    def get_peer_infos(self) -> list[PeerInfo]:
+        """
+        Get all PeerInfo objects in the routing table.
+
+        Returns
+        -------
+            List[PeerInfo]: List of all PeerInfo objects
+
+        """
+        peer_infos = []
+        for bucket in self.buckets:
+            peer_infos.extend(bucket.peer_infos())
+        return peer_infos
+
     def cleanup_routing_table(self) -> None:
         """
         Cleanup the routing table by removing all data.
