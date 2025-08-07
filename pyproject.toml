@@ -11,7 +11,7 @@ requires-python = ">=3.10, <4.0"
 license = { text = "MIT AND Apache-2.0" }
 keywords = ["libp2p", "p2p"]
 maintainers = [
-    { name = "Paul Robinson", email = "pacrob@protonmail.com" },
+    { name = "pacrob", email = "pacrob@protonmail.com" },
     { name = "Manu Sheel Gupta", email = "manu@seeta.in" },
     { name = "Dave Grantham", email = "dave@aviation.community" },
 ]
