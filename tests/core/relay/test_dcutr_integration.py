@@ -349,6 +349,11 @@ async def test_dcutr_hole_punch_through_relay():
                         result,
                     )
 
+                    assert result is not None, "Hole punch result should not be None"
+                    assert isinstance(result, bool), (
+                        "Hole punch result should be a boolean"
+                    )
+
                     # Wait a bit more
                     await trio.sleep(0.1)
 
