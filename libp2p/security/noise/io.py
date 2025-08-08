@@ -41,7 +41,8 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     read_writer: NoisePacketReadWriter
     noise_state: NoiseState
 
-    # FIXME: This prefix is added in msg#3 in Go. Check whether it's a desired behavior.
+    # NOTE: This prefix is added in msg#3 in Go.
+    #       Support in py-libp2p is available but not used
     prefix: bytes = b"\x00" * 32
 
     def __init__(self, conn: IRawConnection, noise_state: NoiseState) -> None:
