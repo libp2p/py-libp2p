@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 import multiaddr
 import trio
@@ -55,8 +56,8 @@ async def send_ping(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    host = new_host(listen_addrs=[listen_addr])
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    host = new_host()
 
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
@@ -106,7 +107,19 @@ def main() -> None:
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="enable verbose logging"
+    )
+
     args = parser.parse_args()
+
+    if args.verbose:
+        # Enable even more detailed logging
+        logging.getLogger("libp2p").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.network").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.transport").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.security").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.stream_muxer").setLevel(logging.DEBUG)
 
     try:
         trio.run(run, *(args.port, args.destination))
