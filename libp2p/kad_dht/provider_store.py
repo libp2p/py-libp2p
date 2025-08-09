@@ -22,12 +22,14 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 
 from .common import (
     ALPHA,
@@ -240,10 +242,21 @@ class ProviderStore:
             message.type = Message.MessageType.ADD_PROVIDER
             message.key = key
 
+            # Create sender's signed-peer-record
+            envelope = create_signed_peer_record(
+                self.host.get_id(),
+                self.host.get_addrs(),
+                self.host.get_private_key(),
+            )
+            message.senderRecord = envelope.marshal_envelope()
+
             # Add our provider info
             provider = message.providerPeers.add()
             provider.id = self.local_peer_id.to_bytes()
             provider.addrs.extend(addrs)
+
+            # Add the provider's signed-peer-record
+            provider.signedRecord = envelope.marshal_envelope()
 
             # Serialize and send the message
             proto_bytes = message.SerializeToString()
@@ -276,9 +289,27 @@ class ProviderStore:
             response = Message()
             response.ParseFromString(response_bytes)
 
-            # Check response type
-            response.type == Message.MessageType.ADD_PROVIDER
-            if response.type:
+            if response.type == Message.MessageType.ADD_PROVIDER:
+                # Consume the sender's signed-peer-record if sent
+                if response.HasField("senderRecord"):
+                    try:
+                        # Convert the signed-peer-record(Envelope) from
+                        # protobuf bytes
+                        envelope, _ = consume_envelope(
+                            response.senderRecord, "libp2p-peer-record"
+                        )
+                        # Use the defualt TTL of 2 hours (7200 seconds)
+                        if not self.host.get_peerstore().consume_peer_record(
+                            envelope, 7200
+                        ):
+                            logger.error(
+                                "Updating the Certified-Addr-Book was unsuccessful"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            "Error updating the certified addr book for peer: %s", e
+                        )
+
                 result = True
 
         except Exception as e:
@@ -380,6 +411,14 @@ class ProviderStore:
                 message.type = Message.MessageType.GET_PROVIDERS
                 message.key = key
 
+                # Create sender's signed-peer-record
+                envelope = create_signed_peer_record(
+                    self.host.get_id(),
+                    self.host.get_addrs(),
+                    self.host.get_private_key(),
+                )
+                message.senderRecord = envelope.marshal_envelope()
+
                 # Serialize and send the message
                 proto_bytes = message.SerializeToString()
                 await stream.write(varint.encode(len(proto_bytes)))
@@ -414,6 +453,26 @@ class ProviderStore:
                 if response.type != Message.MessageType.GET_PROVIDERS:
                     return []
 
+                # Consume the sender's signed-peer-record if sent
+                if response.HasField("senderRecord"):
+                    try:
+                        # Convert the signed-peer-record(Envelope) from
+                        # protobuf bytes
+                        envelope, _ = consume_envelope(
+                            response.senderRecord, "libp2p-peer-record"
+                        )
+                        # Use the defualt TTL of 2 hours (7200 seconds)
+                        if not self.host.get_peerstore().consume_peer_record(
+                            envelope, 7200
+                        ):
+                            logger.error(
+                                "Updating the Certified-Addr-Book was unsuccessful"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            "Error updating the certified addr book for peer: %s", e
+                        )
+
                 # Extract provider information
                 providers = []
                 for provider_proto in response.providerPeers:
@@ -431,6 +490,30 @@ class ProviderStore:
 
                         # Create PeerInfo and add to result
                         providers.append(PeerInfo(provider_id, addrs))
+
+                        # Consume the provider's signed-peer-record if sent
+                        if provider_proto.HasField("signedRecord"):
+                            try:
+                                # Convert the signed-peer-record(Envelope) from
+                                # protobuf bytes
+                                envelope, _ = consume_envelope(
+                                    provider_proto.signedRecord,
+                                    "libp2p-peer-record",
+                                )
+                                # Use the default TTL of 2 hours (7200 seconds)
+                                if not self.host.get_peerstore().consume_peer_record(  # noqa
+                                    envelope, 7200
+                                ):
+                                    logger.error(
+                                        "Failed to update the Certified-Addr-Book"
+                                    )
+                            except Exception as e:
+                                logger.error(
+                                    "Error updating the certified-addr-book for peer %s: %s",  # noqa
+                                    provider_id,
+                                    e,
+                                )
+
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")
 
