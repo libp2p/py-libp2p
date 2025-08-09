@@ -25,13 +25,13 @@ from libp2p.transport.webrtc.async_bridge import (
 from libp2p.transport.webrtc.connection import (
     WebRTCRawConnection,
 )
-from libp2p.transport.constants import (
+from libp2p.transport.webrtc.constants import (
     CODEC_CERTHASH,
     CODEC_WEBRTC,
     CODEC_WEBRTC_DIRECT,
     SIGNALING_PROTOCOL,
 )
-from libp2p.transport.webrtc.gen_certificate import WebRTCCertificate
+from libp2p.transport.webrtc.private_to_public.gen_certificate import WebRTCCertificate
 
 logger = logging.getLogger("libp2p.transport.webrtc.js_interop_test")
 

@@ -17,7 +17,7 @@ from libp2p.peer.id import ID
 
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
-from ...constants import (
+from ..constants import (
     DEFAULT_DIAL_TIMEOUT,
     SIGNALING_PROTOCOL,
     SDPHandshakeError,

@@ -41,7 +41,6 @@ logger = logging.getLogger("webrtc")
 logging.basicConfig(level=logging.INFO)
 SIGNAL_PROTOCOL: TProtocol = TProtocol("/libp2p/webrtc/signal/1.0.0")
 
-
 class WebRTCListener(IListener):
     """
     WebRTC Listener Implementation.

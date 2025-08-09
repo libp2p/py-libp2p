@@ -8,7 +8,7 @@ implementations.
 import sys
 from .private_to_private.transport import WebRTCTransport
 from .private_to_public.transport import WebRTCDirectTransport
-from ..constants import (
+from .constants import (
     DEFAULT_ICE_SERVERS,
     SIGNALING_PROTOCOL,
     MUXER_PROTOCOL,

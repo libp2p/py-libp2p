@@ -11,15 +11,15 @@ from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.transport.webrtc.async_bridge import TrioSafeWebRTCOperations
 from libp2p.transport.webrtc.connection import WebRTCRawConnection
-from libp2p.transport.constants import (
+from libp2p.transport.webrtc.constants import (
     SIGNALING_PROTOCOL,
-)
-from libp2p.transport.webrtc.gen_certificate import (
-    WebRTCCertificate,
-    create_webrtc_direct_multiaddr,
 )
 from libp2p.transport.webrtc.private_to_private.transport import (
     WebRTCTransport,
+)
+from libp2p.transport.webrtc.private_to_public.gen_certificate import (
+    WebRTCCertificate,
+    create_webrtc_direct_multiaddr,
 )
 from libp2p.transport.webrtc.private_to_public.transport import (
     WebRTCDirectTransport,

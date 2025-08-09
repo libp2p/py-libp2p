@@ -290,7 +290,6 @@ class WebRTCCertificate:
             .sign(private_key, hashes.SHA256())
         )
         self.cert = cert
-        pem = cert.public_bytes(Encoding.PEM).decode('utf-8')
         cert_pem, _ = self.to_pem()
         cert_hash = self.certhash()
         return (cert, cert_pem, cert_hash)

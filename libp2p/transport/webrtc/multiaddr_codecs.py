@@ -33,10 +33,9 @@ def webrtc_direct_decode(b: ByteString) -> str:
     return ""
 
 
-def certhash_encode(s: str) -> ByteString:
-    """Encode certificate hash component."""
+def certhash_decode(s: str) -> Tuple[int, bytes]:
     if not s:
-        return b""
+        raise ValueError("Empty certhash string.")
 
     # Remove multibase prefix if present
     if s.startswith("uEi"):
@@ -46,16 +45,29 @@ def certhash_encode(s: str) -> ByteString:
 
     # Decode base64url encoded hash
     try:
-        # Ensure s is bytes for base64 decoding
-        s_bytes = s.encode("ascii") if isinstance(s, str) else s
+        s_bytes = s.encode("ascii")
         # Add padding if needed
         padding = 4 - (len(s_bytes) % 4)
         if padding != 4:
             s_bytes += b"=" * padding
-        return base64.urlsafe_b64decode(s_bytes)
-    except Exception:
-        # Fallback to raw bytes
-        return s.encode("utf-8")
+        raw_bytes = base64.urlsafe_b64decode(s_bytes)
+    except Exception as e:
+        raise ValueError("Invalid base64url certhash") from e
+
+    if len(raw_bytes) < 2:
+        raise ValueError("Decoded certhash is too short to contain multihash header")
+
+    # Multihash format: <code><length><digest>
+    code = raw_bytes[0]
+    length = raw_bytes[1]
+    digest = raw_bytes[2:]
+
+    if len(digest) != length:
+        raise ValueError(
+            f"Digest length mismatch: expected {length}, got {len(digest)}"
+        )
+
+    return code, digest
 
 
 def certhash_decode(b: ByteString) -> str:
@@ -73,6 +85,6 @@ __all__ = [
     "webrtc_decode",
     "webrtc_direct_encode",
     "webrtc_direct_decode",
-    "certhash_encode",
-    "certhash_decode",
+    # "certhash_encode",
+    # "certhash_decode",
 ]

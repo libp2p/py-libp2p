@@ -24,7 +24,7 @@ from libp2p.peer.id import (
     ID,
 )
 
-from ..constants import SIGNALING_PROTOCOL
+from .constants import SIGNALING_PROTOCOL
 
 logger = logging.getLogger("libp2p.transport.webrtc.signal")
 

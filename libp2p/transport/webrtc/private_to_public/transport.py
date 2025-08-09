@@ -16,99 +16,24 @@ from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..connection import WebRTCRawConnection
-from ...constants import (
+from ..constants import (
     DEFAULT_HANDSHAKE_TIMEOUT,
     DEFAULT_ICE_SERVERS,
     WebRTCError,
 )
-from ..gen_certificate import (
+from .util import generate_ufrag
+from .gen_certificate import (
     WebRTCCertificate,
-    create_webrtc_direct_multiaddr,
     parse_webrtc_maddr,
 )
-from ..udp_hole_punching import UDPHolePuncher
-from ..util import (
+from .connect import connect
+from .direct_rtc_connection import DirectPeerConnection
+from .listener import WebRTCDirectListener
+from .util import (
     SDPMunger,
-    WebRTCDirectDiscovery,
 )
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
-
-
-class WebRTCDirectListener(IListener):
-    """
-    Private-to-public WebRTC-Direct transport implementation.
-    Allows direct peer-to-peer WebRTC connections without signaling servers,
-    using UDP hole punching and mDNS/libp2p pubsub for peer discovery.
-    """
-
-    def __init__(self, transport: Any, handler: THandler) -> None:
-        self.transport = transport
-        self.handler = handler
-        self._is_listening = False
-        self.cert_mgr: WebRTCCertificate | None = None
-        self.hole_puncher: UDPHolePuncher | None = None
-        self.discovery: WebRTCDirectDiscovery | None = None
-        self._listen_addrs: list[Multiaddr] = []
-
-    async def listen(self, maddr: Any, nursery: trio.Nursery) -> bool:
-        """Start listening for incoming connections."""
-        if self._is_listening:
-            return True
-
-        try:
-            # Generate certificate for this listener
-            self.cert_mgr = WebRTCCertificate.generate()
-
-            # Initialize UDP hole puncher
-            self.hole_puncher = UDPHolePuncher()
-
-            # Initialize peer discovery
-            if self.transport.host:
-                self.discovery = WebRTCDirectDiscovery(
-                    self.transport.host, self.cert_mgr
-                )
-                await self.discovery.start_discovery()
-
-            # Create listening multiaddr with certificate hash
-            if hasattr(maddr, "value_for_protocol"):
-                ip = maddr.value_for_protocol("ip4") or maddr.value_for_protocol("ip6")
-                port = maddr.value_for_protocol("udp") or 0
-                peer_id = self.transport.host.get_id() if self.transport.host else None
-
-                if ip and peer_id:
-                    listen_addr = create_webrtc_direct_multiaddr(ip, port, peer_id)
-                    self._listen_addrs.append(listen_addr)
-
-            self._is_listening = True
-            logger.info("WebRTC-Direct listener started")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to start WebRTC-Direct listener: {e}")
-            return False
-
-    async def close(self) -> None:
-        """Close the listener."""
-        self._is_listening = False
-
-        if self.discovery:
-            # Stop discovery
-            pass  # TODO: Implement discovery cleanup
-
-        if self.hole_puncher:
-            # Cleanup hole puncher
-            pass  # TODO: Implement hole puncher cleanup
-
-        logger.info("WebRTC-Direct listener closed")
-
-    def get_addrs(self) -> tuple[Multiaddr, ...]:
-        """Get listener addresses."""
-        return tuple(self._listen_addrs)
-
-    def is_listening(self) -> bool:
-        """Check if listener is active."""
-        return self._is_listening
 
 
 class WebRTCDirectTransport(ITransport):
@@ -116,15 +41,13 @@ class WebRTCDirectTransport(ITransport):
     Provides direct peer-to-peer WebRTC connections without signaling servers.
     """
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(self) -> None:
         """Initialize WebRTC-Direct transport."""
-        self.config = config or {}
-        self.ice_servers = self.config.get("ice_servers", DEFAULT_ICE_SERVERS)
+        self.ice_servers = DEFAULT_ICE_SERVERS
         self.active_connections: dict[str, IRawConnection] = {}
         self.pending_connections: dict[str, RTCPeerConnection] = {}
         self._started = False
         self.host: IHost | None = None
-        self.hole_puncher: UDPHolePuncher | None = None
         self.connection_events: dict[str, trio.Event] = {}
         self.cert_mgr: WebRTCCertificate | None = None
         logger.info("WebRTC-Direct Transport initialized")
@@ -139,14 +62,10 @@ class WebRTCDirectTransport(ITransport):
 
         # Generate certificate for this transport
         self.cert_mgr = WebRTCCertificate.generate()
-        
+
         with trio.CancelScope() as scope:
             self.cert_mgr.cancel_scope = scope
             nursery.start_soon(self.cert_mgr.renewal_loop)
-        
-        
-        # Initialize UDP hole puncher
-        # self.hole_puncher = UDPHolePuncher()
 
         self._started = True
         logger.info("WebRTC-Direct Transport started")
@@ -162,10 +81,6 @@ class WebRTCDirectTransport(ITransport):
 
         if self.cert_mgr and self.cert_mgr.cancel_scope:
             self.cert_mgr.cancel_scope.cancel()
-        # Clean up hole puncher
-        # if self.hole_puncher:
-        #     # TODO: Implement proper cleanup
-        #     pass
 
         self._started = False
         logger.info("WebRTC-Direct Transport stopped")
@@ -203,84 +118,26 @@ class WebRTCDirectTransport(ITransport):
 
             logger.info(f"Dialing WebRTC-Direct to {peer_id} at {ip}:{port}")
 
-            # Perform UDP hole punching
-            if self.hole_puncher is None:
-                raise WebRTCError("hole_puncher is not initialized")
-
-            local_ip, local_port = await self.hole_puncher.punch_hole(ip, port)
-
-            # Create peer connection without STUN/TURN
-            config = RTCConfiguration(iceServers=[])
-
+            ufrag = generate_ufrag()
+            
             async with open_loop():
-                pc = await aio_as_trio(RTCPeerConnection(config))
-
-                # Store for cleanup
                 conn_id = str(peer_id)
-                self.pending_connections[conn_id] = pc
+                pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+                direct_peer_connection = await DirectPeerConnection.create_dialer_rtc_peer_connection(role="client", ufrag= ufrag, rtc_configuration=pc)
+                
+                try:
+                    connection = await connect(role="client", ufrag=ufrag, peer_connection=direct_peer_connection)
+                    self.active_connections[conn_id] = connection
+                    self.pending_connections.pop(conn_id, None)
+                    self.connection_events.pop(conn_id, None)
 
-                # Create data channel
-                channel = await aio_as_trio(
-                    pc.createDataChannel("libp2p-webrtc-direct")
-                )
-
-                # Setup channel event handlers
-                channel_ready = trio.Event()
-                self.connection_events[conn_id] = channel_ready
-
-                def on_open() -> None:
-                    logger.info(f"WebRTC-Direct channel opened to {peer_id}")
-                    channel_ready.set()
-
-                def on_error(error: Any) -> None:
-                    logger.error(f"WebRTC-Direct channel error: {error}")
-
-                def on_ice_candidate(candidate: Any) -> None:
-                    if candidate:
-                        ice_candidates.append(candidate)
-                        logger.debug(f"ICE candidate generated: {candidate.type}")
-
-                # Setup channel event handlers
-                channel.on("open", on_open)
-                channel.on("error", on_error)
-
-                # Setup ICE candidate handling
-                ice_candidates: list[Any] = []
-                pc.on("icecandidate", on_ice_candidate)
-
-                # Create offer
-                offer = await aio_as_trio(pc.createOffer())
-
-                # Munge SDP for direct connection
-                munged_sdp = SDPMunger.munge_offer(offer.sdp, local_ip, local_port)
-                offer = RTCSessionDescription(sdp=munged_sdp, type=offer.type)
-
-                # Set local description
-                await aio_as_trio(pc.setLocalDescription(offer))
-
-                # Exchange offer/answer via pubsub (for direct connections)
-                await self._exchange_offer_answer_direct(peer_id, offer, certhash)
-
-                with trio.move_on_after(DEFAULT_HANDSHAKE_TIMEOUT) as cancel_scope:
-                    await channel_ready.wait()
-
-                if cancel_scope.cancelled_caught:
-                    raise WebRTCError("WebRTC-Direct connection timeout")
-
-                # Create connection object
-                connection = WebRTCRawConnection(
-                    peer_id, pc, channel, is_initiator=True
-                )
-
-                # Track connection
-                self.active_connections[conn_id] = connection
-                self.pending_connections.pop(conn_id, None)
-                self.connection_events.pop(conn_id, None)
-
-                logger.info(
-                    f"Successfully established WebRTC-Direct connection to {peer_id}"
-                )
-                return connection
+                    logger.info(
+                        f"Successfully established WebRTC-Direct connection to {peer_id}"
+                    )
+                    return connection
+                except Exception as e:
+                    logger.error(f"Failed to connect as client: {e}")
+                    direct_peer_connection.close()
 
         except Exception as e:
             logger.error(f"Failed to dial WebRTC-Direct connection to {maddr}: {e}")
