@@ -10,8 +10,10 @@ readme = "README.md"
 requires-python = ">=3.10, <4.0"
 license = { text = "MIT AND Apache-2.0" }
 keywords = ["libp2p", "p2p"]
-authors = [
-    { name = "The Ethereum Foundation", email = "snakecharmers@ethereum.org" },
+maintainers = [
+    { name = "pacrob", email = "pacrob@protonmail.com" },
+    { name = "Manu Sheel Gupta", email = "manu@seeta.in" },
+    { name = "Dave Grantham", email = "dave@aviation.community" },
 ]
 dependencies = [
     "base58>=1.0.3",
