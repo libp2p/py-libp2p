@@ -57,7 +57,10 @@ class TestPeerRouting:
     def mock_host(self):
         """Create a mock host for testing."""
         host = Mock()
-        host.get_id.return_value = create_valid_peer_id("local")
+        key_pair = create_new_key_pair()
+        host.get_id.return_value = ID.from_pubkey(key_pair.public_key)
+        host.get_public_key.return_value = key_pair.public_key
+        host.get_private_key.return_value = key_pair.private_key
         host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
         host.get_peerstore.return_value = Mock()
         host.new_stream = AsyncMock()
