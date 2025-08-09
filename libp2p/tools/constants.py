@@ -27,6 +27,7 @@ LISTEN_MADDR = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID = gossipsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID_V1 = gossipsub.PROTOCOL_ID_V11
+GOSSIPSUB_PROTOCOL_ID_V12 = gossipsub.PROTOCOL_ID_V12
 
 
 class GossipsubParams(NamedTuple):
