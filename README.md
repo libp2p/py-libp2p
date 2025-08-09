@@ -34,19 +34,19 @@ ______________________________________________________________________
 | -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
 | **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
 | **`libp2p-quic`**                      |     🌱     |                                                                                     |
-| **`libp2p-websocket`**                 |     ❌     |                                                                                     |
-| **`libp2p-webrtc-browser-to-server`**  |     ❌     |                                                                                     |
-| **`libp2p-webrtc-private-to-private`** |     ❌     |                                                                                     |
+| **`libp2p-websocket`**                 |     🌱     |                                                                                     |
+| **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
+| **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
 
 ______________________________________________________________________
 
 ### NAT Traversal
 
-| **NAT Traversal**             | **Status** |
-| ----------------------------- | :--------: |
-| **`libp2p-circuit-relay-v2`** |     ❌     |
-| **`libp2p-autonat`**          |     ❌     |
-| **`libp2p-hole-punching`**    |     ❌     |
+| **NAT Traversal**             | **Status** |                                   **Source**                                    |
+| ----------------------------- | :--------: | :-----------------------------------------------------------------------------: |
+| **`libp2p-circuit-relay-v2`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/relay/circuit_v2) |
+| **`libp2p-autonat`**          |     ✅     |   [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/host/autonat)   |
+| **`libp2p-hole-punching`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/relay/circuit_v2) |
 
 ______________________________________________________________________
 
@@ -54,27 +54,27 @@ ______________________________________________________________________
 
 | **Secure Communication** | **Status** |                                  **Source**                                   |
 | ------------------------ | :--------: | :---------------------------------------------------------------------------: |
-| **`libp2p-noise`**       |     🌱     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
-| **`libp2p-tls`**         |     ❌     |                                                                               |
+| **`libp2p-noise`**       |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
+| **`libp2p-tls`**         |     🌱     |                                                                               |
 
 ______________________________________________________________________
 
 ### Discovery
 
-| **Discovery**        | **Status** |
-| -------------------- | :--------: |
-| **`bootstrap`**      |     ❌     |
-| **`random-walk`**    |     ❌     |
-| **`mdns-discovery`** |     ❌     |
-| **`rendezvous`**     |     ❌     |
+| **Discovery**        | **Status** |                                     **Source**                                     |
+| -------------------- | :--------: | :--------------------------------------------------------------------------------: |
+| **`bootstrap`**      |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/bootstrap) |
+| **`random-walk`**    |     🌱     |                                                                                    |
+| **`mdns-discovery`** |     ✅     |   [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns)    |
+| **`rendezvous`**     |     🌱     |                                                                                    |
 
 ______________________________________________________________________
 
 ### Peer Routing
 
-| **Peer Routing**     | **Status** |
-| -------------------- | :--------: |
-| **`libp2p-kad-dht`** |     ❌     |
+| **Peer Routing**     | **Status** |                               **Source**                               |
+| -------------------- | :--------: | :--------------------------------------------------------------------: |
+| **`libp2p-kad-dht`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/kad_dht) |
 
 ______________________________________________________________________
 
@@ -89,10 +89,10 @@ ______________________________________________________________________
 
 ### Stream Muxers
 
-| **Stream Muxers**  | **Status** |                                         **Status**                                         |
-| ------------------ | :--------: | :----------------------------------------------------------------------------------------: |
-| **`libp2p-yamux`** |     🌱     |                                                                                            |
-| **`libp2p-mplex`** |     🛠️     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/stream_muxer/mplex/mplex.py) |
+| **Stream Muxers**  | **Status** |                                    **Source**                                     |
+| ------------------ | :--------: | :-------------------------------------------------------------------------------: |
+| **`libp2p-yamux`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/yamux) |
+| **`libp2p-mplex`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/mplex) |
 
 ______________________________________________________________________
 
@@ -100,7 +100,7 @@ ______________________________________________________________________
 
 | **Storage**         | **Status** |
 | ------------------- | :--------: |
-| **`libp2p-record`** |     ❌     |
+| **`libp2p-record`** |     🌱     |
 
 ______________________________________________________________________
 
