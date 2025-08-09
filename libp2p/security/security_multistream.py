@@ -26,6 +26,9 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+from libp2p.transport.exceptions import (
+    SecurityUpgradeFailure,
+)
 
 """
 Represents a secured connection object, which includes a connection and details about
@@ -104,7 +107,7 @@ class SecurityMultistream(ABC):
         :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        protocol: TProtocol
+        protocol: TProtocol | None
         communicator = MultiselectCommunicator(conn)
         if is_initiator:
             # Select protocol if initiator
@@ -114,5 +117,7 @@ class SecurityMultistream(ABC):
         else:
             # Select protocol if non-initiator
             protocol, _ = await self.multiselect.negotiate(communicator)
+            if protocol is None:
+                raise SecurityUpgradeFailure("No protocol selected")
         # Return transport from protocol
         return self.transports[protocol]

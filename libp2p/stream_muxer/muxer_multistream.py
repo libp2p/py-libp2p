@@ -30,6 +30,9 @@ from libp2p.stream_muxer.yamux.yamux import (
     PROTOCOL_ID,
     Yamux,
 )
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+)
 
 
 class MuxerMultistream:
@@ -73,7 +76,7 @@ class MuxerMultistream:
         :param conn: conn to choose a transport over
         :return: selected muxer transport
         """
-        protocol: TProtocol
+        protocol: TProtocol | None
         communicator = MultiselectCommunicator(conn)
         if conn.is_initiator:
             protocol = await self.multiselect_client.select_one_of(
@@ -81,6 +84,8 @@ class MuxerMultistream:
             )
         else:
             protocol, _ = await self.multiselect.negotiate(communicator)
+            if protocol is None:
+                raise MuxerUpgradeFailure("No protocol selected")
         return self.transports[protocol]
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
