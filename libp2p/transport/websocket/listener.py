@@ -1,6 +1,6 @@
 import logging
 import socket
-from typing import Any
+from typing import Any, Callable
 
 from multiaddr import Multiaddr
 import trio
@@ -10,6 +10,7 @@ from trio_websocket import serve_websocket
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler
 from libp2p.network.connection.raw_connection import RawConnection
+from libp2p.transport.upgrader import TransportUpgrader
 
 from .connection import P2PWebSocketConnection
 
@@ -21,11 +22,15 @@ class WebsocketListener(IListener):
     Listen on /ip4/.../tcp/.../ws addresses, handshake WS, wrap into RawConnection.
     """
 
-    def __init__(self, handler: THandler) -> None:
+    def __init__(self, handler: THandler, upgrader: TransportUpgrader) -> None:
         self._handler = handler
+        self._upgrader = upgrader
         self._server = None
+        self._shutdown_event = trio.Event()
+        self._nursery = None
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+        logger.debug(f"WebsocketListener.listen called with {maddr}")
         addr_str = str(maddr)
         if addr_str.endswith("/wss"):
             raise NotImplementedError("/wss (TLS) not yet supported")
@@ -42,43 +47,126 @@ class WebsocketListener(IListener):
         if port_str is None:
             raise ValueError(f"No TCP port found in multiaddr: {maddr}")
         port = int(port_str)
+        
+        logger.debug(f"WebsocketListener: host={host}, port={port}")
 
-        async def serve(
-            task_status: TaskStatus[Any] = trio.TASK_STATUS_IGNORED,
+        async def serve_websocket_tcp(
+            handler: Callable,
+            port: int,
+            host: str,
+            task_status: trio.TaskStatus[list],
         ) -> None:
-            # positional ssl_context=None
-            self._server = await serve_websocket(
-                self._handle_connection, host, port, None
-            )
-            task_status.started()
-            await self._server.wait_closed()
+            """Start TCP server and handle WebSocket connections manually"""
+            logger.debug("serve_websocket_tcp %s %s", host, port)
+            
+            async def websocket_handler(request):
+                """Handle WebSocket requests"""
+                logger.debug("WebSocket request received")
+                try:
+                    # Accept the WebSocket connection
+                    ws_connection = await request.accept()
+                    logger.debug("WebSocket handshake successful")
+                    
+                    # Create the WebSocket connection wrapper
+                    conn = P2PWebSocketConnection(ws_connection)
+                    
+                    # Call the handler function that was passed to create_listener
+                    # This handler will handle the security and muxing upgrades
+                    logger.debug("Calling connection handler")
+                    await self._handler(conn)
+                    
+                    # Don't keep the connection alive indefinitely
+                    # Let the handler manage the connection lifecycle
+                    logger.debug("Handler completed, connection will be managed by handler")
+                    
+                except Exception as e:
+                    logger.debug(f"WebSocket connection error: {e}")
+                    logger.debug(f"Error type: {type(e)}")
+                    import traceback
+                    logger.debug(f"Traceback: {traceback.format_exc()}")
+                    # Reject the connection
+                    try:
+                        await request.reject(400)
+                    except:
+                        pass
+            
+            # Use trio_websocket.serve_websocket for proper WebSocket handling
+            from trio_websocket import serve_websocket
+            await serve_websocket(websocket_handler, host, port, None, task_status=task_status)
 
-        await nursery.start(serve)
+        # Store the nursery for shutdown
+        self._nursery = nursery
+        
+        # Start the server using nursery.start() like TCP does
+        logger.debug("Calling nursery.start()...")
+        started_listeners = await nursery.start(
+            serve_websocket_tcp,
+            None,  # No handler needed since it's defined inside serve_websocket_tcp
+            port,
+            host,
+        )
+        logger.debug(f"nursery.start() returned: {started_listeners}")
+
+        if started_listeners is None:
+            logger.error(f"Failed to start WebSocket listener for {maddr}")
+            return False
+
+        # Store the listeners for get_addrs() and close() - these are real SocketListener objects
+        self._listeners = started_listeners
+        logger.debug(f"WebsocketListener.listen returning True with WebSocketServer object")
         return True
-
-    async def _handle_connection(self, websocket: Any) -> None:
-        try:
-            # use raw transport_stream
-            conn = P2PWebSocketConnection(websocket.stream)
-            raw = RawConnection(conn, initiator=False)
-            await self._handler(raw)
-        except Exception as e:
-            logger.debug("WebSocket connection error: %s", e)
-
+    
     def get_addrs(self) -> tuple[Multiaddr, ...]:
-        if not self._server or not self._server.sockets:
+        if not hasattr(self, '_listeners') or not self._listeners:
+            logger.debug("No listeners available for get_addrs()")
             return ()
-        addrs = []
-        for sock in self._server.sockets:
-            host, port = sock.getsockname()[:2]
-            if sock.family == socket.AF_INET6:
-                addr = Multiaddr(f"/ip6/{host}/tcp/{port}/ws")
-            else:
-                addr = Multiaddr(f"/ip4/{host}/tcp/{port}/ws")
-            addrs.append(addr)
-        return tuple(addrs)
+        
+        # Handle WebSocketServer objects
+        if hasattr(self._listeners, 'port'):
+            # This is a WebSocketServer object
+            port = self._listeners.port
+            # Create a multiaddr from the port
+            return (Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws"),)
+        else:
+            # This is a list of listeners (like TCP)
+            listeners = self._listeners
+            # Get addresses from listeners like TCP does
+            return tuple(
+                _multiaddr_from_socket(listener.socket) for listener in listeners
+            )
 
     async def close(self) -> None:
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
+        """Close the WebSocket listener and stop accepting new connections"""
+        logger.debug("WebsocketListener.close called")
+        if hasattr(self, '_listeners') and self._listeners:
+            # Signal shutdown
+            self._shutdown_event.set()
+            
+            # Close the WebSocket server
+            if hasattr(self._listeners, 'aclose'):
+                # This is a WebSocketServer object
+                logger.debug("Closing WebSocket server")
+                await self._listeners.aclose()
+                logger.debug("WebSocket server closed")
+            elif isinstance(self._listeners, (list, tuple)):
+                # This is a list of listeners (like TCP)
+                logger.debug("Closing TCP listeners")
+                for listener in self._listeners:
+                    listener.close()
+                logger.debug("TCP listeners closed")
+            else:
+                # Unknown type, try to close it directly
+                logger.debug("Closing unknown listener type")
+                if hasattr(self._listeners, 'close'):
+                    self._listeners.close()
+                logger.debug("Unknown listener closed")
+            
+            # Clear the listeners reference
+            self._listeners = None
+            logger.debug("WebsocketListener.close completed")
+
+
+def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
+    """Convert socket to multiaddr"""
+    ip, port = socket.getsockname()
+    return Multiaddr(f"/ip4/{ip}/tcp/{port}/ws")
