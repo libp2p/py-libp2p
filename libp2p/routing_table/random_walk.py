@@ -110,7 +110,7 @@ class RandomWalk:
         try:
             # Generate random peer ID
             random_peer_id = self.generate_random_peer_id()
-            logger.debug(f"Starting random walk for peer ID: {random_peer_id}")
+            logger.info(f"Starting random walk for peer ID: {random_peer_id}")
             
             # Perform FIND_NODE query
             discovered_peers: List[PeerInfo] = []
@@ -158,6 +158,7 @@ class RandomWalk:
             Combined list of all validated peers discovered
         """
         all_validated_peers: List[PeerInfo] = []
+        logger.info(f"Starting {count} concurrent random walks")
         
         async def single_walk():
             try:

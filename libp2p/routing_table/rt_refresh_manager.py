@@ -230,15 +230,17 @@ class RTRefreshManager:
             start_time = current_time
             
             # Ping and evict dead peers
-            await self._ping_and_evict_peers()
+            # await self._ping_and_evict_peers()
             
             # Perform random walks to discover new peers
+            logger.info("Running concurrent random walks to discover new peers")
             discovered_peers = await self.random_walk.run_concurrent_random_walks()
             
             # Add discovered peers to routing table
             added_count = 0
             for peer_info in discovered_peers:
-                if self.routing_table.add_peer(peer_info):
+                result = await self.routing_table.add_peer(peer_info)
+                if result:
                     added_count += 1
             
             self._last_refresh_time = current_time
@@ -262,53 +264,53 @@ class RTRefreshManager:
             logger.error(f"Routing table refresh failed: {e}")
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
     
-    async def _ping_and_evict_peers(self) -> None:
-        """
-        Ping peers in the routing table and evict unresponsive ones.
+    # async def _ping_and_evict_peers(self) -> None:
+    #     """
+    #     Ping peers in the routing table and evict unresponsive ones.
         
-        Similar to go-libp2p's pingAndEvictPeers function.
-        """
-        try:
-            peers = self.routing_table.get_peer_infos()
-            if not peers:
-                return
+    #     Similar to go-libp2p's pingAndEvictPeers function.
+    #     """
+    #     try:
+    #         peers = self.routing_table.get_peer_infos()
+    #         if not peers:
+    #             return
             
-            logger.debug(f"Pinging {len(peers)} peers for liveness check")
+    #         logger.debug(f"Pinging {len(peers)} peers for liveness check")
             
-            async def check_peer_liveness(peer_info: PeerInfo):
-                try:
-                    # Skip if we have recent successful communication
-                    # (This would need to be tracked in the routing table implementation)
+    #         async def check_peer_liveness(peer_info: PeerInfo):
+    #             try:
+    #                 # Skip if we have recent successful communication
+    #                 # (This would need to be tracked in the routing table implementation)
                     
-                    # Ping the peer
-                    is_alive = False
-                    if self.ping_function:
-                        with trio.move_on_after(PEER_PING_TIMEOUT):
-                            async with self.ping_function(peer_info.peer_id) as result:
-                                is_alive = result
-                    else:
-                        # Fallback: try to connect
-                        with trio.move_on_after(PEER_PING_TIMEOUT):
-                            await self.host.connect(peer_info)
-                            is_alive = True
+    #                 # Ping the peer
+    #                 is_alive = False
+    #                 if self.ping_function:
+    #                     with trio.move_on_after(PEER_PING_TIMEOUT):
+    #                         async with self.ping_function(peer_info.peer_id) as result:
+    #                             is_alive = result
+    #                 else:
+    #                     # Fallback: try to connect
+    #                     with trio.move_on_after(PEER_PING_TIMEOUT):
+    #                         await self.host.connect(peer_info)
+    #                         is_alive = True
                     
-                    if not is_alive:
-                        logger.debug(f"Evicting unresponsive peer: {peer_info.peer_id}")
-                        self.routing_table.remove_peer(peer_info.peer_id)
+    #                 if not is_alive:
+    #                     logger.debug(f"Evicting unresponsive peer: {peer_info.peer_id}")
+    #                     self.routing_table.remove_peer(peer_info.peer_id)
                     
-                except Exception as e:
-                    logger.debug(f"Evicting peer {peer_info.peer_id} due to error: {e}")
-                    self.routing_table.remove_peer(peer_info.peer_id)
+    #             except Exception as e:
+    #                 logger.debug(f"Evicting peer {peer_info.peer_id} due to error: {e}")
+    #                 self.routing_table.remove_peer(peer_info.peer_id)
             
-            # Check peers concurrently
-            async with trio.open_nursery() as nursery:
-                for peer_info in peers:
-                    nursery.start_soon(check_peer_liveness, peer_info)
+    #         # Check peers concurrently
+    #         async with trio.open_nursery() as nursery:
+    #             for peer_info in peers:
+    #                 nursery.start_soon(check_peer_liveness, peer_info)
             
-            logger.debug("Peer liveness check completed")
+    #         logger.debug("Peer liveness check completed")
             
-        except Exception as e:
-            logger.warning(f"Peer ping and evict operation failed: {e}")
+    #     except Exception as e:
+    #         logger.warning(f"Peer ping and evict operation failed: {e}")
     
     def add_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when refresh completes."""
