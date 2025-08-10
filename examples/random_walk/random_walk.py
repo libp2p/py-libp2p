@@ -77,17 +77,17 @@ for module in [
 
 # Configure random walk module logging  
 for module in ["random_walk", "rt_refresh_manager"]:
-    child_logger = logging.getLogger(f"libp2p.routing_table.{module}")
+    child_logger = logging.getLogger(f"libp2p.discovery.random_walk.{module}")
     child_logger.setLevel(logging.INFO)
     child_logger.propagate = True
     # Add handler if not present
     if not child_logger.handlers:
         child_logger.addHandler(logging.StreamHandler())
 
-# Configure libp2p routing table parent logger
-routing_table_logger = logging.getLogger("libp2p.routing_table")
-routing_table_logger.setLevel(logging.INFO)
-routing_table_logger.propagate = True
+# Configure libp2p discovery random_walk parent logger
+random_walk_parent_logger = logging.getLogger("libp2p.discovery.random_walk")
+random_walk_parent_logger.setLevel(logging.INFO)
+random_walk_parent_logger.propagate = True
 
 # Also configure the kad_dht module for better visibility
 kad_dht_logger = logging.getLogger("libp2p.kad_dht")
@@ -125,12 +125,12 @@ async def configure_dht_logging(dht: KadDHT) -> None:
         dht: The Kademlia DHT instance
     """
     # Ensure RT Refresh Manager logging is properly configured
-    rt_refresh_logger = logging.getLogger("libp2p.routing_table.rt_refresh_manager")
+    rt_refresh_logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
     rt_refresh_logger.setLevel(logging.INFO)
     rt_refresh_logger.propagate = True
     
     # Also configure the random walk logger
-    random_walk_logger = logging.getLogger("libp2p.routing_table.random_walk")
+    random_walk_logger = logging.getLogger("libp2p.discovery.random_walk.random_walk")
     random_walk_logger.setLevel(logging.INFO)
     random_walk_logger.propagate = True
     
@@ -438,16 +438,16 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         # Also enable debug logging for random walk modules
-        logging.getLogger("libp2p.routing_table.random_walk").setLevel(logging.DEBUG)
-        logging.getLogger("libp2p.routing_table.rt_refresh_manager").setLevel(logging.DEBUG)
-        logging.getLogger("libp2p.routing_table").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.discovery.random_walk.random_walk").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.discovery.random_walk").setLevel(logging.DEBUG)
         logging.getLogger("libp2p.kad_dht").setLevel(logging.DEBUG)
         logger.info("Verbose logging enabled - you'll see detailed random walk logs")
     else:
         logging.getLogger().setLevel(logging.INFO)
         # Ensure INFO level for rt_refresh_manager even in non-verbose mode
-        logging.getLogger("libp2p.routing_table.rt_refresh_manager").setLevel(logging.INFO)
-        logging.getLogger("libp2p.routing_table.random_walk").setLevel(logging.INFO)
+        logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager").setLevel(logging.INFO)
+        logging.getLogger("libp2p.discovery.random_walk.random_walk").setLevel(logging.INFO)
         logger.info("Standard logging enabled - you'll see random walk start messages")
     
     return args

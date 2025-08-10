@@ -33,8 +33,8 @@ from libp2p.peer.peerinfo import (
 from libp2p.tools.async_service import (
     Service,
 )
-from libp2p.routing_table.rt_refresh_manager import RTRefreshManager
-from libp2p.routing_table.config import RANDOM_WALK_ENABLED
+from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
+from libp2p.discovery.random_walk.config import RANDOM_WALK_ENABLED
 
 from .common import (
     ALPHA,

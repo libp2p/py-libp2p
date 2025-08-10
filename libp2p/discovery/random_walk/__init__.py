@@ -1,4 +1,4 @@
-"""Routing table management modules for py-libp2p."""
+"""Random walk discovery modules for py-libp2p."""
 
 from .rt_refresh_manager import RTRefreshManager
 from .random_walk import RandomWalk

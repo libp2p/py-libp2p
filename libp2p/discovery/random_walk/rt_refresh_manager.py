@@ -9,9 +9,9 @@ import trio
 from libp2p.abc import IHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.routing_table.exceptions import RoutingTableRefreshError
-from libp2p.routing_table.random_walk import RandomWalk
-from libp2p.routing_table.config import (
+from libp2p.discovery.random_walk.exceptions import RoutingTableRefreshError
+from libp2p.discovery.random_walk.random_walk import RandomWalk
+from libp2p.discovery.random_walk.config import (
     MIN_RT_REFRESH_THRESHOLD,
     REFRESH_INTERVAL,
     SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD,
@@ -19,7 +19,7 @@ from libp2p.routing_table.config import (
     RANDOM_WALK_ENABLED
 )
 
-logger = logging.getLogger("libp2p.routing_table.rt_refresh_manager")
+logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
 
 class RoutingTableProtocol(Protocol):
     """Protocol defining the interface for routing table operations."""

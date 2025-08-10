@@ -10,14 +10,14 @@ import trio
 from libp2p.abc import IHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.routing_table.exceptions import RandomWalkError, PeerValidationError
-from libp2p.routing_table.config import (
+from libp2p.discovery.random_walk.exceptions import RandomWalkError, PeerValidationError
+from libp2p.discovery.random_walk.config import (
     RANDOM_WALK_CONCURRENCY,
     REFRESH_QUERY_TIMEOUT,
     PEER_PING_TIMEOUT
 )
 
-logger = logging.getLogger("libp2p.routing_table.random_walk")
+logger = logging.getLogger("libp2p.discovery.random_walk")
 
 class RandomWalk:
     """
