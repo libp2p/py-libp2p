@@ -357,6 +357,14 @@ class INetConn(Closer):
         :return: A tuple containing instances of INetStream.
         """
 
+    @abstractmethod
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Retrieve the transport addresses used by this connection.
+
+        :return: A list of multiaddresses used by the transport.
+        """
+
 
 # -------------------------- peermetadata interface.py --------------------------
 
