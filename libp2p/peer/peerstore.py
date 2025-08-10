@@ -46,8 +46,6 @@ def create_signed_peer_record(
     """Creates a signed_peer_record wrapped in an Envelope"""
     record = PeerRecord(peer_id, addrs)
     envelope = seal_record(record, pvt_key)
-
-    print(envelope)
     return envelope
 
 

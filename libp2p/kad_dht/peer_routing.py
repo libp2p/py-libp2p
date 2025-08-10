@@ -257,8 +257,6 @@ class PeerRouting(IPeerRouting):
             find_node_msg.type = Message.MessageType.FIND_NODE
             find_node_msg.key = target_key  # Set target key directly as bytes
 
-            print("MESSAGE GOING TO BE CREATED")
-
             # Create sender_signed_peer_record
             envelope = create_signed_peer_record(
                 self.host.get_id(), self.host.get_addrs(), self.host.get_private_key()
