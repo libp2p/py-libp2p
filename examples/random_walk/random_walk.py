@@ -58,9 +58,23 @@ BOOTSTRAP_ADDR_LOG = os.path.join(SCRIPT_DIR, "bootstrap_nodes.txt")
 
 # Default bootstrap nodes for testing (only TCP-compatible ones)
 DEFAULT_BOOTSTRAP_NODES = [
-    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-    # Note: Removed DNS bootstrap nodes as they often resolve to QUIC-only addresses
-    # which are incompatible with this py-libp2p implementation
+    # Official IPFS bootstrap nodes (TCP only)
+    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",  # mars.i.ipfs.io
+    
+    # DNS-based bootstrap nodes (these resolve to multiple addresses)
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",  # rust-libp2p-server
+    # "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+    
+    # Additional stable IPFS nodes (TCP compatible)
+    # "/ip4/128.199.219.111/tcp/4001/p2p/QmSoLV4Bbm51jM9C4gDYZQ9Cy3U6aXMJDAbzgu2fzaDs64",  # ipfs.io
+    # "/ip4/104.236.76.40/tcp/4001/p2p/QmSoLV4Bbm51jM9C4gDYZQ9Cy3U6aXMJDAbzgu2fzaDs64",   # ipfs.io
+    # "/ip4/178.62.158.247/tcp/4001/p2p/QmSoLer265NRgSp2LA3dPaeykiS1J6DifTC88f5uVQKNAd", # ipfs.io
+    
+    # # Community and research nodes
+    # "/ip4/94.130.135.167/tcp/4001/p2p/QmfMfgCkJp3dnX8F4YGBWKJqkqWfQFZKWbCFRJ4gLxKwxB",   # community node
+    # "/ip4/147.75.77.187/tcp/4001/p2p/QmdnXwLrC8p1ueiq2Qya8joNvk3TVVDAut7PrikmZwubtR",   # packet.net node
 ]
 
 # Set the level for all child loggers
@@ -93,6 +107,12 @@ random_walk_parent_logger.propagate = True
 kad_dht_logger = logging.getLogger("libp2p.kad_dht")
 kad_dht_logger.setLevel(logging.INFO)
 kad_dht_logger.propagate = True
+
+# Suppress noisy multiaddr logs
+multiaddr_logger = logging.getLogger("multiaddr.transforms")
+multiaddr_logger.setLevel(logging.WARNING)
+multiaddr_codecs_logger = logging.getLogger("multiaddr.codecs")
+multiaddr_codecs_logger.setLevel(logging.WARNING)
 
 
 def filter_compatible_peer_info(peer_info) -> bool:
@@ -138,42 +158,6 @@ async def configure_dht_logging(dht: KadDHT) -> None:
     logger.info(f"RT Refresh Manager logger level: {rt_refresh_logger.level}")
     logger.info(f"Random Walk logger level: {random_walk_logger.level}")
 
-
-async def connect_to_bootstrap_nodes(host: IHost, bootstrap_addrs: list[str]) -> None:
-    """
-    Connect to the bootstrap nodes provided in the list.
-    
-    Args:
-        host: The host instance to connect to
-        bootstrap_addrs: List of bootstrap node addresses
-    """
-    connected_count = 0
-    for addr in bootstrap_addrs:
-        try:
-            logger.info(f"Connecting to bootstrap node: {addr}")
-            peer_info = info_from_p2p_addr(Multiaddr(addr))
-            
-            # Check if this peer has compatible addresses
-            if not filter_compatible_peer_info(peer_info):
-                logger.warning(f"Bootstrap node {addr} has incompatible addresses, skipping")
-                continue
-            
-            host.get_peerstore().add_addrs(peer_info.peer_id, peer_info.addrs, 3600)
-            
-            # Add timeout for connection attempt
-            with trio.move_on_after(10) as cancel_scope:
-                await host.connect(peer_info)
-                connected_count += 1
-                logger.info(f"Connected to bootstrap node: {peer_info.peer_id}")
-            
-            if cancel_scope.cancelled_caught:
-                logger.warning(f"Connection to bootstrap node {addr} timed out")
-                
-        except Exception as e:
-            logger.error(f"Failed to connect to bootstrap node {addr}: {e}")
-    
-    logger.info(f"Successfully connected to {connected_count}/{len(bootstrap_addrs)} bootstrap nodes")
-
 async def maintain_connections(host: IHost) -> None:
     """
     Periodically maintain connections to ensure the host remains connected
@@ -186,7 +170,6 @@ async def maintain_connections(host: IHost) -> None:
     while True:
         try:
             # Get current connected peers
-            logger.info("Maintaining connections...")
             connected_peers = host.get_connected_peers()
             logger.info(f"Currently connected peers: {len(connected_peers)}")
             list_peers = host.get_peerstore().peers_with_addrs()
@@ -210,6 +193,9 @@ async def maintain_connections(host: IHost) -> None:
                 if compatible_peers:
                     random_peers = random.sample(compatible_peers, min(50, len(compatible_peers)))
                     for peer_id in random_peers:
+                        if peer_id in connected_peers:
+                            logger.debug(f"Already connected to {peer_id}, skipping")
+                            continue
                         try:
                             # add a timeout to avoid blocking
                             with trio.move_on_after(5) as cancel_scope:
@@ -248,23 +234,10 @@ async def demonstrate_random_walk_discovery(dht: KadDHT, interval: int = 30) -> 
         iteration += 1
         
         # Show current routing table state
-        rt_size = dht.get_routing_table_size()
-        connected_peers = len(dht.host.get_connected_peers())
-        peerstore_size = len(dht.host.get_peerstore().peer_ids())
-        
         logger.info(f"--- Iteration {iteration} ---")
-        logger.info(f"Routing table size: {rt_size}")
-        logger.info(f"Connected peers: {connected_peers}")
-        logger.info(f"Peerstore size: {peerstore_size}")
-        
-        # Show some routing table peers
-        if rt_size > 0:
-            peer_infos = dht.routing_table.get_peer_infos()
-            logger.info("Current routing table peers:")
-            for i, peer_info in enumerate(peer_infos[:5]):  # Show first 5
-                logger.info(f"  {i+1}. {peer_info.peer_id}")
-            if len(peer_infos) > 5:
-                logger.info(f"  ... and {len(peer_infos) - 5} more")
+        logger.info(f"Routing table size: {dht.get_routing_table_size()}")
+        logger.info(f"Connected peers: {len(dht.host.get_connected_peers())}")
+        logger.info(f"Peerstore size: {len(dht.host.get_peerstore().peer_ids())}")
         
         # Manually trigger a random walk refresh to demonstrate the functionality
         if iteration % 2 == 0:  # Every other iteration
@@ -274,7 +247,7 @@ async def demonstrate_random_walk_discovery(dht: KadDHT, interval: int = 30) -> 
             refresh_time = time.time() - start_time
             
             new_rt_size = dht.get_routing_table_size()
-            peers_discovered = new_rt_size - rt_size
+            peers_discovered = new_rt_size - dht.get_routing_table_size()
             logger.info(f"Refresh completed in {refresh_time:.2f}s")
             logger.info(f"Net peers discovered: {peers_discovered} (new size: {new_rt_size})")
         else:
@@ -327,14 +300,7 @@ async def run_node(
 
             logger.info(f"Node address: {addr_str}")
             logger.info(f"Node peer ID: {peer_id}")
-            
-            # Connect to bootstrap nodes
-            if DEFAULT_BOOTSTRAP_NODES:
-                await connect_to_bootstrap_nodes(host, DEFAULT_BOOTSTRAP_NODES)
-                logger.info(f"Connected to {len(host.get_connected_peers())} bootstrap peers")
-            
 
-            # logger.info(f"Connected peers: {len(host.get_connected_peers())}")
             # Create DHT with Random Walk enabled
             dht = KadDHT(host, dht_mode)
             
@@ -353,9 +319,6 @@ async def run_node(
                 logger.info("Random Walk module is automatically enabled")
                 logger.info("RT Refresh Manager should now be running and performing random walks")
                 
-                # Generate a unique node identifier for demonstrations
-                node_id = str(random.randint(1, 1000))
-                
                 # Start concurrent tasks
                 async with trio.open_nursery() as task_nursery:
                     # Start random walk discovery demonstration
@@ -364,7 +327,7 @@ async def run_node(
                     # Keep the node running and show periodic status
                     async def status_reporter():
                         while True:
-                            await trio.sleep(60)  # Report every minute
+                            await trio.sleep(30)  # Report every 30 seconds
                             logger.debug(
                                 "Status - Connected: %d, Routing table: %d, Peerstore: %d",
                                 len(dht.host.get_connected_peers()),

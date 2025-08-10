@@ -14,3 +14,4 @@ MAX_N_BOOTSTRAPPERS: Final[int] = 2  # Maximum bootstrap peers to try
 # Random walk specific
 RANDOM_WALK_CONCURRENCY: Final[int] = 3  # Number of concurrent random walks
 RANDOM_WALK_ENABLED: Final[bool] = True  # Enable automatic random walks
+RANDOM_WALK_RT_THRESHOLD: Final[int] = 20  # RT size threshold for peerstore fallback

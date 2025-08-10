@@ -14,7 +14,8 @@ from libp2p.discovery.random_walk.exceptions import RandomWalkError, PeerValidat
 from libp2p.discovery.random_walk.config import (
     RANDOM_WALK_CONCURRENCY,
     REFRESH_QUERY_TIMEOUT,
-    PEER_PING_TIMEOUT
+    PEER_PING_TIMEOUT,
+    RANDOM_WALK_RT_THRESHOLD
 )
 
 logger = logging.getLogger("libp2p.discovery.random_walk")
@@ -147,18 +148,45 @@ class RandomWalk:
             logger.error(f"Random walk failed: {e}")
             raise RandomWalkError(f"Random walk operation failed: {e}") from e
     
-    async def run_concurrent_random_walks(self, count: int = RANDOM_WALK_CONCURRENCY) -> List[PeerInfo]:
+    async def run_concurrent_random_walks(
+        self, 
+        count: int = RANDOM_WALK_CONCURRENCY, 
+        current_routing_table_size: int = 0
+    ) -> List[PeerInfo]:
         """
         Run multiple random walks concurrently.
         
         Args:
             count: Number of concurrent random walks to perform
+            current_routing_table_size: Current size of routing table (for optimization)
             
         Returns:
             Combined list of all validated peers discovered
         """
         all_validated_peers: List[PeerInfo] = []
-        logger.info(f"Starting {count} concurrent random walks")
+        logger.info(f"Starting {count} concurrent random walks (RT size: {current_routing_table_size})")
+        
+        # First, try to add peers from peerstore if routing table is small
+        if current_routing_table_size < RANDOM_WALK_RT_THRESHOLD:
+            try:
+                peerstore_peers = self._get_peerstore_peers()
+                if peerstore_peers:
+                    logger.info(f"Routing table size ({current_routing_table_size}) < {RANDOM_WALK_RT_THRESHOLD}, checking {len(peerstore_peers)} peerstore peers")
+                    
+                    # Validate peerstore peers first
+                    for peer_info in peerstore_peers[:20]:  # Limit to avoid too many validations
+                        try:
+                            if await self.validate_peer(peer_info):
+                                all_validated_peers.append(peer_info)
+                                logger.debug(f"Added peerstore peer to candidates: {peer_info.peer_id}")
+                        except Exception as e:
+                            logger.debug(f"Failed to validate peerstore peer {peer_info.peer_id}: {e}")
+                    
+                    logger.info(f"Validated {len(all_validated_peers)} peers from peerstore")
+            except Exception as e:
+                logger.warning(f"Error processing peerstore peers: {e}")
+        else:
+            logger.debug(f"Routing table size ({current_routing_table_size}) >= {RANDOM_WALK_RT_THRESHOLD}, skipping peerstore check")
         
         async def single_walk():
             try:
@@ -180,3 +208,59 @@ class RandomWalk:
         result = list(unique_peers.values())
         logger.info(f"Concurrent random walks completed: {len(result)} unique peers discovered")
         return result
+    
+    def _get_peerstore_peers(self) -> List[PeerInfo]:
+        """
+        Get peer info objects from the host's peerstore.
+        
+        Returns:
+            List of PeerInfo objects from peerstore
+        """
+        try:
+            peerstore = self.host.get_peerstore()
+            peer_ids = peerstore.peers_with_addrs()
+            
+            peer_infos = []
+            for peer_id in peer_ids:
+                try:
+                    # Skip local peer
+                    if peer_id == self.local_peer_id:
+                        continue
+                        
+                    peer_info = peerstore.peer_info(peer_id)
+                    if peer_info and peer_info.addrs:
+                        # Filter for compatible addresses (TCP + IPv4)
+                        if self._has_compatible_addresses(peer_info):
+                            peer_infos.append(peer_info)
+                        else:
+                            logger.debug(f"Skipping peer {peer_id} - no compatible addresses")
+                except Exception as e:
+                    logger.debug(f"Error getting peer info for {peer_id}: {e}")
+            
+            logger.debug(f"Retrieved {len(peer_infos)} compatible peer infos from peerstore")
+            return peer_infos
+            
+        except Exception as e:
+            logger.warning(f"Error accessing peerstore: {e}")
+            return []
+    
+    def _has_compatible_addresses(self, peer_info: PeerInfo) -> bool:
+        """
+        Check if a peer has TCP+IPv4 compatible addresses.
+        
+        Args:
+            peer_info: PeerInfo to check
+            
+        Returns:
+            True if peer has compatible addresses
+        """
+        if not peer_info.addrs:
+            return False
+        
+        for addr in peer_info.addrs:
+            addr_str = str(addr)
+            # Check for TCP and IPv4 compatibility, avoid QUIC
+            if '/tcp/' in addr_str and '/ip4/' in addr_str and '/quic' not in addr_str:
+                return True
+        
+        return False

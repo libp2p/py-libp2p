@@ -16,7 +16,8 @@ from libp2p.discovery.random_walk.config import (
     REFRESH_INTERVAL,
     SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD,
     PEER_PING_TIMEOUT,
-    RANDOM_WALK_ENABLED
+    RANDOM_WALK_ENABLED,
+    RANDOM_WALK_CONCURRENCY
 )
 
 logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
@@ -234,7 +235,11 @@ class RTRefreshManager:
             
             # Perform random walks to discover new peers
             logger.info("Running concurrent random walks to discover new peers")
-            discovered_peers = await self.random_walk.run_concurrent_random_walks()
+            current_rt_size = self.routing_table.size()
+            discovered_peers = await self.random_walk.run_concurrent_random_walks(
+                count=RANDOM_WALK_CONCURRENCY, 
+                current_routing_table_size=current_rt_size
+            )
             
             # Add discovered peers to routing table
             added_count = 0
