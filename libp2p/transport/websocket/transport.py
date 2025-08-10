@@ -1,6 +1,6 @@
 import logging
+
 from multiaddr import Multiaddr
-from trio_websocket import open_websocket_url
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
@@ -11,7 +11,7 @@ from libp2p.transport.upgrader import TransportUpgrader
 from .connection import P2PWebSocketConnection
 from .listener import WebsocketListener
 
-logger = logging.getLogger("libp2p.transport.websocket")
+logger = logging.getLogger(__name__)
 
 
 class WebsocketTransport(ITransport):
@@ -25,7 +25,7 @@ class WebsocketTransport(ITransport):
     async def dial(self, maddr: Multiaddr) -> RawConnection:
         """Dial a WebSocket connection to the given multiaddr."""
         logger.debug(f"WebsocketTransport.dial called with {maddr}")
-        
+
         # Extract host and port from multiaddr
         host = (
             maddr.value_for_protocol("ip4")
@@ -45,6 +45,7 @@ class WebsocketTransport(ITransport):
 
         try:
             from trio_websocket import open_websocket_url
+
             # Use the context manager but don't exit it immediately
             # The connection will be closed when the RawConnection is closed
             ws_context = open_websocket_url(ws_url)

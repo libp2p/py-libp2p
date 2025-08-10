@@ -20,7 +20,7 @@ from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
 
-PLAINTEXT_PROTOCOL_ID = "/plaintext/1.0.0"
+PLAINTEXT_PROTOCOL_ID = "/plaintext/2.0.0"
 
 
 @pytest.mark.trio
@@ -74,6 +74,11 @@ async def test_ping_with_js_node():
         peer_id = ID.from_base58(peer_id_line)
         maddr = Multiaddr(addr_line)
 
+        # Debug: Print what we're trying to connect to
+        print(f"JS Node Peer ID: {peer_id_line}")
+        print(f"JS Node Address: {addr_line}")
+        print(f"All JS Node lines: {lines}")
+
         # Set up Python host
         key_pair = create_new_key_pair()
         py_peer_id = ID.from_pubkey(key_pair.public_key)
@@ -86,12 +91,14 @@ async def test_ping_with_js_node():
             },
             muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
         )
-        transport = WebsocketTransport()
+        transport = WebsocketTransport(upgrader)
         swarm = Swarm(py_peer_id, peer_store, upgrader, transport)
         host = BasicHost(swarm)
 
         # Connect to JS node
         peer_info = PeerInfo(peer_id, [maddr])
+
+        print(f"Python trying to connect to: {peer_info}")
 
         await trio.sleep(1)
 

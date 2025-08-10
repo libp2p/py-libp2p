@@ -19,6 +19,7 @@ from libp2p.abc import (
     IPeerRouting,
     IPeerStore,
     ISecureTransport,
+    ITransport,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -231,14 +232,15 @@ def new_swarm(
     )
 
     # Create transport based on listen_addrs or default to TCP
+    transport: ITransport
     if listen_addrs is None:
         transport = TCP()
     else:
         # Use the first address to determine transport type
         addr = listen_addrs[0]
-        transport = create_transport_for_multiaddr(addr, upgrader)
-        
-        if transport is None:
+        transport_maybe = create_transport_for_multiaddr(addr, upgrader)
+
+        if transport_maybe is None:
             # Fallback to TCP if no specific transport found
             if addr.__contains__("tcp"):
                 transport = TCP()
@@ -250,20 +252,8 @@ def new_swarm(
                     f"Unknown transport in listen_addrs: {listen_addrs}. "
                     f"Supported protocols: {supported_protocols}"
                 )
-
-    # Generate X25519 keypair for Noise
-    noise_key_pair = create_new_x25519_key_pair()
-
-    # Default security transports (using Noise as primary)
-    secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
-        NOISE_PROTOCOL_ID: NoiseTransport(
-            key_pair, noise_privkey=noise_key_pair.private_key
-        ),
-        TProtocol(secio.ID): secio.Transport(key_pair),
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
-            key_pair, peerstore=peerstore_opt
-        ),
-    }
+        else:
+            transport = transport_maybe
 
     # Use given muxer preference if provided, otherwise use global default
     if muxer_preference is not None:

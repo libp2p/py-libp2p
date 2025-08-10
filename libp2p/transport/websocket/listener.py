@@ -1,6 +1,6 @@
+from collections.abc import Awaitable, Callable
 import logging
-import socket
-from typing import Any, Callable
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -9,7 +9,6 @@ from trio_websocket import serve_websocket
 
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler
-from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.transport.upgrader import TransportUpgrader
 
 from .connection import P2PWebSocketConnection
@@ -27,7 +26,8 @@ class WebsocketListener(IListener):
         self._upgrader = upgrader
         self._server = None
         self._shutdown_event = trio.Event()
-        self._nursery = None
+        self._nursery: trio.Nursery | None = None
+        self._listeners: Any = None
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
@@ -47,56 +47,60 @@ class WebsocketListener(IListener):
         if port_str is None:
             raise ValueError(f"No TCP port found in multiaddr: {maddr}")
         port = int(port_str)
-        
+
         logger.debug(f"WebsocketListener: host={host}, port={port}")
 
         async def serve_websocket_tcp(
-            handler: Callable,
+            handler: Callable[[Any], Awaitable[None]],
             port: int,
             host: str,
-            task_status: trio.TaskStatus[list],
+            task_status: TaskStatus[Any],
         ) -> None:
             """Start TCP server and handle WebSocket connections manually"""
             logger.debug("serve_websocket_tcp %s %s", host, port)
-            
-            async def websocket_handler(request):
+
+            async def websocket_handler(request: Any) -> None:
                 """Handle WebSocket requests"""
                 logger.debug("WebSocket request received")
                 try:
                     # Accept the WebSocket connection
                     ws_connection = await request.accept()
                     logger.debug("WebSocket handshake successful")
-                    
+
                     # Create the WebSocket connection wrapper
-                    conn = P2PWebSocketConnection(ws_connection)
-                    
+                    conn = P2PWebSocketConnection(ws_connection)  # type: ignore[no-untyped-call]
+
                     # Call the handler function that was passed to create_listener
                     # This handler will handle the security and muxing upgrades
                     logger.debug("Calling connection handler")
                     await self._handler(conn)
-                    
+
                     # Don't keep the connection alive indefinitely
                     # Let the handler manage the connection lifecycle
-                    logger.debug("Handler completed, connection will be managed by handler")
-                    
+                    logger.debug(
+                        "Handler completed, connection will be managed by handler"
+                    )
+
                 except Exception as e:
                     logger.debug(f"WebSocket connection error: {e}")
                     logger.debug(f"Error type: {type(e)}")
                     import traceback
+
                     logger.debug(f"Traceback: {traceback.format_exc()}")
                     # Reject the connection
                     try:
                         await request.reject(400)
-                    except:
+                    except Exception:
                         pass
-            
+
             # Use trio_websocket.serve_websocket for proper WebSocket handling
-            from trio_websocket import serve_websocket
-            await serve_websocket(websocket_handler, host, port, None, task_status=task_status)
+            await serve_websocket(
+                websocket_handler, host, port, None, task_status=task_status
+            )
 
         # Store the nursery for shutdown
         self._nursery = nursery
-        
+
         # Start the server using nursery.start() like TCP does
         logger.debug("Calling nursery.start()...")
         started_listeners = await nursery.start(
@@ -111,18 +115,21 @@ class WebsocketListener(IListener):
             logger.error(f"Failed to start WebSocket listener for {maddr}")
             return False
 
-        # Store the listeners for get_addrs() and close() - these are real SocketListener objects
+        # Store the listeners for get_addrs() and close() - these are real
+        # SocketListener objects
         self._listeners = started_listeners
-        logger.debug(f"WebsocketListener.listen returning True with WebSocketServer object")
+        logger.debug(
+            "WebsocketListener.listen returning True with WebSocketServer object"
+        )
         return True
-    
+
     def get_addrs(self) -> tuple[Multiaddr, ...]:
-        if not hasattr(self, '_listeners') or not self._listeners:
+        if not hasattr(self, "_listeners") or not self._listeners:
             logger.debug("No listeners available for get_addrs()")
             return ()
-        
+
         # Handle WebSocketServer objects
-        if hasattr(self._listeners, 'port'):
+        if hasattr(self._listeners, "port"):
             # This is a WebSocketServer object
             port = self._listeners.port
             # Create a multiaddr from the port
@@ -138,12 +145,12 @@ class WebsocketListener(IListener):
     async def close(self) -> None:
         """Close the WebSocket listener and stop accepting new connections"""
         logger.debug("WebsocketListener.close called")
-        if hasattr(self, '_listeners') and self._listeners:
+        if hasattr(self, "_listeners") and self._listeners:
             # Signal shutdown
             self._shutdown_event.set()
-            
+
             # Close the WebSocket server
-            if hasattr(self._listeners, 'aclose'):
+            if hasattr(self._listeners, "aclose"):
                 # This is a WebSocketServer object
                 logger.debug("Closing WebSocket server")
                 await self._listeners.aclose()
@@ -152,15 +159,15 @@ class WebsocketListener(IListener):
                 # This is a list of listeners (like TCP)
                 logger.debug("Closing TCP listeners")
                 for listener in self._listeners:
-                    listener.close()
+                    await listener.aclose()
                 logger.debug("TCP listeners closed")
             else:
                 # Unknown type, try to close it directly
                 logger.debug("Closing unknown listener type")
-                if hasattr(self._listeners, 'close'):
+                if hasattr(self._listeners, "close"):
                     self._listeners.close()
                 logger.debug("Unknown listener closed")
-            
+
             # Clear the listeners reference
             self._listeners = None
             logger.debug("WebsocketListener.close completed")
