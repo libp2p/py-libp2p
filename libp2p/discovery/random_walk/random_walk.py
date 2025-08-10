@@ -119,7 +119,9 @@ class RandomWalk:
             with trio.move_on_after(REFRESH_QUERY_TIMEOUT):
                 async with self.query_function(random_peer_id) as query_result:
                     discovered_peers = query_result or []
-            
+
+            logger.info(f"Discovered {len(discovered_peers)} peers in random walk for {random_peer_id}")
+
             if not discovered_peers:
                 logger.debug(f"No peers discovered in random walk for {random_peer_id}")
                 return []

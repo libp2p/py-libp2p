@@ -89,19 +89,44 @@ for module in [
     child_logger.setLevel(logging.INFO)
     child_logger.propagate = True
 
-# Configure random walk module logging  
-for module in ["random_walk", "rt_refresh_manager"]:
-    child_logger = logging.getLogger(f"libp2p.discovery.random_walk.{module}")
-    child_logger.setLevel(logging.INFO)
-    child_logger.propagate = True
-    # Add handler if not present
-    if not child_logger.handlers:
-        child_logger.addHandler(logging.StreamHandler())
+# Configure random walk module logging with proper handlers
+def setup_random_walk_logging():
+    """Setup proper logging for random walk modules."""
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    
+    # Configure main random walk logger
+    rw_logger = logging.getLogger("libp2p.discovery.random_walk")
+    rw_logger.setLevel(logging.INFO)
+    rw_logger.handlers.clear()  # Clear any existing handlers
+    rw_logger.addHandler(handler)
+    rw_logger.propagate = False
+    
+    # Configure RT refresh manager logger  
+    rt_logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
+    rt_logger.setLevel(logging.INFO)
+    rt_logger.handlers.clear()
+    rt_logger.addHandler(handler)
+    rt_logger.propagate = False
+    
+    # Configure specific random walk module logger
+    rw_module_logger = logging.getLogger("libp2p.discovery.random_walk.random_walk")
+    rw_module_logger.setLevel(logging.INFO)
+    rw_module_logger.handlers.clear()
+    rw_module_logger.addHandler(handler)
+    rw_module_logger.propagate = False
+    
+    logger.info("Random walk logging configured with dedicated handlers")
 
-# Configure libp2p discovery random_walk parent logger
+# Setup random walk logging
+setup_random_walk_logging()
+
+# Configure libp2p discovery random_walk parent logger (backup)
 random_walk_parent_logger = logging.getLogger("libp2p.discovery.random_walk")
-random_walk_parent_logger.setLevel(logging.INFO)
-random_walk_parent_logger.propagate = True
+if not random_walk_parent_logger.handlers:
+    random_walk_parent_logger.setLevel(logging.INFO)
+    random_walk_parent_logger.propagate = True
 
 # Also configure the kad_dht module for better visibility
 kad_dht_logger = logging.getLogger("libp2p.kad_dht")
