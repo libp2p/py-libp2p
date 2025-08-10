@@ -39,8 +39,6 @@ from .peerinfo import (
 PERMANENT_ADDR_TTL = 0
 
 
-# TODO: Set up an async task for periodic peer-store cleanup
-# for expired addresses and records.
 class PeerRecordState:
     envelope: Envelope
     seq: int
@@ -217,7 +215,6 @@ class PeerStore(IPeerStore):
 
     # -----CERT-ADDR-BOOK-----
 
-    # TODO: Make proper use of this function
     def maybe_delete_peer_record(self, peer_id: ID) -> None:
         """
         Delete the signed peer record for a peer if it has no know
