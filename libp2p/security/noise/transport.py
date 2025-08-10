@@ -29,11 +29,6 @@ class Transport(ISecureTransport):
     early_data: bytes | None
     with_noise_pipes: bool
 
-    # NOTE: Implementations that support Noise Pipes must decide whether to use
-    #   an XX or IK handshake based on whether they possess a cached static
-    #   Noise key for the remote peer.
-    # TODO: A storage of seen noise static keys for pattern IK?
-
     def __init__(
         self,
         libp2p_keypair: KeyPair,
