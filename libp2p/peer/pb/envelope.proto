@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package libp2p.peer.pb.record;
+
+import "libp2p/peer/pb/crypto.proto";
+
+option go_package = "github.com/libp2p/go-libp2p/core/record/pb";
+
+message Envelope {
+    libp2p.peer.pb.crypto.PublicKey public_key = 1;
+    bytes payload_type = 2;
+    bytes payload = 3;
+    bytes signature = 5;
+}
