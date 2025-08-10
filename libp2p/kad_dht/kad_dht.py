@@ -352,7 +352,6 @@ class KadDHT(Service):
 
                 # Handle ADD_PROVIDER message
                 elif message.type == Message.MessageType.ADD_PROVIDER:
-                    print("ADD_PROVIDER REQ RECEIVED")
                     # Process ADD_PROVIDER
                     key = message.key
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
@@ -449,7 +448,6 @@ class KadDHT(Service):
 
                 # Handle GET_PROVIDERS message
                 elif message.type == Message.MessageType.GET_PROVIDERS:
-                    print("GET_PROVIDERS REQ RECIEVED")
                     # Process GET_PROVIDERS
                     key = message.key
                     logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
@@ -560,7 +558,6 @@ class KadDHT(Service):
 
                 # Handle GET_VALUE message
                 elif message.type == Message.MessageType.GET_VALUE:
-                    print("GET VALUE REQ RECEIVED")
                     # Process GET_VALUE
                     key = message.key
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
