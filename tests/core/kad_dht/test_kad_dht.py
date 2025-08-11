@@ -86,7 +86,7 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
         dht_b.host.get_peerstore().get_peer_record(dht_a.host.get_id()), Envelope
     )
 
-    # Verifies if the senderRecord in the FIND_NODE response is correctly proccessed
+    # Verifies if the senderRecord in the FIND_NODE response is correctly processed
     assert isinstance(
         dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id()), Envelope
     )

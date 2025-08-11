@@ -361,7 +361,6 @@ class PeerRouting(IPeerRouting):
                             )
 
         except Exception as e:
-            print("EXCEPTION CAME")
             logger.debug(f"Error querying peer {peer} for closest: {e}")
 
         finally:
