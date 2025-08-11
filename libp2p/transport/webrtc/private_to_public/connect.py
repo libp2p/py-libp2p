@@ -7,15 +7,10 @@ from libp2p.transport.webrtc.private_to_public.util import (
     fingerprint_to_multiaddr,
 )
 from trio_asyncio import aio_as_trio
-from libp2p.transport.webrtc.noise_handshake import (
-    generate_noise_prologue,
-    NoiseEncrypter,
-)
 from libp2p.transport.webrtc.connection import WebRTCMultiaddrConnection
-from libp2p.transport.webrtc.muxer import DataChannelMuxerFactory
 from libp2p.transport.webrtc.constants import WEBRTC_CONNECTION_STATES
 import logging
-
+from .stream import WebRTCStream
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
 async def connect(
@@ -56,7 +51,7 @@ async def connect(
             logger.debug("server setting local description %s", munged_answer.sdp)
             await aio_as_trio(peer_connection.setLocalDescription(munged_answer))
 
-    # TODO: Fix this
+        # TODO: Check if this is the best way
         # Wait for handshake channel to open
         if handshake_channel.readyState != "open":
             logger.debug(
@@ -88,9 +83,16 @@ async def connect(
         if local_fingerprint is None:
             raise Exception("Could not get fingerprint from local description sdp")
 
+        # Setup stream for read and write on RTCDataChannel
+        webrtc_stream = WebRTCStream.createStream(handshake_channel, direction="outbound", )
+        
         logger.debug("%s performing noise handshake", role)
-        #TODO: Complete the noise handshake and connection authentication
+        #TODO: Complete the noise handshake and connection authentication 
+        # including securing and upgrading the connection
+        # Ref: js-libp2p transport-webrtc connect.ts (see lines 135-199)
+        # https://github.com/libp2p/js-libp2p/blob/main/packages/transport-webrtc/src/private-to-public/utils/connect.ts
         noiseProlouge = generate_noise_prologue(local_fingerprint, remote_addr, role)
+        
         
     except Exception as e:
         logger.error("%s noise handshake failed: %s", role, e)
