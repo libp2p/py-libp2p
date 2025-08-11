@@ -49,8 +49,6 @@ def create_signed_peer_record(
     return envelope
 
 
-# TODO: Set up an async task for periodic peer-store cleanup
-# for expired addresses and records.
 class PeerRecordState:
     envelope: Envelope
     seq: int
