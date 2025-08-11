@@ -364,7 +364,7 @@ class KadDHT(Service):
                             envelope, _ = consume_envelope(
                                 message.senderRecord, "libp2p-peer-record"
                             )
-                            # Use the default TTL of 2 hours (72000 seconds)
+                            # Use the default TTL of 2 hours (7200 seconds)
                             if not self.host.get_peerstore().consume_peer_record(
                                 envelope, 7200
                             ):
