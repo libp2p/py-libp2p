@@ -13,6 +13,8 @@ from libp2p.identity.identify.identify import (
     _multiaddr_to_bytes,
     parse_identify_response,
 )
+from libp2p.peer.envelope import Envelope, consume_envelope, unmarshal_envelope
+from libp2p.peer.peer_record import unmarshal_record
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -39,6 +41,19 @@ async def test_identify_protocol(security_protocol):
 
         # Parse the response (handles both old and new formats)
         identify_response = parse_identify_response(response)
+
+        # Validate the recieved envelope and then store it in the certified-addr-book
+        envelope, record = consume_envelope(
+            identify_response.signedPeerRecord, "libp2p-peer-record"
+        )
+        assert host_b.peerstore.consume_peer_record(envelope, ttl=7200)
+
+        # Check if the peer_id in the record is same as of host_a
+        assert record.peer_id == host_a.get_id()
+
+        # Check if the peer-record is correctly consumed
+        assert host_a.get_addrs() == host_b.peerstore.addrs(host_a.get_id())
+        assert isinstance(host_b.peerstore.get_peer_record(host_a.get_id()), Envelope)
 
         logger.debug("host_a: %s", host_a.get_addrs())
         logger.debug("host_b: %s", host_b.get_addrs())
@@ -71,5 +86,14 @@ async def test_identify_protocol(security_protocol):
         # Check protocols
         assert set(identify_response.protocols) == set(host_a.get_mux().get_protocols())
 
-        # sanity check
-        assert identify_response == _mk_identify_protobuf(host_a, cleaned_addr)
+        # sanity check if the peer_id of the identify msg are same
+        assert (
+            unmarshal_record(
+                unmarshal_envelope(identify_response.signedPeerRecord).raw_payload
+            ).peer_id
+            == unmarshal_record(
+                unmarshal_envelope(
+                    _mk_identify_protobuf(host_a, cleaned_addr).signedPeerRecord
+                ).raw_payload
+            ).peer_id
+        )
