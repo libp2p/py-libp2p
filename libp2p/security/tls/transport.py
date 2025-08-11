@@ -42,11 +42,17 @@ class TLSTransport(ISecureTransport):
         self,
         libp2p_keypair: KeyPair,
         early_data: bytes | None = None,
+        muxers: list[str] | None = None,
+        identity_config: IdentityConfig | None = None,
     ):
         """Initialize TLS transport."""
         self.libp2p_privkey = libp2p_keypair.private_key
         self.local_peer = ID.from_pubkey(libp2p_keypair.public_key)
         self.early_data = early_data
+        # Optional list of preferred stream muxers for ALPN negotiation.
+        self._preferred_muxers = muxers or []
+        # Optional identity config for certificate template and key log writer.
+        self._identity_config = identity_config
 
     def create_ssl_context(self, server_side: bool = False) -> ssl.SSLContext:
         """
@@ -59,6 +65,13 @@ class TLSTransport(ISecureTransport):
             Configured SSL context
 
         """
+        # Placeholder for SSL context creation following libp2p TLS 1.3 profile.
+        # Expected responsibilities:
+        # - TLS 1.3 only
+        # - Insecure cert verification here, custom verification post-handshake
+        # - Set ALPN protocols: preferred muxers + "libp2p"
+        # - Apply key log writer if provided in identity_config
+        # - Disable SNI for client-side connections
         raise NotImplementedError("SSL context creation not implemented")
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
@@ -157,11 +170,25 @@ class TLSTransport(ISecureTransport):
         """Get the protocol ID for this transport."""
         return PROTOCOL_ID
 
+    def get_preferred_muxers(self) -> list[str]:
+        """
+        Return the list of preferred stream muxers for ALPN negotiation.
+        """
+        return list(self._preferred_muxers)
+
+    def get_negotiated_muxer(self) -> str | None:
+        """
+        Placeholder: return the muxer negotiated via ALPN, if any.
+        """
+        raise NotImplementedError("Negotiated muxer retrieval not implemented")
+
 
 # Factory function for creating TLS transport
 def create_tls_transport(
     libp2p_keypair: KeyPair,
     early_data: bytes | None = None,
+    muxers: list[str] | None = None,
+    identity_config: IdentityConfig | None = None,
 ) -> TLSTransport:
     """
     Create a new TLS transport.
@@ -169,9 +196,11 @@ def create_tls_transport(
     Args:
         libp2p_keypair: Key pair for the local peer
         early_data: Optional early data for TLS handshake
+        muxers: Optional list of preferred stream muxer protocol IDs for ALPN
+        identity_config: Optional TLS identity config (cert template, key log writer)
 
     Returns:
         TLS transport instance
 
     """
-    return TLSTransport(libp2p_keypair, early_data)
+    return TLSTransport(libp2p_keypair, early_data, muxers, identity_config)

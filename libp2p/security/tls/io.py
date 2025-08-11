@@ -45,6 +45,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._ssl_socket = None
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_complete = False
+        self._negotiated_protocol: str | None = None
 
     async def handshake(self) -> None:
         """
@@ -54,6 +55,12 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             HandshakeFailure: If handshake fails
 
         """
+        # Placeholder: perform TLS handshake on the underlying connection.
+        # Expected responsibilities:
+        # - Wrap the raw connection with SSL and do handshake
+        # - Populate _peer_certificate
+        # - Set _negotiated_protocol from ALPN
+        # - Ensure SNI is not sent for client-side
         raise NotImplementedError("TLS handshake not implemented")
 
     def get_peer_certificate(self) -> x509.Certificate | None:
@@ -74,6 +81,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             msg: Message to encrypt and send
 
         """
+        # Placeholder: write encrypted data via SSL socket
         raise NotImplementedError("TLS write_msg not implemented")
 
     async def read_msg(self) -> bytes:
@@ -84,6 +92,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             Decrypted message bytes
 
         """
+        # Placeholder: read encrypted data via SSL socket
         raise NotImplementedError("TLS read_msg not implemented")
 
     def encrypt(self, data: bytes) -> bytes:
@@ -118,7 +127,14 @@ class TLSReadWriter(EncryptedMsgReadWriter):
 
     async def close(self) -> None:
         """Close the TLS connection."""
+        # Placeholder: close SSL socket and underlying connection
         raise NotImplementedError("TLS close not implemented")
+
+    def get_negotiated_protocol(self) -> str | None:
+        """
+        Return the ALPN-negotiated protocol (e.g., selected muxer) if any.
+        """
+        return self._negotiated_protocol
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """

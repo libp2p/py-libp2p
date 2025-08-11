@@ -19,6 +19,10 @@ ALPN_PROTOCOL = "libp2p"
 # Custom OID for libp2p peer identity extension (same as Rust implementation)
 LIBP2P_EXTENSION_OID = ObjectIdentifier("1.3.6.1.4.1.53594.1.1")
 
+# Prefix used when signing the TLS certificate public key with the libp2p host key
+# to bind the X.509 certificate to the libp2p identity.
+LIBP2P_CERT_PREFIX: bytes = b"libp2p-tls-handshake:"
+
 
 @dataclass
 class SignedKey:
@@ -26,6 +30,35 @@ class SignedKey:
 
     public_key_bytes: bytes
     signature: bytes
+
+
+def encode_signed_key(public_key_bytes: bytes, signature: bytes) -> bytes:
+    """
+    ASN.1-encode the SignedKey structure for inclusion in the libp2p X.509 extension.
+
+    Args:
+        public_key_bytes: libp2p protobuf-encoded public key bytes
+        signature: signature over prefix+certificate public key
+
+    Returns:
+        DER-encoded bytes representing the SignedKey sequence
+
+    """
+    raise NotImplementedError("SignedKey ASN.1 encoding not implemented")
+
+
+def decode_signed_key(der_bytes: bytes) -> SignedKey:
+    """
+    Parse DER-encoded SignedKey from the libp2p X.509 extension value.
+
+    Args:
+        der_bytes: DER bytes for SignedKey
+
+    Returns:
+        Parsed SignedKey instance
+
+    """
+    raise NotImplementedError("SignedKey ASN.1 decoding not implemented")
 
 
 def create_cert_template() -> x509.CertificateBuilder:
