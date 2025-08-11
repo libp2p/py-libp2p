@@ -33,7 +33,7 @@ MAX_MESSAGE_SIZE = 16 * 1024  # 16KB (compatible with go-libp2p and rust-libp2p)
 FIN_ACK_TIMEOUT = 5000  # 5 seconds
 OPEN_TIMEOUT = 5000  # 5 seconds
 DATA_CHANNEL_DRAIN_TIMEOUT = 30000  # 30 seconds
-DEFAULT_READ_TIMEOUT = 30000 # 30 seconds
+DEFAULT_READ_TIMEOUT = 30000  # 30 seconds
 # WebRTC-Direct specific constants
 UFRAG_PREFIX = "libp2p+webrtc+v1/"
 UFRAG_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"

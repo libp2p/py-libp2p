@@ -1,22 +1,29 @@
-from aiortc import (RTCConfiguration, RTCPeerConnection, RTCSessionDescription, RTCDtlsFingerprint)
-from trio_asyncio import aio_as_trio
 from dataclasses import dataclass
+
+from aiortc import (
+    RTCConfiguration,
+    RTCDtlsFingerprint,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
+from trio_asyncio import aio_as_trio
+
 from .gen_certificate import WebRTCCertificate
-import datetime
-from ..constants import MAX_MESSAGE_SIZE
+
 
 @dataclass
 class DirectRTCConfiguration:
     ufrag: str
     peer_connection: RTCPeerConnection
     rtc_config: RTCConfiguration
-    
+
+
 class DirectPeerConnection(RTCPeerConnection):
     def __init__(self, direct_config: DirectRTCConfiguration):
         self.ufrag = direct_config.ufrag
         self.peer_connection = direct_config.peer_connection
         super().__init__(direct_config.rtc_config)
-    
+
     async def createOffer(self) -> RTCSessionDescription:
         """
         Create SDP offer, patching ICE ufrag and pwd to self.ufrag and self.upwd,
@@ -61,29 +68,29 @@ class DirectPeerConnection(RTCPeerConnection):
         await aio_as_trio(self.setLocalDescription(patched_answer))
         return patched_answer
 
-    
+    # TODO: FIx this
     def remoteFingerprint(self) -> RTCDtlsFingerprint:
-        pass
-        # return self.peer_connection.
-    
+        return RTCDtlsFingerprint("", "")
+
     @staticmethod
     async def create_dialer_rtc_peer_connection(
         role: str,
         ufrag: str,
         rtc_configuration: RTCConfiguration,
         certificate: WebRTCCertificate | None = None,
-    ):
+    ) -> "DirectPeerConnection":
         """
-        Create a DirectRTCPeerConnection for dialing, similar to the JS createDialerRTCPeerConnection.
+        Create a DirectRTCPeerConnection for dialing,
+        similar to the JS createDialerRTCPeerConnection.
         """
-       
         if certificate is None:
-            certificate = WebRTCCertificate.generate()
+            certificate = WebRTCCertificate()
 
         # TODO: ICE servers. Should we use the ones from the rtc_configuration?
-        
+
         # # ICE servers
-        # ice_servers = rtc_config.get("iceServers") if isinstance(rtc_config, dict) else getattr(rtc_config, "iceServers", None)
+        # ice_servers = rtc_config.get("iceServers") if isinstance(rtc_config, dict)
+        #               else getattr(rtc_config, "iceServers", None)
         # if ice_servers is None and default_ice_servers is not None:
         #     ice_servers = default_ice_servers
 
@@ -91,17 +98,19 @@ class DirectPeerConnection(RTCPeerConnection):
         #     mapped_ice_servers = map_ice_servers(ice_servers)
         # else:
         #     mapped_ice_servers = ice_servers
-
+        # timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000
         peer_connection = RTCPeerConnection(
             RTCConfiguration(
-                f"{role}-{(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)}",
-                disable_fingerprint_verification=True,
-                disable_auto_negotiation=True,
-                certificate_pem_file=certificate.to_pem()[0],
-                key_pem_file=certificate.to_pem()[1],
-                enable_ice_udp_mux=(role == "server"),
-                max_message_size=MAX_MESSAGE_SIZE,
+                # f"{role}-{timestamp}",
+                # disable_fingerprint_verification=True,
+                # disable_auto_negotiation=True,
+                # certificate_pem_file=certificate.to_pem()[0],
+                # key_pem_file=certificate.to_pem()[1],
+                # enable_ice_udp_mux=(role == "server"),
+                # max_message_size=MAX_MESSAGE_SIZE,
                 # ice_servers=mapped_ice_servers,
             )
         )
-        return DirectPeerConnection(DirectRTCConfiguration(ufrag, peer_connection, rtc_configuration))
+        return DirectPeerConnection(
+            DirectRTCConfiguration(ufrag, peer_connection, rtc_configuration)
+        )

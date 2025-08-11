@@ -6,17 +6,29 @@ from enum import Enum
 import logging
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-import trio
 from aiortc import RTCDataChannel
+import trio
+
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
-    from libp2p.custom_types import TProtocol
-from ..exception import WebRTCStreamStateError, WebRTCStreamClosedError, WebRTCStreamResetError, WebRTCStreamError
-from ..constants import MAX_BUFFERED_AMOUNT, DEFAULT_READ_TIMEOUT, MAX_MESSAGE_SIZE, BUFFERED_AMOUNT_LOW_TIMEOUT
-from .pb.message_pb2 import Message
 import varint
+
+from ..constants import (
+    BUFFERED_AMOUNT_LOW_TIMEOUT,
+    DEFAULT_READ_TIMEOUT,
+    MAX_BUFFERED_AMOUNT,
+    MAX_MESSAGE_SIZE,
+)
+from ..exception import (
+    WebRTCStreamClosedError,
+    WebRTCStreamError,
+    WebRTCStreamResetError,
+    WebRTCStreamStateError,
+    WebRTCStreamTimeoutError,
+)
+from .pb.message_pb2 import Message
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public.stream")
 
@@ -25,7 +37,7 @@ class StreamState(Enum):
     OPEN = "open"
     WRITE_CLOSED = "write_closed"
     READ_CLOSED = "read_closed"
-    CLOSED = "closed" 
+    CLOSED = "closed"
     CONNECTING = "connecting"
     CLOSING = "closing"
     RESET = "reset"
@@ -66,55 +78,54 @@ class WebRTCStream(IMuxedStream):
     """
     WebRTC Stream implementation following libp2p IMuxedStream interface.
     """
-    
-    def __init__(
-        self,
-        id: int,
-        direction: StreamDirection,
-        channel: RTCDataChannel
-    ):
+
+    def __init__(self, id: int, direction: StreamDirection, channel: RTCDataChannel):
         """
         Initialize WebRTC stream.
+
         Args:
             id: Stream identifier (int)
             direction: Stream direction (inbound/outbound)
             channel: RTCDataChannel instance
+
         """
-        
         self._id = id
         self._channel = channel
         self._direction = direction
-        
+
         self._state_lock = trio.Lock()
-        
+
         self._timeline = StreamTimeline()
         self._timeline.record_open()
-        
-        match self._channel.readyState:
-            case StreamState.OPEN:
+        self._state = StreamState.OPEN
+
+        match self._channel.readyState.lower():
+            case StreamState.OPEN.value.lower():
                 self._state = StreamState.OPEN
-            case StreamState.CLOSED | StreamState.CLOSING:
+            case StreamState.CLOSED.value.lower() | StreamState.CLOSING.value.lower():
                 if self._timeline.closed_at is None or self._timeline.closed_at == 0:
                     self._timeline.record_close()
-            case StreamState.CONNECTING:
+            case StreamState.CONNECTING.value.lower():
                 # noop
                 pass
             case _:
                 logger.error("Unknown datachannel state %s", self._channel.readyState)
                 raise WebRTCStreamStateError("Unknown datachannel state")
-        
-        # Register handler for message listener 
-        self._channel.on("message", self.handle_incoming_data)
-        
+
         # Stream-specific channels
         self.send_channel: trio.MemorySendChannel[bytes]
         self.receive_channel: trio.MemoryReceiveChannel[bytes]
         self.send_channel, self.receive_channel = trio.open_memory_channel(100)
-        
-        logger.debug(
-            f"Created WebRTC stream {id} "
-            f"({direction.value})"
-        )
+
+        # Message reader buffer
+        self._receive_buffer = bytearray()
+        self._receive_buffer_lock = trio.Lock()
+        self._receive_event = trio.Event()
+
+        # Register handler for message listener
+        self._channel.on("message", self.handle_incoming_data)
+
+        logger.debug(f"Created WebRTC stream {id} ({direction.value})")
 
     @property
     def stream_id(self) -> str:
@@ -141,14 +152,17 @@ class WebRTCStream(IMuxedStream):
     async def read(self, n: int | None = None) -> bytes:
         """
         Read data from the stream with RTCDataChannel flow control.
+
         Args:
             n: Maximum number of bytes to read. If None or -1, read all available.
+
         Returns:
             Data read from stream
         Raises:
             WebRTCStreamClosedError: Stream is closed
             WebRTCStreamResetError: Stream was reset
             WebRTCStreamTimeoutError: Read timeout exceeded
+
         """
         if n is None:
             n = -1
@@ -171,7 +185,9 @@ class WebRTCStream(IMuxedStream):
                     self._receive_event = trio.Event()  # Reset for next wait
 
             if cancel_scope.cancelled_caught:
-                raise WebRTCStreamTimeoutError(f"Read timeout on stream {self.stream_id}")
+                raise WebRTCStreamTimeoutError(
+                    f"Read timeout on stream {self.stream_id}"
+                )
             return b""
         except WebRTCStreamResetError:
             # Stream was reset while reading
@@ -184,14 +200,16 @@ class WebRTCStream(IMuxedStream):
     async def write(self, data: bytes, check_buffer: bool = True) -> None:
         """
         Write data to the stream with WebRTC DataChannel flow control.
+
         Args:
             data: Data to send
-            check_buffer: Whether to check the DataChannel's bufferedAmount before sending
+            check_buffer: Whether to check the channel's bufferedAmount before sending
         Raises:
             WebRTCStreamClosedError: Stream is closed for writing
             WebRTCStreamResetError: Stream was reset
             StreamStateError: DataChannel is not open
             TimeoutError: Timed out waiting for DataChannel buffer to clear
+
         """
         if not data:
             return
@@ -206,11 +224,12 @@ class WebRTCStream(IMuxedStream):
             offset = 0
             while offset < bytes_total:
                 to_send = min(bytes_total - offset, max_message_size)
-                buf = data[offset: offset + to_send]
-                
+                buf = data[offset : offset + to_send]
+
                 message_buf = Message()
                 message_buf.message = buf
-                send_buf = varint.encode(len(message_buf)) + bytes(message_buf)
+                encoded_msg = message_buf.SerializeToString()
+                send_buf = varint.encode(len(encoded_msg)) + encoded_msg
 
                 logger.debug(f"sending {len(buf)}/{bytes_total} bytes on channel")
                 await self._send_message(send_buf, check_buffer=check_buffer)
@@ -225,25 +244,35 @@ class WebRTCStream(IMuxedStream):
             await self._handle_stream_error(e)
             raise
 
+    async def reset(self) -> None:
+        """Reset the stream by calling the handle reset function."""
+        await self.sendReset()
+
     # This section handles writing of message and flag to the RTCDataChannel
-     
+
     async def _send_message(self, data: bytes, check_buffer: bool = True) -> None:
         # Wait for buffer to be low enough if needed
         if check_buffer and self._channel.bufferedAmount > MAX_BUFFERED_AMOUNT:
             bufferedamountlow_event = trio.Event()
 
-            def on_bufferedamountlow():
+            def on_bufferedamountlow() -> None:
                 bufferedamountlow_event.set()
 
             self._channel.on("bufferedamountlow", on_bufferedamountlow)
             try:
-                logger.debug(f'Channel buffer is {self._channel.bufferedAmount}, wait for "bufferedamountlow" event')
+                logger.debug(
+                    f"Channel buffer:{self._channel.bufferedAmount}, "
+                    'wait for "bufferedamountlow" event'
+                )
                 with trio.move_on_after(BUFFERED_AMOUNT_LOW_TIMEOUT) as scope:
-                    while self._channel.bufferedAmount > self._max_buffered_amount:
+                    while self._channel.bufferedAmount > MAX_BUFFERED_AMOUNT:
                         await bufferedamountlow_event.wait()
                         bufferedamountlow_event = trio.Event()
                 if scope.cancelled_caught:
-                    raise TimeoutError(f"Timed out waiting for DataChannel buffer to clear after {BUFFERED_AMOUNT_LOW_TIMEOUT}s")
+                    raise TimeoutError(
+                        "Timed out waiting for DataChannel buffer"
+                        "to clear after {BUFFERED_AMOUNT_LOW_TIMEOUT}s"
+                    )
             finally:
                 bufferedamountlow_event = trio.Event()
 
@@ -254,7 +283,7 @@ class WebRTCStream(IMuxedStream):
             logger.error(f"Error while sending message: {err}")
             raise
 
-    async def _send_flag(self, flag) -> bool:
+    async def _send_flag(self, flag: "Message.Flag.ValueType") -> bool:
         """
         Send a flag message over the DataChannel, if the channel is open.
 
@@ -263,17 +292,20 @@ class WebRTCStream(IMuxedStream):
 
         Returns:
             bool: True if the flag was sent, False otherwise.
+
         """
-        if self._channel.readyState != StreamState.OPEN:
+        if str(self._channel.readyState).lower() != StreamState.OPEN.value.lower():
             logger.debug(
-                f'Not sending flag {flag} because channel is "{self._channel.readyState}" and not "open"'
+                f"Not sending flag {flag} because"
+                f' channel is "{self._channel.readyState}", and not "open"',
             )
             return False
 
         logger.debug(f"Sending flag {flag}")
         message_buf = Message()
         message_buf.flag = flag
-        encoded_message = bytes(message_buf)
+        # Use SerializeToString() for protobuf objects
+        encoded_message = message_buf.SerializeToString()
         prefixed_buf = varint.encode(len(encoded_message)) + encoded_message
 
         try:
@@ -282,7 +314,6 @@ class WebRTCStream(IMuxedStream):
         except Exception as err:
             logger.error(f"Could not send flag {flag} - {err}")
             return False
-
 
     async def sendReset(self) -> None:
         """
@@ -295,40 +326,40 @@ class WebRTCStream(IMuxedStream):
         finally:
             self._channel.close()
 
-    async def sendCloseWrite(self, options=None) -> None:
+    async def sendCloseWrite(self) -> None:
         """
         Send a FIN flag to close the write side and await FIN_ACK.
         """
-        if self._channel.readyState != StreamState.OPEN:
-
-            self.close()
+        if str(self._channel.readyState).lower() != StreamState.OPEN.value.lower():
+            await self.close()
             return
 
-        sent = await self._send_flag(Message.Flag.FIN)
-        self.close()
+        await self.send_channel.aclose()
+        await self._send_flag(Message.Flag.FIN)
 
     async def sendCloseRead(self) -> None:
         """
         Send a STOP_SENDING flag to close the read side.
         """
-        if self._channel.readyState != StreamState.OPEN:
+        if str(self._channel.readyState).lower() != StreamState.OPEN.value.lower():
             return
-
+        await self.receive_channel.aclose()
         await self._send_flag(Message.Flag.STOP_SENDING)
 
     # This section handles recieving of messages and flags from RTCDataChannel
-        
+
     async def handle_incoming_data(self, data: bytes) -> None:
         """
         Handle data received from the WebRTC datachannel.
+
         Args:
             data: Received data
+
         """
         if self._state == StreamState.RESET:
             return
 
         if data:
-
             self.send_channel.send_nowait(data)
             self._timeline.record_first_data()
 
@@ -339,7 +370,7 @@ class WebRTCStream(IMuxedStream):
 
         else:
             async with self._state_lock:
-                if self._write_closed:
+                if self._state == StreamState.WRITE_CLOSED:
                     self._state = StreamState.CLOSED
                 else:
                     self._state = StreamState.READ_CLOSED
@@ -349,19 +380,20 @@ class WebRTCStream(IMuxedStream):
     async def process_incoming_protobuf(self, buffer: bytes) -> bytes | None:
         """
         Process an incoming protobuf message from the datachannel.
+
         Args:
             buffer: The received protobuf-encoded bytes
         Returns:
-            The message payload (bytes) if this is a data message and the stream is readable, else None.
+            The message payload (bytes)
+            if this is a data message and the stream is readable,
+            else None.
+
         """
         message = Message()
         message.ParseFromString(buffer)
 
         if message.flag is not None:
-            logger.debug(
-                'incoming flag %s"',
-                message.flag
-            )
+            logger.debug('incoming flag %s"', message.flag)
 
             if message.flag == Message.Flag.FIN:
                 # We should expect no more data from the remote, stop reading
@@ -371,34 +403,32 @@ class WebRTCStream(IMuxedStream):
                     await self._send_flag(Message.Flag.FIN_ACK)
                 except Exception as err:
                     logger.error("error sending FIN_ACK immediately: %s", err)
-                return
+                return None
             if message.flag == Message.Flag.RESET:
                 # Stop reading and writing to the stream immediately
                 await self.handle_reset()
-                return
+                return None
             if message.flag == Message.Flag.STOP_SENDING:
                 # The remote has stopped reading
                 await self.handle_stop_sending()
-                return 
+                return None
             if message.flag == Message.Flag.FIN_ACK:
                 logger.debug("received FIN_ACK")
-                self.close()
-                return
-        if message.message is not None :
+                await self.close()
+                return None
+        if message.message is not None:
             # The message is of type message
             async with self._receive_buffer_lock:
                 self._receive_buffer.extend(message.message)
-        else: 
+        else:
             raise WebRTCStreamError("Unidentified feild in protobuf")
         return None
-    
+
     async def handle_stop_sending(self) -> None:
         """
         Handle STOP_SENDING frame from remote peer.
         """
-        logger.debug(
-            f"Stream {self.stream_id} handling STOP_SENDING"
-        )
+        logger.debug(f"Stream {self.stream_id} handling STOP_SENDING")
         async with self._state_lock:
             if self.direction == StreamDirection.OUTBOUND:
                 self._state = StreamState.CLOSED
@@ -407,21 +437,33 @@ class WebRTCStream(IMuxedStream):
             else:
                 # Only write side closed
                 self._state = StreamState.WRITE_CLOSED
-                
+        await self.sendCloseWrite()
+
+    async def handle_stop_reading(self) -> None:
+        """
+        Handle FIN frame from remote peer.
+        """
+        logger.debug(f"Stream {self.stream_id} handling FIN")
+        async with self._state_lock:
+            if self.direction == StreamDirection.INBOUND:
+                self._state = StreamState.CLOSED
+            elif self._state == StreamState.WRITE_CLOSED:
+                self._state = StreamState.CLOSED
+            else:
+                # Only write side closed
+                self._state = StreamState.READ_CLOSED
+        await self.sendCloseRead()
+
     async def handle_reset(self) -> None:
         """
         Handle stream reset from remote peer.
         """
-        logger.debug(
-            f"Stream {self.stream_id} reset by peer"
-        )
+        logger.debug(f"Stream {self.stream_id} reset by peer")
 
         async with self._state_lock:
             self._state = StreamState.RESET
 
-        await self._cleanup_resources()
         self._timeline.record_reset()
-
         self._receive_buffer = bytearray()
         self._receive_buffer_lock = trio.Lock()
         self._receive_event.set()
@@ -452,20 +494,6 @@ class WebRTCStream(IMuxedStream):
         """Check if stream was reset."""
         return self._state == StreamState.RESET
 
-    def can_read(self) -> bool:
-        """Check if stream can be read from."""
-        return not self._read_closed and self._state not in (
-            StreamState.CLOSED,
-            StreamState.RESET,
-        )
-
-    def can_write(self) -> bool:
-        """Check if stream can be written to."""
-        return not self._write_closed and self._state not in (
-            StreamState.CLOSED,
-            StreamState.RESET,
-        )
-
     async def close(self) -> None:
         """
         Close the stream gracefully (both read and write sides).
@@ -480,15 +508,15 @@ class WebRTCStream(IMuxedStream):
 
         await self.receive_channel.aclose()
         await self.send_channel.aclose()
-        await self._channel.close()
-        
+        self._channel.close()
+
         # Update state and cleanup
         async with self._state_lock:
             self._state = StreamState.CLOSED
 
         self._timeline.record_close()
         logger.debug(f"Stream {self.stream_id} closed")
-        
+
     # Abstact implementations
     async def __aenter__(self) -> "WebRTCStream":
         """Enter the async context manager."""
@@ -506,8 +534,16 @@ class WebRTCStream(IMuxedStream):
 
     def set_deadline(self, ttl: int) -> bool:
         # TODO: Implement deadline for this stream
-        pass
-    
+        return True
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        """
+        Get the remote address for this stream.
+
+        WebRTC connections don't expose IP:port addresses, so this returns None.
+        """
+        return None
+
     # String representation for debugging
     def __repr__(self) -> str:
         return (
@@ -518,9 +554,11 @@ class WebRTCStream(IMuxedStream):
 
     def __str__(self) -> str:
         return f"WebRTCStream({self.stream_id})"
-    
+
     @staticmethod
     def createStream(channel: RTCDataChannel, direction: str) -> "WebRTCStream":
         # Convert direction string to StreamDirection enum
         direction_enum = StreamDirection(direction)
+        if channel.id is None:
+            return WebRTCStream(0, direction_enum, channel)
         return WebRTCStream(channel.id, direction_enum, channel)

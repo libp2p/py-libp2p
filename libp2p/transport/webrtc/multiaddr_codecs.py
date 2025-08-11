@@ -33,7 +33,7 @@ def webrtc_direct_decode(b: ByteString) -> str:
     return ""
 
 
-def certhash_decode(s: str) -> Tuple[int, bytes]:
+def certhash_decode(s: str) -> tuple[int, bytes]:
     if not s:
         raise ValueError("Empty certhash string.")
 
@@ -70,7 +70,7 @@ def certhash_decode(s: str) -> Tuple[int, bytes]:
     return code, digest
 
 
-def certhash_decode(b: ByteString) -> str:
+def certhash_encode(b: ByteString) -> str:
     """Decode certificate hash component."""
     if not b:
         return ""

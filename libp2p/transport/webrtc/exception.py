@@ -2,8 +2,6 @@
 WebRTC Transport exceptions
 """
 
-from typing import Any, Literal
-
 
 class WebRTCError(Exception):
     """Base exception for all WebRTC transport errors."""
@@ -92,6 +90,7 @@ class WebRTCStreamTimeoutError(WebRTCStreamError):
     """Stream operation timed out."""
 
     pass
+
 
 class WebRTCStreamStateError(WebRTCStreamError):
     """Invalid operation for current stream state."""

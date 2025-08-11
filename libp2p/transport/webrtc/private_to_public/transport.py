@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 from aiortc import (
     RTCConfiguration,
@@ -15,22 +14,19 @@ from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 
-from ..connection import WebRTCRawConnection
 from ..constants import (
-    DEFAULT_HANDSHAKE_TIMEOUT,
     DEFAULT_ICE_SERVERS,
     WebRTCError,
 )
-from .util import generate_ufrag
+from .connect import connect
+from .direct_rtc_connection import DirectPeerConnection
 from .gen_certificate import (
     WebRTCCertificate,
     parse_webrtc_maddr,
 )
-from .connect import connect
-from .direct_rtc_connection import DirectPeerConnection
 from .listener import WebRTCDirectListener
 from .util import (
-    SDPMunger,
+    generate_ufrag,
 )
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
@@ -50,6 +46,7 @@ class WebRTCDirectTransport(ITransport):
         self.host: IHost | None = None
         self.connection_events: dict[str, trio.Event] = {}
         self.cert_mgr: WebRTCCertificate | None = None
+        self.supported_protocols: set[str] = {"webrtc-direct", "p2p"}
         logger.info("WebRTC-Direct Transport initialized")
 
     async def start(self, nursery: trio.Nursery) -> None:
@@ -61,11 +58,12 @@ class WebRTCDirectTransport(ITransport):
             raise WebRTCError("Host must be set before starting transport")
 
         # Generate certificate for this transport
-        self.cert_mgr = WebRTCCertificate.generate()
+        self.cert_mgr = WebRTCCertificate()
 
         with trio.CancelScope() as scope:
             self.cert_mgr.cancel_scope = scope
-            nursery.start_soon(self.cert_mgr.renewal_loop)
+            if self.cert_mgr is not None:
+                nursery.start_soon(self.cert_mgr.renewal_loop)
 
         self._started = True
         logger.info("WebRTC-Direct Transport started")
@@ -119,25 +117,39 @@ class WebRTCDirectTransport(ITransport):
             logger.info(f"Dialing WebRTC-Direct to {peer_id} at {ip}:{port}")
 
             ufrag = generate_ufrag()
-            
+
             async with open_loop():
                 conn_id = str(peer_id)
-                pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
-                direct_peer_connection = await DirectPeerConnection.create_dialer_rtc_peer_connection(role="client", ufrag= ufrag, rtc_configuration=pc)
-                
+                rtc_config = RTCConfiguration(iceServers=[])
+                direct_peer_connection = (
+                    await DirectPeerConnection.create_dialer_rtc_peer_connection(
+                        role="client", ufrag=ufrag, rtc_configuration=rtc_config
+                    )
+                )
+
                 try:
-                    connection = await connect(role="client", ufrag=ufrag, peer_connection=direct_peer_connection)
+                    connection = await connect(
+                        role="client",
+                        ufrag=ufrag,
+                        peer_connection=direct_peer_connection,
+                        remote_addr=maddr,
+                    )
+                    if connection is None:
+                        raise OpenConnectionError("WebRTC-Direct connection failed")
                     self.active_connections[conn_id] = connection
                     self.pending_connections.pop(conn_id, None)
                     self.connection_events.pop(conn_id, None)
 
-                    logger.info(
-                        f"Successfully established WebRTC-Direct connection to {peer_id}"
+                    logger.debug(
+                        f"Successfully established WebRTC-direct connection to{peer_id}"
                     )
                     return connection
                 except Exception as e:
                     logger.error(f"Failed to connect as client: {e}")
-                    direct_peer_connection.close()
+                    await direct_peer_connection.close()
+                    raise OpenConnectionError(
+                        f"Failed to connect as client: {e}"
+                    ) from e
 
         except Exception as e:
             logger.error(f"Failed to dial WebRTC-Direct connection to {maddr}: {e}")
@@ -145,7 +157,14 @@ class WebRTCDirectTransport(ITransport):
 
     def create_listener(self, handler_function: THandler) -> IListener:
         """Create a WebRTC-Direct listener for incoming connections."""
-        return WebRTCDirectListener(transport=self, handler=handler_function)
+        if self.cert_mgr is None:
+            raise OpenConnectionError("Cert_mgr not present")
+        rtc_config = RTCConfiguration()
+        return WebRTCDirectListener(
+            transport=self,
+            cert=self.cert_mgr,
+            rtc_configuration=rtc_config,
+        )
 
     async def _exchange_offer_answer_direct(
         self, peer_id: ID, offer: RTCSessionDescription, certhash: str
@@ -153,6 +172,7 @@ class WebRTCDirectTransport(ITransport):
         """Exchange offer/answer for direct connection via pubsub."""
         # TODO: Implement pubsub-based offer/answer exchange
         # This would use libp2p pubsub to exchange SDP messages
+        # WHy??
         logger.debug(f"Exchanging offer/answer with {peer_id} via pubsub")
         pass
 

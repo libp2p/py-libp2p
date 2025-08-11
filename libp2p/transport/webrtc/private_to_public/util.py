@@ -1,22 +1,14 @@
-from collections.abc import Callable
-import json
+import base64
+from collections.abc import ByteString
+import hashlib
 import logging
 import random
 import re
-from typing import (
-    Any,
-    Tuple
-)
-import base64
-import re
-import hashlib
+from typing import Any
+
 from multiaddr import Multiaddr
-from libp2p.abc import (
-    IHost,
-    TProtocol,
-)
-from ..constants import (MAX_MESSAGE_SIZE)
-from collections.abc import ByteString
+
+from ..constants import MAX_MESSAGE_SIZE
 
 _fingerprint_regex = re.compile(
     r"^a=fingerprint:(?:\w+-[0-9]+)\s(?P<fingerprint>(:?([0-9a-fA-F]{2}:?)+))$",
@@ -25,10 +17,9 @@ _fingerprint_regex = re.compile(
 log = logging.getLogger("libp2p.transport.webrtc")
 
 
-
 class SDP:
     """
-    Handle SDP modification for direct connections
+    Provides utilities for handling SDP modification for direct connections.
     """
 
     @staticmethod
@@ -39,11 +30,15 @@ class SDP:
         Parameters
         ----------
         sdp : str
+            The SDP string to be munged.
         ufrag : str
+            The ICE username fragment to insert.
 
         Returns
         -------
         str
+            The munged SDP string.
+
         """
         if sdp is None:
             raise ValueError("Can't munge a missing SDP")
@@ -73,10 +68,13 @@ class SDP:
         Parameters
         ----------
         sdp : str | None
+            The SDP string to extract the fingerprint from.
 
         Returns
         -------
         str | None
+            The extracted fingerprint, or None if not found.
+
         """
         if sdp is None:
             return None
@@ -84,9 +82,9 @@ class SDP:
         if match and match.group("fingerprint"):
             return match.group("fingerprint")
         return None
-    
+
     @staticmethod
-    def server_answer_from_multiaddr(ma, ufrag: str) -> dict:
+    def server_answer_from_multiaddr(ma: Multiaddr, ufrag: str) -> dict[str, str]:
         """
         Create an answer SDP message from a multiaddr.
         The server always operates in ice-lite mode and DTLS active mode.
@@ -97,23 +95,26 @@ class SDP:
             The multiaddr to extract host, port, and fingerprint from.
         ufrag : str
             ICE username fragment (also used as password).
-        max_message_size : int
-            Maximum SCTP message size (default: 65536).
 
         Returns
         -------
-        dict
+        dict[str, str]
             Dictionary with keys 'type' and 'sdp' for RTCSessionDescription.
+
         """
         # Extract host, port, and family from multiaddr
         opts = extract_from_multiaddr(ma)
-        host = opts.get("host")
-        port = opts.get("port")
-        family = opts.get("family", 4)
+        host = opts[0]
+        port = opts[1]
+        family = opts[2] if opts[2] is not None else 4
         # Convert family to string (4 or 6)
         family_str = str(family)
         # Get fingerprint from multiaddr
-        fingerprint = multiaddr_to_fingerprint(ma) if "multiaddr_to_fingerprint" in globals() else None
+        fingerprint = (
+            multiaddr_to_fingerprint(ma)
+            if "multiaddr_to_fingerprint" in globals()
+            else None
+        )
         if fingerprint is None:
             raise ValueError("Could not extract fingerprint from multiaddr")
         sdp = (
@@ -135,13 +136,10 @@ class SDP:
             f"a=candidate:1467250027 1 UDP 1467250027 {host} {port} typ host\r\n"
             f"a=end-of-candidates\r\n"
         )
-        return {
-            "type": "answer",
-            "sdp": sdp
-        }
+        return {"type": "answer", "sdp": sdp}
 
     @staticmethod
-    def client_offer_from_multiaddr(ma, ufrag: str) -> dict:
+    def client_offer_from_multiaddr(ma: Multiaddr, ufrag: str) -> dict[str, str]:
         """
         Create an offer SDP message from a multiaddr.
 
@@ -154,13 +152,14 @@ class SDP:
 
         Returns
         -------
-        dict
+        dict[str, str]
             Dictionary with keys 'type' and 'sdp' for RTCSessionDescription.
+
         """
         opts = extract_from_multiaddr(ma)
-        host = opts.get("host")
-        port = opts.get("port")
-        family = opts.get("family", 4)
+        host = opts[0]
+        port = opts[1]
+        family = opts[2] if opts[2] is not None else 4
         family_str = str(family)
         # Use a dummy fingerprint as in the TS code
         dummy_fingerprint = "sha-256 " + ":".join(["00"] * 32)
@@ -182,10 +181,8 @@ class SDP:
             f"a=candidate:1467250027 1 UDP 1467250027 {host} {port} typ host\r\n"
             f"a=end-of-candidates\r\n"
         )
-        return {
-            "type": "offer",
-            "sdp": sdp
-        }
+        return {"type": "offer", "sdp": sdp}
+
 
 def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
     """
@@ -194,33 +191,44 @@ def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
     Parameters
     ----------
     fingerprint : str
+        The DTLS fingerprint as a colon-separated hex string.
 
     Returns
     -------
     Multiaddr
+        The resulting multiaddr with a /certhash/ component.
+
     """
-    
     fingerprint = fingerprint.strip().replace(" ", "").upper()
     parts = fingerprint.split(":")
     encoded = bytes(int(part, 16) for part in parts)
     digest = hashlib.sha256(encoded).digest()
-    
+
     # Multibase base64url, no padding, prefix "uEi" (libp2p convention)
     b64 = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
     certhash = f"uEi{b64}"
     return Multiaddr(f"/certhash/{certhash}")
 
+
 def get_hash_function(code: int) -> str:
     """
-    Get hash function name from code.
+    Get the hash function name from a multihash code.
 
     Parameters
     ----------
     code : int
+        The multihash code.
 
     Returns
     -------
     str
+        The hash function name (e.g., "sha-256").
+
+    Raises
+    ------
+    Exception
+        If the code is not a supported hash algorithm.
+
     """
     if code == 0x11:
         return "sha-1"
@@ -231,34 +239,52 @@ def get_hash_function(code: int) -> str:
     else:
         raise Exception(f"Unsupported hash algorithm code: {code}")
 
+
 def extract_certhash(ma: Multiaddr) -> str:
     """
-    Extract certhash component from Multiaddr.
+    Extract the certhash component from a Multiaddr.
 
     Parameters
     ----------
     ma : Multiaddr
+        The multiaddr to extract the certhash from.
 
     Returns
     -------
     str
+        The certhash string.
+
+    Raises
+    ------
+    Exception
+        If the certhash component is not found.
+
     """
-    for proto in ma.protocols_with_values():
+    for proto in ma.items():
         if proto[0].name == "certhash":
             return proto[1]
     raise Exception(f"Couldn't find a certhash component in: {str(ma)}")
 
-def certhash_encode(s: str) -> Tuple[int, bytes]:
+
+def certhash_encode(s: str) -> tuple[int, bytes]:
     """
-    Encode certificate hash component.
+    Encode a certificate hash component from a certhash string.
 
     Parameters
     ----------
     s : str
+        The certhash string to encode.
 
     Returns
     -------
-    Tuple[int, bytes]
+    tuple[int, bytes]
+        A tuple containing the multihash code and the digest bytes.
+
+    Raises
+    ------
+    Exception
+        If the input is empty, invalid, or the digest length is incorrect.
+
     """
     if not s:
         raise Exception("Empty certhash string.")
@@ -296,15 +322,18 @@ def certhash_encode(s: str) -> Tuple[int, bytes]:
 
 def certhash_decode(b: ByteString) -> str:
     """
-    Decode certificate hash component.
+    Decode a certificate hash component to a certhash string.
 
     Parameters
     ----------
     b : ByteString
+        The digest bytes to encode.
 
     Returns
     -------
     str
+        The certhash string (multibase base64url, prefix "uEi").
+
     """
     if not b:
         return ""
@@ -313,6 +342,7 @@ def certhash_decode(b: ByteString) -> str:
     b64_hash = base64.urlsafe_b64encode(b).decode().rstrip("=")
     return f"uEi{b64_hash}"
 
+
 def multiaddr_to_fingerprint(ma: Multiaddr) -> str:
     """
     Extract the fingerprint from a Multiaddr containing a certhash.
@@ -320,25 +350,30 @@ def multiaddr_to_fingerprint(ma: Multiaddr) -> str:
     Parameters
     ----------
     ma : Multiaddr
+        The multiaddr containing a /certhash/ component.
 
     Returns
     -------
     str
+        The fingerprint string in SDP format.
 
     Raises
     ------
     Exception
+        If the fingerprint cannot be extracted.
+
     """
     certhash_str = extract_certhash(ma)
-    code, digest = certhash_decode(certhash_str)
-    prefix = get_hash_function(code)
+    code, digest = certhash_encode(certhash_str)
+    prefix = get_hash_function(int(code))
     hex_digest = digest.hex()
-    sdp = [hex_digest[i:i+2].upper() for i in range(0, len(hex_digest), 2)]
+    sdp = [hex_digest[i : i + 2].upper() for i in range(0, len(hex_digest), 2)]
 
     if not sdp:
         raise Exception(hex_digest, str(ma))
 
     return f"{prefix} {':'.join(sdp)}"
+
 
 def pick_random_ice_servers(
     ice_servers: list[dict[str, Any]], num_servers: int = 4
@@ -349,11 +384,15 @@ def pick_random_ice_servers(
     Parameters
     ----------
     ice_servers : list[dict[str, Any]]
-    num_servers : int, default=4
+        The list of ICE server dictionaries.
+    num_servers : int, optional
+        The number of servers to select (default is 4).
 
     Returns
     -------
     list[dict[str, Any]]
+        The randomly selected subset of ICE servers.
+
     """
     random.shuffle(ice_servers)
     return ice_servers[:num_servers]
@@ -365,20 +404,22 @@ def generate_ufrag(length: int = 4) -> str:
 
     Parameters
     ----------
-    length : int, default=4
+    length : int, optional
+        The length of the generated ufrag (default is 4).
 
     Returns
     -------
     str
+        The generated ufrag string.
+
     """
     alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
     return "".join(random.choices(alphabet, k=length))
 
-from multiaddr import Multiaddr
 
-def extract_from_multiaddr(ma: Multiaddr) -> dict:
+def extract_from_multiaddr(ma: Multiaddr) -> tuple[str, int, int | None]:
     """
-    Convert a Multiaddr to a dictionary with host, port, and IP family.
+    Convert a Multiaddr to a tuple with host, port, and IP family.
 
     Parameters
     ----------
@@ -387,8 +428,14 @@ def extract_from_multiaddr(ma: Multiaddr) -> dict:
 
     Returns
     -------
-    dict
-        Dictionary with keys 'host', 'port', and 'family'.
+    Tuple[str, int, Optional[int]]
+        Tuple with (host, port, family).
+
+    Raises
+    ------
+    Exception
+        If the multiaddr is missing an IP or port.
+
     """
     protocols = ma.protocols()
     values = ma.values()
@@ -410,14 +457,12 @@ def extract_from_multiaddr(ma: Multiaddr) -> dict:
     if ip is None or port is None:
         raise Exception(f"Invalid multiaddr, missing ip/port: {str(ma)}")
 
-    return {
-        "host": ip,
-        "port": port,
-        "family": family
-    }
+    return str(ip), port, family
 
 
-def generate_noise_prologue(local_fingerprint: str, remote_multi_addr: Multiaddr, role: str) -> bytes:
+def generate_noise_prologue(
+    local_fingerprint: str, remote_multi_addr: Multiaddr, role: str
+) -> bytes:
     """
     Generate a noise prologue from the peer connection's certificate.
 
@@ -434,9 +479,11 @@ def generate_noise_prologue(local_fingerprint: str, remote_multi_addr: Multiaddr
     -------
     bytes
         The noise prologue as bytes.
+
     """
-    # noise prologue = bytes('libp2p-webrtc-noise:') + noise-server fingerprint + noise-client fingerprint
-    PREFIX = b'libp2p-webrtc-noise:'
+    # noise prologue =
+    # bytes('libp2p-webrtc-noise:') +noise-server fingerprint +noise-client fingerprint
+    PREFIX = b"libp2p-webrtc-noise:"
 
     local_fp_string = local_fingerprint.strip().lower().replace(":", "")
     local_fp_bytes = bytes.fromhex(local_fp_string)
