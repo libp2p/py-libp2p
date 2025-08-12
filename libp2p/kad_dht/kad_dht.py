@@ -117,8 +117,6 @@ class KadDHT(Service):
             routing_table=self.routing_table,
             local_peer_id=self.local_peer_id,
             query_function=self._create_query_function(),
-            ping_function=self._create_ping_function(),
-            validation_function=self._create_validation_function(),
             enable_auto_refresh=RANDOM_WALK_ENABLED,
         )
 
@@ -677,49 +675,6 @@ class KadDHT(Service):
                 yield []
         
         return query_for_peers
-    
-    def _create_ping_function(self):
-        """Create the ping function for peer liveness checks."""
-        @asynccontextmanager
-        async def ping_peer(peer_id: ID):
-            try:
-                # Use the routing table's ping implementation
-                # First check if the peer is in our routing table
-                bucket = self.routing_table.find_bucket(peer_id)
-                result = await bucket._ping_peer(peer_id)
-                yield result
-            except Exception as e:
-                logger.debug(f"Ping failed for {peer_id}: {e}")
-                yield False
-        
-        return ping_peer
-    
-    def _create_validation_function(self):
-        """Create validation function using bootstrap module logic."""
-        @asynccontextmanager
-        async def validate_peer(peer_info: PeerInfo):
-            try:
-                # Basic validation - check if we can connect to the peer
-                # Skip if it's our own peer
-                if peer_info.peer_id == self.local_peer_id:
-                    yield False
-                    return
-                
-                # Try to connect to validate
-                try:
-                    with trio.move_on_after(10.0):  # 10 second timeout
-                        await self.host.connect(peer_info)
-                        yield True
-                        return
-                except Exception as e:
-                    logger.debug(f"Failed to connect to peer {peer_info.peer_id}: {e}")
-                
-                yield False
-            except Exception as e:
-                logger.debug(f"Peer validation failed for {peer_info.peer_id}: {e}")
-                yield False
-        
-        return validate_peer
 
     async def trigger_routing_table_refresh(self, force: bool = False) -> None:
         """

@@ -268,7 +268,8 @@ async def demonstrate_random_walk_discovery(dht: KadDHT, interval: int = 30) -> 
         if iteration % 2 == 0:  # Every other iteration
             logger.info("Manually triggering routing table refresh (this will start random walks)...")
             start_time = time.time()
-            await dht.trigger_routing_table_refresh(force=True)
+            # await dht.trigger_routing_table_refresh(force=True)
+            # await dht.find_peer(dht.host.get_id())
             refresh_time = time.time() - start_time
             
             new_rt_size = dht.get_routing_table_size()

@@ -3,7 +3,6 @@ import logging
 import secrets
 import time
 from typing import Optional, List, Callable, Dict, Any, AsyncContextManager
-from contextlib import asynccontextmanager
 
 import trio
 
@@ -33,8 +32,6 @@ class RandomWalk:
         host: IHost,
         local_peer_id: ID,
         query_function: Callable[[str], AsyncContextManager[List[PeerInfo]]],
-        validation_function: Optional[Callable[[PeerInfo], AsyncContextManager[bool]]] = None,
-        ping_function: Optional[Callable[[ID], AsyncContextManager[bool]]] = None,
     ):
         """
         Initialize Random Walk module.
@@ -49,8 +46,6 @@ class RandomWalk:
         self.host = host
         self.local_peer_id = local_peer_id
         self.query_function = query_function
-        self.validation_function = validation_function
-        self.ping_function = ping_function
         
         self._running = False
         self._nursery_manager: Optional[trio.Nursery] = None
@@ -66,40 +61,6 @@ class RandomWalk:
         random_bytes = secrets.token_bytes(32)
         # Convert to hex string for query
         return random_bytes.hex()
-    
-    async def validate_peer(self, peer_info: PeerInfo) -> bool:
-        """
-        Validate a discovered peer using the same validation as bootstrap module.
-        
-        Args:
-            peer_info: Peer information to validate
-            
-        Returns:
-            True if peer is valid, False otherwise
-        """
-        try:
-            # Use provided validation function if available
-            if self.validation_function:
-                async with self.validation_function(peer_info) as is_valid:
-                    return is_valid
-            
-            # Default validation - basic connectivity check
-            if self.ping_function:
-                async with self.ping_function(peer_info.peer_id) as is_alive:
-                    return is_alive
-                    
-            # Fallback - just check if we can connect
-            try:
-                with trio.move_on_after(PEER_PING_TIMEOUT):
-                    await self.host.connect(peer_info)
-                    return True
-            except Exception as e:
-                logger.debug(f"Failed to connect to peer {peer_info.peer_id}: {e}")
-                return False
-                
-        except Exception as e:
-            logger.warning(f"Peer validation failed for {peer_info.peer_id}: {e}")
-            return False
     
     async def perform_random_walk(self) -> List[PeerInfo]:
         """
@@ -131,17 +92,8 @@ class RandomWalk:
             # Validate discovered peers
             validated_peers: List[PeerInfo] = []
             
-            async def validate_single_peer(peer_info: PeerInfo):
-                if await self.validate_peer(peer_info):
-                    validated_peers.append(peer_info)
-                    logger.debug(f"Validated peer: {peer_info.peer_id}")
-                else:
-                    logger.debug(f"Peer validation failed: {peer_info.peer_id}")
-            
-            # Validate peers concurrently
-            async with trio.open_nursery() as nursery:
-                for peer_info in discovered_peers:
-                    nursery.start_soon(validate_single_peer, peer_info)
+            for peer_info in discovered_peers:
+                validated_peers.append(peer_info)
             
             logger.info(f"Random walk completed: {len(validated_peers)}/{len(discovered_peers)} peers validated")
             return validated_peers
@@ -174,17 +126,7 @@ class RandomWalk:
                 peerstore_peers = self._get_peerstore_peers()
                 if peerstore_peers:
                     logger.info(f"Routing table size ({current_routing_table_size}) < {RANDOM_WALK_RT_THRESHOLD}, checking {len(peerstore_peers)} peerstore peers")
-                    
-                    # Validate peerstore peers first
-                    for peer_info in peerstore_peers[:20]:  # Limit to avoid too many validations
-                        try:
-                            if await self.validate_peer(peer_info):
-                                all_validated_peers.append(peer_info)
-                                logger.debug(f"Added peerstore peer to candidates: {peer_info.peer_id}")
-                        except Exception as e:
-                            logger.debug(f"Failed to validate peerstore peer {peer_info.peer_id}: {e}")
-                    
-                    logger.info(f"Validated {len(all_validated_peers)} peers from peerstore")
+                all_validated_peers.extend(peerstore_peers)
             except Exception as e:
                 logger.warning(f"Error processing peerstore peers: {e}")
         else:
