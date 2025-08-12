@@ -2,12 +2,56 @@
 Utility functions for Kademlia DHT implementation.
 """
 
+import logging
+
 import base58
 import multihash
 
+from libp2p.abc import IHost
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+
+from .pb.kademlia_pb2 import (
+    Message,
+)
+
+logger = logging.getLogger("kademlia-example.utils")
+
+
+def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> bool:
+    if isinstance(msg, Message):
+        if msg.HasField("senderRecord"):
+            try:
+                # Convert the signed-peer-record(Envelope) from
+                # protobuf bytes
+                envelope, _ = consume_envelope(msg.senderRecord, "libp2p-peer-record")
+                # Use the default  TTL of 2 hours (7200 seconds)
+                if not host.get_peerstore().consume_peer_record(envelope, 7200):
+                    logger.error("Updating the certified-addr-book was unsuccessful")
+            except Exception as e:
+                logger.error("Error updating teh certified addr book for peer: %s", e)
+                return False
+    else:
+        if msg.HasField("signedRecord"):
+            try:
+                # Convert the signed-peer-record(Envelope) from
+                # protobuf bytes
+                envelope, _ = consume_envelope(
+                    msg.signedRecord,
+                    "libp2p-peer-record",
+                )
+                # Use the default TTL of 2 hours (7200 seconds)
+                if not host.get_peerstore().consume_peer_record(envelope, 7200):
+                    logger.error("Failed to update the Certified-Addr-Book")
+            except Exception as e:
+                logger.error(
+                    "Error updating the certified-addr-book: %s",
+                    e,
+                )
+
+    return True
 
 
 def create_key_from_binary(binary_data: bytes) -> bytes:
