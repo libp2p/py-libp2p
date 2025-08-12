@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 
 """
-Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
+Reference: https://github.com/libp2p/go-libp2p-swarm/blob/
+04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
 """
 
 
@@ -52,9 +53,12 @@ class SwarmConn(INetConn):
                 self.remove_stream(stream)
 
             setattr(self.muxed_conn, "remove_stream", _remove_stream_hook)
-        except Exception:
+        except Exception as e:
+            logging.warning(
+                f"Failed to set optional conveniences on muxed_conn "
+                f"for peer {muxed_conn.peer_id}: {e}"
+            )
             # optional conveniences
-            pass
         if hasattr(muxed_conn, "on_close"):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
