@@ -3,6 +3,69 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.2.10 (2025-08-12)
+------------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- identify protocol use now prefix-length messages by default. use use_varint_format param for old raw messages (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+
+
+Bugfixes
+~~~~~~~~
+
+- Improved type safety in ``get_mux()`` and ``get_protocols()`` by returning properly typed values instead
+  of ``Any``. Also updated ``identify.py`` and ``discovery.py`` to handle ``None`` values safely and
+  compare protocols correctly. (`#746 <https://github.com/libp2p/py-libp2p/issues/746>`__)
+- fixed malformed PeerId in test_peerinfo (`#757 <https://github.com/libp2p/py-libp2p/issues/757>`__)
+- Fixed incorrect handling of raw protobuf format in identify protocol. The identify example now properly handles both raw and length-prefixed (varint) message formats, provides better error messages, and displays connection status with peer IDs. Replaced mock-based tests with comprehensive real network integration tests for both formats. (`#778 <https://github.com/libp2p/py-libp2p/issues/778>`__)
+- Fixed incorrect handling of raw protobuf format in identify push protocol. The identify push example now properly handles both raw and length-prefixed (varint) message formats, provides better error messages, and displays connection status with peer IDs. Replaced mock-based tests with comprehensive real network integration tests for both formats. (`#784 <https://github.com/libp2p/py-libp2p/issues/784>`__)
+- Recompiled protobufs that were out of date and added a ``make`` rule so that protobufs are always up to date. (`#818 <https://github.com/libp2p/py-libp2p/issues/818>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Improve error message under the function decode_uvarint_from_stream in libp2p/utils/varint.py file (`#760 <https://github.com/libp2p/py-libp2p/issues/760>`__)
+- Clarified the requirement for a trailing newline in newsfragments to pass lint checks. (`#775 <https://github.com/libp2p/py-libp2p/issues/775>`__)
+
+
+Features
+~~~~~~~~
+
+- Added ``Bootstrap`` peer discovery module that allows nodes to connect to predefined bootstrap peers for network discovery. (`#711 <https://github.com/libp2p/py-libp2p/issues/711>`__)
+- Add lock for read/write to avoid interleaving receiving messages in mplex_stream.py (`#748 <https://github.com/libp2p/py-libp2p/issues/748>`__)
+- Add logic to clear_peerdata method in peerstore (`#750 <https://github.com/libp2p/py-libp2p/issues/750>`__)
+- Added the ``Certified Addr-Book`` interface supported by ``Envelope`` and ``PeerRecord`` class.
+  Integrated the signed-peer-record transfer in the identify/push protocols. (`#753 <https://github.com/libp2p/py-libp2p/issues/753>`__)
+- add length-prefixed support to identify protocol (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- remove FIXME comment since it's obsolete and 32-byte prefix support is there but not enabled by default (`#592 <https://github.com/libp2p/py-libp2p/issues/592>`__)
+- Add comprehensive tests for relay_discovery method in circuit_relay_v2 (`#749 <https://github.com/libp2p/py-libp2p/issues/749>`__)
+- [mplex] Add timeout and error handling during stream close (`#752 <https://github.com/libp2p/py-libp2p/issues/752>`__)
+- fixed a typecheck error using cast in peerinfo.py (`#757 <https://github.com/libp2p/py-libp2p/issues/757>`__)
+- Fix raw format reading in identify/push protocol and add comprehensive test coverage for both varint and raw formats (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+- Pin py-multiaddr dependency to specific git commit db8124e2321f316d3b7d2733c7df11d6ad9c03e6 (`#766 <https://github.com/libp2p/py-libp2p/issues/766>`__)
+- Replace the libp2p.peer.ID cache attributes with functools.cached_property functional decorator. (`#772 <https://github.com/libp2p/py-libp2p/issues/772>`__)
+- Yamux RawConnError Logging Refactor - Improved error handling and debug logging (`#784 <https://github.com/libp2p/py-libp2p/issues/784>`__)
+- The TODO IK patterns in Noise has been deprecated in specs: https://github.com/libp2p/specs/tree/master/noise#handshake-pattern (`#816 <https://github.com/libp2p/py-libp2p/issues/816>`__)
+- Remove the already completed TODO tasks in Peerstore:
+  TODO: Set up an async task for periodic peer-store cleanup for expired addresses and records.
+  TODO: Make proper use of this function (`#819 <https://github.com/libp2p/py-libp2p/issues/819>`__)
+
+
+Performance Improvements
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Added throttling for async topic validators in validate_msg, enforcing a
+  concurrency limit to prevent resource exhaustion under heavy load. (`#755 <https://github.com/libp2p/py-libp2p/issues/755>`__)
+
+
 py-libp2p v0.2.9 (2025-07-09)
 -----------------------------
 
