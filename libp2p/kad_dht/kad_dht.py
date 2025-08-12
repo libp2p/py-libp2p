@@ -131,7 +131,7 @@ class KadDHT(Service):
         async with trio.open_nursery() as nursery:
             # Start the RT Refresh Manager
             nursery.start_soon(self.rt_refresh_manager.start)
-            logger.info("RT Refresh Manager started - Random Walk is now active")
+            logger.debug("RT Refresh Manager started - Random Walk is now active")
 
             # Start the main DHT service loop
             nursery.start_soon(self._run_main_loop)

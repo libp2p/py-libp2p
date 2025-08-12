@@ -37,17 +37,12 @@ class RandomWalk:
         Args:
             host: The libp2p host instance
             local_peer_id: Local peer ID
-            query_function: Function to perform FIND_NODE queries
-            validation_function: Function to validate discovered peers (optional)
-            peer_routing: PeerRouting instance to run find node query.
+            peer_routing: PeerRouting instance to run find node query
 
         """
         self.host = host
         self.local_peer_id = local_peer_id
         self.peer_routing = peer_routing
-
-        self._running = False
-        self._nursery_manager: trio.Nursery | None = None
 
     def generate_random_peer_id(self) -> str:
         """
@@ -87,16 +82,14 @@ class RandomWalk:
                     await self.peer_routing.find_closest_peers_network(target_key) or []
                 )
 
-            logger.info(
-                f"Discovered {len(discovered_peer_ids)} peers in random walk "
-                f"for {random_peer_id}"
-            )
-
             if not discovered_peer_ids:
                 logger.debug(f"No peers discovered in random walk for {random_peer_id}")
                 return []
 
-            logger.debug(f"Discovered {len(discovered_peer_ids)} peers in random walk")
+            logger.info(
+                f"Discovered {len(discovered_peer_ids)} peers in random walk "
+                f"for {random_peer_id[:8]}..."  # Show only first 8 chars for brevity
+            )
 
             # Convert peer IDs to PeerInfo objects and validate
             validated_peers: list[PeerInfo] = []
@@ -140,15 +133,13 @@ class RandomWalk:
             try:
                 peerstore_peers = self._get_peerstore_peers()
                 if peerstore_peers:
-                    logger.info(
-                        f"Routing table size ({current_routing_table_size}) "
-                        f"checking {len(peerstore_peers)} peerstore peers"
+                    logger.debug(
+                        f"RT size ({current_routing_table_size}) below threshold, "
+                        f"adding {len(peerstore_peers)} peerstore peers"
                     )
                 all_validated_peers.extend(peerstore_peers)
             except Exception as e:
                 logger.warning(f"Error processing peerstore peers: {e}")
-        else:
-            logger.debug(f"Routing table size ({current_routing_table_size}).")
 
         async def single_walk() -> None:
             try:
@@ -198,16 +189,9 @@ class RandomWalk:
                         # Filter for compatible addresses (TCP + IPv4)
                         if self._has_compatible_addresses(peer_info):
                             peer_infos.append(peer_info)
-                        else:
-                            logger.debug(
-                                f"Skipping peer {peer_id} - no compatible addresses"
-                            )
                 except Exception as e:
                     logger.debug(f"Error getting peer info for {peer_id}: {e}")
 
-            logger.debug(
-                f"Retrieved {len(peer_infos)} compatible peer infos from peerstore"
-            )
             return peer_infos
 
         except Exception as e:
