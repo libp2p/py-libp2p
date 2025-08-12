@@ -10,7 +10,7 @@ from .exceptions import (
 
 __all__ = [
     "RTRefreshManager",
-    "RandomWalk", 
+    "RandomWalk",
     "RoutingTableRefreshError",
     "RandomWalkError",
     "PeerValidationError",

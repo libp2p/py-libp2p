@@ -1,10 +1,9 @@
-import time
 from typing import Final
 
 # Timing constants (matching go-libp2p)
 PEER_PING_TIMEOUT: Final[float] = 10.0  # seconds
 REFRESH_QUERY_TIMEOUT: Final[float] = 60.0  # seconds
-REFRESH_INTERVAL: Final[float] = 300.0  # 5 minutes
+REFRESH_INTERVAL: Final[float] = 10.0  # 10 seconds for demonstration
 SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD: Final[float] = 60.0  # 1 minute
 
 # Routing table thresholds

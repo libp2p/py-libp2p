@@ -10,7 +10,6 @@ from enum import (
 )
 import logging
 import time
-from contextlib import asynccontextmanager
 
 from multiaddr import (
     Multiaddr,
@@ -21,6 +20,8 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.discovery.random_walk.config import RANDOM_WALK_ENABLED
+from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -33,8 +34,6 @@ from libp2p.peer.peerinfo import (
 from libp2p.tools.async_service import (
     Service,
 )
-from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
-from libp2p.discovery.random_walk.config import RANDOM_WALK_ENABLED
 
 from .common import (
     ALPHA,
@@ -116,7 +115,8 @@ class KadDHT(Service):
             host=self.host,
             routing_table=self.routing_table,
             local_peer_id=self.local_peer_id,
-            query_function=self._create_query_function(),
+            # query_function=self._create_query_function(),
+            peer_routing=self.peer_routing,
             enable_auto_refresh=RANDOM_WALK_ENABLED,
         )
 
@@ -132,10 +132,10 @@ class KadDHT(Service):
             # Start the RT Refresh Manager
             nursery.start_soon(self.rt_refresh_manager.start)
             logger.info("RT Refresh Manager started - Random Walk is now active")
-            
+
             # Start the main DHT service loop
             nursery.start_soon(self._run_main_loop)
-    
+
     async def _run_main_loop(self) -> None:
         """Run the main DHT service loop."""
         # Main service loop
@@ -161,13 +161,10 @@ class KadDHT(Service):
     async def stop(self) -> None:
         """Stop the DHT service and cleanup resources."""
         logger.info("Stopping Kademlia DHT")
-        
+
         # Stop the RT Refresh Manager
         await self.rt_refresh_manager.stop()
         logger.info("RT Refresh Manager stopped")
-        
-        # Call parent stop method
-        await super().stop()
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -648,39 +645,3 @@ class KadDHT(Service):
 
         """
         return self.value_store.size()
-
-    def _create_query_function(self):
-        """Create the query function for random walk."""
-        @asynccontextmanager
-        async def query_for_peers(target_key: str):
-            try:
-                # Convert hex string to bytes for FIND_NODE query
-                target_bytes = bytes.fromhex(target_key)
-                # Perform FIND_NODE query using peer routing
-                result_peers = await self.peer_routing.find_closest_peers_network(target_bytes)
-                
-                # Convert peer IDs to PeerInfo objects
-                peer_infos = []
-                for peer_id in result_peers:
-                    try:
-                        addrs = self.host.get_peerstore().addrs(peer_id)
-                        if addrs:
-                            peer_infos.append(PeerInfo(peer_id, addrs))
-                    except Exception as e:
-                        logger.debug(f"Failed to get addresses for peer {peer_id}: {e}")
-                
-                yield peer_infos
-            except Exception as e:
-                logger.error(f"Query failed for {target_key}: {e}")
-                yield []
-        
-        return query_for_peers
-
-    async def trigger_routing_table_refresh(self, force: bool = False) -> None:
-        """
-        Trigger a manual routing table refresh using the RT Refresh Manager.
-        
-        Args:
-            force: Whether to force refresh regardless of timing
-        """
-        await self.rt_refresh_manager.trigger_refresh(force=force)

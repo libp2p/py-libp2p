@@ -1,244 +1,172 @@
-import asyncio
+from collections.abc import Callable
 import logging
 import time
-from typing import Optional, List, Callable, Dict, Any, Protocol, AsyncContextManager
-from contextlib import asynccontextmanager
 
 import trio
 
 from libp2p.abc import IHost
-from libp2p.peer.id import ID
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.discovery.random_walk.exceptions import RoutingTableRefreshError
-from libp2p.discovery.random_walk.random_walk import RandomWalk
 from libp2p.discovery.random_walk.config import (
     MIN_RT_REFRESH_THRESHOLD,
-    REFRESH_INTERVAL,
-    SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD,
-    PEER_PING_TIMEOUT,
+    RANDOM_WALK_CONCURRENCY,
     RANDOM_WALK_ENABLED,
-    RANDOM_WALK_CONCURRENCY
+    REFRESH_INTERVAL,
 )
+from libp2p.discovery.random_walk.exceptions import RoutingTableRefreshError
+from libp2p.discovery.random_walk.random_walk import RandomWalk
+from libp2p.kad_dht.peer_routing import PeerRouting
+from libp2p.kad_dht.routing_table import RoutingTable
+from libp2p.peer.id import ID
 
 logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
 
-class RoutingTableProtocol(Protocol):
-    """Protocol defining the interface for routing table operations."""
-    
-    def size(self) -> int:
-        """Return the current size of the routing table."""
-        ...
-    
-    def get_peer_infos(self) -> List[PeerInfo]:
-        """Get list of all peers in the routing table."""
-        ...
-    
-    def add_peer(self, peer_info: PeerInfo) -> bool:
-        """Add a peer to the routing table."""
-        ...
-    
-    def remove_peer(self, peer_id: ID) -> None:
-        """Remove a peer from the routing table."""
-        ...
-
-class RefreshTrigger:
-    """Represents a refresh trigger request."""
-    
-    def __init__(self, force_refresh: bool = False):
-        self.force_refresh = force_refresh
-        self.response_channel: Optional[trio.MemorySendChannel] = None
-        self.response_receive_channel: Optional[trio.MemoryReceiveChannel] = None
 
 class RTRefreshManager:
     """
     Routing Table Refresh Manager for py-libp2p.
-    
+
     Manages periodic routing table refreshes and random walk operations
     to maintain routing table health and discover new peers.
     """
-    
+
     def __init__(
         self,
         host: IHost,
-        routing_table: RoutingTableProtocol,
+        routing_table: RoutingTable,
         local_peer_id: ID,
-        query_function: Callable[[str], AsyncContextManager[List[PeerInfo]]],
+        peer_routing: PeerRouting,
         enable_auto_refresh: bool = RANDOM_WALK_ENABLED,
         refresh_interval: float = REFRESH_INTERVAL,
         min_refresh_threshold: int = MIN_RT_REFRESH_THRESHOLD,
     ):
         """
         Initialize RT Refresh Manager.
-        
+
         Args:
             host: The libp2p host instance
-            routing_table: The routing table to manage
+            routing_table: Routing table of host
             local_peer_id: Local peer ID
-            query_function: Function to perform DHT queries
+            peer_routing: PeerRouting instance for running find node query
             enable_auto_refresh: Whether to enable automatic refresh
             refresh_interval: Interval between refreshes in seconds
             min_refresh_threshold: Minimum RT size before triggering refresh
+
         """
         self.host = host
         self.routing_table = routing_table
         self.local_peer_id = local_peer_id
-        self.query_function = query_function
-        
+        # self.query_function = query_function
+
         self.enable_auto_refresh = enable_auto_refresh
         self.refresh_interval = refresh_interval
         self.min_refresh_threshold = min_refresh_threshold
-        
+
         # Initialize random walk module
         self.random_walk = RandomWalk(
             host=host,
-            local_peer_id=local_peer_id,
-            query_function=query_function,
+            local_peer_id=self.local_peer_id,
+            # query_function=query_function,
+            peer_routing=peer_routing,
         )
-        
+
         # Control variables
         self._running = False
-        self._nursery: Optional[trio.Nursery] = None
-        self._refresh_trigger_send: Optional[trio.MemorySendChannel] = None
-        self._refresh_trigger_receive: Optional[trio.MemoryReceiveChannel] = None
-        
+        self._nursery: trio.Nursery | None = None
+
         # Tracking
         self._last_refresh_time = 0.0
-        self._refresh_done_callbacks: List[Callable[[], None]] = []
-    
+        self._refresh_done_callbacks: list[Callable[[], None]] = []
+
     async def start(self) -> None:
         """Start the RT Refresh Manager."""
         if self._running:
             logger.warning("RT Refresh Manager is already running")
             return
-        
+
         self._running = True
-        
-        # Create trigger channels
-        self._refresh_trigger_send, self._refresh_trigger_receive = trio.open_memory_channel(100)
-        
+
         logger.info("Starting RT Refresh Manager")
-        
+
         # Start the main loop
         async with trio.open_nursery() as nursery:
             self._nursery = nursery
             nursery.start_soon(self._main_loop)
-    
+
     async def stop(self) -> None:
         """Stop the RT Refresh Manager."""
         if not self._running:
             return
-        
+
         logger.info("Stopping RT Refresh Manager")
         self._running = False
-        
-        # Close trigger channels
-        if self._refresh_trigger_send:
-            await self._refresh_trigger_send.aclose()
-        if self._refresh_trigger_receive:
-            await self._refresh_trigger_receive.aclose()
-    
-    async def trigger_refresh(self, force: bool = False) -> None:
-        """
-        Trigger a manual refresh of the routing table.
-        
-        Args:
-            force: Whether to force refresh regardless of timing
-        """
-        if not self._running or not self._refresh_trigger_send:
-            logger.warning("Cannot trigger refresh: manager not running")
-            return
-        
-        trigger = RefreshTrigger(force_refresh=force)
-        try:
-            await self._refresh_trigger_send.send(trigger)
-            logger.debug(f"Refresh trigger sent (force={force})")
-        except trio.BrokenResourceError:
-            logger.warning("Cannot send refresh trigger: channel closed")
-    
+
     async def _main_loop(self) -> None:
         """Main loop for the RT Refresh Manager."""
         logger.info("RT Refresh Manager main loop started")
-        
+
         # Initial refresh if auto-refresh is enabled
         if self.enable_auto_refresh:
             await self._do_refresh(force=True)
-        
+
         try:
             while self._running:
                 async with trio.open_nursery() as nursery:
                     # Schedule periodic refresh if enabled
                     if self.enable_auto_refresh:
                         nursery.start_soon(self._periodic_refresh_task)
-                    
-                    # Handle manual refresh triggers
-                    nursery.start_soon(self._handle_refresh_triggers)
-                    
+
         except Exception as e:
             logger.error(f"RT Refresh Manager main loop error: {e}")
         finally:
             logger.info("RT Refresh Manager main loop stopped")
-    
+
     async def _periodic_refresh_task(self) -> None:
         """Task for periodic refreshes."""
         while self._running:
             await trio.sleep(self.refresh_interval)
             if self._running:
                 await self._do_refresh()
-    
-    async def _handle_refresh_triggers(self) -> None:
-        """Handle manual refresh trigger requests."""
-        if not self._refresh_trigger_receive:
-            return
-        
-        while self._running:
-            try:
-                trigger = await self._refresh_trigger_receive.receive()
-                await self._do_refresh(force=trigger.force_refresh)
-            except trio.EndOfChannel:
-                break
-            except Exception as e:
-                logger.error(f"Error handling refresh trigger: {e}")
-    
+
     async def _do_refresh(self, force: bool = False) -> None:
         """
         Perform routing table refresh operation.
-        
+
         Args:
             force: Whether to force refresh regardless of timing
+
         """
         try:
             current_time = time.time()
-            
+
             # Check if refresh is needed
             if not force:
                 if current_time - self._last_refresh_time < self.refresh_interval:
                     logger.debug("Skipping refresh: interval not elapsed")
                     return
-                
+
                 if self.routing_table.size() >= self.min_refresh_threshold:
                     logger.debug("Skipping refresh: routing table size above threshold")
                     return
-            
+
             logger.info(f"Starting routing table refresh (force={force})")
             start_time = current_time
-            
+
             # Perform random walks to discover new peers
             logger.info("Running concurrent random walks to discover new peers")
             current_rt_size = self.routing_table.size()
             discovered_peers = await self.random_walk.run_concurrent_random_walks(
-                count=RANDOM_WALK_CONCURRENCY, 
-                current_routing_table_size=current_rt_size
+                count=RANDOM_WALK_CONCURRENCY,
+                current_routing_table_size=current_rt_size,
             )
-            
+
             # Add discovered peers to routing table
             added_count = 0
             for peer_info in discovered_peers:
                 result = await self.routing_table.add_peer(peer_info)
                 if result:
                     added_count += 1
-            
+
             self._last_refresh_time = current_time
-            
+
             duration = time.time() - start_time
             logger.info(
                 f"Routing table refresh completed: "
@@ -246,22 +174,22 @@ class RTRefreshManager:
                 f"RT size: {self.routing_table.size()}, "
                 f"duration: {duration:.2f}s"
             )
-            
+
             # Notify refresh completion
             for callback in self._refresh_done_callbacks:
                 try:
                     callback()
                 except Exception as e:
                     logger.warning(f"Refresh callback error: {e}")
-            
+
         except Exception as e:
             logger.error(f"Routing table refresh failed: {e}")
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
-    
+
     def add_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when refresh completes."""
         self._refresh_done_callbacks.append(callback)
-    
+
     def remove_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Remove a refresh completion callback."""
         if callback in self._refresh_done_callbacks:

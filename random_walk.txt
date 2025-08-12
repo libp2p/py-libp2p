@@ -1,0 +1,230 @@
+2025-08-12 17:29:00,576 - random-walk-example - INFO - Random walk logging configured with dedicated handlers
+2025-08-12 17:29:00,576 - random-walk-example - INFO - Standard logging enabled - you'll see random walk start messages
+2025-08-12 17:29:00,576 - random-walk-example - INFO - === Random Walk Example for py-libp2p ===
+2025-08-12 17:29:00,576 - random-walk-example - INFO - Mode: server
+2025-08-12 17:29:00,577 - random-walk-example - INFO - Port: 0
+2025-08-12 17:29:00,577 - random-walk-example - INFO - Demo interval: 10s
+2025-08-12 17:29:00,577 - random-walk-example - INFO - Starting server node on port 36348
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Node peer ID: 16Uiu2HAkxTyWSrHxpGBkaJU7aUC4SB2uUqXxPQZ4gMwUZjB6QkT7
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Node address: /ip4/0.0.0.0/tcp/36348/p2p/16Uiu2HAkxTyWSrHxpGBkaJU7aUC4SB2uUqXxPQZ4gMwUZjB6QkT7
+2025-08-12 17:29:00,610 - random-walk-example - INFO - DHT and Random Walk logging configured
+2025-08-12 17:29:00,610 - random-walk-example - INFO - RT Refresh Manager logger level: 20
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Random Walk logger level: 20
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Initial routing table size: 0
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Currently connected peers: 0
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Peers in peerstore: 1
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Not enough connected peers, reconnecting to nodes...
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Found 1 compatible peers
+2025-08-12 17:29:00,610 - random-walk-example - INFO - Total peers checked: 1
+2025-08-12 17:29:00,611 - kademlia-example.kad_dht - INFO - Starting Kademlia DHT with peer ID 16Uiu2HAkxTyWSrHxpGBkaJU7aUC4SB2uUqXxPQZ4gMwUZjB6QkT7
+2025-08-12 17:29:00,611 - kademlia-example.kad_dht - INFO - RT Refresh Manager started - Random Walk is now active
+2025-08-12 17:29:00,611 - random-walk-example - INFO - DHT service started in SERVER mode
+2025-08-12 17:29:00,611 - random-walk-example - INFO - Random Walk module is automatically enabled
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting RT Refresh Manager
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting RT Refresh Manager
+2025-08-12 17:29:00,611 - kademlia-example.peer_routing - INFO - Refreshing routing table
+2025-08-12 17:29:00,611 - kademlia-example.peer_routing - WARNING - No local peers available for network lookup
+2025-08-12 17:29:00,611 - random-walk-example - INFO - === Random Walk Discovery Demonstration ===
+2025-08-12 17:29:00,611 - random-walk-example - INFO - --- Iteration 1 ---
+2025-08-12 17:29:00,611 - random-walk-example - INFO - Routing table size: 0
+2025-08-12 17:29:00,611 - random-walk-example - INFO - Connected peers: 0
+2025-08-12 17:29:00,611 - random-walk-example - INFO - Peerstore size: 2
+2025-08-12 17:29:00,611 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - RT Refresh Manager main loop started
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - RT Refresh Manager main loop started
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting routing table refresh (force=True)
+2025-08-12 17:29:00,611 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting routing table refresh (force=True)
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Running concurrent random walks to discover new peers
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Running concurrent random walks to discover new peers
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Starting 3 concurrent random walks)
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Routing table size (0) checking 1 peerstore peers
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: 5f86c2046e187e8109256828edfa6541f77213f8ec3bfcb0547af2c75680ad35
+2025-08-12 17:29:00,612 - kademlia-example.peer_routing - WARNING - No local peers available for network lookup
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Discovered 0 peers in random walk for 5f86c2046e187e8109256828edfa6541f77213f8ec3bfcb0547af2c75680ad35
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: 5dfe3cc5405495355883f18f677684b7370e54b68569cdc7b941210ca1daa25c
+2025-08-12 17:29:00,612 - kademlia-example.peer_routing - WARNING - No local peers available for network lookup
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Discovered 0 peers in random walk for 5dfe3cc5405495355883f18f677684b7370e54b68569cdc7b941210ca1daa25c
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: ce581d67c652a3f5404661cef08f361e591f7671eafb232e5c5ed07d6a6fe999
+2025-08-12 17:29:00,612 - kademlia-example.peer_routing - WARNING - No local peers available for network lookup
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Discovered 0 peers in random walk for ce581d67c652a3f5404661cef08f361e591f7671eafb232e5c5ed07d6a6fe999
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk - INFO - Concurrent random walks completed: 1 unique peers discovered
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Routing table refresh completed: 1/1 peers added, RT size: 1, duration: 0.00s
+2025-08-12 17:29:00,612 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Routing table refresh completed: 1/1 peers added, RT size: 1, duration: 0.00s
+2025-08-12 17:29:02,139 - random-walk-example - INFO - Connected to peer: QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ
+2025-08-12 17:29:10,620 - random-walk-example - INFO - --- Iteration 2 ---
+2025-08-12 17:29:10,621 - random-walk-example - INFO - Routing table size: 1
+2025-08-12 17:29:10,621 - random-walk-example - INFO - Connected peers: 1
+2025-08-12 17:29:10,622 - random-walk-example - INFO - Peerstore size: 2
+2025-08-12 17:29:10,622 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:10,622 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting routing table refresh (force=False)
+2025-08-12 17:29:10,622 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Starting routing table refresh (force=False)
+2025-08-12 17:29:10,622 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Running concurrent random walks to discover new peers
+2025-08-12 17:29:10,622 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - Running concurrent random walks to discover new peers
+2025-08-12 17:29:10,623 - libp2p.discovery.random_walk - INFO - Starting 3 concurrent random walks)
+2025-08-12 17:29:10,623 - libp2p.discovery.random_walk - INFO - Routing table size (1) checking 1 peerstore peers
+2025-08-12 17:29:10,624 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: 820f9efd5388aebe805d43b2525d7791815ba8c29f886bae5e0ef8e1da43a11c
+2025-08-12 17:29:10,624 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: 99760136940987a99e68225a944c310151c12080023a9df4c21e55d594029688
+2025-08-12 17:29:10,624 - libp2p.discovery.random_walk - INFO - Starting random walk for peer ID: f59d4b3dfbc38cf1cc2a1c6c08a9f1d4e085355fdfeeef9a1c0122f25f582f3d
+2025-08-12 17:29:11,392 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWQ2ysjectHefVydCcRnmgSUMUHPzmxrKVqso5uhoSY9ij: Invalid binary MultiAddr protocol 465: Unknown Protocol (protocol: 465) (binary: b')&\x02\x02\x94\x00\x00\x00l\x00\x00\x00\x00\x00\x00\x00\x02\x91\x02\x0f\xa1\xcd\x03\xd1\x03\xd2\x03"\x12 \x87\x82\x90W\xc1\x94D\x987?\xe0G\x8a\xdcm\x0f\xa9\xdd\xe1\x8bV\x92\xe92s|\x10\x0b/\x1a\xbbI\xd2\x03"\x12 \xbee\x96\xf04\xa2\x18x\xee<\xbb\\\xd3\x86\x85=oo\xa0&Y\xf7\xa9\'\xa5[4\xc5\x0fL\xa4\x07')
+2025-08-12 17:29:11,393 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWNuQPjgbWfSWDCAKruCB7qs5EWSzVSNBQnWa9kBi73FD2: MultiAddr '/ip4/185.241.151.25/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:11,393 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWB6ehfwbj2krRZSXh99fJopGXgEcWEk84Sb2ZvrLPLn8y: Invalid binary MultiAddr protocol 465: Unknown Protocol (protocol: 465) (binary: b'\x04Q\x07\x0b\xa2\x91\x02\x0f\xa1\xcd\x03\xd1\x03\xd2\x03"\x12 \xa1ex9\x86OD,<\xbct_\xb95\xea\x0e@\xd6\xb5\xd8\x0ef\x9d\xeb\xdd\xef%d\x07\x94>\xaa\xd2\x03"\x12 \x10=\xbd\x89\x04\xa7\xa09\x89\xfa\xca\xc5A\xb1\xb58\x1cGJ\xdaZ V\xff\x05\x1e\xba\xff \xe4\xad\x07')
+2025-08-12 17:29:11,680 - kademlia-example.peer_routing - WARNING - Failed to open stream to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi: unable to connect to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi, no addresses established a successful connection (with exceptions)
+2025-08-12 17:29:13,040 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWLn85Hw1g2NTJBy9RPoPLkYK5hnwojnJXQF1m4urT26dw: MultiAddr '/ip6/2a01:240:ad00:2:ec9d:4dff:fea9:45d5/tcp/4001' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:29:13,565 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWLaMzm5BJ8nzFVti6WcTtcCe8FgH62UzsWpL8qjUedNHF: MultiAddr '/ip4/78.142.193.28/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:13,565 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWGrHppGjq3HwgfCYoFskh16VUHHs7bFxYbHYi9fUn37SK: MultiAddr '/ip4/66.94.126.198/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:13,763 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWQ2ysjectHefVydCcRnmgSUMUHPzmxrKVqso5uhoSY9ij: Invalid binary MultiAddr protocol 465: Unknown Protocol (protocol: 465) (binary: b')&\x02\x02\x94\x00\x00\x00l\x00\x00\x00\x00\x00\x00\x00\x02\x91\x02\x0f\xa1\xcd\x03\xd1\x03\xd2\x03"\x12 \x87\x82\x90W\xc1\x94D\x987?\xe0G\x8a\xdcm\x0f\xa9\xdd\xe1\x8bV\x92\xe92s|\x10\x0b/\x1a\xbbI\xd2\x03"\x12 \xbee\x96\xf04\xa2\x18x\xee<\xbb\\\xd3\x86\x85=oo\xa0&Y\xf7\xa9\'\xa5[4\xc5\x0fL\xa4\x07')
+2025-08-12 17:29:14,047 - kademlia-example.peer_routing - WARNING - Failed to open stream to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi: unable to connect to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi, no addresses established a successful connection (with exceptions)
+2025-08-12 17:29:15,885 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWHgRu5vU5DoYpaNdrgopMC1u2EJABPivL4RpNs6AXTiQz: MultiAddr '/ip4/162.55.134.135/udp/32401/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:15,886 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWBSQTPxvFpRHnpTk4KDW4H5Y1qrh6rUr4GcnJKdR8TkTn: MultiAddr '/ip4/127.0.0.1/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:15,887 - kademlia-example.peer_routing - WARNING - Failed to open stream to 12D3KooWHVHW3AFv6qXxecJTFjEDcWZ2Bnf6e3ptZKu4QYKijqhF: MultiAddr '/ip4/10.0.136.75/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:15,888 - kademlia-example.peer_routing - INFO - Network lookup completed after 4 rounds, found 20 peers
+2025-08-12 17:29:15,888 - libp2p.discovery.random_walk - INFO - Discovered 20 peers in random walk for f59d4b3dfbc38cf1cc2a1c6c08a9f1d4e085355fdfeeef9a1c0122f25f582f3d
+2025-08-12 17:29:17,140 - random-walk-example - INFO - Currently connected peers: 7
+2025-08-12 17:29:17,140 - random-walk-example - INFO - Peers in peerstore: 153
+2025-08-12 17:29:17,140 - random-walk-example - INFO - Not enough connected peers, reconnecting to nodes...
+2025-08-12 17:29:17,162 - random-walk-example - INFO - Found 85 compatible peers
+2025-08-12 17:29:17,162 - random-walk-example - INFO - Total peers checked: 153
+2025-08-12 17:29:17,163 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWFqe9cszLwzqs2CppjjwXMFWe66J1CfaLoCrQB2Snw6sK: MultiAddr '/ip6/::1/udp/4001/quic' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:29:18,713 - random-walk-example - INFO - Connected to peer: 12D3KooWKhPZEqihJpeqivN4Bsyh6exDAf9aWfd7qdHhyBLRFzXt
+2025-08-12 17:29:18,713 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWNuQPjgbWfSWDCAKruCB7qs5EWSzVSNBQnWa9kBi73FD2: MultiAddr '/ip4/185.241.151.25/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:18,713 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWKE4b2HMqwPez7mnSA83PkgAXpKKsKzgsJKF7FjFyZ6Gz: MultiAddr '/ip4/108.61.217.129/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:18,713 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWAJWUeDWVoVy9QcabtgWzd547JVjb9vpFd7xpwuiaDF5d: MultiAddr '/ip4/149.112.84.178/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:19,959 - random-walk-example - INFO - Connected to peer: 12D3KooWAC2LpYKLERRMTifvmHqv5tDNmrBu8srPJgb3SzqSdbro
+2025-08-12 17:29:19,960 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWRXUvAeq5aQj6Dm26JTWHFj53vLbvvwyxSiU57n1NTzxW: MultiAddr '/ip4/82.65.30.178/udp/24826/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:19,961 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWMwdHHiaLXBRXUV7wxkk1PkqseNB9GAjRFKgDr4izBbNb: MultiAddr '/ip6/::1/tcp/4001' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:29:20,623 - random-walk-example - INFO - --- Iteration 3 ---
+2025-08-12 17:29:20,623 - random-walk-example - INFO - Routing table size: 18
+2025-08-12 17:29:20,623 - random-walk-example - INFO - Connected peers: 9
+2025-08-12 17:29:20,623 - random-walk-example - INFO - Peerstore size: 154
+2025-08-12 17:29:20,623 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:21,542 - random-walk-example - INFO - Connected to peer: 12D3KooWR2isR5g4gyXz5jPUqcdpRqrgorwpKjSkyCdx7fKoHSo2
+2025-08-12 17:29:21,826 - random-walk-example - ERROR - Failed to connect to peer QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi: unable to connect to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi, no addresses established a successful connection (with exceptions)
+2025-08-12 17:29:23,336 - random-walk-example - INFO - Connected to peer: 12D3KooWEbtpN5F2jqtEUQZnveRgsE3kWSyZbCtzgwc8XPEvvKGa
+2025-08-12 17:29:23,336 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWE6116J1W3aMvMrDihRb2nAMRrXbdnTLJv2R7493boCza: MultiAddr '/ip6/::1/udp/4001/quic' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:29:25,057 - random-walk-example - INFO - Connected to peer: 12D3KooWDDbTP65LQm9Uzet6gquUPBF4vVMMn4ymTL6yCitpJpGk
+2025-08-12 17:29:25,058 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWJPyX2kSaBiPL6Xc43gMb6QZmf1y3emxu2weLkNZHXBUf: MultiAddr '/ip4/89.117.17.54/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+Received GO_AWAY for peer 12D3KooWDefCUNPp98fDJpmxvLHFBzqT9kMvP75ogZR44uftQxQ3with unknown error code: 4101
+2025-08-12 17:29:26,532 - random-walk-example - INFO - Connected to peer: 12D3KooWHFeNeUBfFbDhNw5NCgbRTKCnVyNWABCh2uDYgTzVWJwG
+2025-08-12 17:29:28,002 - random-walk-example - INFO - Connected to peer: 12D3KooWErzdZ9CWHeXPn5Dqq8QMuZCu3ucsTrSK5A1V6xZNapGR
+2025-08-12 17:29:29,506 - random-walk-example - INFO - Connected to peer: 12D3KooWKocVk9fCiZfYff2rwmQzbdN5ey2CpE8gqAbCUbYjtisQ
+2025-08-12 17:29:29,506 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWFAJQmDp9rSh2gAUNmFMbrzTU33ukD7nViovTupTP4zJE: MultiAddr '/ip4/45.136.236.227/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:29,506 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWS42PG72Tg6MnugzLAqqTfDnNsxV2AbAed35yqvEHV1jS: MultiAddr '/ip4/209.145.52.114/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:30,624 - random-walk-example - INFO - --- Iteration 4 ---
+2025-08-12 17:29:30,624 - random-walk-example - INFO - Routing table size: 18
+2025-08-12 17:29:30,624 - random-walk-example - INFO - Connected peers: 13
+2025-08-12 17:29:30,624 - random-walk-example - INFO - Peerstore size: 154
+2025-08-12 17:29:30,624 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:31,148 - random-walk-example - INFO - Connected to peer: 12D3KooWCDSG1eRwx26NjAR7TEpHvXNgK1gKGm1wZ3M6ZrMAAcGB
+2025-08-12 17:29:32,386 - random-walk-example - INFO - Connected to peer: 12D3KooWFddvW7PPN3xEedyppfK2dKWDD1Loowm19QNG5CxK8RDM
+2025-08-12 17:29:37,388 - random-walk-example - WARNING - Connection to QmQZjmMmpQ7YhPkbQ5WmxWDaCPqzgcWMkvTjJiWPVYSmCR timed out
+2025-08-12 17:29:38,504 - random-walk-example - INFO - Connected to peer: 12D3KooWQhC43FLPhD7aX3t7AjoEDgwSkNK8tYPy8uKYe5uQY2Cr
+2025-08-12 17:29:38,505 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWD3JT51zrZQ7M9AosPHnvR7Y1ooXkZhRheFfcirak2dGX: MultiAddr '/ip4/127.0.0.1/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:40,183 - random-walk-example - INFO - Connected to peer: 12D3KooWKSMTgHEZWv82tVE51XSw5PAJLRE3rLvfVWy1nc319oiD
+2025-08-12 17:29:40,625 - random-walk-example - INFO - --- Iteration 5 ---
+2025-08-12 17:29:40,625 - random-walk-example - INFO - Routing table size: 18
+2025-08-12 17:29:40,626 - random-walk-example - INFO - Connected peers: 12
+2025-08-12 17:29:40,626 - random-walk-example - INFO - Peerstore size: 154
+2025-08-12 17:29:40,626 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:41,789 - random-walk-example - INFO - Connected to peer: 12D3KooWHKuTsPzQp2F5oL9bn7YtSPinfNvhUKWmbYwy96JnLhW7
+2025-08-12 17:29:43,319 - random-walk-example - INFO - Connected to peer: 12D3KooWEvSPfVcgAYFDegP83bvBzxgWZzUKsL85EjHgQ1j7SK3M
+2025-08-12 17:29:44,865 - random-walk-example - INFO - Connected to peer: 12D3KooWN3PBeAfuzrPLVB8s81ZrzMpbzYMz9t8YyjZEknANxd3G
+2025-08-12 17:29:44,865 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWKMjProZ76K2F2aUUXybH2SFBhn5qgvwE1S5DHWQKvmsF: MultiAddr '/ip4/152.70.152.172/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:46,370 - random-walk-example - INFO - Connected to peer: 12D3KooWSK69SsnfuzzY9SaMsUAxk1r8vhgsXHf1urnAEkU4mk9N
+2025-08-12 17:29:47,999 - random-walk-example - INFO - Connected to peer: 12D3KooWJWBiZcHU2zs74RDTsJpruEzKfWrQBfgjcoTN99AC2GWk
+2025-08-12 17:29:47,999 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWAjBwjgN4ofFMkimHQ3EZ9qcSNHTGSgo4vLbUnDzBgY6e: MultiAddr '/ip4/192.168.1.127/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:49,459 - random-walk-example - INFO - Connected to peer: 12D3KooWHAn3RvsoFWEmEwQ5GF3fn7fKEiLcr5bK5roQr2tqxPxu
+2025-08-12 17:29:50,626 - random-walk-example - INFO - --- Iteration 6 ---
+2025-08-12 17:29:50,626 - random-walk-example - INFO - Routing table size: 18
+2025-08-12 17:29:50,627 - random-walk-example - INFO - Connected peers: 12
+2025-08-12 17:29:50,627 - random-walk-example - INFO - Peerstore size: 154
+2025-08-12 17:29:50,627 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:29:51,239 - random-walk-example - INFO - Connected to peer: 12D3KooWGonwba7sF1WM9xzkFcHW3GEiTfNrihVnFxp5MweBbUhu
+2025-08-12 17:29:51,240 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWHEZmjeA1exvbRj68D632JpYb7ALDR5sPqYs5NhRZnQvZ: MultiAddr '/ip4/158.69.26.101/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:52,809 - random-walk-example - INFO - Connected to peer: 12D3KooWJURmA73U54ZqtiFNSF14cF4pEMXX69V6Uf3S2HgWWgNK
+2025-08-12 17:29:52,809 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWGJCaXRAXFPKQCAp5NEGpLCQ974uuYQMTyMyH2bhUNMyL: MultiAddr '/dns4/57-128-181-190.k51qzi5uqu5dikz6elb59u1scutzy4o55448lr31ki0vihrj18slzlcoyr66iz.libp2p.direct/tcp/4001/tls/ws' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:29:53,069 - random-walk-example - INFO - Connected to peer: 12D3KooWJe5qgAYsWmh6vBZMbnYhTTpMv49DzBubRk7CdG2WhEnB
+2025-08-12 17:29:53,070 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWAfeRkYfK5TwFMzPkjGvYGMQtwBTTtb6MoNuZ6jCwZVzd: MultiAddr '/ip4/127.0.0.1/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:53,070 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWGoNeaAPLpZnBbtDebwryNJ6zA737TV4NsEzVjRAGNFiA: MultiAddr '/ip4/154.12.244.248/udp/4001/quic' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:53,559 - random-walk-example - INFO - Connected to peer: 12D3KooWGGrxvzvwCq4c5uZ6QHy9yX2C8FrqPqQihemLTyNSm28U
+2025-08-12 17:29:53,560 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWBSkuaDMDzLLZoppTRR12hXTmgqXDdrgWzS39q3khuEua: Invalid binary MultiAddr protocol 465: Unknown Protocol (protocol: 465) (binary: b')\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x91\x02\x0f\xa1\xcd\x03\xd1\x03\xd2\x03"\x12 \xed &q^4\x0c\xd2\xab\x9a3\xc0\xaby\xf3(B\xfe\xe7\xc1\xfb\x8d\xa7^\xe0\xf9\xbe\x15E\xc5\xd6\x7f\xd2\x03"\x12 \x8fd1\xe8z\xa6\xbf*\xdc:\xd9A2w[\xf8|j\x06\xc2%&\xcf\x8eq?yq4\xa8S\xe7')
+2025-08-12 17:29:55,017 - random-walk-example - INFO - Connected to peer: 12D3KooWPpAnQTjnkMNvHKQgR9EeRLYFEVJyWGBt31onPAoYjJt7
+2025-08-12 17:29:55,017 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWDnMA3MKeZPH85Ydvd2FBJZnBaNkZyrxoC6dGDj4bA7qc: MultiAddr '/ip4/198.204.251.218/udp/4001/quic-v1' does not contain protocol Protocol(code=6, name='tcp', codec='uint16be')
+2025-08-12 17:29:55,018 - random-walk-example - ERROR - Failed to connect to peer 12D3KooWFExp2DmZcS2y5qDXftimt9hZmoCAmBhjMp1PDbxry51F: MultiAddr '/ip6/64:ff9b::877d:6230/tcp/4001' does not contain protocol Protocol(code=4, name='ip4', codec='ip4')
+2025-08-12 17:30:00,612 - kademlia-example.peer_routing - INFO - Refreshing routing table
+2025-08-12 17:30:00,627 - random-walk-example - INFO - --- Iteration 7 ---
+2025-08-12 17:30:00,627 - random-walk-example - INFO - Routing table size: 18
+2025-08-12 17:30:00,628 - random-walk-example - INFO - Connected peers: 14
+2025-08-12 17:30:00,628 - random-walk-example - INFO - Peerstore size: 154
+2025-08-12 17:30:00,628 - random-walk-example - INFO - Next demonstration in 10 seconds...
+2025-08-12 17:30:00,885 - kademlia-example.peer_routing - WARNING - Failed to open stream to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi: unable to connect to QmQLWucFURXQH7S2JdeCPYCcCfxecGHH4wBaKWigFR9fZi, no addresses established a successful connection (with exceptions)
+2025-08-12 17:30:01,029 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - RT Refresh Manager main loop stopped
+2025-08-12 17:30:01,029 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - RT Refresh Manager main loop stopped
+  + Exception Group Traceback (most recent call last):
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 412, in <module>
+  |     main()
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 402, in main
+  |     trio.run(run_node, args.port, args.mode, args.demo_interval)
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 2435, in run
+  |     raise runner.main_task_outcome.error
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 283, in run_node
+  |     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+  |   File "/usr/lib/python3.12/contextlib.py", line 231, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/host/basic_host.py", line 174, in _run
+  |     async with background_trio_service(network):
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/usr/lib/python3.12/contextlib.py", line 231, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/tools/async_service/trio_service.py", line 456, in background_trio_service
+  |     async with trio.open_nursery() as nursery:
+  |                ^^^^^^^^^^^^^^^^^^^
+  |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 1070, in __aexit__
+  |     raise combined_error_from_nursery
+  | BaseExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/tools/async_service/trio_service.py", line 461, in background_trio_service
+    |     yield manager
+    |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/host/basic_host.py", line 183, in _run
+    |     yield
+    |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 283, in run_node
+    |     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+    |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 1070, in __aexit__
+    |     raise combined_error_from_nursery
+    | BaseExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Exception Group Traceback (most recent call last):
+      |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 303, in run_node
+      |     async with background_trio_service(dht):
+      |   File "/usr/lib/python3.12/contextlib.py", line 231, in __aexit__
+      |     await self.gen.athrow(value)
+      |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/tools/async_service/trio_service.py", line 456, in background_trio_service
+      |     async with trio.open_nursery() as nursery:
+      |                ^^^^^^^^^^^^^^^^^^^
+      |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 1070, in __aexit__
+      |     raise combined_error_from_nursery
+      | BaseExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+      +-+---------------- 1 ----------------
+        | Exception Group Traceback (most recent call last):
+        |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/libp2p/tools/async_service/trio_service.py", line 461, in background_trio_service
+        |     yield manager
+        |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 308, in run_node
+        |     async with trio.open_nursery() as task_nursery:
+        |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 1070, in __aexit__
+        |     raise combined_error_from_nursery
+        | BaseExceptionGroup: Exceptions from Trio nursery (1 sub-exception)
+        +-+---------------- 1 ----------------
+          | Traceback (most recent call last):
+          |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/examples/random_walk/random_walk.py", line 329, in run_node
+          |     await trio.sleep_forever()
+          |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_timeouts.py", line 71, in sleep_forever
+          |     await trio.lowlevel.wait_task_rescheduled(lambda _: trio.lowlevel.Abort.SUCCEEDED)
+          |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_traps.py", line 208, in wait_task_rescheduled
+          |     return (await _async_yield(WaitTaskRescheduled(abort_func))).unwrap()
+          |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/outcome/_impl.py", line 213, in unwrap
+          |     raise captured_error
+          |   File "/mnt/3A1C4C761C4C2EE7/Code/PLDG/New folder/py-libp2p/venv/lib/python3.12/site-packages/trio/_core/_run.py", line 1590, in raise_cancel
+          |     raise KeyboardInterrupt
+          | KeyboardInterrupt
+          +------------------------------------
