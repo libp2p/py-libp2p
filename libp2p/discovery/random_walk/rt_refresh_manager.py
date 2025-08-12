@@ -1,6 +1,7 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import logging
 import time
+from typing import Protocol
 
 import trio
 
@@ -13,9 +14,21 @@ from libp2p.discovery.random_walk.config import (
 )
 from libp2p.discovery.random_walk.exceptions import RoutingTableRefreshError
 from libp2p.discovery.random_walk.random_walk import RandomWalk
-from libp2p.kad_dht.peer_routing import PeerRouting
-from libp2p.kad_dht.routing_table import RoutingTable
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+
+
+class RoutingTableProtocol(Protocol):
+    """Protocol for routing table operations needed by RT refresh manager."""
+
+    def size(self) -> int:
+        """Return the current size of the routing table."""
+        ...
+
+    async def add_peer(self, peer_obj: PeerInfo) -> bool:
+        """Add a peer to the routing table."""
+        ...
+
 
 logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
 
@@ -31,9 +44,9 @@ class RTRefreshManager:
     def __init__(
         self,
         host: IHost,
-        routing_table: RoutingTable,
+        routing_table: RoutingTableProtocol,
         local_peer_id: ID,
-        peer_routing: PeerRouting,
+        query_function: Callable[[bytes], Awaitable[list[ID]]],
         enable_auto_refresh: bool = RANDOM_WALK_ENABLED,
         refresh_interval: float = REFRESH_INTERVAL,
         min_refresh_threshold: int = MIN_RT_REFRESH_THRESHOLD,
@@ -45,7 +58,7 @@ class RTRefreshManager:
             host: The libp2p host instance
             routing_table: Routing table of host
             local_peer_id: Local peer ID
-            peer_routing: PeerRouting instance for running find node query
+            query_function: Function to query for closest peers given target key bytes
             enable_auto_refresh: Whether to enable automatic refresh
             refresh_interval: Interval between refreshes in seconds
             min_refresh_threshold: Minimum RT size before triggering refresh
@@ -54,7 +67,7 @@ class RTRefreshManager:
         self.host = host
         self.routing_table = routing_table
         self.local_peer_id = local_peer_id
-        # self.query_function = query_function
+        self.query_function = query_function
 
         self.enable_auto_refresh = enable_auto_refresh
         self.refresh_interval = refresh_interval
@@ -64,8 +77,7 @@ class RTRefreshManager:
         self.random_walk = RandomWalk(
             host=host,
             local_peer_id=self.local_peer_id,
-            # query_function=query_function,
-            peer_routing=peer_routing,
+            query_function=query_function,
         )
 
         # Control variables

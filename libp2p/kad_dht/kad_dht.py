@@ -5,6 +5,7 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
+from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
 )
@@ -115,13 +116,30 @@ class KadDHT(Service):
             host=self.host,
             routing_table=self.routing_table,
             local_peer_id=self.local_peer_id,
-            # query_function=self._create_query_function(),
-            peer_routing=self.peer_routing,
+            query_function=self._create_query_function(),
             enable_auto_refresh=RANDOM_WALK_ENABLED,
         )
 
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+
+    def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
+        """
+        Create a query function that wraps peer_routing.find_closest_peers_network.
+
+        This function is used by the RandomWalk module to query for peers without
+        directly importing PeerRouting, avoiding circular import issues.
+
+        Returns:
+            Callable that takes target_key bytes and returns list of peer IDs
+
+        """
+
+        async def query_function(target_key: bytes) -> list[ID]:
+            """Query for closest peers to target key."""
+            return await self.peer_routing.find_closest_peers_network(target_key)
+
+        return query_function
 
     async def run(self) -> None:
         """Run the DHT service."""

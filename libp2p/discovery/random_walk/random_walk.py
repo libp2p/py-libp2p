@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 import logging
 import secrets
 
@@ -10,7 +11,6 @@ from libp2p.discovery.random_walk.config import (
     REFRESH_QUERY_TIMEOUT,
 )
 from libp2p.discovery.random_walk.exceptions import RandomWalkError
-from libp2p.kad_dht.peer_routing import PeerRouting
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
@@ -29,7 +29,7 @@ class RandomWalk:
         self,
         host: IHost,
         local_peer_id: ID,
-        peer_routing: PeerRouting,
+        query_function: Callable[[bytes], Awaitable[list[ID]]],
     ):
         """
         Initialize Random Walk module.
@@ -37,12 +37,12 @@ class RandomWalk:
         Args:
             host: The libp2p host instance
             local_peer_id: Local peer ID
-            peer_routing: PeerRouting instance to run find node query
+            query_function: Function to query for closest peers given target key bytes
 
         """
         self.host = host
         self.local_peer_id = local_peer_id
-        self.peer_routing = peer_routing
+        self.query_function = query_function
 
     def generate_random_peer_id(self) -> str:
         """
@@ -75,12 +75,9 @@ class RandomWalk:
             discovered_peer_ids: list[ID] = []
 
             with trio.move_on_after(REFRESH_QUERY_TIMEOUT):
-                # Call find_closest_peers_network directly (it returns list[ID])
-                # Convert hex string back to bytes for the query
+                # Call the query function with target key bytes
                 target_key = bytes.fromhex(random_peer_id)
-                discovered_peer_ids = (
-                    await self.peer_routing.find_closest_peers_network(target_key) or []
-                )
+                discovered_peer_ids = await self.query_function(target_key) or []
 
             if not discovered_peer_ids:
                 logger.debug(f"No peers discovered in random walk for {random_peer_id}")
