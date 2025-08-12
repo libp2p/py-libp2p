@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.2.9"
+version = "0.2.10"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -189,7 +189,7 @@ name = "Removals"
 showcontent = true
 
 [tool.bumpversion]
-current_version = "0.2.9"
+current_version = "0.2.10"
 parse = """
     (?P<major>\\d+)
     \\.(?P<minor>\\d+)
