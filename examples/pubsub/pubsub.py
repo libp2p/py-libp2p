@@ -144,6 +144,9 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
     pubsub = Pubsub(host, gossipsub)
     termination_event = trio.Event()  # Event to signal termination
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        # Start the peer-store cleanup task
+        nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
         logger.info(f"Node started with peer ID: {host.get_id()}")
         logger.info(f"Listening on: {listen_addr}")
         logger.info("Initializing PubSub and GossipSub...")

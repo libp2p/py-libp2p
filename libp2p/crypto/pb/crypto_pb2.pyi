@@ -28,6 +28,7 @@ class _KeyTypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTy
     Secp256k1: _KeyType.ValueType  # 2
     ECDSA: _KeyType.ValueType  # 3
     ECC_P256: _KeyType.ValueType  # 4
+    X25519: _KeyType.ValueType  # 5
 
 class KeyType(_KeyType, metaclass=_KeyTypeEnumTypeWrapper): ...
 
@@ -36,6 +37,7 @@ Ed25519: KeyType.ValueType  # 1
 Secp256k1: KeyType.ValueType  # 2
 ECDSA: KeyType.ValueType  # 3
 ECC_P256: KeyType.ValueType  # 4
+X25519: KeyType.ValueType  # 5
 global___KeyType = KeyType
 
 @typing.final
