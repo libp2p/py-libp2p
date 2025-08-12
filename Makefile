@@ -69,6 +69,8 @@ PYI = $(PB:.proto=_pb2.pyi)
 ## Set default to `protobufs`, otherwise `format` is called when typing only `make`
 all: protobufs
 
+.PHONY: protobufs clean-proto
+
 protobufs: $(PY)
 
 %_pb2.py: %.proto
@@ -76,6 +78,11 @@ protobufs: $(PY)
 
 clean-proto:
 	rm -f $(PY) $(PYI)
+
+# Force protobuf regeneration by making them always out of date
+$(PY): FORCE
+
+FORCE:
 
 # docs commands
 
