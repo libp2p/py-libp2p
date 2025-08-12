@@ -7,47 +7,46 @@ import builtins
 import collections.abc
 import google.protobuf.descriptor
 import google.protobuf.internal.containers
+import google.protobuf.internal.enum_type_wrapper
 import google.protobuf.message
+import sys
 import typing
+
+if sys.version_info >= (3, 10):
+    import typing as typing_extensions
+else:
+    import typing_extensions
 
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
 
 @typing.final
 class HolePunch(google.protobuf.message.Message):
-    """HolePunch message for the DCUtR protocol."""
-    
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
-    
-    class Type(builtins.int):
-        """Message types for HolePunch"""
-        @builtins.classmethod
-        def Name(cls, number: builtins.int) -> builtins.str: ...
-        @builtins.classmethod
-        def Value(cls, name: builtins.str) -> 'HolePunch.Type': ...
-        @builtins.classmethod
-        def keys(cls) -> typing.List[builtins.str]: ...
-        @builtins.classmethod
-        def values(cls) -> typing.List['HolePunch.Type']: ...
-        @builtins.classmethod
-        def items(cls) -> typing.List[typing.Tuple[builtins.str, 'HolePunch.Type']]: ...
-    
-    CONNECT: HolePunch.Type  # 100
-    SYNC: HolePunch.Type  # 300
-    
+
+    class _Type:
+        ValueType = typing.NewType("ValueType", builtins.int)
+        V: typing_extensions.TypeAlias = ValueType
+
+    class _TypeEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[HolePunch._Type.ValueType], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+        CONNECT: HolePunch._Type.ValueType  # 100
+        SYNC: HolePunch._Type.ValueType  # 300
+
+    class Type(_Type, metaclass=_TypeEnumTypeWrapper): ...
+    CONNECT: HolePunch.Type.ValueType  # 100
+    SYNC: HolePunch.Type.ValueType  # 300
+
     TYPE_FIELD_NUMBER: builtins.int
     OBSADDRS_FIELD_NUMBER: builtins.int
-    type: HolePunch.Type
-    
+    type: global___HolePunch.Type.ValueType
     @property
     def ObsAddrs(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
-    
     def __init__(
         self,
         *,
-        type: HolePunch.Type = ...,
-        ObsAddrs: collections.abc.Iterable[builtins.bytes] = ...,
+        type: global___HolePunch.Type.ValueType | None = ...,
+        ObsAddrs: collections.abc.Iterable[builtins.bytes] | None = ...,
     ) -> None: ...
-    
     def HasField(self, field_name: typing.Literal["type", b"type"]) -> builtins.bool: ...
     def ClearField(self, field_name: typing.Literal["ObsAddrs", b"ObsAddrs", "type", b"type"]) -> None: ...
 
