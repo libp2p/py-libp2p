@@ -46,9 +46,11 @@ class SwarmConn(INetConn):
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
+
             # NetStream expects an awaitable remove_stream hook
             async def _remove_stream_hook(stream: NetStream) -> None:
                 self.remove_stream(stream)
+
             setattr(self.muxed_conn, "remove_stream", _remove_stream_hook)
         except Exception:
             # optional conveniences

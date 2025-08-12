@@ -1,3 +1,7 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 import logging
 
 from multiaddr import (
@@ -37,11 +41,6 @@ from libp2p.transport.exceptions import (
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
-)
-
-from typing import (
-    Awaitable,
-    Callable,
 )
 
 from ..exceptions import (
