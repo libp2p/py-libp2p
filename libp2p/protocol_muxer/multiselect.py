@@ -53,7 +53,7 @@ class Multiselect(IMultiselectMuxer):
         self,
         communicator: IMultiselectCommunicator,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-    ) -> tuple[TProtocol, StreamHandlerFn | None]:
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
         """
         Negotiate performs protocol selection.
 
