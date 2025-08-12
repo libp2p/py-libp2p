@@ -22,7 +22,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.peer.envelope import consume_envelope
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
@@ -291,25 +291,7 @@ class ProviderStore:
 
             if response.type == Message.MessageType.ADD_PROVIDER:
                 # Consume the sender's signed-peer-record if sent
-                if response.HasField("senderRecord"):
-                    try:
-                        # Convert the signed-peer-record(Envelope) from
-                        # protobuf bytes
-                        envelope, _ = consume_envelope(
-                            response.senderRecord, "libp2p-peer-record"
-                        )
-                        # Use the defualt TTL of 2 hours (7200 seconds)
-                        if not self.host.get_peerstore().consume_peer_record(
-                            envelope, 7200
-                        ):
-                            logger.error(
-                                "Updating the Certified-Addr-Book was unsuccessful"
-                            )
-                    except Exception as e:
-                        logger.error(
-                            "Error updating the certified addr book for peer: %s", e
-                        )
-
+                _ = maybe_consume_signed_record(response, self.host)
                 result = True
 
         except Exception as e:
@@ -454,24 +436,7 @@ class ProviderStore:
                     return []
 
                 # Consume the sender's signed-peer-record if sent
-                if response.HasField("senderRecord"):
-                    try:
-                        # Convert the signed-peer-record(Envelope) from
-                        # protobuf bytes
-                        envelope, _ = consume_envelope(
-                            response.senderRecord, "libp2p-peer-record"
-                        )
-                        # Use the defualt TTL of 2 hours (7200 seconds)
-                        if not self.host.get_peerstore().consume_peer_record(
-                            envelope, 7200
-                        ):
-                            logger.error(
-                                "Updating the Certified-Addr-Book was unsuccessful"
-                            )
-                    except Exception as e:
-                        logger.error(
-                            "Error updating the certified addr book for peer: %s", e
-                        )
+                _ = maybe_consume_signed_record(response, self.host)
 
                 # Extract provider information
                 providers = []
@@ -492,27 +457,7 @@ class ProviderStore:
                         providers.append(PeerInfo(provider_id, addrs))
 
                         # Consume the provider's signed-peer-record if sent
-                        if provider_proto.HasField("signedRecord"):
-                            try:
-                                # Convert the signed-peer-record(Envelope) from
-                                # protobuf bytes
-                                envelope, _ = consume_envelope(
-                                    provider_proto.signedRecord,
-                                    "libp2p-peer-record",
-                                )
-                                # Use the default TTL of 2 hours (7200 seconds)
-                                if not self.host.get_peerstore().consume_peer_record(  # noqa
-                                    envelope, 7200
-                                ):
-                                    logger.error(
-                                        "Failed to update the Certified-Addr-Book"
-                                    )
-                            except Exception as e:
-                                logger.error(
-                                    "Error updating the certified-addr-book for peer %s: %s",  # noqa
-                                    provider_id,
-                                    e,
-                                )
+                        _ = maybe_consume_signed_record(provider_proto, self.host)
 
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")

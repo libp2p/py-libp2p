@@ -15,7 +15,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.peer.envelope import consume_envelope
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
@@ -166,24 +166,7 @@ class ValueStore:
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
                 # Consume the sender's signed-peer-record if sent
-                if response.HasField("senderRecord"):
-                    try:
-                        # Convert the signed-peer-record(Envelope) from
-                        # protobuf bytes
-                        envelope, _ = consume_envelope(
-                            response.senderRecord, "libp2p-peer-record"
-                        )
-                        # Use the default TTL of 2 hours (7200 seconds)
-                        if not self.host.get_peerstore().consume_peer_record(
-                            envelope, 7200
-                        ):
-                            logger.error(
-                                "Updating the certified-addr-book was unsuccessful"
-                            )
-                    except Exception as e:
-                        logger.error(
-                            "Error updating the certified addr book for peer: %s", e
-                        )
+                _ = maybe_consume_signed_record(response, self.host)
 
                 if response.key == key:
                     result = True
@@ -314,24 +297,7 @@ class ValueStore:
                     and response.record.value
                 ):
                     # Consume the sender's signed-peer-record
-                    if response.HasField("senderRecord"):
-                        try:
-                            # Convert the signed-peer-record(Envelope) from
-                            # protobuf bytes
-                            envelope, _ = consume_envelope(
-                                response.senderRecord, "libp2p-peer-record"
-                            )
-                            # Use the default TTL of 2 hours (7200 seconds)
-                            if not self.host.get_peerstore().consume_peer_record(
-                                envelope, 7200
-                            ):
-                                logger.error(
-                                    "Updating the certified-addr-book was unsuccessful"
-                                )
-                        except Exception as e:
-                            logger.error(
-                                "Error updating the certified addr book for peer: %s", e
-                            )
+                    _ = maybe_consume_signed_record(response, self.host)
 
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
