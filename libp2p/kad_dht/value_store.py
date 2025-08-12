@@ -15,9 +15,11 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 
 from .common import (
     DEFAULT_TTL,
@@ -110,6 +112,14 @@ class ValueStore:
             message = Message()
             message.type = Message.MessageType.PUT_VALUE
 
+            # Create sender's signed-peer-record
+            envelope = create_signed_peer_record(
+                self.host.get_id(),
+                self.host.get_addrs(),
+                self.host.get_private_key(),
+            )
+            message.senderRecord = envelope.marshal_envelope()
+
             # Set message fields
             message.key = key
             message.record.key = key
@@ -155,7 +165,27 @@ class ValueStore:
 
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
-                if response.key:
+                # Consume the sender's signed-peer-record if sent
+                if response.HasField("senderRecord"):
+                    try:
+                        # Convert the signed-peer-record(Envelope) from
+                        # protobuf bytes
+                        envelope, _ = consume_envelope(
+                            response.senderRecord, "libp2p-peer-record"
+                        )
+                        # Use the default TTL of 2 hours (7200 seconds)
+                        if not self.host.get_peerstore().consume_peer_record(
+                            envelope, 7200
+                        ):
+                            logger.error(
+                                "Updating the certified-addr-book was unsuccessful"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            "Error updating the certified addr book for peer: %s", e
+                        )
+
+                if response.key == key:
                     result = True
             return result
 
@@ -231,6 +261,14 @@ class ValueStore:
             message.type = Message.MessageType.GET_VALUE
             message.key = key
 
+            # Create sender's signed-peer-record
+            envelope = create_signed_peer_record(
+                self.host.get_id(),
+                self.host.get_addrs(),
+                self.host.get_private_key(),
+            )
+            message.senderRecord = envelope.marshal_envelope()
+
             # Serialize and send the protobuf message
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
@@ -275,6 +313,26 @@ class ValueStore:
                     and response.HasField("record")
                     and response.record.value
                 ):
+                    # Consume the sender's signed-peer-record
+                    if response.HasField("senderRecord"):
+                        try:
+                            # Convert the signed-peer-record(Envelope) from
+                            # protobuf bytes
+                            envelope, _ = consume_envelope(
+                                response.senderRecord, "libp2p-peer-record"
+                            )
+                            # Use the default TTL of 2 hours (7200 seconds)
+                            if not self.host.get_peerstore().consume_peer_record(
+                                envelope, 7200
+                            ):
+                                logger.error(
+                                    "Updating the certified-addr-book was unsuccessful"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                "Error updating the certified addr book for peer: %s", e
+                            )
+
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )

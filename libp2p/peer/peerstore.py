@@ -23,7 +23,8 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
-from libp2p.peer.envelope import Envelope
+from libp2p.peer.envelope import Envelope, seal_record
+from libp2p.peer.peer_record import PeerRecord
 
 from .id import (
     ID,
@@ -37,6 +38,17 @@ from .peerinfo import (
 )
 
 PERMANENT_ADDR_TTL = 0
+
+
+def create_signed_peer_record(
+    peer_id: ID, addrs: list[Multiaddr], pvt_key: PrivateKey
+) -> Envelope:
+    """Creates a signed_peer_record wrapped in an Envelope"""
+    record = PeerRecord(peer_id, addrs)
+    envelope = seal_record(record, pvt_key)
+
+    print(envelope)
+    return envelope
 
 
 class PeerRecordState:

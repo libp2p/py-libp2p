@@ -15,12 +15,14 @@ from libp2p.abc import (
     INetStream,
     IPeerRouting,
 )
+from libp2p.peer.envelope import Envelope, consume_envelope
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 
 from .common import (
     ALPHA,
@@ -255,6 +257,14 @@ class PeerRouting(IPeerRouting):
             find_node_msg.type = Message.MessageType.FIND_NODE
             find_node_msg.key = target_key  # Set target key directly as bytes
 
+            print("MESSAGE GOING TO BE CREATED")
+
+            # Create sender_signed_peer_record
+            envelope = create_signed_peer_record(
+                self.host.get_id(), self.host.get_addrs(), self.host.get_private_key()
+            )
+            find_node_msg.senderRecord = envelope.marshal_envelope()
+
             # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
             logger.debug(
@@ -299,6 +309,26 @@ class PeerRouting(IPeerRouting):
 
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:
+                # Consume the sender_signed_peer_record
+                if response_msg.HasField("senderRecord"):
+                    try:
+                        # Convert the signed-peer-record(Envelope) from
+                        # protobuf bytes
+                        envelope, _ = consume_envelope(
+                            response_msg.senderRecord, "libp2p-peer-record"
+                        )
+                        # Use the default TTL of 2 hours (7200 seconds)
+                        if not self.host.get_peerstore().consume_peer_record(
+                            envelope, 7200
+                        ):
+                            logger.error(
+                                "Updating teh Certified-Addr-Book was unsuccessful"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            "Error updating the certified addr book for peer: %s", e
+                        )
+
                 for peer_data in response_msg.closerPeers:
                     new_peer_id = ID(peer_data.id)
                     if new_peer_id not in results:
@@ -311,7 +341,29 @@ class PeerRouting(IPeerRouting):
                         addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
 
+                    # Consume the received closer_peers signed-records
+                    if peer_data.HasField("signedRecord"):
+                        try:
+                            # Convert the signed-peer-record(Envelope) from
+                            # protobuf bytes
+                            envelope, _ = consume_envelope(
+                                peer_data.signedRecord,
+                                "libp2p-peer-record",
+                            )
+                            # Use the default TTL of 2 hours (7200 seconds)
+                            if not self.host.get_peerstore().consume_peer_record(
+                                envelope, 7200
+                            ):
+                                logger.error("Failed to update certified-addr-book")
+                        except Exception as e:
+                            logger.error(
+                                "Error updating the certified-addr-book for peer %s: %s",  # noqa
+                                new_peer_id,
+                                e,
+                            )
+
         except Exception as e:
+            print("EXCEPTION CAME")
             logger.debug(f"Error querying peer {peer} for closest: {e}")
 
         finally:
@@ -345,10 +397,31 @@ class PeerRouting(IPeerRouting):
 
             # Parse protobuf message
             kad_message = Message()
+            closer_peer_envelope: Envelope | None = None
             try:
                 kad_message.ParseFromString(message_bytes)
 
                 if kad_message.type == Message.MessageType.FIND_NODE:
+                    # Consume the sender's signed-peer-record if sent
+                    if kad_message.HasField("senderRecord"):
+                        try:
+                            # Convert the signed-peer-record(Envelope) from
+                            # protobuf bytes
+                            envelope, _ = consume_envelope(
+                                kad_message.senderRecord, "libp2p-peer-record"
+                            )
+                            # Use the default TTL of 2 hours (7200 seconds)
+                            if not self.host.get_peerstore().consume_peer_record(
+                                envelope, 7200
+                            ):
+                                logger.error(
+                                    "Updating the Certified-Addr-Book was unsuccessful"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                "Error updating the certified addr book for peer: %s", e
+                            )
+
                     # Get target key directly from protobuf message
                     target_key = kad_message.key
 
@@ -361,11 +434,29 @@ class PeerRouting(IPeerRouting):
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
 
+                    # Create sender_signed_peer_record for the response
+                    envelope = create_signed_peer_record(
+                        self.host.get_id(),
+                        self.host.get_addrs(),
+                        self.host.get_private_key(),
+                    )
+                    response.senderRecord = envelope.marshal_envelope()
+
                     # Add peer information to response
                     for peer_id in closest_peers:
                         peer_proto = response.closerPeers.add()
                         peer_proto.id = peer_id.to_bytes()
                         peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add the signed-records of closest_peers if cached
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer_id)
+                        )
+
+                        if isinstance(closer_peer_envelope, Envelope):
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
+                            )
 
                         # Add addresses if available
                         try:
