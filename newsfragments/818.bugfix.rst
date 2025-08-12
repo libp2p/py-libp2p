@@ -1,0 +1,1 @@
+Recompiled protobufs that were out of date and added a `make` rule so that protobufs are always up to date.

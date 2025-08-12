@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
@@ -146,6 +147,24 @@ class SwarmConn(INetConn):
 
     def get_streams(self) -> tuple[NetStream, ...]:
         return tuple(self.streams)
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Retrieve the transport addresses used by this connection.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of multiaddresses used by the transport.
+
+        """
+        # Return the addresses from the peerstore for this peer
+        try:
+            peer_id = self.muxed_conn.peer_id
+            return self.swarm.peerstore.addrs(peer_id)
+        except Exception as e:
+            logging.warning(f"Error getting transport addresses: {e}")
+            return []
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:
