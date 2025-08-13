@@ -141,12 +141,14 @@ async def run_node(port: int, mode: str, demo_interval: int = 30) -> None:
             logger.info(f"Node peer ID: {peer_id}")
             logger.info(f"Node address: /ip4/0.0.0.0/tcp/{port}/p2p/{peer_id}")
 
-            # Create and start DHT with Random Walk
-            dht = KadDHT(host, dht_mode)
+            # Create and start DHT with Random Walk enabled
+            # dht = KadDHT(host, dht_mode, enable_random_walk=True)
+            dht = KadDHT(host, dht_mode, enable_random_walk=False)
             logger.info(f"Initial routing table size: {dht.get_routing_table_size()}")
 
             async with background_trio_service(dht):
                 logger.info(f"DHT service started in {dht_mode.value} mode")
+                logger.info(f"Random Walk enabled: {dht.is_random_walk_enabled()}")
 
                 async with trio.open_nursery() as task_nursery:
                     # Start demonstration and status reporting
