@@ -142,8 +142,7 @@ async def run_node(port: int, mode: str, demo_interval: int = 30) -> None:
             logger.info(f"Node address: /ip4/0.0.0.0/tcp/{port}/p2p/{peer_id}")
 
             # Create and start DHT with Random Walk enabled
-            # dht = KadDHT(host, dht_mode, enable_random_walk=True)
-            dht = KadDHT(host, dht_mode, enable_random_walk=False)
+            dht = KadDHT(host, dht_mode, enable_random_walk=True)
             logger.info(f"Initial routing table size: {dht.get_routing_table_size()}")
 
             async with background_trio_service(dht):
