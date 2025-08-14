@@ -15,7 +15,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.pubsub.utils import env_to_send_in_RPC
 
 from .exceptions import (
     PubsubRouterError,
@@ -106,12 +106,8 @@ class FloodSub(IPubsubRouter):
 
         # Add the senderRecord of the peer in the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope = create_signed_peer_record(
-                self.pubsub.host.get_id(),
-                self.pubsub.host.get_addrs(),
-                self.pubsub.host.get_private_key(),
-            )
-            rpc_msg.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
 
