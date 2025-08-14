@@ -9,6 +9,12 @@ from libp2p.crypto.keys import KeyPair, PrivateKey
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.security.secure_session import SecureSession
+from libp2p.security.tls.certificate import (
+    ALPN_PROTOCOL,
+    create_cert_template,
+    generate_certificate,
+    verify_certificate_chain,
+)
 from libp2p.security.tls.io import TLSReadWriter
 
 # Protocol ID for TLS transport
@@ -53,6 +59,17 @@ class TLSTransport(ISecureTransport):
         self._preferred_muxers = muxers or []
         # Optional identity config for certificate template and key log writer.
         self._identity_config = identity_config
+        # Generate and cache a stable identity certificate for this transport
+        template = (
+            self._identity_config.cert_template
+            if self._identity_config and self._identity_config.cert_template
+            else create_cert_template()
+        )
+        self._cert_pem, self._key_pem = generate_certificate(
+            self.libp2p_privkey, template
+        )
+        # Trusted peer certs (PEM) for accepting self-signed peers during tests
+        self._trusted_peer_certs_pem: list[str] = []
 
     def create_ssl_context(self, server_side: bool = False) -> ssl.SSLContext:
         """
@@ -72,7 +89,60 @@ class TLSTransport(ISecureTransport):
         # - Set ALPN protocols: preferred muxers + "libp2p"
         # - Apply key log writer if provided in identity_config
         # - Disable SNI for client-side connections
-        raise NotImplementedError("SSL context creation not implemented")
+        ctx = ssl.SSLContext(
+            ssl.PROTOCOL_TLS_SERVER if server_side else ssl.PROTOCOL_TLS_CLIENT
+        )
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+        # We do our own verification of the peer certificate
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
+
+        # Load our cached self-signed certificate bound to libp2p identity
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", delete=False) as cert_file:
+            cert_file.write(self._cert_pem)
+            cert_path = cert_file.name
+        with tempfile.NamedTemporaryFile("w", delete=False) as key_file:
+            key_file.write(self._key_pem)
+            key_path = key_file.name
+        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+
+        # If we have trusted peer certs, configure verification to accept those
+        if server_side and self._trusted_peer_certs_pem:
+            with tempfile.NamedTemporaryFile("w", delete=False) as cafile:
+                cafile.write("".join(self._trusted_peer_certs_pem))
+                ca_path = cafile.name
+            try:
+                ctx.load_verify_locations(cafile=ca_path)
+                ctx.verify_mode = ssl.CERT_OPTIONAL
+            except Exception:
+                pass
+
+        # ALPN: provide list; without a select-callback we accept server preference.
+        alpn_list = list(self._preferred_muxers) + [ALPN_PROTOCOL]
+        try:
+            ctx.set_alpn_protocols(alpn_list)
+        except Exception:
+            # ALPN may be unavailable; proceed without early muxer negotiation
+            pass
+
+        # key log file support if provided as path-like
+        if self._identity_config and self._identity_config.key_log_writer:
+            # Accept a file path or a file-like with name
+            keylog_path = None
+            writer = self._identity_config.key_log_writer
+            if isinstance(writer, str):
+                keylog_path = writer
+            elif hasattr(writer, "name"):
+                keylog_path = getattr(writer, "name")
+            if keylog_path:
+                try:
+                    ctx.keylog_filename = keylog_path
+                except Exception:
+                    pass
+
+        return ctx
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
@@ -99,7 +169,7 @@ class TLSTransport(ISecureTransport):
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
         if not peer_cert:
-            raise NotImplementedError("Peer certificate extraction not implemented")
+            raise ValueError("missing peer certificate")
 
         # Extract remote public key from certificate
         remote_public_key = self._extract_public_key_from_cert(peer_cert)
@@ -141,14 +211,16 @@ class TLSTransport(ISecureTransport):
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
         if not peer_cert:
-            raise NotImplementedError("Peer certificate extraction not implemented")
+            raise ValueError("missing peer certificate")
 
         # Extract and verify remote public key
         remote_public_key = self._extract_public_key_from_cert(peer_cert)
         remote_peer_id = ID.from_pubkey(remote_public_key)
 
         if remote_peer_id != peer_id:
-            raise NotImplementedError("Peer ID verification not implemented")
+            raise ValueError(
+                f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
+            )
 
         # Return SecureSession like noise does
         return SecureSession(
@@ -162,9 +234,8 @@ class TLSTransport(ISecureTransport):
 
     def _extract_public_key_from_cert(self, cert: x509.Certificate) -> Any:
         """Extract public key from certificate."""
-        raise NotImplementedError(
-            "Public key extraction from certificate not implemented"
-        )
+        # Use our chain verifier to extract the host public key
+        return verify_certificate_chain([cert])
 
     def get_protocol_id(self) -> TProtocol:
         """Get the protocol ID for this transport."""
@@ -180,7 +251,17 @@ class TLSTransport(ISecureTransport):
         """
         Placeholder: return the muxer negotiated via ALPN, if any.
         """
-        raise NotImplementedError("Negotiated muxer retrieval not implemented")
+        # Negotiated muxer is available from the TLSReadWriter after handshake.
+        # It's surfaced on the SecureSession via connection state in other impls.
+        # For now, not exposed at this layer.
+        return None
+
+    # Expose local certificate for tests
+    def get_certificate_pem(self) -> str:
+        return self._cert_pem
+
+    def trust_peer_cert_pem(self, pem: str) -> None:
+        self._trusted_peer_certs_pem.append(pem)
 
 
 # Factory function for creating TLS transport

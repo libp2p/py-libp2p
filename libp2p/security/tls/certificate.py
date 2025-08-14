@@ -6,12 +6,17 @@ that embed libp2p peer identity information in X.509 extensions.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import os
+from typing import Any
 
 from cryptography import x509
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import ObjectIdentifier
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
+from cryptography.x509.oid import NameOID, ObjectIdentifier
 
 from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.serialization import deserialize_public_key
 
 # ALPN protocol for libp2p TLS
 ALPN_PROTOCOL = "libp2p"
@@ -44,7 +49,22 @@ def encode_signed_key(public_key_bytes: bytes, signature: bytes) -> bytes:
         DER-encoded bytes representing the SignedKey sequence
 
     """
-    raise NotImplementedError("SignedKey ASN.1 encoding not implemented")
+
+    # DER encoding helpers
+    def _encode_len(n: int) -> bytes:
+        if n < 0x80:
+            return bytes([n])
+        length_bytes = n.to_bytes((n.bit_length() + 7) // 8, byteorder="big")
+        return bytes([0x80 | len(length_bytes)]) + length_bytes
+
+    def _encode_octet_string(data: bytes) -> bytes:
+        return bytes([0x04]) + _encode_len(len(data)) + data
+
+    def _encode_sequence(content: bytes) -> bytes:
+        return bytes([0x30]) + _encode_len(len(content)) + content
+
+    content = _encode_octet_string(public_key_bytes) + _encode_octet_string(signature)
+    return _encode_sequence(content)
 
 
 def decode_signed_key(der_bytes: bytes) -> SignedKey:
@@ -58,7 +78,49 @@ def decode_signed_key(der_bytes: bytes) -> SignedKey:
         Parsed SignedKey instance
 
     """
-    raise NotImplementedError("SignedKey ASN.1 decoding not implemented")
+
+    # Minimal DER parser for: SEQUENCE { OCTET STRING, OCTET STRING }
+    def _expect_byte(data: bytes, idx: int, b: int) -> int:
+        if idx >= len(data) or data[idx] != b:
+            raise ValueError("Invalid DER: unexpected tag")
+        return idx + 1
+
+    def _read_len(data: bytes, idx: int) -> tuple[int, int]:
+        if idx >= len(data):
+            raise ValueError("Invalid DER: truncated length")
+        first = data[idx]
+        idx += 1
+        if first < 0x80:
+            return first, idx
+        num = first & 0x7F
+        if idx + num > len(data):
+            raise ValueError("Invalid DER: truncated long length")
+        val = int.from_bytes(data[idx : idx + num], "big")
+        return val, idx + num
+
+    i = 0
+    i = _expect_byte(der_bytes, i, 0x30)  # SEQUENCE
+    seq_len, i = _read_len(der_bytes, i)
+    end_seq = i + seq_len
+
+    i = _expect_byte(der_bytes, i, 0x04)  # OCTET STRING
+    pk_len, i = _read_len(der_bytes, i)
+    if i + pk_len > len(der_bytes):
+        raise ValueError("Invalid DER: truncated public key")
+    pk_bytes = der_bytes[i : i + pk_len]
+    i += pk_len
+
+    i = _expect_byte(der_bytes, i, 0x04)  # OCTET STRING
+    sig_len, i = _read_len(der_bytes, i)
+    if i + sig_len > len(der_bytes):
+        raise ValueError("Invalid DER: truncated signature")
+    sig_bytes = der_bytes[i : i + sig_len]
+    i += sig_len
+
+    if i != end_seq:
+        raise ValueError("Invalid DER: extra data in SignedKey")
+
+    return SignedKey(public_key_bytes=pk_bytes, signature=sig_bytes)
 
 
 def create_cert_template() -> x509.CertificateBuilder:
@@ -69,7 +131,30 @@ def create_cert_template() -> x509.CertificateBuilder:
         Certificate builder template
 
     """
-    raise NotImplementedError("TLS certificate template creation not implemented")
+    # Serial: random 64-bit value
+    serial = int.from_bytes(os.urandom(8), "big")
+    not_before = datetime.now(timezone.utc) - timedelta(hours=1)
+    # ~100 years
+    not_after = not_before + timedelta(days=365 * 100)
+
+    # Create name attributes with explicit typing to satisfy strict type checker
+    common_name_value: Any = "libp2p"
+    subject_name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, common_name_value)]
+    )
+    issuer_name = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, common_name_value)]
+    )
+
+    builder = (
+        x509.CertificateBuilder()
+        .serial_number(serial)
+        .not_valid_before(not_before)
+        .not_valid_after(not_after)
+        .subject_name(subject_name)
+        .issuer_name(issuer_name)
+    )
+    return builder
 
 
 def add_libp2p_extension(
@@ -87,7 +172,9 @@ def add_libp2p_extension(
         Certificate builder with libp2p extension
 
     """
-    raise NotImplementedError("libp2p extension addition not implemented")
+    sk_der = encode_signed_key(peer_public_key.serialize(), signature)
+    ext = x509.UnrecognizedExtension(LIBP2P_EXTENSION_OID, sk_der)
+    return cert_builder.add_extension(ext, critical=False)
 
 
 def generate_certificate(
@@ -104,7 +191,32 @@ def generate_certificate(
         Tuple of (certificate PEM, private key PEM)
 
     """
-    raise NotImplementedError("Certificate generation not implemented")
+    # Generate an ephemeral TLS key (ECDSA P-256)
+    tls_private_key = ec.generate_private_key(ec.SECP256R1())
+
+    # Build SignedKey over the certificate's SubjectPublicKeyInfo
+    spki_der = tls_private_key.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    signature = private_key.sign(LIBP2P_CERT_PREFIX + spki_der)
+
+    builder = cert_template
+    builder = builder.public_key(tls_private_key.public_key())
+    # Self-signed
+    builder = add_libp2p_extension(builder, private_key.get_public_key(), signature)
+    certificate = builder.sign(
+        private_key=tls_private_key,
+        algorithm=hashes.SHA256(),
+    )
+
+    cert_pem = certificate.public_bytes(serialization.Encoding.PEM).decode()
+    key_pem = tls_private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    return cert_pem, key_pem
 
 
 def verify_certificate_chain(cert_chain: list[x509.Certificate]) -> PublicKey:
@@ -121,7 +233,75 @@ def verify_certificate_chain(cert_chain: list[x509.Certificate]) -> PublicKey:
         SecurityError: If verification fails
 
     """
-    raise NotImplementedError("Certificate chain verification not implemented")
+    if len(cert_chain) != 1:
+        raise ValueError("expected one certificates in the chain")
+
+    [cert] = cert_chain
+
+    # 1) Validity window
+    now = datetime.now(timezone.utc)
+    not_before = getattr(cert, "not_valid_before_utc", None)
+    not_after = getattr(cert, "not_valid_after_utc", None)
+    if not_before is None:
+        not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
+    if not_after is None:
+        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+    if not_before > now or not_after < now:
+        raise ValueError("certificate has expired or is not yet valid")
+
+    # 2) Find libp2p extension
+    ext_value: bytes | None = None
+    for idx, ext in enumerate(cert.extensions):
+        if ext.oid == LIBP2P_EXTENSION_OID:
+            # Remove from unhandled critical list if necessary by re-creating cert
+            # object is non-trivial here; we'll just parse value
+            ext_value = (
+                ext.value.value
+                if isinstance(ext.value, x509.UnrecognizedExtension)
+                else None
+            )
+            break
+    if ext_value is None:
+        raise ValueError("expected certificate to contain the key extension")
+
+    # 3) Verify self-signature of the certificate
+    pub = cert.public_key()
+    # Verify self-signature with correct algorithm based on key type
+    try:
+        hash_alg = cert.signature_hash_algorithm
+        if hash_alg is None:
+            raise ValueError("Certificate signature hash algorithm is None")
+
+        if isinstance(pub, ec.EllipticCurvePublicKey):
+            pub.verify(cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(hash_alg))
+        elif isinstance(pub, rsa.RSAPublicKey):
+            from cryptography.hazmat.primitives.asymmetric import padding
+
+            pub.verify(
+                cert.signature, cert.tbs_certificate_bytes, padding.PKCS1v15(), hash_alg
+            )
+        elif isinstance(pub, (ed25519.Ed25519PublicKey, ed448.Ed448PublicKey)):
+            pub.verify(cert.signature, cert.tbs_certificate_bytes)
+        elif isinstance(pub, dsa.DSAPublicKey):
+            pub.verify(cert.signature, cert.tbs_certificate_bytes, hash_alg)
+        else:
+            raise ValueError(f"Unsupported key type for verification: {type(pub)}")
+    except Exception as e:
+        raise ValueError(f"certificate verification failed: {e}")
+
+    # 4) Verify extension signature
+    signed = decode_signed_key(ext_value)
+    host_pub = deserialize_public_key(signed.public_key_bytes)
+
+    spki_der = cert.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    message = LIBP2P_CERT_PREFIX + spki_der
+    if not host_pub.verify(message, signed.signature):
+        raise ValueError("signature invalid")
+
+    return host_pub
 
 
 def pub_key_from_cert_chain(cert_chain: list[x509.Certificate]) -> PublicKey:
@@ -150,4 +330,17 @@ def generate_self_signed_cert() -> tuple[ec.EllipticCurvePrivateKey, x509.Certif
         Tuple of (private key, certificate)
 
     """
-    raise NotImplementedError("Self-signed certificate generation not implemented")
+    key = ec.generate_private_key(ec.SECP256R1())
+    common_name_value: Any = "py-libp2p"
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name_value)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(int.from_bytes(os.urandom(8), "big"))
+        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )
+    return key, cert

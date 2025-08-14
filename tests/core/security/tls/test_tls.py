@@ -1,17 +1,40 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Any
-
 import pytest
 
+from libp2p import generate_new_rsa_identity
+from libp2p.security.tls.transport import TLSTransport
+from tests.utils.factories import tls_conn_factory
 
-# Placeholder factory to satisfy static checks; real TLS wiring not implemented yet.
-@asynccontextmanager
-async def tls_conn_factory(nursery: Any) -> AsyncIterator[tuple[Any, Any]]:
-    """Placeholder factory for TLS connection testing."""
-    if False:  # pragma: no cover
-        yield (None, None)
-    raise NotImplementedError("TLS connection factory not implemented")
+
+@pytest.mark.trio
+async def test_tls_basic_handshake(nursery):
+    keypair_a = generate_new_rsa_identity()
+    keypair_b = generate_new_rsa_identity()
+
+    t_a = TLSTransport(keypair_a)
+    t_b = TLSTransport(keypair_b)
+    # Trust each other's certs during tests to avoid system verify failure
+    t_a.trust_peer_cert_pem(t_b.get_certificate_pem())
+    t_b.trust_peer_cert_pem(t_a.get_certificate_pem())
+
+    async with tls_conn_factory(
+        nursery, client_transport=t_a, server_transport=t_b
+    ) as (
+        client_conn,
+        server_conn,
+    ):
+        assert client_conn.get_local_peer() == t_a.local_peer
+        assert server_conn.get_local_peer() == t_b.local_peer
+        assert client_conn.get_remote_peer() == t_b.local_peer
+        assert server_conn.get_remote_peer() == t_a.local_peer
+
+        await server_conn.write(b"hello")
+        assert await client_conn.read(5) == b"hello"
+
+        await client_conn.write(b"world")
+        assert await server_conn.read(5) == b"world"
+
+        await client_conn.close()
+        await server_conn.close()
 
 
 DATA_0 = b"hello"

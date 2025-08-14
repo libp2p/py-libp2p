@@ -9,7 +9,7 @@ from libp2p.security.tls.transport import (
     TLSTransport,
     IdentityConfig,
     create_tls_transport,
-    PROTOCOL_ID
+    PROTOCOL_ID,
 )
 from libp2p.security.tls.io import TLSReadWriter
 from libp2p.security.tls.certificate import (
