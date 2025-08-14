@@ -974,6 +974,7 @@ class IPeerStore(
     def get_local_record(self) -> Optional["Envelope"]:
         """Get the local-peer-record wrapped in Envelope"""
 
+    @abstractmethod
     def set_local_record(self, envelope: "Envelope") -> None:
         """Set the local-peer-record wrapped in Envelope"""
 
