@@ -12,6 +12,7 @@ from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 
 from .pb.kademlia_pb2 import (
     Message,
@@ -52,6 +53,34 @@ def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> boo
                 )
 
     return True
+
+
+def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
+    listen_addrs_set = {addr for addr in host.get_addrs()}
+    local_env = host.get_peerstore().get_local_record()
+
+    if local_env is None:
+        # No cached SPR yet -> create one
+        return issue_and_cache_local_record(host), True
+    else:
+        record_addrs_set = local_env._env_addrs_set()
+        if record_addrs_set == listen_addrs_set:
+            # Perfect match -> reuse cached envelope
+            return local_env.marshal_envelope(), False
+        else:
+            # Addresses changed -> issue a new SPR and cache it
+            return issue_and_cache_local_record(host), True
+
+
+def issue_and_cache_local_record(host: IHost) -> bytes:
+    env = create_signed_peer_record(
+        host.get_id(),
+        host.get_addrs(),
+        host.get_private_key(),
+    )
+    # Cache it for nexxt time use
+    host.get_peerstore().set_local_record(env)
+    return env.marshal_envelope()
 
 
 def create_key_from_binary(binary_data: bytes) -> bytes:
