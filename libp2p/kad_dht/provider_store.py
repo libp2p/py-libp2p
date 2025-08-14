@@ -22,14 +22,13 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.kad_dht.utils import maybe_consume_signed_record
+from libp2p.kad_dht.utils import env_to_send_in_RPC, maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
 
 from .common import (
     ALPHA,
@@ -243,12 +242,8 @@ class ProviderStore:
             message.key = key
 
             # Create sender's signed-peer-record
-            envelope = create_signed_peer_record(
-                self.host.get_id(),
-                self.host.get_addrs(),
-                self.host.get_private_key(),
-            )
-            message.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            message.senderRecord = envelope_bytes
 
             # Add our provider info
             provider = message.providerPeers.add()
@@ -256,7 +251,7 @@ class ProviderStore:
             provider.addrs.extend(addrs)
 
             # Add the provider's signed-peer-record
-            provider.signedRecord = envelope.marshal_envelope()
+            provider.signedRecord = envelope_bytes
 
             # Serialize and send the message
             proto_bytes = message.SerializeToString()
@@ -394,12 +389,8 @@ class ProviderStore:
                 message.key = key
 
                 # Create sender's signed-peer-record
-                envelope = create_signed_peer_record(
-                    self.host.get_id(),
-                    self.host.get_addrs(),
-                    self.host.get_private_key(),
-                )
-                message.senderRecord = envelope.marshal_envelope()
+                envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                message.senderRecord = envelope_bytes
 
                 # Serialize and send the message
                 proto_bytes = message.SerializeToString()

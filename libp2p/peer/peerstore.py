@@ -65,7 +65,16 @@ class PeerStore(IPeerStore):
         self.peer_data_map = defaultdict(PeerData)
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
+        self.local_peer_record: Envelope | None = None
         self.max_records = max_records
+
+    def get_local_record(self) -> Envelope | None:
+        """Get the local-signed-record wrapped in Envelope"""
+        return self.local_peer_record
+
+    def set_local_record(self, envelope: Envelope) -> None:
+        """Set the local-signed-record wrapped in Envelope"""
+        self.local_peer_record = envelope
 
     def peer_info(self, peer_id: ID) -> PeerInfo:
         """

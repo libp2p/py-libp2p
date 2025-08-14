@@ -22,7 +22,6 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
 
 from .common import (
     ALPHA,
@@ -35,6 +34,7 @@ from .routing_table import (
     RoutingTable,
 )
 from .utils import (
+    env_to_send_in_RPC,
     maybe_consume_signed_record,
     sort_peer_ids_by_distance,
 )
@@ -259,10 +259,8 @@ class PeerRouting(IPeerRouting):
             find_node_msg.key = target_key  # Set target key directly as bytes
 
             # Create sender_signed_peer_record
-            envelope = create_signed_peer_record(
-                self.host.get_id(), self.host.get_addrs(), self.host.get_private_key()
-            )
-            find_node_msg.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            find_node_msg.senderRecord = envelope_bytes
 
             # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
@@ -381,12 +379,8 @@ class PeerRouting(IPeerRouting):
                     response.type = Message.MessageType.FIND_NODE
 
                     # Create sender_signed_peer_record for the response
-                    envelope = create_signed_peer_record(
-                        self.host.get_id(),
-                        self.host.get_addrs(),
-                        self.host.get_private_key(),
-                    )
-                    response.senderRecord = envelope.marshal_envelope()
+                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
 
                     # Add peer information to response
                     for peer_id in closest_peers:

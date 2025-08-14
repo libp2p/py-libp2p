@@ -9,9 +9,12 @@ This module tests core functionality of the Kademlia DHT including:
 
 import hashlib
 import logging
+import os
+from unittest.mock import patch
 import uuid
 
 import pytest
+import multiaddr
 import trio
 
 from libp2p.kad_dht.kad_dht import (
@@ -77,6 +80,18 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
     """Test that nodes can find each other in the DHT."""
     dht_a, dht_b = dht_pair
 
+    # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
+    # so both the nodes will have records of each other before the next FIND_NODE
+    # req is sent
+    envelope_a = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
+    envelope_b = dht_b.host.get_peerstore().get_peer_record(dht_a.host.get_id())
+
+    assert isinstance(envelope_a, Envelope)
+    assert isinstance(envelope_b, Envelope)
+
+    record_a = envelope_a.record()
+    record_b = envelope_b.record()
+
     # Node A should be able to find Node B
     with trio.fail_after(TEST_TIMEOUT):
         found_info = await dht_a.find_peer(dht_b.host.get_id())
@@ -90,6 +105,26 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
     assert isinstance(
         dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id()), Envelope
     )
+
+    # These are the records that were sent betweeen the peers during the FIND_NODE req
+    envelope_a_find_peer = dht_a.host.get_peerstore().get_peer_record(
+        dht_b.host.get_id()
+    )
+    envelope_b_find_peer = dht_b.host.get_peerstore().get_peer_record(
+        dht_a.host.get_id()
+    )
+
+    assert isinstance(envelope_a_find_peer, Envelope)
+    assert isinstance(envelope_b_find_peer, Envelope)
+
+    record_a_find_peer = envelope_a_find_peer.record()
+    record_b_find_peer = envelope_b_find_peer.record()
+
+    # This proves that both the records are same, and a latest cached signed record
+    # was passed between the peers during FIND_NODE exceution, which proves the
+    # signed-record transfer/re-issuing works correctly in FIND_NODE executions.
+    assert record_a.seq == record_a_find_peer.seq
+    assert record_b.seq == record_b_find_peer.seq
 
     # Verify that the found peer has the correct peer ID
     assert found_info is not None, "Failed to find the target peer"
@@ -144,11 +179,11 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     record_a_put_value = envelope_a_put_value.record()
     record_b_put_value = envelope_b_put_value.record()
 
-    # This proves that both the records are different, and a new signed record
+    # This proves that both the records are same, and a latest cached signed record
     # was passed between the peers during PUT_VALUE exceution, which proves the
-    # signed-record transfer works correctly in PUT_VALUE executions.
-    assert record_a.seq < record_a_put_value.seq
-    assert record_b.seq < record_b_put_value.seq
+    # signed-record transfer/re-issuing works correctly in PUT_VALUE executions.
+    assert record_a.seq == record_a_put_value.seq
+    assert record_b.seq == record_b_put_value.seq
 
     # # Log debugging information
     logger.debug("Put value with key %s...", key.hex()[:10])
@@ -234,11 +269,12 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_a_add_prov = envelope_a_add_prov.record()
     record_b_add_prov = envelope_b_add_prov.record()
 
-    # This proves that both the records are different, and a new signed record
+    # This proves that both the records are same, the latest cached signed record
     # was passed between the peers during ADD_PROVIDER exceution, which proves the
-    # signed-record transfer works correctly in ADD_PROVIDER executions.
-    assert record_a.seq < record_a_add_prov.seq
-    assert record_b.seq < record_b_add_prov.seq
+    # signed-record transfer/re-issuing of the latest record works correctly in
+    # ADD_PROVIDER executions.
+    assert record_a.seq == record_a_add_prov.seq
+    assert record_b.seq == record_b_add_prov.seq
 
     # Allow time for the provider record to propagate
     await trio.sleep(0.1)
@@ -294,8 +330,41 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_a_get_value = envelope_a_get_value.record()
     record_b_get_value = envelope_b_get_value.record()
 
-    # This proves that both the records are different, meaning that there was
-    # a new signed-record tranfer during the GET_VALUE execution by dht_b, which means
-    # the signed-record transfer works correctly in GET_VALUE executions.
-    assert record_a_find_prov.seq < record_a_get_value.seq
-    assert record_b_find_prov.seq < record_b_get_value.seq
+    # This proves that both the records are same, meaning that the latest cached
+    # signed-record tranfer happened during the GET_VALUE execution by dht_b,
+    # which means the signed-record transfer/re-issuing works correctly
+    # in GET_VALUE executions.
+    assert record_a_find_prov.seq == record_a_get_value.seq
+    assert record_b_find_prov.seq == record_b_get_value.seq
+
+
+@pytest.mark.trio
+async def test_reissue_when_listen_addrs_change(dht_pair: tuple[KadDHT, KadDHT]):
+    dht_a, dht_b = dht_pair
+
+    # Warm-up: A stores B's current record
+    with trio.fail_after(10):
+        await dht_a.find_peer(dht_b.host.get_id())
+
+    env0 = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
+    assert isinstance(env0, Envelope)
+    seq0 = env0.record().seq
+
+    # Simulate B's listen addrs changing (different port)
+    new_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+
+    # Patch just for the duration we force B to respond:
+    with patch.object(dht_b.host, "get_addrs", return_value=[new_addr]):
+        # Force B to send a response (which should include a fresh SPR)
+        with trio.fail_after(10):
+            await dht_a.peer_routing._query_peer_for_closest(
+                dht_b.host.get_id(), os.urandom(32)
+            )
+
+    # A should now hold B's new record with a bumped seq
+    env1 = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
+    assert isinstance(env1, Envelope)
+    seq1 = env1.record().seq
+
+    # This proves that upon the change in listen_addrs, we issue new records
+    assert seq1 > seq0, f"Expected seq to bump after addr change, got {seq0} -> {seq1}"
