@@ -365,6 +365,7 @@ async def test_yamux_stress_ping():
             await client_host.connect(info)
 
             async def ping_stream(i: int):
+                stream = None
                 try:
                     start = trio.current_time()
                     stream = await client_host.new_stream(
@@ -384,7 +385,8 @@ async def test_yamux_stress_ping():
                 except Exception as e:
                     print(f"[Ping #{i}] Failed: {e}")
                     failures.append(i)
-                    await stream.reset()
+                    if stream:
+                        await stream.reset()
 
             async with trio.open_nursery() as nursery:
                 for i in range(STREAM_COUNT):

@@ -199,9 +199,10 @@ def new_swarm(
             transport = TCP()
     else:
         addr = listen_addrs[0]
+        is_quic = addr.__contains__("quic") or addr.__contains__("quic-v1")
         if addr.__contains__("tcp"):
             transport = TCP()
-        elif addr.__contains__("quic"):
+        elif is_quic:
             transport_opt = transport_opt or {}
             quic_config = transport_opt.get('quic_config', QUICTransportConfig())
             transport = QUICTransport(key_pair.private_key, quic_config)
