@@ -1,3 +1,7 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 import logging
 
 from multiaddr import (
@@ -411,7 +415,15 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.listen, self, multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
-        raise NotImplementedError
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.closed_stream, self, stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
         raise NotImplementedError
+
+    # Generic notifier used by NetStream._notify_closed
+    async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifier, notifee)
