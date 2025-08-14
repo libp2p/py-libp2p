@@ -255,6 +255,12 @@ class QUICTransport(ITransport):
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
+            remote_peer_id = maddr.get_peer_id()
+            if remote_peer_id is not None:
+                remote_peer_id = ID.from_base58(remote_peer_id)
+
+            if remote_peer_id is None:
+                raise QUICDialError("Unable to derive peer id from multiaddr")
             quic_version = multiaddr_to_quic_version(maddr)
 
             # Get appropriate QUIC client configuration
@@ -288,7 +294,7 @@ class QUICTransport(ITransport):
             connection = QUICConnection(
                 quic_connection=native_quic_connection,
                 remote_addr=(host, port),
-                remote_peer_id=None,
+                remote_peer_id=remote_peer_id,
                 local_peer_id=self._peer_id,
                 is_initiator=True,
                 maddr=maddr,

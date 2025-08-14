@@ -172,9 +172,7 @@ class QUICTransportConfig:
     """Backoff factor for stream error retries."""
 
     # Protocol identifiers matching go-libp2p
-    # TODO: UNTIL MUITIADDR REPO IS UPDATED
-    # PROTOCOL_QUIC_V1: TProtocol = TProtocol("/quic-v1")  # RFC 9000
-    PROTOCOL_QUIC_V1: TProtocol = TProtocol("quic")  # RFC 9000
+    PROTOCOL_QUIC_V1: TProtocol = TProtocol("quic-v1")  # RFC 9000
     PROTOCOL_QUIC_DRAFT29: TProtocol = TProtocol("quic")  # draft-29
 
     def __post_init__(self) -> None:

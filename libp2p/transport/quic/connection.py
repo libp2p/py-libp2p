@@ -519,6 +519,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             self._peer_verified = True
             logger.debug(f"Peer identity verified successfully: {verified_peer_id}")
+
             return verified_peer_id
 
         except QUICPeerVerificationError:
