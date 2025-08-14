@@ -45,7 +45,10 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
         secret = secrets.token_bytes(32)
 
     host = new_host(key_pair=create_new_key_pair(secret))
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        # Start the peer-store cleanup task
+        nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
         print(f"I am {host.get_id().to_string()}")
 
         if not destination:  # its the server
