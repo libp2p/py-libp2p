@@ -24,7 +24,6 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -35,11 +34,11 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import (
     PERMANENT_ADDR_TTL,
-    create_signed_peer_record,
 )
 from libp2p.pubsub import (
     floodsub,
 )
+from libp2p.pubsub.utils import env_to_send_in_RPC, maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
 )
@@ -230,24 +229,7 @@ class GossipSub(IPubsubRouter, Service):
         """
         # Process the senderRecord if sent
         if isinstance(self.pubsub, Pubsub):
-            if rpc.HasField("senderRecord"):
-                try:
-                    # Convert the signed-peer-record(Envelope) from
-                    # protobuf bytes
-                    envelope, _ = consume_envelope(
-                        rpc.senderRecord, "libp2p-peer-record"
-                    )
-                    # Use the default TTL of 2 hours (7200 seconds)
-                    if self.pubsub.host.get_peerstore().consume_peer_record(
-                        envelope, 7200
-                    ):
-                        logger.error(
-                            "Updating the Certified-Addr-Book was unsuccessful"
-                        )
-                except Exception as e:
-                    logger.error(
-                        "Error updating the certified addr book for peer: %s", e
-                    )
+            _ = maybe_consume_signed_record(rpc, self.pubsub.host)
 
         control_message = rpc.control
 
@@ -278,12 +260,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add the senderRecord of the peer in the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope = create_signed_peer_record(
-                self.pubsub.host.get_id(),
-                self.pubsub.host.get_addrs(),
-                self.pubsub.host.get_private_key(),
-            )
-            rpc_msg.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
 
@@ -854,12 +832,8 @@ class GossipSub(IPubsubRouter, Service):
         # to the iwant control msg, so we will send a freshly created senderRecord
         # with the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope = create_signed_peer_record(
-                self.pubsub.host.get_id(),
-                self.pubsub.host.get_addrs(),
-                self.pubsub.host.get_private_key(),
-            )
-            packet.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
 
         packet.publish.extend(msgs_to_forward)
 
@@ -1019,12 +993,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add the sender's peer-record in the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope = create_signed_peer_record(
-                self.pubsub.host.get_id(),
-                self.pubsub.host.get_addrs(),
-                self.pubsub.host.get_private_key(),
-            )
-            packet.senderRecord = envelope.marshal_envelope()
+            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
 
         packet.control.CopyFrom(control_msg)
 
