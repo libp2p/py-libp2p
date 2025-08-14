@@ -1,0 +1,6 @@
+Implement closed_stream notification in MyNotifee
+
+- Add notify_closed_stream method to swarm notification system for proper stream lifecycle management
+- Integrate remove_stream hook in SwarmConn to enable stream closure notifications
+- Add comprehensive tests for closed_stream functionality in test_notify.py
+- Enable stream lifecycle integration for proper cleanup and resource management
