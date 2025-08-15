@@ -161,8 +161,11 @@ class ValueStore:
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
                 # Consume the sender's signed-peer-record if sent
-                _ = maybe_consume_signed_record(response, self.host)
-
+                if not maybe_consume_signed_record(response, self.host):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    return False
                 if response.key == key:
                     result = True
             return result
@@ -288,7 +291,11 @@ class ValueStore:
                     and response.record.value
                 ):
                     # Consume the sender's signed-peer-record
-                    _ = maybe_consume_signed_record(response, self.host)
+                    if not maybe_consume_signed_record(response, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, ignoring the response"
+                        )
+                        return None
 
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"

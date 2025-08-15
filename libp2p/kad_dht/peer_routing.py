@@ -307,9 +307,20 @@ class PeerRouting(IPeerRouting):
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:
                 # Consume the sender_signed_peer_record
-                _ = maybe_consume_signed_record(response_msg, self.host)
+                if not maybe_consume_signed_record(response_msg, self.host):
+                    logger.error(
+                        "Received an invalid-signed-record,ignoring the response"
+                    )
+                    return []
 
                 for peer_data in response_msg.closerPeers:
+                    # Consume the received closer_peers signed-records
+                    if not maybe_consume_signed_record(peer_data, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record,ignoring the response"
+                        )
+                        return []
+
                     new_peer_id = ID(peer_data.id)
                     if new_peer_id not in results:
                         results.append(new_peer_id)
@@ -320,9 +331,6 @@ class PeerRouting(IPeerRouting):
 
                         addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
-
-                    # Consume the received closer_peers signed-records
-                    _ = maybe_consume_signed_record(peer_data, self.host)
 
         except Exception as e:
             logger.debug(f"Error querying peer {peer} for closest: {e}")
@@ -364,7 +372,11 @@ class PeerRouting(IPeerRouting):
 
                 if kad_message.type == Message.MessageType.FIND_NODE:
                     # Consume the sender's signed-peer-record if sent
-                    _ = maybe_consume_signed_record(kad_message, self.host)
+                    if not maybe_consume_signed_record(kad_message, self.host):
+                        logger.error(
+                            "Receivedf an invalid-signed-record, dropping the stream"
+                        )
+                        return
 
                     # Get target key directly from protobuf message
                     target_key = kad_message.key
