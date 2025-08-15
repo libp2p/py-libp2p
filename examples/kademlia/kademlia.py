@@ -227,7 +227,7 @@ async def run_node(
 
                 # Keep the node running
                 while True:
-                    logger.debug(
+                    logger.info(
                         "Status - Connected peers: %d,"
                         "Peers in store: %d, Values in store: %d",
                         len(dht.host.get_connected_peers()),
