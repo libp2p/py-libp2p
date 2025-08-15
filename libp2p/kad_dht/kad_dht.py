@@ -280,7 +280,12 @@ class KadDHT(Service):
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
                     # Consume the source signed_peer_record if sent
-                    success = maybe_consume_signed_record(message, self.host)
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Build response message with protobuf
                     response = Message()
@@ -336,7 +341,12 @@ class KadDHT(Service):
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
                     # Consume the source signed-peer-record if sent
-                    success = maybe_consume_signed_record(message, self.host)
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Extract provider information
                     for provider_proto in message.providerPeers:
@@ -366,9 +376,13 @@ class KadDHT(Service):
                             )
 
                             # Process the signed-records of provider if sent
-                            success = maybe_consume_signed_record(
-                                provider_proto, self.host
-                            )
+                            if not maybe_consume_signed_record(message, self.host):
+                                logger.error(
+                                    "Received an invalid-signed-record,"
+                                    "dropping the stream"
+                                )
+                                await stream.close()
+                                return
                         except Exception as e:
                             logger.warning(f"Failed to process provider info: {e}")
 
@@ -393,7 +407,12 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
 
                     # Consume the source signed_peer_record if sent
-                    success = maybe_consume_signed_record(message, self.host)
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
@@ -482,7 +501,12 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
                     # Consume the sender_signed_peer_record
-                    success = maybe_consume_signed_record(message, self.host)
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     value = self.value_store.get(key)
                     if value:
@@ -571,7 +595,12 @@ class KadDHT(Service):
                     success = False
 
                     # Consume the source signed_peer_record if sent
-                    success = maybe_consume_signed_record(message, self.host)
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     try:
                         if not (key and value):
