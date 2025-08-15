@@ -180,7 +180,10 @@ def test_new_swarm_tcp_multiaddr_supported():
     assert isinstance(swarm.transport, TCP)
 
 
-def test_new_swarm_quic_multiaddr_raises():
+def test_new_swarm_quic_multiaddr_supported():
+    from libp2p.transport.quic.transport import QUICTransport
+
     addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
-    with pytest.raises(ValueError, match="QUIC not yet supported"):
-        new_swarm(listen_addrs=[addr])
+    swarm = new_swarm(listen_addrs=[addr])
+    assert isinstance(swarm, Swarm)
+    assert isinstance(swarm.transport, QUICTransport)
