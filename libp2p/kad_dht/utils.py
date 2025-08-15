@@ -27,7 +27,10 @@ def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> boo
             try:
                 # Convert the signed-peer-record(Envelope) from
                 # protobuf bytes
-                envelope, _ = consume_envelope(msg.senderRecord, "libp2p-peer-record")
+                envelope, _ = consume_envelope(
+                    msg.senderRecord,
+                    "libp2p-peer-record",
+                )
                 # Use the default  TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):
                     logger.error("Updating the certified-addr-book was unsuccessful")
@@ -51,7 +54,7 @@ def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> boo
                     "Error updating the certified-addr-book: %s",
                     e,
                 )
-
+                return False
     return True
 
 

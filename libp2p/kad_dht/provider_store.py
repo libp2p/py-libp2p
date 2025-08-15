@@ -286,8 +286,13 @@ class ProviderStore:
 
             if response.type == Message.MessageType.ADD_PROVIDER:
                 # Consume the sender's signed-peer-record if sent
-                _ = maybe_consume_signed_record(response, self.host)
-                result = True
+                if not maybe_consume_signed_record(response, self.host):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    result = False
+                else:
+                    result = True
 
         except Exception as e:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
@@ -427,12 +432,24 @@ class ProviderStore:
                     return []
 
                 # Consume the sender's signed-peer-record if sent
-                _ = maybe_consume_signed_record(response, self.host)
+                if not maybe_consume_signed_record(response, self.host):
+                    logger.error(
+                        "Recieved an invalid-signed-record, ignoring the response"
+                    )
+                    return []
 
                 # Extract provider information
                 providers = []
                 for provider_proto in response.providerPeers:
                     try:
+                        # Consume the provider's signed-peer-record if sent
+                        if not maybe_consume_signed_record(provider_proto, self.host):
+                            logger.error(
+                                "Recieved an invalid-signed-record, "
+                                "ignoring the response"
+                            )
+                            return []
+
                         # Create peer ID from bytes
                         provider_id = ID(provider_proto.id)
 
@@ -446,9 +463,6 @@ class ProviderStore:
 
                         # Create PeerInfo and add to result
                         providers.append(PeerInfo(provider_id, addrs))
-
-                        # Consume the provider's signed-peer-record if sent
-                        _ = maybe_consume_signed_record(provider_proto, self.host)
 
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")
