@@ -15,6 +15,7 @@ from libp2p.abc import (
     INetStream,
     IPeerRouting,
 )
+from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -33,6 +34,8 @@ from .routing_table import (
     RoutingTable,
 )
 from .utils import (
+    env_to_send_in_RPC,
+    maybe_consume_signed_record,
     sort_peer_ids_by_distance,
 )
 
@@ -255,6 +258,10 @@ class PeerRouting(IPeerRouting):
             find_node_msg.type = Message.MessageType.FIND_NODE
             find_node_msg.key = target_key  # Set target key directly as bytes
 
+            # Create sender_signed_peer_record
+            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            find_node_msg.senderRecord = envelope_bytes
+
             # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
             logger.debug(
@@ -299,7 +306,21 @@ class PeerRouting(IPeerRouting):
 
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:
+                # Consume the sender_signed_peer_record
+                if not maybe_consume_signed_record(response_msg, self.host):
+                    logger.error(
+                        "Received an invalid-signed-record,ignoring the response"
+                    )
+                    return []
+
                 for peer_data in response_msg.closerPeers:
+                    # Consume the received closer_peers signed-records
+                    if not maybe_consume_signed_record(peer_data, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record,ignoring the response"
+                        )
+                        return []
+
                     new_peer_id = ID(peer_data.id)
                     if new_peer_id not in results:
                         results.append(new_peer_id)
@@ -345,10 +366,18 @@ class PeerRouting(IPeerRouting):
 
             # Parse protobuf message
             kad_message = Message()
+            closer_peer_envelope: Envelope | None = None
             try:
                 kad_message.ParseFromString(message_bytes)
 
                 if kad_message.type == Message.MessageType.FIND_NODE:
+                    # Consume the sender's signed-peer-record if sent
+                    if not maybe_consume_signed_record(kad_message, self.host):
+                        logger.error(
+                            "Receivedf an invalid-signed-record, dropping the stream"
+                        )
+                        return
+
                     # Get target key directly from protobuf message
                     target_key = kad_message.key
 
@@ -361,11 +390,25 @@ class PeerRouting(IPeerRouting):
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
 
+                    # Create sender_signed_peer_record for the response
+                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+
                     # Add peer information to response
                     for peer_id in closest_peers:
                         peer_proto = response.closerPeers.add()
                         peer_proto.id = peer_id.to_bytes()
                         peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add the signed-records of closest_peers if cached
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer_id)
+                        )
+
+                        if isinstance(closer_peer_envelope, Envelope):
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
+                            )
 
                         # Add addresses if available
                         try:

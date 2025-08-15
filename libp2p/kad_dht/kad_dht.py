@@ -20,9 +20,11 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.kad_dht.utils import env_to_send_in_RPC, maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
+from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -164,6 +166,9 @@ class KadDHT(Service):
         await self.add_peer(peer_id)
         logger.debug(f"Added peer {peer_id} to routing table")
 
+        closer_peer_envelope: Envelope | None = None
+        provider_peer_envelope: Envelope | None = None
+
         try:
             # Read varint-prefixed length for the message
             length_prefix = b""
@@ -204,6 +209,14 @@ class KadDHT(Service):
                     )
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     # Build response message with protobuf
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
@@ -228,6 +241,21 @@ class KadDHT(Service):
                         except Exception:
                             pass
 
+                        # Add the signed-peer-record for each peer in the peer-proto
+                        # if cached in the peerstore
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer)
+                        )
+
+                        if closer_peer_envelope is not None:
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
+                            )
+
+                    # Create sender_signed_peer_record
+                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+
                     # Serialize and send response
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
@@ -241,6 +269,14 @@ class KadDHT(Service):
                     # Process ADD_PROVIDER
                     key = message.key
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
+
+                    # Consume the source signed-peer-record if sent
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Extract provider information
                     for provider_proto in message.providerPeers:
@@ -268,6 +304,15 @@ class KadDHT(Service):
                             logger.debug(
                                 f"Added provider {provider_id} for key {key.hex()}"
                             )
+
+                            # Process the signed-records of provider if sent
+                            if not maybe_consume_signed_record(message, self.host):
+                                logger.error(
+                                    "Received an invalid-signed-record,"
+                                    "dropping the stream"
+                                )
+                                await stream.close()
+                                return
                         except Exception as e:
                             logger.warning(f"Failed to process provider info: {e}")
 
@@ -275,6 +320,10 @@ class KadDHT(Service):
                     response = Message()
                     response.type = Message.MessageType.ADD_PROVIDER
                     response.key = key
+
+                    # Add sender's signed-peer-record
+                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
 
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
@@ -287,6 +336,14 @@ class KadDHT(Service):
                     key = message.key
                     logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
 
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
                     logger.debug(
@@ -298,11 +355,27 @@ class KadDHT(Service):
                     response.type = Message.MessageType.GET_PROVIDERS
                     response.key = key
 
+                    # Create sender_signed_peer_record for the response
+                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+
                     # Add provider information to response
                     for provider_info in providers:
                         provider_proto = response.providerPeers.add()
                         provider_proto.id = provider_info.peer_id.to_bytes()
                         provider_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add provider signed-records if cached
+                        provider_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(
+                                provider_info.peer_id
+                            )
+                        )
+
+                        if provider_peer_envelope is not None:
+                            provider_proto.signedRecord = (
+                                provider_peer_envelope.marshal_envelope()
+                            )
 
                         # Add addresses if available
                         for addr in provider_info.addrs:
@@ -327,6 +400,16 @@ class KadDHT(Service):
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
 
+                            # Add the signed-records of closest_peers if cached
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
+
                             # Add addresses if available
                             try:
                                 addrs = self.host.get_peerstore().addrs(peer)
@@ -347,6 +430,14 @@ class KadDHT(Service):
                     key = message.key
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
+                    # Consume the sender_signed_peer_record
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     value = self.value_store.get(key)
                     if value:
                         logger.debug(f"Found value for key {key.hex()}")
@@ -361,6 +452,10 @@ class KadDHT(Service):
                         response.record.value = value
                         response.record.timeReceived = str(time.time())
 
+                        # Create sender_signed_peer_record
+                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
+
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
@@ -373,6 +468,10 @@ class KadDHT(Service):
                         response = Message()
                         response.type = Message.MessageType.GET_VALUE
                         response.key = key
+
+                        # Create sender_signed_peer_record for the response
+                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
 
                         # Add closest peers to key
                         closest_peers = self.routing_table.find_local_closest_peers(
@@ -391,6 +490,16 @@ class KadDHT(Service):
                             peer_proto = response.closerPeers.add()
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                            # Add signed-records of closer-peers if cached
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
 
                             # Add addresses if available
                             try:
@@ -414,6 +523,15 @@ class KadDHT(Service):
                     key = message.record.key
                     value = message.record.value
                     success = False
+
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     try:
                         if not (key and value):
                             raise ValueError(
@@ -434,6 +552,12 @@ class KadDHT(Service):
                         response.type = Message.MessageType.PUT_VALUE
                         if success:
                             response.key = key
+
+                        # Create sender_signed_peer_record for the response
+                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
+
+                        # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
