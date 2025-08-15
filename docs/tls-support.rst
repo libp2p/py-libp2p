@@ -1,19 +1,6 @@
 TLS Support in py-libp2p
 =========================
 
-.. meta::
-   :description: Documentation for enabling, configuring, and troubleshooting TLS in py-libp2p implementations.
-
-.. contents:: Table of Contents
-   :depth: 3
-   :local:
-
-------------
-1. Overview
-------------
-
-Purpose of TLS in P2P Networking
-================================
 Transport Layer Security (TLS) provides encrypted communication and peer authentication in py-libp2p, ensuring:
 
 - **Data confidentiality**: Prevents eavesdropping
