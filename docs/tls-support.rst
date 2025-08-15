@@ -159,7 +159,6 @@ Troubleshooting
    * - Connection refused
      - Port blocked or listener not running
      - Check firewall rules and listener status.
-```
 
 
 
