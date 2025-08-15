@@ -21,7 +21,7 @@ Python Dependencies
 ===================
 .. code-block:: bash
 
-   pip install py-libp2p[tls]  # Installs with TLS extras
+   pip install py-libp2p[tls] 
 
 Mandatory:
 - ``cryptography`` >= 3.4
