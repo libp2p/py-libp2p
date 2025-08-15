@@ -744,10 +744,6 @@ class QUICListener(IListener):
                     f"Started background tasks for connection {dest_cid.hex()}"
                 )
 
-            if self._transport._swarm:
-                await self._transport._swarm.add_conn(connection)
-                logger.debug(f"Successfully added connection {dest_cid.hex()} to swarm")
-
             try:
                 logger.debug(f"Invoking user callback {dest_cid.hex()}")
                 await self._handler(connection)

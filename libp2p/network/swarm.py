@@ -246,10 +246,6 @@ class Swarm(Service, INetworkService):
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
         swarm_conn = await self.dial_peer(peer_id)
-        dd = "Yes" if swarm_conn is None else "No"
-
-        print(f"Is swarm conn None: {dd}")
-
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
         return net_stream
@@ -283,17 +279,23 @@ class Swarm(Service, INetworkService):
             async def conn_handler(
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
-                raw_conn = RawConnection(read_write_closer, False)
-
                 # No need to upgrade QUIC Connection
                 if isinstance(self.transport, QUICTransport):
-                    quic_conn = cast(QUICConnection, raw_conn)
-                    await self.add_conn(quic_conn)
-                    # NOTE: This is a intentional barrier to prevent from the handler
-                    # exiting and closing the connection.
-                    await self.manager.wait_finished()
-                    print("Connection Connected")
+                    try:
+                        quic_conn = cast(QUICConnection, read_write_closer)
+                        await self.add_conn(quic_conn)
+                        peer_id = quic_conn.peer_id
+                        logger.debug(
+                            f"successfully opened connection to peer {peer_id}"
+                        )
+                        # NOTE: This is a intentional barrier to prevent from the
+                        # handler exiting and closing the connection.
+                        await self.manager.wait_finished()
+                    except Exception:
+                        await read_write_closer.close()
                     return
+
+                raw_conn = RawConnection(read_write_closer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
                 # secure the conn and then mux the conn
@@ -410,9 +412,10 @@ class Swarm(Service, INetworkService):
             muxed_conn,
             self,
         )
-        print("add_conn called")
+        logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
+        logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()
         # Store muxed_conn with peer id

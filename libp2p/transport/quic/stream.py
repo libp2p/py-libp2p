@@ -625,7 +625,7 @@ class QUICStream(IMuxedStream):
         exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context manager and close the stream."""
-        print("Exiting the context and closing the stream")
+        logger.debug("Exiting the context and closing the stream")
         await self.close()
 
     def set_deadline(self, ttl: int) -> bool:

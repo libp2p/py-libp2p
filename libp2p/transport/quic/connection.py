@@ -728,51 +728,47 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def accept_stream(self, timeout: float | None = None) -> QUICStream:
         """
-        Accept an incoming stream with timeout support.
+        Accept incoming stream.
 
         Args:
-            timeout: Optional timeout for accepting streams
-
-        Returns:
-            Accepted incoming stream
-
-        Raises:
-            QUICStreamTimeoutError: Accept timeout exceeded
-            QUICConnectionClosedError: Connection is closed
+            timeout: Optional timeout. If None, waits indefinitely.
 
         """
         if self._closed:
             raise QUICConnectionClosedError("Connection is closed")
 
-        timeout = timeout or self.STREAM_ACCEPT_TIMEOUT
-
-        with trio.move_on_after(timeout):
-            while True:
-                if self._closed:
-                    raise MuxedConnUnavailable("QUIC connection is closed")
-
-                async with self._accept_queue_lock:
-                    if self._stream_accept_queue:
-                        stream = self._stream_accept_queue.pop(0)
-                        logger.debug(f"Accepted inbound stream {stream.stream_id}")
-                        return stream
-
-                if self._closed:
-                    raise MuxedConnUnavailable(
-                        "Connection closed while accepting stream"
-                    )
-
-                # Wait for new streams
-                await self._stream_accept_event.wait()
-
-        logger.error(
-            "Timeout occured while accepting stream for local peer "
-            f"{self._local_peer_id.to_string()} on QUIC connection"
-        )
-        if self._closed_event.is_set() or self._closed:
-            raise MuxedConnUnavailable("QUIC connection closed during timeout")
+        if timeout is not None:
+            with trio.move_on_after(timeout):
+                return await self._accept_stream_impl()
+            # Timeout occurred
+            if self._closed_event.is_set() or self._closed:
+                raise MuxedConnUnavailable("QUIC connection closed during timeout")
+            else:
+                raise QUICStreamTimeoutError(
+                    f"Stream accept timed out after {timeout}s"
+                )
         else:
-            raise QUICStreamTimeoutError(f"Stream accept timed out after {timeout}s")
+            # No timeout - wait indefinitely
+            return await self._accept_stream_impl()
+
+    async def _accept_stream_impl(self) -> QUICStream:
+        while True:
+            if self._closed:
+                raise MuxedConnUnavailable("QUIC connection is closed")
+
+            async with self._accept_queue_lock:
+                if self._stream_accept_queue:
+                    stream = self._stream_accept_queue.pop(0)
+                    logger.debug(f"Accepted inbound stream {stream.stream_id}")
+                    return stream
+
+            if self._closed:
+                raise MuxedConnUnavailable("Connection closed while accepting stream")
+
+            # Wait for new streams indefinitely
+            await self._stream_accept_event.wait()
+
+        raise QUICConnectionError("Error occurred while waiting to accept stream")
 
     def set_stream_handler(self, handler_function: TQUICStreamHandlerFn) -> None:
         """
