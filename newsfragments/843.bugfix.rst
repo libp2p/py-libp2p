@@ -1,0 +1,1 @@
+Fixed message id type inconsistency in handle ihave and message id parsing improvement in handle iwant in pubsub module.
