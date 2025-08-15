@@ -1,174 +1,166 @@
-TLS Support in py-libp2p
-=========================
+Py-libp2p – TLS Support Documentation 
+======================================================
 
-Transport Layer Security (TLS) provides encrypted communication and peer authentication in py-libp2p, ensuring:
+.. contents::
+   :depth: 2
+   :local:
 
-- **Data confidentiality**: Prevents eavesdropping
-- **Integrity protection**: Detects tampering
-- **Peer authentication**: Verifies identities via certificates
+Overview of TLS in Libp2p
+-------------------------
 
-TLS in libp2p Security Stack
-============================
-- Operates at the **transport security layer** (alongside Noise protocol)
-- Complies with libp2p's `SECIO <https://docs.libp2p.io/concepts/security/secio/>`_ replacement initiative
-- Current implementation status: **Stable** (interoperable with go-libp2p/js-libp2p)
+**Purpose of TLS in P2P networking**
 
---------------------------
-2. Installation Requirements
---------------------------
+- Encrypts data between peers.
+- Authenticates peer identity using certificates.
+- Prevents man-in-the-middle attacks.
 
-Python Dependencies
-===================
+**Integration in libp2p security modules**
+
+- TLS is one of the supported secure channel protocols (alongside Noise).
+- Negotiated during connection setup.
+
+**Current status**
+
+- **py-libp2p**: Experimental, usable for local and interop tests.
+- **go-libp2p / js-libp2p**: Stable and production-ready.
+
+Installation Requirements
+-------------------------
+
+**Python requirements**
+
+- Python 3.8+
+
+**Install with TLS support**
+
 .. code-block:: bash
 
-   pip install py-libp2p[tls] 
+   pip install "libp2p[tls]"
 
-Mandatory:
-- ``cryptography`` >= 3.4
-- ``pyOpenSSL`` >= 20.0
+**Additional dependencies**
 
-Platform Support
-================
-- **OS**: Linux/macOS/Windows (with OpenSSL)
-- **Python**: 3.8+
-- **OpenSSL**: 1.1.1 or newer
+Ubuntu / Debian:
 
-----------------------------
-3. Enabling TLS in py-libp2p
-----------------------------
+.. code-block:: bash
 
-Basic Configuration
-===================
+   sudo apt install build-essential python3-dev libffi-dev libssl-dev
+
+macOS:
+
+.. code-block:: bash
+
+   brew install openssl
+
+Enabling TLS in py-libp2p
+-------------------------
+
+**Working example – Listener and Dialer**
+
+Listener node:
+
 .. code-block:: python
 
-   from libp2p import new_node
+   import asyncio
+   from libp2p import new_host
    from libp2p.security.tls.transport import TLSTransport
 
-   async def create_tls_node():
-       node = await new_node(
-           security_transports=[TLSTransport()],  # Explicit TLS enable
-           transport_priority=['/tls/1.0.0']     # Prefer TLS over other security layers
-       )
-       await node.listen("/ip4/0.0.0.0/tcp/8000")
-       print(f"Node ID: {node.get_id()}, Listening on: {node.get_addrs()}")
+   async def main():
+       host = await new_host(security_transports=[TLSTransport()])
+       await host.listen("/ip4/0.0.0.0/tcp/8000")
+       print("TLS-enabled listener at:", host.get_addrs())
 
-Default Behavior
-================
-- TLS **enabled by default** in py-libp2p >= 0.3.0
-- Auto-generates self-signed certificates if none provided
-- Fallback to Noise protocol if TLS handshake fails
+       await asyncio.Future()  # Keep running
 
-------------------------
-4. Certificate Management
-------------------------
+   if __name__ == "__main__":
+       asyncio.run(main())
 
-Generating Certificates
-=======================
-For development (self-signed):
+Dialer node:
+
+.. code-block:: python
+
+   import asyncio
+   from libp2p import new_host
+   from libp2p.security.tls.transport import TLSTransport
+   from libp2p.peer.peerinfo import info_from_p2p_addr
+
+   async def main():
+       host = await new_host(security_transports=[TLSTransport()])
+
+       addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
+       peer_info = info_from_p2p_addr(addr)
+
+       await host.connect(peer_info)
+       print("Connected securely to", peer_info.peer_id)
+
+   if __name__ == "__main__":
+       asyncio.run(main())
+
+**Defaults if no configuration is provided**
+
+- Generates a self-signed certificate automatically.
+
+Certificate Management
+----------------------
+
+**Generate a development certificate**
 
 .. code-block:: bash
 
-   openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+   openssl req -x509 -newkey rsa:2048 \
+     -keyout key.pem -out cert.pem \
+     -days 365 -nodes -subj "/CN=py-libp2p"
 
-Production Recommendations
-==========================
-- Use **CA-signed certificates** for public nodes
-- Store keys in secure vaults (Hashicorp Vault/AWS Secrets Manager)
-- Implement certificate rotation:
+- Store keys outside version control.
+- Rotate certificates every 90 days in production.
 
-.. code-block:: python
+Testing TLS Connections
+-----------------------
 
-   TLSTransport(
-       identity_loader=my_cert_rotation_func  # Callable returning (cert, key)
-   )
+**Local test steps**
 
-----------------------------
-5. Testing TLS Connections
-----------------------------
+1. Run the listener example.
+2. Start the dialer with the listener's multiaddress.
+3. Confirm the secure connection in logs.
 
-Local Test Between Python Nodes
-===============================
-1. Start listener:
+**Interop testing**
 
-.. code-block:: python
+- Ensure both nodes advertise `/tls/1.0.0`.
+- Peer IDs must match certificate public keys.
 
-   node1 = await new_node(security_transports=[TLSTransport()])
-   await node1.listen("/ip4/0.0.0.0/tcp/8000")
+Security Considerations
+-----------------------
 
-2. Connect from second node:
+- Never disable certificate verification in production.
+- Use TLS 1.3 or later.
+- Pin certificates for critical peers.
 
-.. code-block:: python
+Troubleshooting
+---------------
 
-   stream = await node2.dial(node1.get_id(), "/tls/1.0.0")
-   assert stream.is_encrypted()
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
 
-Interop Testing Matrix
-=======================
-+----------------+----------------+----------------+
-| Implementation | Handshake      | Data Transfer  |
-+================+================+================+
-| py-libp2p      | ✅             | ✅             |
-+----------------+----------------+----------------+
-| go-libp2p      | ✅ (v0.23+)    | ✅             |
-+----------------+----------------+----------------+
-| js-libp2p      | ✅ (v0.42+)    | ✅             |
-+----------------+----------------+----------------+
-
-Debugging Tips
-==============
-Enable verbose logging:
-
-.. code-block:: python
-
-   import logging
-   logging.basicConfig(level=logging.DEBUG)
-
---------------------------------
-6. Security Considerations
---------------------------------
-
-Critical Configuration Checks
-=============================
-- Verify ``peer_id`` matches certificate hash
-- Disable deprecated TLS versions:
-
-.. code-block:: python
-
-   TLSTransport(
-       tls_min_version=ssl.TLSVersion.TLSv1_3
-   )
-
-Threat Model
-============
-- Mitigates: MITM attacks, replay attacks
-- Does **not** protect against: DDoS, protocol-level exploits
-
-Roadmap
-=======
-- QUIC integration (Q2 2024)
-- Post-quantum cryptography (Q3 2024)
-
-------------------------
-7. Troubleshooting
-------------------------
-
-Common Errors
-=============
-``TLS handshake failed``
-  - Cause: Clock skew >5 minutes
-  - Fix: Sync system time
-
-``UnknownProtocolError``
-  - Cause: Mismatched ``/tls`` version
-  - Fix: Update both nodes to same libp2p version
-
-Debugging Commands
-==================
-Verify certificate chain:
-
-.. code-block:: bash
-
-   openssl s_client -connect 127.0.0.1:8000 -showcerts
-
+   * - Problem
+     - Cause
+     - Solution
+   * - Certificate not trusted
+     - Self-signed without trust store entry
+     - Add cert to local trust store or disable verification **only** in testing.
+   * - Protocol negotiation failed
+     - One peer does not support `/tls/1.0.0`
+     - Enable TLS on both peers or use Noise.
+   * - SSL handshake failure
+     - TLS version mismatch or clock skew
+     - Enforce TLS 1.3, sync system clock.
+   * - `ImportError: No module named libp2p.security.tls`
+     - TLS extras not installed
+     - Run `pip install "libp2p[tls]"`.
+   * - Connection refused
+     - Port blocked or listener not running
+     - Check firewall rules and listener status.
 ```
+
+
+
 
