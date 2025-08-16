@@ -262,7 +262,6 @@ class GossipSub(IPubsubRouter, Service):
                 continue
             stream = self.pubsub.peers[peer_id]
 
-            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
             await self.pubsub.write_msg(stream, rpc_msg)
 
         for topic in pubsub_msg.topicIDs:
