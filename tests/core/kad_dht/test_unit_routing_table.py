@@ -226,6 +226,32 @@ class TestKBucket:
 class TestRoutingTable:
     """Test suite for RoutingTable class."""
 
+    @pytest.mark.trio
+    async def test_kbucket_split_behavior(self, mock_host, local_peer_id):
+        """
+        Test that adding more than BUCKET_SIZE peers to the routing table
+        triggers kbucket splitting and all peers are added.
+        """
+        routing_table = RoutingTable(local_peer_id, mock_host)
+
+        num_peers = BUCKET_SIZE + 5
+        peer_ids = []
+        for i in range(num_peers):
+            key_pair = create_new_key_pair()
+            peer_id = ID.from_pubkey(key_pair.public_key)
+            peer_info = PeerInfo(peer_id, [Multiaddr(f"/ip4/127.0.0.1/tcp/{9000 + i}")])
+            peer_ids.append(peer_id)
+            added = await routing_table.add_peer(peer_info)
+            assert added, f"Peer {peer_id} should be added"
+
+        assert len(routing_table.buckets) > 1, "KBucket splitting did not occur"
+        for pid in peer_ids:
+            assert routing_table.peer_in_table(pid), f"Peer {pid} not found after split"
+        all_peer_ids = routing_table.get_peer_ids()
+        assert set(peer_ids).issubset(set(all_peer_ids)), (
+            "Not all peers present after split"
+        )
+
     @pytest.fixture
     def mock_host(self):
         """Create a mock host for testing."""
