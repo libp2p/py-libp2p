@@ -6,6 +6,7 @@ from multiaddr.resolvers import DNSResolver
 from libp2p.abc import ID, INetworkService, PeerInfo
 from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
+from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 logger = logging.getLogger("libp2p.discovery.bootstrap")
@@ -64,16 +65,17 @@ class BootstrapDiscovery:
                 logger.warning(f"No addresses resolved for DNS address: {addr_str}")
                 return
             peer_info = PeerInfo(peer_id, addrs)
-            self.add_addr(peer_info)
+            await self.add_addr(peer_info)
         else:
-            self.add_addr(info_from_p2p_addr(multiaddr))
+            peer_info = info_from_p2p_addr(multiaddr)
+            await self.add_addr(peer_info)
 
     def is_dns_addr(self, addr: Multiaddr) -> bool:
         """Check if the address is a DNS address."""
         return any(protocol.name == "dnsaddr" for protocol in addr.protocols())
 
-    def add_addr(self, peer_info: PeerInfo) -> None:
-        """Add a peer to the peerstore and emit discovery event."""
+    async def add_addr(self, peer_info: PeerInfo) -> None:
+        """Add a peer to the peerstore, emit discovery event, and attempt connection."""
         # Skip if it's our own peer
         if peer_info.peer_id == self.swarm.get_peer_id():
             logger.debug(f"Skipping own peer ID: {peer_info.peer_id}")
@@ -90,5 +92,48 @@ class BootstrapDiscovery:
             # Emit peer discovery event
             peerDiscovery.emit_peer_discovered(peer_info)
             logger.debug(f"Peer discovered: {peer_info.peer_id}")
+
+            # Attempt to connect to the peer
+            await self._connect_to_peer(peer_info.peer_id)
         else:
             logger.debug(f"Additional addresses added for peer: {peer_info.peer_id}")
+
+    async def _connect_to_peer(self, peer_id: ID) -> None:
+        """Attempt to establish a connection to a peer using swarm.dial_peer."""
+        # Pre-connection validation: Check if already connected
+        # This prevents duplicate connection attempts and unnecessary network overhead
+        if peer_id in self.swarm.connections:
+            logger.debug(
+                f"Already connected to {peer_id} - skipping connection attempt"
+            )
+            return
+
+        try:
+            # Log connection attempt for monitoring and debugging
+            logger.debug(f"Attempting to connect to {peer_id}")
+
+            # Use swarm.dial_peer to establish connection
+            await self.swarm.dial_peer(peer_id)
+
+            # Post-connection validation: Verify connection was actually established
+            # swarm.dial_peer may succeed but connection might not be in
+            # connections dict
+            # This can happen due to race conditions or connection cleanup
+            if peer_id in self.swarm.connections:
+                # Connection successfully established and registered
+                # Log success at INFO level for operational visibility
+                logger.info(f"Connected to {peer_id}")
+            else:
+                # Edge case: dial succeeded but connection not found
+                # This indicates a potential issue with connection management
+                logger.warning(f"Dial succeeded but connection not found for {peer_id}")
+
+        except SwarmException as e:
+            # Handle swarm-level connection errors
+            logger.warning(f"Failed to connect to {peer_id}: {e}")
+
+        except Exception as e:
+            # Handle unexpected errors that aren't swarm-specific
+            logger.error(f"Unexpected error connecting to {peer_id}: {e}")
+            # Re-raise to allow caller to handle if needed
+            raise
