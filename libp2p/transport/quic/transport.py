@@ -114,12 +114,14 @@ class QUICTransport(ITransport):
 
         self._swarm: Swarm | None = None
 
-        print(f"Initialized QUIC transport with security for peer {self._peer_id}")
+        logger.debug(
+            f"Initialized QUIC transport with security for peer {self._peer_id}"
+        )
 
     def set_background_nursery(self, nursery: trio.Nursery) -> None:
         """Set the nursery to use for background tasks (called by swarm)."""
         self._background_nursery = nursery
-        print("Transport background nursery set")
+        logger.debug("Transport background nursery set")
 
     def set_swarm(self, swarm: Swarm) -> None:
         """Set the swarm for adding incoming connections."""
@@ -155,27 +157,28 @@ class QUICTransport(ITransport):
             self._apply_tls_configuration(base_client_config, client_tls_config)
 
             # QUIC v1 (RFC 9000) configurations
-            quic_v1_server_config = create_server_config_from_base(
-                base_server_config, self._security_manager, self._config
-            )
-            quic_v1_server_config.supported_versions = [
-                quic_version_to_wire_format(QUIC_V1_PROTOCOL)
-            ]
+            if self._config.enable_v1:
+                quic_v1_server_config = create_server_config_from_base(
+                    base_server_config, self._security_manager, self._config
+                )
+                quic_v1_server_config.supported_versions = [
+                    quic_version_to_wire_format(QUIC_V1_PROTOCOL)
+                ]
 
-            quic_v1_client_config = create_client_config_from_base(
-                base_client_config, self._security_manager, self._config
-            )
-            quic_v1_client_config.supported_versions = [
-                quic_version_to_wire_format(QUIC_V1_PROTOCOL)
-            ]
+                quic_v1_client_config = create_client_config_from_base(
+                    base_client_config, self._security_manager, self._config
+                )
+                quic_v1_client_config.supported_versions = [
+                    quic_version_to_wire_format(QUIC_V1_PROTOCOL)
+                ]
 
-            # Store both server and client configs for v1
-            self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_server")] = (
-                quic_v1_server_config
-            )
-            self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_client")] = (
-                quic_v1_client_config
-            )
+                # Store both server and client configs for v1
+                self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_server")] = (
+                    quic_v1_server_config
+                )
+                self._quic_configs[TProtocol(f"{QUIC_V1_PROTOCOL}_client")] = (
+                    quic_v1_client_config
+                )
 
             # QUIC draft-29 configurations for compatibility
             if self._config.enable_draft29:
@@ -196,7 +199,7 @@ class QUICTransport(ITransport):
                     draft29_client_config
                 )
 
-            print("QUIC configurations initialized with libp2p TLS security")
+            logger.debug("QUIC configurations initialized with libp2p TLS security")
 
         except Exception as e:
             raise QUICSecurityError(
@@ -221,7 +224,7 @@ class QUICTransport(ITransport):
             config.alpn_protocols = tls_config.alpn_protocols
             config.verify_mode = ssl.CERT_NONE
 
-            print("Successfully applied TLS configuration to QUIC config")
+            logger.debug("Successfully applied TLS configuration to QUIC config")
 
         except Exception as e:
             raise QUICSecurityError(f"Failed to apply TLS configuration: {e}") from e
@@ -267,7 +270,7 @@ class QUICTransport(ITransport):
 
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
-            print("config_key", config_key, self._quic_configs.keys())
+            logger.debug("config_key", config_key, self._quic_configs.keys())
             config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
@@ -303,7 +306,7 @@ class QUICTransport(ITransport):
                 transport=self,
                 security_manager=self._security_manager,
             )
-            print("QUIC Connection Created")
+            logger.debug("QUIC Connection Created")
 
             if self._background_nursery is None:
                 logger.error("No nursery set to execute background tasks")
@@ -353,8 +356,8 @@ class QUICTransport(ITransport):
                     f"{expected_peer_id}, got {verified_peer_id}"
                 )
 
-            print(f"Peer identity verified: {verified_peer_id}")
-            print(f"Peer identity verified: {verified_peer_id}")
+            logger.debug(f"Peer identity verified: {verified_peer_id}")
+            logger.debug(f"Peer identity verified: {verified_peer_id}")
 
         except Exception as e:
             raise QUICSecurityError(f"Peer identity verification failed: {e}") from e
@@ -392,7 +395,7 @@ class QUICTransport(ITransport):
         )
 
         self._listeners.append(listener)
-        print("Created QUIC listener with security")
+        logger.debug("Created QUIC listener with security")
         return listener
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
@@ -438,7 +441,7 @@ class QUICTransport(ITransport):
             return
 
         self._closed = True
-        print("Closing QUIC transport")
+        logger.debug("Closing QUIC transport")
 
         # Close all active connections and listeners concurrently using trio nursery
         async with trio.open_nursery() as nursery:
@@ -453,7 +456,7 @@ class QUICTransport(ITransport):
         self._connections.clear()
         self._listeners.clear()
 
-        print("QUIC transport closed")
+        logger.debug("QUIC transport closed")
 
     async def _cleanup_terminated_connection(self, connection: QUICConnection) -> None:
         """Clean up a terminated connection from all listeners."""

@@ -245,6 +245,13 @@ class Swarm(Service, INetworkService):
         """
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
+        if (
+            isinstance(self.transport, QUICTransport)
+            and self.connections[peer_id] is not None
+        ):
+            conn = cast(SwarmConn, self.connections[peer_id])
+            return await conn.new_stream()
+
         swarm_conn = await self.dial_peer(peer_id)
         net_stream = await swarm_conn.new_stream()
         logger.debug("successfully opened a stream to peer %s", peer_id)
@@ -286,7 +293,7 @@ class Swarm(Service, INetworkService):
                         await self.add_conn(quic_conn)
                         peer_id = quic_conn.peer_id
                         logger.debug(
-                            f"successfully opened connection to peer {peer_id}"
+                            f"successfully opened quic connection to peer {peer_id}"
                         )
                         # NOTE: This is a intentional barrier to prevent from the
                         # handler exiting and closing the connection.

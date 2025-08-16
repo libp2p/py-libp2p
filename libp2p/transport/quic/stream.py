@@ -86,12 +86,6 @@ class QUICStream(IMuxedStream):
     - Implements proper stream lifecycle management
     """
 
-    # Configuration constants based on research
-    DEFAULT_READ_TIMEOUT = 30.0  # 30 seconds
-    DEFAULT_WRITE_TIMEOUT = 30.0  # 30 seconds
-    FLOW_CONTROL_WINDOW_SIZE = 512 * 1024  # 512KB per stream
-    MAX_RECEIVE_BUFFER_SIZE = 1024 * 1024  # 1MB max buffering
-
     def __init__(
         self,
         connection: "QUICConnection",
@@ -144,6 +138,17 @@ class QUICStream(IMuxedStream):
 
         # Resource accounting
         self._memory_reserved = 0
+
+        # Stream constant configurations
+        self.READ_TIMEOUT = connection._transport._config.STREAM_READ_TIMEOUT
+        self.WRITE_TIMEOUT = connection._transport._config.STREAM_WRITE_TIMEOUT
+        self.FLOW_CONTROL_WINDOW_SIZE = (
+            connection._transport._config.STREAM_FLOW_CONTROL_WINDOW
+        )
+        self.MAX_RECEIVE_BUFFER_SIZE = (
+            connection._transport._config.MAX_STREAM_RECEIVE_BUFFER
+        )
+
         if self._resource_scope:
             self._reserve_memory(self.FLOW_CONTROL_WINDOW_SIZE)
 
@@ -226,7 +231,7 @@ class QUICStream(IMuxedStream):
                 return b""
 
         # Wait for data with timeout
-        timeout = self.DEFAULT_READ_TIMEOUT
+        timeout = self.READ_TIMEOUT
         try:
             with trio.move_on_after(timeout) as cancel_scope:
                 while True:
