@@ -971,6 +971,14 @@ class IPeerStore(
     # --------CERTIFIED-ADDR-BOOK----------
 
     @abstractmethod
+    def get_local_record(self) -> Optional["Envelope"]:
+        """Get the local-peer-record wrapped in Envelope"""
+
+    @abstractmethod
+    def set_local_record(self, envelope: "Envelope") -> None:
+        """Set the local-peer-record wrapped in Envelope"""
+
+    @abstractmethod
     def consume_peer_record(self, envelope: "Envelope", ttl: int) -> bool:
         """
         Accept and store a signed PeerRecord, unless it's older

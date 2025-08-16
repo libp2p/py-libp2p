@@ -43,6 +43,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -110,6 +111,14 @@ class BasicHost(IHost):
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
 
+        # Cache a signed-record if the local-node in the PeerStore
+        envelope = create_signed_peer_record(
+            self.get_id(),
+            self.get_addrs(),
+            self.get_private_key(),
+        )
+        self.get_peerstore().set_local_record(envelope)
+        
     def get_id(self) -> ID:
         """
         :return: peer_id of host
