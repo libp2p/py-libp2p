@@ -72,9 +72,9 @@ def is_quic_multiaddr(maddr: multiaddr.Multiaddr) -> bool:
         has_ip = f"/{IP4_PROTOCOL}/" in addr_str or f"/{IP6_PROTOCOL}/" in addr_str
         has_udp = f"/{UDP_PROTOCOL}/" in addr_str
         has_quic = (
-            addr_str.endswith(f"/{QUIC_V1_PROTOCOL}")
-            or addr_str.endswith(f"/{QUIC_DRAFT29_PROTOCOL}")
-            or addr_str.endswith("/quic")
+            f"/{QUIC_V1_PROTOCOL}" in addr_str
+            or f"/{QUIC_DRAFT29_PROTOCOL}" in addr_str
+            or "/quic" in addr_str
         )
 
         return has_ip and has_udp and has_quic

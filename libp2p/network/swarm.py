@@ -191,6 +191,7 @@ class Swarm(Service, INetworkService):
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
+            addr = Multiaddr(f"{addr}/p2p/{peer_id}")
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
             logger.debug("fail to dial peer %s over base transport", peer_id)

@@ -20,6 +20,7 @@ from examples.ping.ping import PING_LENGTH, PING_PROTOCOL_ID
 from libp2p import new_host
 from libp2p.abc import INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
@@ -146,7 +147,9 @@ class TestBasicQUICFlow:
 
                 # Get server address
                 server_addrs = listener.get_addrs()
-                server_addr = server_addrs[0]
+                server_addr = multiaddr.Multiaddr(
+                    f"{server_addrs[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
+                )
                 print(f"🔧 SERVER: Listening on {server_addr}")
 
                 # Give server a moment to be ready
@@ -282,7 +285,9 @@ class TestBasicQUICFlow:
                 success = await listener.listen(listen_addr, nursery)
                 assert success
 
-                server_addr = listener.get_addrs()[0]
+                server_addr = multiaddr.Multiaddr(
+                    f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
+                )
                 print(f"🔧 SERVER: Listening on {server_addr}")
 
                 # Create client but DON'T open a stream
