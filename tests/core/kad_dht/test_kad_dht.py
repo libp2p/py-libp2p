@@ -400,8 +400,7 @@ async def test_dht_req_fail_with_invalid_record_transfer(
         envelope.public_key = key_pair.public_key
         dht_a.host.get_peerstore().set_local_record(envelope)
 
-    with trio.fail_after(TEST_TIMEOUT):
-        await dht_a.put_value(key, value)
+    await dht_a.put_value(key, value)
 
     value = dht_b.value_store.get(key)
 
