@@ -1,10 +1,14 @@
 """
 Unit tests for the RandomWalk module in libp2p.discovery.random_walk.
 """
-import pytest
+
 from unittest.mock import AsyncMock, Mock
+
+import pytest
+
 from libp2p.discovery.random_walk.random_walk import RandomWalk
 from libp2p.peer.id import ID
+
 
 @pytest.fixture
 def mock_host():
@@ -16,22 +20,29 @@ def mock_host():
     host.new_stream = AsyncMock()
     return host
 
+
 @pytest.fixture
 def dummy_query_function():
     async def query(key_bytes):
         return []
+
     return query
+
 
 @pytest.fixture
 def dummy_peer_id():
     return b"\x01" * 32
 
+
 @pytest.mark.trio
-async def test_random_walk_initialization(mock_host, dummy_peer_id, dummy_query_function):
+async def test_random_walk_initialization(
+    mock_host, dummy_peer_id, dummy_query_function
+):
     rw = RandomWalk(mock_host, dummy_peer_id, dummy_query_function)
     assert rw.host == mock_host
     assert rw.local_peer_id == dummy_peer_id
     assert rw.query_function == dummy_query_function
+
 
 def test_generate_random_peer_id(mock_host, dummy_peer_id, dummy_query_function):
     rw = RandomWalk(mock_host, dummy_peer_id, dummy_query_function)
@@ -43,11 +54,12 @@ def test_generate_random_peer_id(mock_host, dummy_peer_id, dummy_query_function)
 @pytest.mark.trio
 async def test_run_concurrent_random_walks(mock_host, dummy_peer_id):
     # Dummy query function returns different peer IDs for each walk
-    call_count = {'count': 0}
+    call_count = {"count": 0}
+
     async def query(key_bytes):
-        call_count['count'] += 1
+        call_count["count"] += 1
         # Return a unique peer ID for each call
-        return [ID(bytes([call_count['count']] * 32))]
+        return [ID(bytes([call_count["count"]] * 32))]
 
     rw = RandomWalk(mock_host, dummy_peer_id, query)
     peers = await rw.run_concurrent_random_walks(count=3)
@@ -68,4 +80,5 @@ async def test_perform_random_walk_running(mock_host, dummy_peer_id):
     assert isinstance(peers, list)
     if peers:
         from libp2p.peer.peerinfo import PeerInfo
+
         assert isinstance(peers[0], PeerInfo)
