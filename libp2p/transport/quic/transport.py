@@ -263,9 +263,8 @@ class QUICTransport(ITransport):
                 remote_peer_id = ID.from_base58(remote_peer_id)
 
             if remote_peer_id is None:
-                # TODO: Peer ID verification during dial
                 logger.error("Unable to derive peer id from multiaddr")
-                # raise QUICDialError("Unable to derive peer id from multiaddr")
+                raise QUICDialError("Unable to derive peer id from multiaddr")
             quic_version = multiaddr_to_quic_version(maddr)
 
             # Get appropriate QUIC client configuration
