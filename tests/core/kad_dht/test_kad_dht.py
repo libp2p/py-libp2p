@@ -17,6 +17,7 @@ import pytest
 import multiaddr
 import trio
 
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
@@ -368,3 +369,42 @@ async def test_reissue_when_listen_addrs_change(dht_pair: tuple[KadDHT, KadDHT])
 
     # This proves that upon the change in listen_addrs, we issue new records
     assert seq1 > seq0, f"Expected seq to bump after addr change, got {seq0} -> {seq1}"
+
+
+@pytest.mark.trio
+async def test_dht_req_fail_with_invalid_record_transfer(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    """
+    Testing showing failure of storing and retrieving values in the DHT,
+    if invalid signed-records are sent.
+    """
+    dht_a, dht_b = dht_pair
+    peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
+
+    # Generate a random key and value
+    key = create_key_from_binary(b"test-key")
+    value = b"test-value"
+
+    # First add the value directly to node A's store to verify storage works
+    dht_a.value_store.put(key, value)
+    local_value = dht_a.value_store.get(key)
+    assert local_value == value, "Local value storage failed"
+    await dht_a.routing_table.add_peer(peer_b_info)
+
+    # Corrupt dht_a's local peer_record
+    envelope = dht_a.host.get_peerstore().get_local_record()
+    key_pair = create_new_key_pair()
+
+    if envelope is not None:
+        envelope.public_key = key_pair.public_key
+        dht_a.host.get_peerstore().set_local_record(envelope)
+
+    with trio.fail_after(TEST_TIMEOUT):
+        await dht_a.put_value(key, value)
+
+    value = dht_b.value_store.get(key)
+
+    # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receiving
+    # the corrupted invalid record
+    assert value is None
