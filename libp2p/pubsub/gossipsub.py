@@ -229,7 +229,9 @@ class GossipSub(IPubsubRouter, Service):
         """
         # Process the senderRecord if sent
         if isinstance(self.pubsub, Pubsub):
-            _ = maybe_consume_signed_record(rpc, self.pubsub.host)
+            if not maybe_consume_signed_record(rpc, self.pubsub.host):
+                logger.error("Received an invalid-signed-record, ignoring the message")
+                return
 
         control_message = rpc.control
 

@@ -270,7 +270,11 @@ class Pubsub(Service, IPubsub):
                 rpc_incoming.ParseFromString(incoming)
 
                 # Process the sender's signed-record if sent
-                _ = maybe_consume_signed_record(rpc_incoming, self.host)
+                if not maybe_consume_signed_record(rpc_incoming, self.host):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the incoming msg"
+                    )
+                    continue
 
                 if rpc_incoming.publish:
                     # deal with RPC.publish
