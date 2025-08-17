@@ -334,8 +334,6 @@ class Swarm(Service, INetworkService):
                     await listener.close()
                     # Notify about listener closure
                     try:
-                        from multiaddr import Multiaddr
-
                         multiaddr = Multiaddr(maddr_str)
                         await self.notify_listen_close(multiaddr)
                     except Exception as e:
