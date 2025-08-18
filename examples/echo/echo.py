@@ -36,22 +36,20 @@ async def _echo_stream_handler(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str, seed: int | None = None) -> None:
-    # CHANGED: previously hardcoded 0.0.0.0
-    listen_addr = get_optimal_binding_address(port)
-    
+    # Use all available interfaces for listening (JS parity)
+    listen_addrs = get_available_interfaces(port)
+
     if seed:
         import random
-
         random.seed(seed)
         secret_number = random.getrandbits(32 * 8)
         secret = secret_number.to_bytes(length=32, byteorder="big")
     else:
         import secrets
-
         secret = secrets.token_bytes(32)
 
     host = new_host(key_pair=create_new_key_pair(secret))
-    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
@@ -60,8 +58,14 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
         if not destination:  # its the server
             host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
+            # Print all listen addresses with peer ID (JS parity)
+            print("Listener ready, listening on:")
+            peer_id = host.get_id().to_string()
+            for addr in listen_addrs:
+                print(f"{addr}/p2p/{peer_id}")
+
             print(
-                "Run this from the same folder in another console:\n\n"
+                "\nRun this from the same folder in another console:\n\n"
                 f"echo-demo "
                 f"-d {host.get_addrs()[0]}\n"
             )
