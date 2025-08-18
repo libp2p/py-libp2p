@@ -31,9 +31,7 @@ async def main():
         noise_privkey=key_pair.private_key,
         # early_data: Optional data to send during the handshake
         # (None means no early data)
-        early_data=None,
-        # with_noise_pipes: Whether to use Noise pipes for additional security features
-        with_noise_pipes=False,
+        # TODO: add early data
     )
 
     # Create a security options dictionary mapping protocol ID to transport
