@@ -330,8 +330,16 @@ class Swarm(Service, INetworkService):
 
             # Close all listeners
             if hasattr(self, "listeners"):
-                for listener in self.listeners.values():
+                for maddr_str, listener in self.listeners.items():
                     await listener.close()
+                    # Notify about listener closure
+                    try:
+                        multiaddr = Multiaddr(maddr_str)
+                        await self.notify_listen_close(multiaddr)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to notify listen_close for {maddr_str}: {e}"
+                        )
                 self.listeners.clear()
 
             # Close the transport if it exists and has a close method
@@ -420,7 +428,9 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.closed_stream, self, stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
-        raise NotImplementedError
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.listen_close, self, multiaddr)
 
     # Generic notifier used by NetStream._notify_closed
     async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
