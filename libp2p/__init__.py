@@ -68,6 +68,15 @@ from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
+from libp2p.transport.quic.quic import (
+    QUIC,
+)
+from libp2p.transport.websocket.websocket import (
+    WebSocket,
+)
+from libp2p.transport.webrtc.webrtc import (
+    WebRTC,
+)
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -192,7 +201,11 @@ def new_swarm(
         if addr.__contains__("tcp"):
             transport = TCP()
         elif addr.__contains__("quic"):
-            raise ValueError("QUIC not yet supported")
+            transport = QUIC()
+        elif addr.__contains__("ws") or addr.__contains__("wss"):
+            transport = WebSocket()
+        elif addr.__contains__("webrtc"):
+            transport = WebRTC()
         else:
             raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
 
