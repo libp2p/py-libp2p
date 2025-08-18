@@ -219,11 +219,25 @@ class CircuitV2Transport(ITransport):
             # Get a relay from the list of discovered relays
             relays = self.discovery.get_relays()
             if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+                # Prioritize relays with active reservations
+                relays_with_reservations = []
+                other_relays = []
 
-            # Wait and try discovery
+                for relay_id in relays:
+                    relay_info = self.discovery.get_relay_info(relay_id)
+                    if relay_info and relay_info.has_reservation:
+                        relays_with_reservations.append(relay_id)
+                    else:
+                        other_relays.append(relay_id)
+
+                # Return first available relay with reservation, or fallback to others
+                if relays_with_reservations:
+                    return relays_with_reservations[
+                        attempts % len(relays_with_reservations)
+                    ]
+                elif other_relays:
+                    return other_relays[attempts % len(other_relays)]
+
             await trio.sleep(1)
             attempts += 1
 
