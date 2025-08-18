@@ -44,8 +44,11 @@ class MyNotifee(INotifee):
         self.events.append(Event.OpenedStream)
 
     async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
-        # TODO: It is not implemented yet.
-        pass
+        if network is None:
+            raise ValueError("network parameter cannot be None")
+        if stream is None:
+            raise ValueError("stream parameter cannot be None")
+        self.events.append(Event.ClosedStream)
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         self.events.append(Event.Connected)
@@ -103,28 +106,20 @@ async def test_notify(security_protocol):
         # Wait for events
         assert await wait_for_event(events_0_0, Event.Connected, 1.0)
         assert await wait_for_event(events_0_0, Event.OpenedStream, 1.0)
-        # assert await wait_for_event(
-        #     events_0_0, Event.ClosedStream, 1.0
-        # )  # Not implemented
+        assert await wait_for_event(events_0_0, Event.ClosedStream, 1.0)
         assert await wait_for_event(events_0_0, Event.Disconnected, 1.0)
 
         assert await wait_for_event(events_0_1, Event.Connected, 1.0)
         assert await wait_for_event(events_0_1, Event.OpenedStream, 1.0)
-        # assert await wait_for_event(
-        #     events_0_1, Event.ClosedStream, 1.0
-        # )  # Not implemented
+        assert await wait_for_event(events_0_1, Event.ClosedStream, 1.0)
         assert await wait_for_event(events_0_1, Event.Disconnected, 1.0)
 
         assert await wait_for_event(events_1_0, Event.Connected, 1.0)
         assert await wait_for_event(events_1_0, Event.OpenedStream, 1.0)
-        # assert await wait_for_event(
-        #     events_1_0, Event.ClosedStream, 1.0
-        # )  # Not implemented
+        assert await wait_for_event(events_1_0, Event.ClosedStream, 1.0)
         assert await wait_for_event(events_1_0, Event.Disconnected, 1.0)
 
         assert await wait_for_event(events_1_1, Event.Connected, 1.0)
         assert await wait_for_event(events_1_1, Event.OpenedStream, 1.0)
-        # assert await wait_for_event(
-        #     events_1_1, Event.ClosedStream, 1.0
-        # )  # Not implemented
+        assert await wait_for_event(events_1_1, Event.ClosedStream, 1.0)
         assert await wait_for_event(events_1_1, Event.Disconnected, 1.0)
