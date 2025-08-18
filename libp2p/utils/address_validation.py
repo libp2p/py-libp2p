@@ -1,9 +1,13 @@
 from __future__ import annotations
-from typing import List, Optional
+
 from multiaddr import Multiaddr
 
 try:
-    from multiaddr.utils import get_thin_waist_addresses, get_network_addrs  # type: ignore
+    from multiaddr.utils import (  # type: ignore
+        get_network_addrs,
+        get_thin_waist_addresses,
+    )
+
     _HAS_THIN_WAIST = True
 except ImportError:  # pragma: no cover - only executed in older environments
     _HAS_THIN_WAIST = False
@@ -11,7 +15,7 @@ except ImportError:  # pragma: no cover - only executed in older environments
     get_network_addrs = None  # type: ignore
 
 
-def _safe_get_network_addrs(ip_version: int) -> List[str]:
+def _safe_get_network_addrs(ip_version: int) -> list[str]:
     """
     Internal safe wrapper. Returns a list of IP addresses for the requested IP version.
     Falls back to minimal defaults when Thin Waist helpers are missing.
@@ -31,7 +35,7 @@ def _safe_get_network_addrs(ip_version: int) -> List[str]:
     return []
 
 
-def _safe_expand(addr: Multiaddr, port: Optional[int] = None) -> List[Multiaddr]:
+def _safe_expand(addr: Multiaddr, port: int | None = None) -> list[Multiaddr]:
     """
     Internal safe expansion wrapper. Returns a list of Multiaddr objects.
     If Thin Waist isn't available, returns [addr] (identity).
@@ -46,7 +50,7 @@ def _safe_expand(addr: Multiaddr, port: Optional[int] = None) -> List[Multiaddr]
     return [addr]
 
 
-def get_available_interfaces(port: int, protocol: str = "tcp") -> List[Multiaddr]:
+def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr]:
     """
     Discover available network interfaces (IPv4 + IPv6 if supported) for binding.
 
@@ -54,15 +58,17 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> List[Multiaddr
     :param protocol: Transport protocol (e.g., "tcp" or "udp").
     :return: List of Multiaddr objects representing candidate interface addresses.
     """
-    addrs: List[Multiaddr] = []
+    addrs: list[Multiaddr] = []
 
     # IPv4 enumeration
     for ip in _safe_get_network_addrs(4):
         addrs.append(Multiaddr(f"/ip4/{ip}/{protocol}/{port}"))
 
-    # IPv6 enumeration (optional: only include if we have at least one global or loopback)
+    # IPv6 enumeration (optional: only include if we have at least one global or
+    # loopback)
     for ip in _safe_get_network_addrs(6):
-        # Avoid returning unusable wildcard expansions if the environment does not support IPv6
+        # Avoid returning unusable wildcard expansions if the environment does not
+        # support IPv6
         addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
 
     # Fallback if nothing discovered
@@ -72,7 +78,9 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> List[Multiaddr
     return addrs
 
 
-def expand_wildcard_address(addr: Multiaddr, port: Optional[int] = None) -> List[Multiaddr]:
+def expand_wildcard_address(
+    addr: Multiaddr, port: int | None = None
+) -> list[Multiaddr]:
     """
     Expand a wildcard (e.g. /ip4/0.0.0.0/tcp/0) into all concrete interfaces.
 

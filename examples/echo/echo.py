@@ -18,10 +18,8 @@ from libp2p.network.stream.net_stream import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
-
 from libp2p.utils.address_validation import (
     get_optimal_binding_address,
-    get_available_interfaces,
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
@@ -38,7 +36,7 @@ async def _echo_stream_handler(stream: INetStream) -> None:
 async def run(port: int, destination: str, seed: int | None = None) -> None:
     # CHANGED: previously hardcoded 0.0.0.0
     listen_addr = get_optimal_binding_address(port)
-    
+
     if seed:
         import random
 
