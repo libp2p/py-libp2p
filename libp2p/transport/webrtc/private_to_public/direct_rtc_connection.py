@@ -10,20 +10,18 @@ from trio_asyncio import aio_as_trio
 
 from .gen_certificate import WebRTCCertificate
 
-
 @dataclass
 class DirectRTCConfiguration:
     ufrag: str
     peer_connection: RTCPeerConnection
     rtc_config: RTCConfiguration
 
-
 class DirectPeerConnection(RTCPeerConnection):
     def __init__(self, direct_config: DirectRTCConfiguration):
         self.ufrag = direct_config.ufrag
         self.peer_connection = direct_config.peer_connection
         super().__init__(direct_config.rtc_config)
-
+    
     async def createOffer(self) -> RTCSessionDescription:
         """
         Create SDP offer, patching ICE ufrag and pwd to self.ufrag and self.upwd,
@@ -67,7 +65,6 @@ class DirectPeerConnection(RTCPeerConnection):
         patched_answer = RTCSessionDescription(sdp=patched_sdp, type=answer.type)
         await aio_as_trio(self.setLocalDescription(patched_answer))
         return patched_answer
-
     # TODO: FIx this
     def remoteFingerprint(self) -> RTCDtlsFingerprint:
         return RTCDtlsFingerprint("", "")

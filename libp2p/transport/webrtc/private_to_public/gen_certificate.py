@@ -3,7 +3,6 @@ import datetime
 import hashlib
 import logging
 from typing import cast
-
 import base58
 from cryptography import (
     x509,
@@ -42,7 +41,6 @@ from ..constants import (
 
 SIGNAL_PROTOCOL = "/libp2p/webrtc/signal/1.0.0"
 logger = logging.getLogger("libp2p.transport.webrtc.certificate")
-
 
 # TODO: Once Datastore is implemented in python, add cert and priv_key storage
 #       and management.
@@ -244,7 +242,6 @@ class WebRTCCertificate:
 
         Raises:
             Exception: If no private key is available to issue a certificate.
-
         """
         if private_key is None:
             if self.private_key is None:
@@ -306,7 +303,6 @@ class WebRTCCertificate:
             await trio.sleep(float(self._getCertRenewalTime()))
             logger.debug("Renewing TLS certificate")
             self.loadOrCreateCertificate(self.private_key, True)
-
 
 def create_webrtc_multiaddr(
     ip: str, peer_id: ID, certhash: str, direct: bool = False

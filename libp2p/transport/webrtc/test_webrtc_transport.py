@@ -572,7 +572,6 @@ class WebRTCTransportTestSuite:
         try:
             # Generate certificate
             cert = WebRTCCertificate()
-
             # Test hash format (should be uEi + base64url as per js-libp2p)
             assert cert.certhash.startswith("uEi"), "Cert should start with uEi"
 
@@ -928,7 +927,6 @@ class WebRTCTransportTestSuite:
             # Test 3: Certificate cleanup (memory) - Simple validation
             cert1 = WebRTCCertificate()
             cert2 = WebRTCCertificate()
-
             # Certificates should be independent
             assert cert1.certhash != cert2.certhash, (
                 "Certificate hashes should be unique"

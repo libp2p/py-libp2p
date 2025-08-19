@@ -29,7 +29,6 @@ class UDPMuxServer:
 
 UDP_MUX_LISTENERS: list[UDPMuxServer] = []
 
-
 class WebRTCDirectListener(IListener):
     """
     Private-to-public WebRTC-Direct transport listener implementation.
@@ -139,7 +138,7 @@ class WebRTCDirectListener(IListener):
         """
         key = f"{remote_host}:{remote_port}:{ufrag}"
         peer_connection = self.peer_connections.get(key)
-
+        
         if peer_connection is not None:
             logger.debug(f"Already got peer connection for {key}")
             return

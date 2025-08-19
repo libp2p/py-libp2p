@@ -69,7 +69,6 @@ def certhash_decode(s: str) -> tuple[int, bytes]:
 
     return code, digest
 
-
 def certhash_encode(b: ByteString) -> str:
     """Decode certificate hash component."""
     if not b:
