@@ -152,7 +152,8 @@ class WebRTCAsyncBridge:
     async def send_data(self, data_channel: RTCDataChannel, data: bytes) -> None:
         """Send data through channel with proper async bridging"""
         try:
-            aio_as_trio(data_channel.send)(data)
+            await aio_as_trio(data_channel.send)(data)
+
             logger.debug(f"Successfully sent {len(data)} bytes")
         except Exception as e:
             logger.error(f"Failed to send data: {e}")

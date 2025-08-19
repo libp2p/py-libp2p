@@ -271,7 +271,7 @@ class OptimizedNetworkTest:
             # Test multiaddr parsing (should work without network)
             key_pair = create_new_key_pair()
             valid_peer_id = generate_peer_id_from(key_pair)
-            valid_cert = WebRTCCertificate.generate()
+            valid_cert = WebRTCCertificate()
 
             test_addresses = [
                 # Use canonical utility for WebRTC-Direct multiaddr
@@ -311,7 +311,7 @@ class OptimizedNetworkTest:
         print("\n6. 🔐 Standalone Certificate Test...")
         try:
             # Generate certificate
-            cert = WebRTCCertificate.generate()
+            cert = WebRTCCertificate()
 
             # Test certificate properties
             assert cert.certhash.startswith("uEi"), "Should start with uEi"
@@ -325,7 +325,7 @@ class OptimizedNetworkTest:
             print("    PEM export/import cryptographically validated")
 
             # Test multiple certificates are unique
-            cert2 = WebRTCCertificate.generate()
+            cert2 = WebRTCCertificate()
             assert cert.certhash != cert2.certhash, "Certificates should be unique"
             print("Certificate uniqueness confirmed")
 

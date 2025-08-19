@@ -149,7 +149,6 @@ class FixedLiveSignalingTest:
 
             webrtc_transport = WebRTCTransport()
             webrtc_transport.set_host(host)
-
             await webrtc_transport.start()
             assert webrtc_transport.is_started()
             assert "webrtc" in webrtc_transport.supported_protocols
@@ -159,7 +158,8 @@ class FixedLiveSignalingTest:
             direct_transport = WebRTCDirectTransport()
             direct_transport.set_host(host)
 
-            await direct_transport.start()
+            async with trio.open_nursery() as nursery:
+                await direct_transport.start(nursery=nursery)
             assert direct_transport.is_started()
             assert "webrtc-direct" in direct_transport.supported_protocols
 
@@ -220,7 +220,7 @@ class FixedLiveSignalingTest:
         """Test certificate integration with ED25519 peer IDs"""
         print("\n6. 🔐 Certificate Integration Test...")
         try:
-            cert = WebRTCCertificate.generate()
+            cert = WebRTCCertificate()
             key_pair = create_new_key_pair()
             peer_id = generate_peer_id_from(key_pair)
 

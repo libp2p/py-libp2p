@@ -105,7 +105,7 @@ class JSLibp2pInteropTest:
             relay_peer_id = generate_peer_id_from(key_pair_relay)
             target_peer_id = generate_peer_id_from(key_pair_target)
             direct_peer_id = generate_peer_id_from(key_pair_direct)
-            valid_cert = WebRTCCertificate.generate()
+            valid_cert = WebRTCCertificate()
 
             js_libp2p_examples = [
                 f"/ip4/127.0.0.1/tcp/9090/p2p/{relay_peer_id}/p2p-circuit/webrtc/p2p/{target_peer_id}",
@@ -141,7 +141,7 @@ class JSLibp2pInteropTest:
         """Test certificate format compatibility with js-libp2p"""
         print("\n3. Testing Certificate Format...")
         try:
-            cert = WebRTCCertificate.generate()
+            cert = WebRTCCertificate()
 
             # Test certificate hash format (js-libp2p expects uEi prefix + base64url)
             assert cert.certhash.startswith("uEi"), (

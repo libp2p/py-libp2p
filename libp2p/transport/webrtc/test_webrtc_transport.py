@@ -83,7 +83,7 @@ class WebRTCTransportTestSuite:
 
         # Generate valid certificates for testing
         for i in range(3):
-            cert = WebRTCCertificate.generate()
+            cert = WebRTCCertificate()
             self._test_certificates[f"cert_{i}"] = cert
 
     def get_test_peer_id(self, name: str = "peer_0") -> ID:
@@ -102,7 +102,7 @@ class WebRTCTransportTestSuite:
 
     def generate_valid_certificate(self) -> WebRTCCertificate:
         """Generate a valid WebRTC certificate for testing"""
-        return WebRTCCertificate.generate()
+        return WebRTCCertificate()
 
     def create_valid_webrtc_multiaddrs(
         self, peer_id: ID, cert: WebRTCCertificate
@@ -393,7 +393,8 @@ class WebRTCTransportTestSuite:
             # Test WebRTC-Direct Transport
             transport_2 = WebRTCDirectTransport()
             transport_2.set_host(host_2)
-            await transport_2.start()
+            async with trio.open_nursery() as nursery:
+                await transport_2.start(nursery)
 
             assert transport_2.is_started()
             assert "webrtc-direct" in transport_2.supported_protocols
@@ -416,7 +417,7 @@ class WebRTCTransportTestSuite:
         print("3. 🔐 Testing Certificate Management...")
         try:
             # Generate certificate
-            cert = WebRTCCertificate.generate()
+            cert = WebRTCCertificate()
 
             # Test certificate properties - must match js-libp2p format
             assert cert.certhash.startswith("uEi"), (
@@ -441,7 +442,7 @@ class WebRTCTransportTestSuite:
             # Test PEM export/import with comprehensive validation
             assert cert.validate_pem_export(), "PEM export/import validation failed"
 
-            cert2 = WebRTCCertificate.generate()
+            cert2 = WebRTCCertificate()
             assert cert.certhash != cert2.certhash
 
             self.results["certificate_management"] = True
@@ -570,8 +571,7 @@ class WebRTCTransportTestSuite:
         print("7. 🔗 Testing js-libp2p Certificate Compatibility...")
         try:
             # Generate certificate
-            cert = WebRTCCertificate.generate()
-
+            cert = WebRTCCertificate()
             # Test hash format (should be uEi + base64url as per js-libp2p)
             assert cert.certhash.startswith("uEi"), "Cert should start with uEi"
 
@@ -925,9 +925,8 @@ class WebRTCTransportTestSuite:
             print("   Transport and host cleanup")
 
             # Test 3: Certificate cleanup (memory) - Simple validation
-            cert1 = WebRTCCertificate.generate()
-            cert2 = WebRTCCertificate.generate()
-
+            cert1 = WebRTCCertificate()
+            cert2 = WebRTCCertificate()
             # Certificates should be independent
             assert cert1.certhash != cert2.certhash, (
                 "Certificate hashes should be unique"

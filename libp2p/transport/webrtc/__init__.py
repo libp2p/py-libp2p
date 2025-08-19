@@ -164,6 +164,6 @@ def webrtc(config: dict[str, Any] | None = None) -> WebRTCTransport:
     return WebRTCTransport(config)
 
 
-def webrtc_direct(config: dict[str, Any] | None = None) -> WebRTCDirectTransport:
+def webrtc_direct() -> WebRTCDirectTransport:
     """Create a WebRTC-Direct transport instance (private-to-public)."""
-    return WebRTCDirectTransport(config)
+    return WebRTCDirectTransport()
