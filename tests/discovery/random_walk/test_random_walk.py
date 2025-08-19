@@ -8,6 +8,7 @@ import pytest
 
 from libp2p.discovery.random_walk.random_walk import RandomWalk
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
 
 
 @pytest.fixture
@@ -79,6 +80,20 @@ async def test_perform_random_walk_running(mock_host, dummy_peer_id):
     peers = await rw.perform_random_walk()
     assert isinstance(peers, list)
     if peers:
-        from libp2p.peer.peerinfo import PeerInfo
-
         assert isinstance(peers[0], PeerInfo)
+
+
+@pytest.mark.trio
+async def test_perform_random_walk_no_peers_found(mock_host, dummy_peer_id):
+    """Test perform_random_walk when no peers are discovered."""
+
+    # Query function returns empty list (no peers found)
+    async def query(key_bytes):
+        return []
+
+    rw = RandomWalk(mock_host, dummy_peer_id, query)
+    peers = await rw.perform_random_walk()
+
+    # Should return empty list when no peers are found
+    assert isinstance(peers, list)
+    assert len(peers) == 0
