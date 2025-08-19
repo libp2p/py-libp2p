@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 
 """
-Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
+Reference: https://github.com/libp2p/go-libp2p-swarm/blob/
+04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
 """
 
 
@@ -43,6 +44,21 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        # Provide back-references/hooks expected by NetStream
+        try:
+            setattr(self.muxed_conn, "swarm", self.swarm)
+
+            # NetStream expects an awaitable remove_stream hook
+            async def _remove_stream_hook(stream: NetStream) -> None:
+                self.remove_stream(stream)
+
+            setattr(self.muxed_conn, "remove_stream", _remove_stream_hook)
+        except Exception as e:
+            logging.warning(
+                f"Failed to set optional conveniences on muxed_conn "
+                f"for peer {muxed_conn.peer_id}: {e}"
+            )
+            # optional conveniences
         if hasattr(muxed_conn, "on_close"):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
