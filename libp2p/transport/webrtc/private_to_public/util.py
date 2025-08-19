@@ -38,6 +38,7 @@ class SDP:
         -------
         str
             The munged SDP string.
+
         """
         if sdp is None:
             raise ValueError("Can't munge a missing SDP")
@@ -73,6 +74,7 @@ class SDP:
         -------
         str | None
             The extracted fingerprint, or None if not found.
+
         """
         if sdp is None:
             return None
@@ -93,7 +95,7 @@ class SDP:
             The multiaddr to extract host, port, and fingerprint from.
         ufrag : str
             ICE username fragment (also used as password).
-        
+
         Returns
         -------
         dict[str, str]
@@ -181,6 +183,7 @@ class SDP:
         )
         return {"type": "offer", "sdp": sdp}
 
+
 def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
     """
     Convert a DTLS fingerprint to a /certhash/ multiaddr.
@@ -205,6 +208,7 @@ def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
     certhash = f"uEi{b64}"
     return Multiaddr(f"/certhash/{certhash}")
 
+
 def get_hash_function(code: int) -> str:
     """
     Get the hash function name from a multihash code.
@@ -223,6 +227,7 @@ def get_hash_function(code: int) -> str:
     ------
     Exception
         If the code is not a supported hash algorithm.
+
     """
     if code == 0x11:
         return "sha-1"
@@ -232,6 +237,7 @@ def get_hash_function(code: int) -> str:
         return "sha-512"
     else:
         raise Exception(f"Unsupported hash algorithm code: {code}")
+
 
 def extract_certhash(ma: Multiaddr) -> str:
     """
@@ -326,6 +332,7 @@ def certhash_decode(b: ByteString) -> str:
     -------
     str
         The certhash string (multibase base64url, prefix "uEi").
+
     """
     if not b:
         return ""
@@ -333,6 +340,7 @@ def certhash_decode(b: ByteString) -> str:
     # Encode as base64url and add multibase prefix
     b64_hash = base64.urlsafe_b64encode(b).decode().rstrip("=")
     return f"uEi{b64_hash}"
+
 
 def multiaddr_to_fingerprint(ma: Multiaddr) -> str:
     """
@@ -365,6 +373,7 @@ def multiaddr_to_fingerprint(ma: Multiaddr) -> str:
 
     return f"{prefix} {':'.join(sdp)}"
 
+
 def pick_random_ice_servers(
     ice_servers: list[dict[str, Any]], num_servers: int = 4
 ) -> list[dict[str, Any]]:
@@ -382,6 +391,7 @@ def pick_random_ice_servers(
     -------
     list[dict[str, Any]]
         The randomly selected subset of ICE servers.
+
     """
     random.shuffle(ice_servers)
     return ice_servers[:num_servers]
@@ -400,6 +410,7 @@ def generate_ufrag(length: int = 4) -> str:
     -------
     str
         The generated ufrag string.
+
     """
     alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
     return "".join(random.choices(alphabet, k=length))
@@ -467,6 +478,7 @@ def generate_noise_prologue(
     -------
     bytes
         The noise prologue as bytes.
+
     """
     # noise prologue =
     # bytes('libp2p-webrtc-noise:') +noise-server fingerprint +noise-client fingerprint
