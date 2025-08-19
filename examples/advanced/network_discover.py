@@ -11,8 +11,8 @@ from multiaddr import Multiaddr
 
 try:
     from libp2p.utils.address_validation import (
-        get_available_interfaces,
         expand_wildcard_address,
+        get_available_interfaces,
         get_optimal_binding_address,
     )
 except ImportError:
@@ -21,7 +21,10 @@ except ImportError:
         return [Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")]
 
     def expand_wildcard_address(addr: Multiaddr, port: int | None = None):
-        return [addr if port is None else Multiaddr(str(addr).rsplit("/", 1)[0] + f"/{port}")]
+        if port is None:
+            return [addr]
+        addr_str = str(addr).rsplit("/", 1)[0]
+        return [Multiaddr(addr_str + f"/{port}")]
 
     def get_optimal_binding_address(port: int, protocol: str = "tcp"):
         return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
