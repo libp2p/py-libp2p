@@ -80,4 +80,3 @@ async def test_slow_notifee_does_not_block_others() -> None:
         with trio.fail_after(0.3):
             for ev in fast_events:
                 await ev.wait()
-

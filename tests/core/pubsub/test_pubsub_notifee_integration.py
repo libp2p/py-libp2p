@@ -88,5 +88,3 @@ async def test_blacklist_blocks_peer_added_by_notifee():
         # Give handler a chance to run
         await trio.sleep(0.1)
         assert p1.my_id not in p0.peers
-
-
