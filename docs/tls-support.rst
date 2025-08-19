@@ -1,4 +1,4 @@
-Py-libp2p – TLS Support Documentation 
+Py-libp2p – TLS Support Documentation
 ======================================================
 
 .. contents::
@@ -60,7 +60,7 @@ Listener node:
 
 .. code-block:: python
 
-   import asyncio
+   import trio
    from libp2p import new_host
    from libp2p.security.tls.transport import TLSTransport
 
@@ -69,16 +69,16 @@ Listener node:
        await host.listen("/ip4/0.0.0.0/tcp/8000")
        print("TLS-enabled listener at:", host.get_addrs())
 
-       await asyncio.Future()  # Keep running
+       await trio.sleep_forever()
 
    if __name__ == "__main__":
-       asyncio.run(main())
+       trio.run(main())
 
 Dialer node:
 
 .. code-block:: python
 
-   import asyncio
+   import trio
    from libp2p import new_host
    from libp2p.security.tls.transport import TLSTransport
    from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -93,7 +93,7 @@ Dialer node:
        print("Connected securely to", peer_info.peer_id)
 
    if __name__ == "__main__":
-       asyncio.run(main())
+       trio.run(main())
 
 **Defaults if no configuration is provided**
 
@@ -159,7 +159,3 @@ Troubleshooting
    * - Connection refused
      - Port blocked or listener not running
      - Check firewall rules and listener status.
-
-
-
-
