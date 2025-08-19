@@ -62,6 +62,10 @@ from .resources import (
     RelayLimits,
     RelayResourceManager,
 )
+from .utils import (
+    maybe_consume_signed_record,
+    env_to_send_in_RPC
+    )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2")
 
@@ -398,6 +402,13 @@ class CircuitV2Protocol(Service):
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                 return
 
+            # Consume signed records if sent
+            if hop_msg.HasField("signedRecord"):
+                if not maybe_consume_signed_record(hop_msg, self.host):
+                    logger.error("Received invalid signed-records. Closing stream")
+                    await stream.close()
+                    return
+
             # Process based on message type
             if hop_msg.type == HopMessage.RESERVE:
                 logger.debug("Handling RESERVE message from %s", remote_id)
@@ -445,6 +456,12 @@ class CircuitV2Protocol(Service):
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
+            if stop_msg.HasField("senderRecord"):
+                if not maybe_consume_signed_record(stop_msg, self.host):
+                    logger.error("Received invalid signed-records. Closing stream")
+                    await stream.close()
+                    return
+
             if stop_msg.type != StopMessage.CONNECT:
                 # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
@@ -476,10 +493,12 @@ class CircuitV2Protocol(Service):
                 StatusCode.OK,
                 "Connection established",
             )
+            signed_record, bool = env_to_send_in_RPC(self.host)
             await self._send_stop_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                signed_record,
             )
 
             # Start relaying data
@@ -552,9 +571,11 @@ class CircuitV2Protocol(Service):
                     code=StatusCode.OK, message="Reservation accepted"
                 )
 
+                signed_record, _ = env_to_send_in_RPC(self.host)
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=status.to_pb(),
+                    signedRecord=signed_record,
                     reservation=Reservation(
                         expire=int(time.time() + ttl),
                         voucher=b"",  # We don't use vouchers yet
@@ -647,12 +668,23 @@ class CircuitV2Protocol(Service):
                     .get_remote_peer_id()
                     .to_bytes(),
                 )
+                if msg.HasField("signedRecord"):
+                    stop_msg.senderRecord = msg.signedRecord
                 await dst_stream.write(stop_msg.SerializeToString())
 
                 # Wait for response from destination
                 resp_bytes = await dst_stream.read()
                 resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
+
+                if resp.HasField("senderRecord"):
+                    if not maybe_consume_signed_record(resp, self.host):
+                        logger.error(
+                            "Received invalid signed-records from destination. "
+                            "Closing stream"
+                        )
+                        await stream.close()
+                        return
 
                 # Handle status attributes from the response
                 if resp.HasField("status"):
@@ -678,10 +710,12 @@ class CircuitV2Protocol(Service):
                 reservation.active_connections += 1
 
             # Send success status
+            signed_record, _ = env_to_send_in_RPC(self.host)
             await self._send_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                signed_record,
             )
 
             # Start relaying data
@@ -703,10 +737,12 @@ class CircuitV2Protocol(Service):
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
+            signed_record, _ = env_to_send_in_RPC(self.host)
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 str(e),
+                signed_record,
             )
             if peer_id in self._active_relays:
                 del self._active_relays[peer_id]
@@ -719,10 +755,12 @@ class CircuitV2Protocol(Service):
                 await dst_stream.reset()
         except Exception as e:
             logger.error("Unexpected error in connect handler: %s", str(e))
+            signed_record, _ = env_to_send_in_RPC(self.host)
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 "Internal error",
+                signed_record,
             )
             if peer_id in self._active_relays:
                 del self._active_relays[peer_id]
@@ -794,6 +832,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: int,
         message: str,
+        signed_record: bytes | None = None,
     ) -> None:
         """Send a status message."""
         try:
@@ -810,6 +849,8 @@ class CircuitV2Protocol(Service):
                     type=HopMessage.STATUS,
                     status=pb_status,
                 )
+                if signed_record:
+                    status_msg.signedRecord = signed_record
 
                 msg_bytes = status_msg.SerializeToString()
                 logger.debug("Status message serialized (%d bytes)", len(msg_bytes))
@@ -832,6 +873,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: int,
         message: str,
+        signed_record: bytes | None = None,
     ) -> None:
         """Send a status message on a STOP stream."""
         try:
@@ -848,6 +890,8 @@ class CircuitV2Protocol(Service):
                     type=StopMessage.STATUS,
                     status=pb_status,
                 )
+                if signed_record:
+                    status_msg.senderRecord = signed_record
                 await stream.write(status_msg.SerializeToString())
                 await trio.sleep(0.5)  # Ensure message is sent
         except Exception as e:
