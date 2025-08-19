@@ -47,7 +47,7 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
         secret = secrets.token_bytes(32)
 
     host = new_host(key_pair=create_new_key_pair(secret))
-    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
+    async with host.run(listen_addr=listen_addr), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
@@ -59,8 +59,7 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
             # Print all listen addresses with peer ID (JS parity)
             print("Listener ready, listening on:")
             peer_id = host.get_id().to_string()
-            for addr in listen_addrs:
-                print(f"{addr}/p2p/{peer_id}")
+            print(f"{listen_addr}/p2p/{peer_id}")
 
             print(
                 "\nRun this from the same folder in another console:\n\n"

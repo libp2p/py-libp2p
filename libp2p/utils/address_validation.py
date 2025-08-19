@@ -62,16 +62,18 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
 
     # IPv4 enumeration
     seen_v4: set[str] = set()
+
     for ip in _safe_get_network_addrs(4):
         seen_v4.add(ip)
         addrs.append(Multiaddr(f"/ip4/{ip}/{protocol}/{port}"))
 
+    seen_v6: set[str] = set()
+    for ip in _safe_get_network_addrs(6):
+        seen_v6.add(ip)
+        addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
+
     # IPv6 enumeration (optional: only include if we have at least one global or
     # loopback)
-    for ip in _safe_get_network_addrs(6):
-        # Avoid returning unusable wildcard expansions if the environment does not
-        # support IPv6
-        addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
     # Optionally ensure IPv6 loopback when any IPv6 present but loopback missing
     if seen_v6 and "::1" not in seen_v6:
         addrs.append(Multiaddr(f"/ip6/::1/{protocol}/{port}"))
