@@ -123,7 +123,7 @@ class RandomWalk:
 
         """
         all_validated_peers: list[PeerInfo] = []
-        logger.info(f"Starting {count} concurrent random walks)")
+        logger.info(f"Starting {count} concurrent random walks")
 
         # First, try to add peers from peerstore if routing table is small
         if current_routing_table_size < RANDOM_WALK_RT_THRESHOLD:
