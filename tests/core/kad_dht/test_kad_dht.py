@@ -25,7 +25,9 @@ from libp2p.kad_dht.kad_dht import (
 from libp2p.kad_dht.utils import (
     create_key_from_binary,
 )
-from libp2p.peer.envelope import Envelope
+from libp2p.peer.envelope import Envelope, seal_record
+from libp2p.peer.id import ID
+from libp2p.peer.peer_record import PeerRecord
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
@@ -394,6 +396,8 @@ async def test_dht_req_fail_with_invalid_record_transfer(
 
     # Corrupt dht_a's local peer_record
     envelope = dht_a.host.get_peerstore().get_local_record()
+    if envelope is not None:
+        true_record = envelope.record()
     key_pair = create_new_key_pair()
 
     if envelope is not None:
@@ -401,9 +405,21 @@ async def test_dht_req_fail_with_invalid_record_transfer(
         dht_a.host.get_peerstore().set_local_record(envelope)
 
     await dht_a.put_value(key, value)
-
-    value = dht_b.value_store.get(key)
+    retrieved_value = dht_b.value_store.get(key)
 
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receiving
     # the corrupted invalid record
-    assert value is None
+    assert retrieved_value is None
+
+    # Create a corrupt envelope with correct signature but false peer_id
+    false_record = PeerRecord(ID.from_pubkey(key_pair.public_key), true_record.addrs)
+    false_envelope = seal_record(false_record, dht_a.host.get_private_key())
+
+    dht_a.host.get_peerstore().set_local_record(false_envelope)
+
+    await dht_a.put_value(key, value)
+    retrieved_value = dht_b.value_store.get(key)
+
+    # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receving
+    # the record with a different peer_id regardless of a valid signature
+    assert retrieved_value is None

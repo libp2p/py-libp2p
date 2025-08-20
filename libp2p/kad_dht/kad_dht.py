@@ -280,7 +280,7 @@ class KadDHT(Service):
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
                     # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host):
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
@@ -341,7 +341,7 @@ class KadDHT(Service):
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
                     # Consume the source signed-peer-record if sent
-                    if not maybe_consume_signed_record(message, self.host):
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
@@ -376,7 +376,9 @@ class KadDHT(Service):
                             )
 
                             # Process the signed-records of provider if sent
-                            if not maybe_consume_signed_record(message, self.host):
+                            if not maybe_consume_signed_record(
+                                message, self.host, peer_id
+                            ):
                                 logger.error(
                                     "Received an invalid-signed-record,"
                                     "dropping the stream"
@@ -407,7 +409,7 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
 
                     # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host):
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
@@ -501,7 +503,7 @@ class KadDHT(Service):
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
                     # Consume the sender_signed_peer_record
-                    if not maybe_consume_signed_record(message, self.host):
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
@@ -595,7 +597,7 @@ class KadDHT(Service):
                     success = False
 
                     # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host):
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
