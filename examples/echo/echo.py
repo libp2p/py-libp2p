@@ -15,6 +15,9 @@ from libp2p.custom_types import (
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
+from libp2p.network.stream.exceptions import (
+    StreamEOF,
+)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -27,10 +30,19 @@ MAX_READ_LEN = 2**32 - 1
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
-    # Wait until EOF
-    msg = await stream.read(MAX_READ_LEN)
-    await stream.write(msg)
-    await stream.close()
+    try:
+        peer_id = stream.muxed_conn.peer_id
+        print(f"Received connection from {peer_id}")
+        # Wait until EOF
+        msg = await stream.read(MAX_READ_LEN)
+        print(f"Echoing message: {msg.decode('utf-8')}")
+        await stream.write(msg)
+    except StreamEOF:
+        print("Stream closed by remote peer.")
+    except Exception as e:
+        print(f"Error in echo handler: {e}")
+    finally:
+        await stream.close()
 
 
 async def run(port: int, destination: str, seed: int | None = None) -> None:
@@ -63,8 +75,7 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
 
             print(
                 "\nRun this from the same folder in another console:\n\n"
-                f"echo-demo "
-                f"-d {host.get_addrs()[0]}\n"
+                f"echo-demo -d {host.get_addrs()[0]}\n"
             )
             print("Waiting for incoming connections...")
             await trio.sleep_forever()
