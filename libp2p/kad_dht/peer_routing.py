@@ -307,14 +307,15 @@ class PeerRouting(IPeerRouting):
             # Process closest peers from response
             if response_msg.type == Message.MessageType.FIND_NODE:
                 # Consume the sender_signed_peer_record
-                if not maybe_consume_signed_record(response_msg, self.host):
+                if not maybe_consume_signed_record(response_msg, self.host, peer):
                     logger.error(
                         "Received an invalid-signed-record,ignoring the response"
                     )
                     return []
 
                 for peer_data in response_msg.closerPeers:
-                    # Consume the received closer_peers signed-records
+                    # Consume the received closer_peers signed-records, peer-id is
+                    # sent with the peer-data
                     if not maybe_consume_signed_record(peer_data, self.host):
                         logger.error(
                             "Received an invalid-signed-record,ignoring the response"
@@ -353,6 +354,7 @@ class PeerRouting(IPeerRouting):
         """
         try:
             # Read message length
+            peer_id = stream.muxed_conn.peer_id
             length_bytes = await stream.read(4)
             if not length_bytes:
                 return
@@ -372,7 +374,7 @@ class PeerRouting(IPeerRouting):
 
                 if kad_message.type == Message.MessageType.FIND_NODE:
                     # Consume the sender's signed-peer-record if sent
-                    if not maybe_consume_signed_record(kad_message, self.host):
+                    if not maybe_consume_signed_record(kad_message, self.host, peer_id):
                         logger.error(
                             "Receivedf an invalid-signed-record, dropping the stream"
                         )

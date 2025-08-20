@@ -21,16 +21,20 @@ from .pb.kademlia_pb2 import (
 logger = logging.getLogger("kademlia-example.utils")
 
 
-def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> bool:
+def maybe_consume_signed_record(
+    msg: Message | Message.Peer, host: IHost, peer_id: ID | None = None
+) -> bool:
     if isinstance(msg, Message):
         if msg.HasField("senderRecord"):
             try:
                 # Convert the signed-peer-record(Envelope) from
                 # protobuf bytes
-                envelope, _ = consume_envelope(
+                envelope, record = consume_envelope(
                     msg.senderRecord,
                     "libp2p-peer-record",
                 )
+                if not (isinstance(peer_id, ID) and record.peer_id == peer_id):
+                    return False
                 # Use the default  TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):
                     logger.error("Updating the certified-addr-book was unsuccessful")
@@ -39,13 +43,16 @@ def maybe_consume_signed_record(msg: Message | Message.Peer, host: IHost) -> boo
                 return False
     else:
         if msg.HasField("signedRecord"):
+            # TODO: Check in with the Message.Peer id with the record's id
             try:
                 # Convert the signed-peer-record(Envelope) from
                 # protobuf bytes
-                envelope, _ = consume_envelope(
+                envelope, record = consume_envelope(
                     msg.signedRecord,
                     "libp2p-peer-record",
                 )
+                if not record.peer_id.to_bytes() == msg.id:
+                    return False
                 # Use the default TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):
                     logger.error("Failed to update the Certified-Addr-Book")

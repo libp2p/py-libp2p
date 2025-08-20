@@ -161,7 +161,7 @@ class ValueStore:
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
                 # Consume the sender's signed-peer-record if sent
-                if not maybe_consume_signed_record(response, self.host):
+                if not maybe_consume_signed_record(response, self.host, peer_id):
                     logger.error(
                         "Received an invalid-signed-record, ignoring the response"
                     )
@@ -291,7 +291,7 @@ class ValueStore:
                     and response.record.value
                 ):
                     # Consume the sender's signed-peer-record
-                    if not maybe_consume_signed_record(response, self.host):
+                    if not maybe_consume_signed_record(response, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, ignoring the response"
                         )
