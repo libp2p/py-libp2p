@@ -11,7 +11,8 @@ from multiaddr.protocols import P_IP4, P_IP6, P_P2P, P_TCP
 # pytestmark = pytest.mark.timeout(20)  # Temporarily disabled for debugging
 
 # This test is intentionally lightweight and can be marked as 'integration'.
-# It ensures the echo example runs and prints the new Thin Waist lines using Trio primitives.
+# It ensures the echo example runs and prints the new Thin Waist lines using
+# Trio primitives.
 
 current_file = Path(__file__)
 project_root = current_file.parent.parent.parent
