@@ -67,6 +67,10 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
         seen_v4.add(ip)
         addrs.append(Multiaddr(f"/ip4/{ip}/{protocol}/{port}"))
 
+    # Ensure IPv4 loopback is always included when IPv4 interfaces are discovered
+    if seen_v4 and "127.0.0.1" not in seen_v4:
+        addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
+
     seen_v6: set[str] = set()
     for ip in _safe_get_network_addrs(6):
         seen_v6.add(ip)
