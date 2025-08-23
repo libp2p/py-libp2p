@@ -434,7 +434,7 @@ class ProviderStore:
                 # Consume the sender's signed-peer-record if sent
                 if not maybe_consume_signed_record(response, self.host, peer_id):
                     logger.error(
-                        "Recieved an invalid-signed-record, ignoring the response"
+                        "Received an invalid-signed-record, ignoring the response"
                     )
                     return []
 
@@ -446,7 +446,7 @@ class ProviderStore:
                         # already sent with the provider-proto
                         if not maybe_consume_signed_record(provider_proto, self.host):
                             logger.error(
-                                "Recieved an invalid-signed-record, "
+                                "Received an invalid-signed-record, "
                                 "ignoring the response"
                             )
                             return []
