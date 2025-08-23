@@ -26,6 +26,7 @@ from libp2p.peer.peerinfo import (
 
 from .common import (
     BUCKET_SIZE,
+    MAXIMUM_BUCKETS,
     PEER_REFRESH_INTERVAL,
     PROTOCOL_ID,
     STALE_PEER_THRESHOLD,
