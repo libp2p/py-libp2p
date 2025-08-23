@@ -18,7 +18,6 @@ from multiaddr import (
 import trio
 import varint
 
-from libp2p import env_to_send_in_RPC
 from libp2p.abc import (
     IHost,
 )
@@ -34,6 +33,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )

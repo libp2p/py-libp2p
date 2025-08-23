@@ -9,7 +9,6 @@ import time
 
 import varint
 
-from libp2p import env_to_send_in_RPC
 from libp2p.abc import (
     IHost,
 )
@@ -20,6 +19,7 @@ from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 
 from .common import (
     DEFAULT_TTL,
