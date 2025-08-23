@@ -259,7 +259,7 @@ class PeerRouting(IPeerRouting):
             find_node_msg.key = target_key  # Set target key directly as bytes
 
             # Create sender_signed_peer_record
-            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
             find_node_msg.senderRecord = envelope_bytes
 
             # Serialize and send the protobuf message with varint length prefix
@@ -393,7 +393,7 @@ class PeerRouting(IPeerRouting):
                     response.type = Message.MessageType.FIND_NODE
 
                     # Create sender_signed_peer_record for the response
-                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
                     response.senderRecord = envelope_bytes
 
                     # Add peer information to response

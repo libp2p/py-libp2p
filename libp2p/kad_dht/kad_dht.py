@@ -323,7 +323,7 @@ class KadDHT(Service):
                             )
 
                     # Create sender_signed_peer_record
-                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
                     response.senderRecord = envelope_bytes
 
                     # Serialize and send response
@@ -394,7 +394,7 @@ class KadDHT(Service):
                     response.key = key
 
                     # Add sender's signed-peer-record
-                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
                     response.senderRecord = envelope_bytes
 
                     response_bytes = response.SerializeToString()
@@ -428,7 +428,7 @@ class KadDHT(Service):
                     response.key = key
 
                     # Create sender_signed_peer_record for the response
-                    envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
                     response.senderRecord = envelope_bytes
 
                     # Add provider information to response
@@ -525,7 +525,7 @@ class KadDHT(Service):
                         response.record.timeReceived = str(time.time())
 
                         # Create sender_signed_peer_record
-                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
                         # Serialize and send response
@@ -542,7 +542,7 @@ class KadDHT(Service):
                         response.key = key
 
                         # Create sender_signed_peer_record for the response
-                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
                         # Add closest peers to key
@@ -626,7 +626,7 @@ class KadDHT(Service):
                             response.key = key
 
                         # Create sender_signed_peer_record for the response
-                        envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
                         # Serialize and send response

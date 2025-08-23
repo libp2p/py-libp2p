@@ -242,7 +242,7 @@ class ProviderStore:
             message.key = key
 
             # Create sender's signed-peer-record
-            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
             # Add our provider info
@@ -394,7 +394,7 @@ class ProviderStore:
                 message.key = key
 
                 # Create sender's signed-peer-record
-                envelope_bytes, bool = env_to_send_in_RPC(self.host)
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
                 message.senderRecord = envelope_bytes
 
                 # Serialize and send the message
