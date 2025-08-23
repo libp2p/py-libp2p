@@ -158,11 +158,12 @@ def get_default_muxer_options() -> TMuxerOptions:
 
 def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
     """
-    Returns the signed peer record (Envelope) to be sent in an RPC,
-    by checking whether the host already has a cached signed peer record.
-    If one exists and its addresses match the host's current listen addresses,
-    the cached envelope is reused. Otherwise, a new signed peer record is created,
-    cached, and returned.
+    Return the signed peer record (Envelope) to be sent in an RPC.
+
+    This function checks whether the host already has a cached signed peer record
+    (SPR). If one exists and its addresses match the host's current listen
+    addresses, the cached envelope is reused. Otherwise, a new signed peer record
+    is created, cached, and returned.
 
     Parameters
     ----------
@@ -173,13 +174,11 @@ def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
     Returns
     -------
     tuple[bytes, bool]
-        A tuple containing:
-        - The serialized envelope (bytes) for the signed peer record.
-        - A boolean flag indicating whether a new record was created (True)
-          or an existing cached one was reused (False).
-
+        A 2-tuple where the first element is the serialized envelope (bytes)
+        for the signed peer record, and the second element is a boolean flag
+        indicating whether a new record was created (True) or an existing cached
+        one was reused (False).
     """
-
     listen_addrs_set = {addr for addr in host.get_addrs()}
     local_env = host.get_peerstore().get_local_record()
 
