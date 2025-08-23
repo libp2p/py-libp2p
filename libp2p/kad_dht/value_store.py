@@ -112,7 +112,7 @@ class ValueStore:
             message.type = Message.MessageType.PUT_VALUE
 
             # Create sender's signed-peer-record
-            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
             # Set message fields
@@ -243,7 +243,7 @@ class ValueStore:
             message.key = key
 
             # Create sender's signed-peer-record
-            envelope_bytes, bool = env_to_send_in_RPC(self.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
             # Serialize and send the protobuf message
