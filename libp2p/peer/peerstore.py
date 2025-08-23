@@ -16,6 +16,7 @@ import trio
 from trio import MemoryReceiveChannel, MemorySendChannel
 
 from libp2p.abc import (
+    IHost,
     IPeerStore,
 )
 from libp2p.crypto.keys import (
@@ -47,6 +48,77 @@ def create_signed_peer_record(
     record = PeerRecord(peer_id, addrs)
     envelope = seal_record(record, pvt_key)
     return envelope
+
+
+def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
+    """
+    Return the signed peer record (Envelope) to be sent in an RPC.
+
+    This function checks whether the host already has a cached signed peer record
+    (SPR). If one exists and its addresses match the host's current listen
+    addresses, the cached envelope is reused. Otherwise, a new signed peer record
+    is created, cached, and returned.
+
+    Parameters
+    ----------
+    host : IHost
+        The local host instance, providing access to peer ID, listen addresses,
+        private key, and the peerstore.
+
+    Returns
+    -------
+    tuple[bytes, bool]
+        A 2-tuple where the first element is the serialized envelope (bytes)
+        for the signed peer record, and the second element is a boolean flag
+        indicating whether a new record was created (True) or an existing cached
+        one was reused (False).
+
+    """
+    listen_addrs_set = {addr for addr in host.get_addrs()}
+    local_env = host.get_peerstore().get_local_record()
+
+    if local_env is None:
+        # No cached SPR yet -> create one
+        return issue_and_cache_local_record(host), True
+    else:
+        record_addrs_set = local_env._env_addrs_set()
+        if record_addrs_set == listen_addrs_set:
+            # Perfect match -> reuse cached envelope
+            return local_env.marshal_envelope(), False
+        else:
+            # Addresses changed -> issue a new SPR and cache it
+            return issue_and_cache_local_record(host), True
+
+
+def issue_and_cache_local_record(host: IHost) -> bytes:
+    """
+    Create and cache a new signed peer record (Envelope) for the host.
+
+    This function generates a new signed peer record from the host’s peer ID,
+    listen addresses, and private key. The resulting envelope is stored in
+    the peerstore as the local record for future reuse.
+
+    Parameters
+    ----------
+    host : IHost
+        The local host instance, providing access to peer ID, listen addresses,
+        private key, and the peerstore.
+
+    Returns
+    -------
+    bytes
+        The serialized envelope (bytes) representing the newly created signed
+        peer record.
+
+    """
+    env = create_signed_peer_record(
+        host.get_id(),
+        host.get_addrs(),
+        host.get_private_key(),
+    )
+    # Cache it for nexxt time use
+    host.get_peerstore().set_local_record(env)
+    return env.marshal_envelope()
 
 
 class PeerRecordState:
