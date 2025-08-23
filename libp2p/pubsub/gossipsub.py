@@ -34,11 +34,12 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import (
     PERMANENT_ADDR_TTL,
+    env_to_send_in_RPC,
 )
 from libp2p.pubsub import (
     floodsub,
 )
-from libp2p.pubsub.utils import env_to_send_in_RPC, maybe_consume_signed_record
+from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
 )
@@ -229,7 +230,7 @@ class GossipSub(IPubsubRouter, Service):
         """
         # Process the senderRecord if sent
         if isinstance(self.pubsub, Pubsub):
-            if not maybe_consume_signed_record(rpc, self.pubsub.host):
+            if not maybe_consume_signed_record(rpc, self.pubsub.host, sender_peer_id):
                 logger.error("Received an invalid-signed-record, ignoring the message")
                 return
 
@@ -262,7 +263,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add the senderRecord of the peer in the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
             rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
@@ -834,7 +835,7 @@ class GossipSub(IPubsubRouter, Service):
         # to the iwant control msg, so we will send a freshly created senderRecord
         # with the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
             packet.senderRecord = envelope_bytes
 
         packet.publish.extend(msgs_to_forward)
@@ -995,7 +996,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add the sender's peer-record in the RPC msg
         if isinstance(self.pubsub, Pubsub):
-            envelope_bytes, bool = env_to_send_in_RPC(self.pubsub.host)
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
             packet.senderRecord = envelope_bytes
 
         packet.control.CopyFrom(control_msg)

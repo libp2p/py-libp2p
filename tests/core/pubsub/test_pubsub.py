@@ -19,10 +19,11 @@ from libp2p.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamEOF,
 )
-from libp2p.peer.envelope import Envelope
+from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peer_record import PeerRecord
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -170,11 +171,30 @@ async def test_peer_subscribe_fail_upon_invald_record_transfer():
 
         # Corrupt host_a's local peer record
         envelope = pubsubs_fsub[0].host.get_peerstore().get_local_record()
+        if envelope is not None:
+            true_record = envelope.record()
         key_pair = create_new_key_pair()
 
         if envelope is not None:
             envelope.public_key = key_pair.public_key
             pubsubs_fsub[0].host.get_peerstore().set_local_record(envelope)
+
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Yeild to let 0 notify 1
+        await trio.sleep(1)
+        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
+            TESTING_TOPIC, set()
+        )
+
+        # Create a corrupt envelope with correct signature but false peer-id
+        false_record = PeerRecord(
+            ID.from_pubkey(key_pair.public_key), true_record.addrs
+        )
+        false_envelope = seal_record(
+            false_record, pubsubs_fsub[0].host.get_private_key()
+        )
+
+        pubsubs_fsub[0].host.get_peerstore().set_local_record(false_envelope)
 
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         # Yeild to let 0 notify 1
