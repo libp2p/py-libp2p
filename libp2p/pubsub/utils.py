@@ -42,9 +42,9 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
 
             # Use the default TTL of 2 hours (7200 seconds)
             if not host.get_peerstore().consume_peer_record(envelope, 7200):
-                logger.error("Updating the certified-addr-book was unsuccessful")
+                logger.error("Failed to update the Certified-Addr-Book")
                 return False
         except Exception as e:
-            logger.error("Error updating the certified addr book for peer: %s", e)
+            logger.error("Failed to update the Certified-Addr-Book: %s", e)
             return False
     return True
