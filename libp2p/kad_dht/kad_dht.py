@@ -21,8 +21,8 @@ import varint
 from libp2p.abc import (
     IHost,
 )
-from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.custom_types import TProtocol
+from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -100,7 +100,8 @@ class KadDHT(Service):
     def __init__(
         self,
         host: IHost,
-        mode: DHTMode, enable_random_walk: bool = False,
+        mode: DHTMode,
+        enable_random_walk: bool = False,
         validator: NamespacedValidator | None = None,
         validator_changed: bool = False,
         protocol_prefix: TProtocol = PROTOCOL_PREFIX,
