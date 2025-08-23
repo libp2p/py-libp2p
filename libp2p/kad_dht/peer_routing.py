@@ -10,6 +10,7 @@ import logging
 import trio
 import varint
 
+from libp2p import env_to_send_in_RPC
 from libp2p.abc import (
     IHost,
     INetStream,
@@ -34,7 +35,6 @@ from .routing_table import (
     RoutingTable,
 )
 from .utils import (
-    env_to_send_in_RPC,
     maybe_consume_signed_record,
     sort_peer_ids_by_distance,
 )
