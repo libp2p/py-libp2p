@@ -16,13 +16,14 @@ from multiaddr import (
 import trio
 import varint
 
+from libp2p import env_to_send_in_RPC
 from libp2p.abc import (
     IHost,
 )
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.kad_dht.utils import env_to_send_in_RPC, maybe_consume_signed_record
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
