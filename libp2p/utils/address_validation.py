@@ -71,16 +71,22 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     if seen_v4 and "127.0.0.1" not in seen_v4:
         addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
 
-    seen_v6: set[str] = set()
-    for ip in _safe_get_network_addrs(6):
-        seen_v6.add(ip)
-        addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
-
-    # IPv6 enumeration (optional: only include if we have at least one global or
-    # loopback)
-    # Optionally ensure IPv6 loopback when any IPv6 present but loopback missing
-    if seen_v6 and "::1" not in seen_v6:
-        addrs.append(Multiaddr(f"/ip6/::1/{protocol}/{port}"))
+    # TODO: IPv6 support temporarily disabled due to libp2p handshake issues
+    # IPv6 connections fail during protocol negotiation (SecurityUpgradeFailure)
+    # Re-enable IPv6 support once the following issues are resolved:
+    # - libp2p security handshake over IPv6
+    # - multiselect protocol over IPv6
+    # - connection establishment over IPv6
+    #
+    # seen_v6: set[str] = set()
+    # for ip in _safe_get_network_addrs(6):
+    #     seen_v6.add(ip)
+    #     addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
+    #
+    # # Always include IPv6 loopback for testing purposes when IPv6 is available
+    # # This ensures IPv6 functionality can be tested even without global IPv6 addresses
+    # if "::1" not in seen_v6:
+    #     addrs.append(Multiaddr(f"/ip6/::1/{protocol}/{port}"))
 
     # Fallback if nothing discovered
     if not addrs:
