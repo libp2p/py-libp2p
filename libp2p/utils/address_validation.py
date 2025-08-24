@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 from multiaddr import Multiaddr
 
 try:
@@ -33,6 +35,13 @@ def _safe_get_network_addrs(ip_version: int) -> list[str]:
     if ip_version == 6:
         return ["::1"]
     return []
+
+
+def find_free_port() -> int:
+    """Find a free port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))  # Bind to a free port provided by the OS
+        return s.getsockname()[1]
 
 
 def _safe_expand(addr: Multiaddr, port: int | None = None) -> list[Multiaddr]:
@@ -147,4 +156,5 @@ __all__ = [
     "get_available_interfaces",
     "get_optimal_binding_address",
     "expand_wildcard_address",
+    "find_free_port",
 ]

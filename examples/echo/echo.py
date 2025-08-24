@@ -1,7 +1,6 @@
 import argparse
 import random
 import secrets
-import socket
 
 import multiaddr
 import trio
@@ -25,18 +24,12 @@ from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
 from libp2p.utils.address_validation import (
+    find_free_port,
     get_available_interfaces,
 )
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 MAX_READ_LEN = 2**32 - 1
-
-
-def find_free_port():
-    """Find a free port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))  # Bind to a free port provided by the OS
-        return s.getsockname()[1]
 
 
 async def _echo_stream_handler(stream: INetStream) -> None:
