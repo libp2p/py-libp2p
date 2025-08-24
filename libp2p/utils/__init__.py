@@ -19,6 +19,7 @@ from libp2p.utils.address_validation import (
     get_available_interfaces,
     get_optimal_binding_address,
     expand_wildcard_address,
+    find_free_port,
 )
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     "get_available_interfaces",
     "get_optimal_binding_address",
     "expand_wildcard_address",
+    "find_free_port",
 ]
