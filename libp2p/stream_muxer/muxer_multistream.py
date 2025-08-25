@@ -33,6 +33,9 @@ from libp2p.stream_muxer.yamux.yamux import (
     PROTOCOL_ID,
     Yamux,
 )
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+)
 
 
 class MuxerMultistream:
