@@ -1,0 +1,2 @@
+class Allowlist:
+    pass
