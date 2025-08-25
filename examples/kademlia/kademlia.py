@@ -151,7 +151,10 @@ async def run_node(
         host = new_host(key_pair=key_pair)
         listen_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
-        async with host.run(listen_addrs=[listen_addr]):
+        async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+            # Start the peer-store cleanup task
+            nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
             peer_id = host.get_id().pretty()
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
@@ -224,7 +227,7 @@ async def run_node(
 
                 # Keep the node running
                 while True:
-                    logger.debug(
+                    logger.info(
                         "Status - Connected peers: %d,"
                         "Peers in store: %d, Values in store: %d",
                         len(dht.host.get_connected_peers()),

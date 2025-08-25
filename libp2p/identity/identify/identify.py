@@ -15,8 +15,12 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.peer.envelope import seal_record
+from libp2p.peer.peer_record import PeerRecord
 from libp2p.utils import (
+    decode_varint_with_size,
     get_agent_version,
+    varint,
 )
 
 from .pb.identify_pb2 import (
@@ -59,7 +63,12 @@ def _mk_identify_protobuf(
 ) -> Identify:
     public_key = host.get_public_key()
     laddrs = host.get_addrs()
-    protocols = host.get_mux().get_protocols()
+    protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
+
+    # Create a signed peer-record for the remote peer
+    record = PeerRecord(host.get_id(), host.get_addrs())
+    envelope = seal_record(record, host.get_private_key())
+    protobuf = envelope.marshal_envelope()
 
     observed_addr = observed_multiaddr.to_bytes() if observed_multiaddr else b""
     return Identify(
@@ -69,10 +78,51 @@ def _mk_identify_protobuf(
         listen_addrs=map(_multiaddr_to_bytes, laddrs),
         observed_addr=observed_addr,
         protocols=protocols,
+        signedPeerRecord=protobuf,
     )
 
 
-def identify_handler_for(host: IHost) -> StreamHandlerFn:
+def parse_identify_response(response: bytes) -> Identify:
+    """
+    Parse identify response that could be either:
+    - Old format: raw protobuf
+    - New format: length-prefixed protobuf
+
+    This function provides backward and forward compatibility.
+    """
+    # Try new format first: length-prefixed protobuf
+    if len(response) >= 1:
+        length, varint_size = decode_varint_with_size(response)
+        if varint_size > 0 and length > 0 and varint_size + length <= len(response):
+            protobuf_data = response[varint_size : varint_size + length]
+            try:
+                identify_response = Identify()
+                identify_response.ParseFromString(protobuf_data)
+                # Sanity check: must have agent_version (protocol_version is optional)
+                if identify_response.agent_version:
+                    logger.debug(
+                        "Parsed length-prefixed identify response (new format)"
+                    )
+                    return identify_response
+            except Exception:
+                pass  # Fall through to old format
+
+    # Fall back to old format: raw protobuf
+    try:
+        identify_response = Identify()
+        identify_response.ParseFromString(response)
+        logger.debug("Parsed raw protobuf identify response (old format)")
+        return identify_response
+    except Exception as e:
+        logger.error(f"Failed to parse identify response: {e}")
+        logger.error(f"Response length: {len(response)}")
+        logger.error(f"Response hex: {response.hex()}")
+        raise
+
+
+def identify_handler_for(
+    host: IHost, use_varint_format: bool = True
+) -> StreamHandlerFn:
     async def handle_identify(stream: INetStream) -> None:
         # get observed address from ``stream``
         peer_id = (
@@ -100,7 +150,21 @@ def identify_handler_for(host: IHost) -> StreamHandlerFn:
         response = protobuf.SerializeToString()
 
         try:
-            await stream.write(response)
+            if use_varint_format:
+                # Send length-prefixed protobuf message (new format)
+                await stream.write(varint.encode_uvarint(len(response)))
+                await stream.write(response)
+                logger.debug(
+                    "Sent new format (length-prefixed) identify response to %s",
+                    peer_id,
+                )
+            else:
+                # Send raw protobuf message (old format for backward compatibility)
+                await stream.write(response)
+                logger.debug(
+                    "Sent old format (raw protobuf) identify response to %s",
+                    peer_id,
+                )
         except StreamClosed:
             logger.debug("Fail to respond to %s request: stream closed", ID)
         else:

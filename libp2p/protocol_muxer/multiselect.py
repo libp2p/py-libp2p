@@ -48,12 +48,11 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
-    # FIXME: Make TProtocol Optional[TProtocol] to keep types consistent
     async def negotiate(
         self,
         communicator: IMultiselectCommunicator,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-    ) -> tuple[TProtocol, StreamHandlerFn | None]:
+    ) -> tuple[TProtocol | None, StreamHandlerFn | None]:
         """
         Negotiate performs protocol selection.
 
@@ -84,14 +83,14 @@ class Multiselect(IMultiselectMuxer):
                             raise MultiselectError() from error
 
                     else:
-                        protocol = TProtocol(command)
-                        if protocol in self.handlers:
+                        protocol_to_check = None if not command else TProtocol(command)
+                        if protocol_to_check in self.handlers:
                             try:
-                                await communicator.write(protocol)
+                                await communicator.write(command)
                             except MultiselectCommunicatorError as error:
                                 raise MultiselectError() from error
 
-                            return protocol, self.handlers[protocol]
+                            return protocol_to_check, self.handlers[protocol_to_check]
                         try:
                             await communicator.write(PROTOCOL_NOT_FOUND_MSG)
                         except MultiselectCommunicatorError as error:
@@ -100,6 +99,18 @@ class Multiselect(IMultiselectMuxer):
                 raise MultiselectError("Negotiation failed: no matching protocol")
         except trio.TooSlowError:
             raise MultiselectError("handshake read timeout")
+
+    def get_protocols(self) -> tuple[TProtocol | None, ...]:
+        """
+        Retrieve the protocols for which handlers have been registered.
+
+        Returns
+        -------
+        tuple[TProtocol, ...]
+            A tuple of registered protocol names.
+
+        """
+        return tuple(self.handlers.keys())
 
     async def handshake(self, communicator: IMultiselectCommunicator) -> None:
         """

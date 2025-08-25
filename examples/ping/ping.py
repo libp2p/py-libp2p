@@ -59,6 +59,9 @@ async def run(port: int, destination: str) -> None:
     host = new_host(listen_addrs=[listen_addr])
 
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        # Start the peer-store cleanup task
+        nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
         if not destination:
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
