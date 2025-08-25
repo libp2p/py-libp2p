@@ -29,9 +29,6 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
-from libp2p.transport.exceptions import (
-    SecurityUpgradeFailure,
-)
 
 """
 Represents a secured connection object, which includes a connection and details about
