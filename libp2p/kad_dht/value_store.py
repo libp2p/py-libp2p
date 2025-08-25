@@ -15,9 +15,11 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 
 from .common import (
     DEFAULT_TTL,
@@ -110,6 +112,10 @@ class ValueStore:
             message = Message()
             message.type = Message.MessageType.PUT_VALUE
 
+            # Create sender's signed-peer-record
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            message.senderRecord = envelope_bytes
+
             # Set message fields
             message.key = key
             message.record.key = key
@@ -155,7 +161,13 @@ class ValueStore:
 
             # Check if response is valid
             if response.type == Message.MessageType.PUT_VALUE:
-                if response.key:
+                # Consume the sender's signed-peer-record if sent
+                if not maybe_consume_signed_record(response, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    return False
+                if response.key == key:
                     result = True
             return result
 
@@ -231,6 +243,10 @@ class ValueStore:
             message.type = Message.MessageType.GET_VALUE
             message.key = key
 
+            # Create sender's signed-peer-record
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            message.senderRecord = envelope_bytes
+
             # Serialize and send the protobuf message
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
@@ -275,6 +291,13 @@ class ValueStore:
                     and response.HasField("record")
                     and response.record.value
                 ):
+                    # Consume the sender's signed-peer-record
+                    if not maybe_consume_signed_record(response, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, ignoring the response"
+                        )
+                        return None
+
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )

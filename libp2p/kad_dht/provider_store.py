@@ -22,12 +22,14 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 
 from .common import (
     ALPHA,
@@ -240,10 +242,17 @@ class ProviderStore:
             message.type = Message.MessageType.ADD_PROVIDER
             message.key = key
 
+            # Create sender's signed-peer-record
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            message.senderRecord = envelope_bytes
+
             # Add our provider info
             provider = message.providerPeers.add()
             provider.id = self.local_peer_id.to_bytes()
             provider.addrs.extend(addrs)
+
+            # Add the provider's signed-peer-record
+            provider.signedRecord = envelope_bytes
 
             # Serialize and send the message
             proto_bytes = message.SerializeToString()
@@ -276,10 +285,15 @@ class ProviderStore:
             response = Message()
             response.ParseFromString(response_bytes)
 
-            # Check response type
-            response.type == Message.MessageType.ADD_PROVIDER
-            if response.type:
-                result = True
+            if response.type == Message.MessageType.ADD_PROVIDER:
+                # Consume the sender's signed-peer-record if sent
+                if not maybe_consume_signed_record(response, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    result = False
+                else:
+                    result = True
 
         except Exception as e:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
@@ -380,6 +394,10 @@ class ProviderStore:
                 message.type = Message.MessageType.GET_PROVIDERS
                 message.key = key
 
+                # Create sender's signed-peer-record
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                message.senderRecord = envelope_bytes
+
                 # Serialize and send the message
                 proto_bytes = message.SerializeToString()
                 await stream.write(varint.encode(len(proto_bytes)))
@@ -414,10 +432,26 @@ class ProviderStore:
                 if response.type != Message.MessageType.GET_PROVIDERS:
                     return []
 
+                # Consume the sender's signed-peer-record if sent
+                if not maybe_consume_signed_record(response, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    return []
+
                 # Extract provider information
                 providers = []
                 for provider_proto in response.providerPeers:
                     try:
+                        # Consume the provider's signed-peer-record if sent, peer-id
+                        # already sent with the provider-proto
+                        if not maybe_consume_signed_record(provider_proto, self.host):
+                            logger.error(
+                                "Received an invalid-signed-record, "
+                                "ignoring the response"
+                            )
+                            return []
+
                         # Create peer ID from bytes
                         provider_id = ID(provider_proto.id)
 
@@ -431,6 +465,7 @@ class ProviderStore:
 
                         # Create PeerInfo and add to result
                         providers.append(PeerInfo(provider_id, addrs))
+
                     except Exception as e:
                         logger.warning(f"Failed to parse provider info: {e}")
 
