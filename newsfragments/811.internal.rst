@@ -1,0 +1,7 @@
+Add Thin Waist address validation utilities and integrate into echo example
+
+- Add ``libp2p/utils/address_validation.py`` with dynamic interface discovery
+- Implement ``get_available_interfaces()``, ``get_optimal_binding_address()``, and ``expand_wildcard_address()``
+- Update echo example to use dynamic address discovery instead of hardcoded wildcard
+- Add safe fallbacks for environments lacking Thin Waist support
+- Temporarily disable IPv6 support due to libp2p handshake issues (TODO: re-enable when resolved)
