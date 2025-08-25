@@ -32,7 +32,10 @@ class MultiselectCommunicator(IMultiselectCommunicator):
         """
         :raise MultiselectCommunicatorError: raised when failed to write to underlying reader
         """  # noqa: E501
-        msg_bytes = encode_delim(msg_str.encode())
+        if msg_str is None:
+            msg_bytes = encode_delim(b"")
+        else:
+            msg_bytes = encode_delim(msg_str.encode())
         try:
             await self.read_writer.write(msg_bytes)
         # Handle for connection close during ongoing negotiation in QUIC

@@ -170,7 +170,7 @@ class PeerRouting(IPeerRouting):
 
         # Return early if we have no peers to start with
         if not closest_peers:
-            logger.warning("No local peers available for network lookup")
+            logger.debug("No local peers available for network lookup")
             return []
 
         # Iterative lookup until convergence

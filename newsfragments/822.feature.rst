@@ -1,0 +1,1 @@
+Added `Random Walk` peer discovery module that enables random peer exploration for improved peer discovery.
