@@ -1,0 +1,2 @@
+Added the `Certified Addr-Book` interface supported by `Envelope` and `PeerRecord` class.
+Integrated the signed-peer-record transfer in the identify/push protocols.

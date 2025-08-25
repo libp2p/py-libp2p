@@ -20,6 +20,7 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -28,7 +29,7 @@ from libp2p.utils import (
     varint,
 )
 from libp2p.utils.varint import (
-    decode_varint_from_bytes,
+    read_length_prefixed_protobuf,
 )
 
 from ..identify.identify import (
@@ -66,49 +67,8 @@ def identify_push_handler_for(
         peer_id = stream.muxed_conn.peer_id
 
         try:
-            if use_varint_format:
-                # Read length-prefixed identify message from the stream
-                # First read the varint length prefix
-                length_bytes = b""
-                while True:
-                    b = await stream.read(1)
-                    if not b:
-                        break
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
-
-                if not length_bytes:
-                    logger.warning("No length prefix received from peer %s", peer_id)
-                    return
-
-                msg_length = decode_varint_from_bytes(length_bytes)
-
-                # Read the protobuf message
-                data = await stream.read(msg_length)
-                if len(data) != msg_length:
-                    logger.warning("Incomplete message received from peer %s", peer_id)
-                    return
-            else:
-                # Read raw protobuf message from the stream
-                # For raw format, we need to read all data before the stream is closed
-                data = b""
-                try:
-                    # Read all available data in a single operation
-                    data = await stream.read()
-                except StreamClosed:
-                    # Try to read any remaining data
-                    try:
-                        data = await stream.read()
-                    except Exception:
-                        pass
-
-                # If we got no data, log a warning and return
-                if not data:
-                    logger.warning(
-                        "No data received in raw format from peer %s", peer_id
-                    )
-                    return
+            # Use the utility function to read the protobuf message
+            data = await read_length_prefixed_protobuf(stream, use_varint_format)
 
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
@@ -119,6 +79,11 @@ def identify_push_handler_for(
             )
 
             logger.debug("Successfully processed identify/push from peer %s", peer_id)
+
+            # Send acknowledgment to indicate successful processing
+            # This ensures the sender knows the message was received before closing
+            await stream.write(b"OK")
+
         except StreamClosed:
             logger.debug(
                 "Stream closed while processing identify/push from %s", peer_id
@@ -127,7 +92,10 @@ def identify_push_handler_for(
             logger.error("Error processing identify/push from %s: %s", peer_id, e)
         finally:
             # Close the stream after processing
-            await stream.close()
+            try:
+                await stream.close()
+            except Exception:
+                pass  # Ignore errors when closing
 
     return handle_identify_push
 
@@ -173,6 +141,19 @@ async def _update_peerstore_from_identify(
         except Exception as e:
             logger.error("Error updating protocols for peer %s: %s", peer_id, e)
 
+    if identify_msg.HasField("signedPeerRecord"):
+        try:
+            # Convert the signed-peer-record(Envelope) from prtobuf bytes
+            envelope, _ = consume_envelope(
+                identify_msg.signedPeerRecord, "libp2p-peer-record"
+            )
+            # Use a default TTL of 2 hours (7200 seconds)
+            if not peerstore.consume_peer_record(envelope, 7200):
+                logger.error("Updating Certified-Addr-Book was unsuccessful")
+        except Exception as e:
+            logger.error(
+                "Error updating the certified addr book for peer %s: %s", peer_id, e
+            )
     # Update observed address if present
     if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
         try:
@@ -226,7 +207,20 @@ async def push_identify_to_peer(
                 # Send raw protobuf message
                 await stream.write(response)
 
-            # Close the stream
+            # Wait for acknowledgment from the receiver with timeout
+            # This ensures the message was processed before closing
+            try:
+                with trio.move_on_after(1.0):  # 1 second timeout
+                    ack = await stream.read(2)  # Read "OK" acknowledgment
+                    if ack != b"OK":
+                        logger.warning(
+                            "Unexpected acknowledgment from peer %s: %s", peer_id, ack
+                        )
+            except Exception as e:
+                logger.debug("No acknowledgment received from peer %s: %s", peer_id, e)
+                # Continue anyway, as the message might have been processed
+
+            # Close the stream after acknowledgment (or timeout)
             await stream.close()
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
