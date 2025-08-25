@@ -5,6 +5,7 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
+from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
 )
@@ -20,6 +21,7 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -73,14 +75,27 @@ class KadDHT(Service):
 
     This class provides a DHT implementation that combines routing table management,
     peer discovery, content routing, and value storage.
+
+    Optional Random Walk feature enhances peer discovery by automatically
+    performing periodic random queries to discover new peers and maintain
+    routing table health.
+
+    Example:
+        # Basic DHT without random walk (default)
+        dht = KadDHT(host, DHTMode.SERVER)
+
+        # DHT with random walk enabled for enhanced peer discovery
+        dht = KadDHT(host, DHTMode.SERVER, enable_random_walk=True)
+
     """
 
-    def __init__(self, host: IHost, mode: DHTMode):
+    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
         """
         Initialize a new Kademlia DHT node.
 
         :param host: The libp2p host.
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
+        :param enable_random_walk: Whether to enable automatic random walk
         """
         super().__init__()
 
@@ -92,6 +107,7 @@ class KadDHT(Service):
             raise TypeError(f"mode must be DHTMode enum, got {type(mode)}")
 
         self.mode = mode
+        self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
@@ -108,13 +124,56 @@ class KadDHT(Service):
         # Last time we republished provider records
         self._last_provider_republish = time.time()
 
+        # Initialize RT Refresh Manager (only if random walk is enabled)
+        self.rt_refresh_manager: RTRefreshManager | None = None
+        if self.enable_random_walk:
+            self.rt_refresh_manager = RTRefreshManager(
+                host=self.host,
+                routing_table=self.routing_table,
+                local_peer_id=self.local_peer_id,
+                query_function=self._create_query_function(),
+                enable_auto_refresh=True,
+            )
+
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+
+    def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
+        """
+        Create a query function that wraps peer_routing.find_closest_peers_network.
+
+        This function is used by the RandomWalk module to query for peers without
+        directly importing PeerRouting, avoiding circular import issues.
+
+        Returns:
+            Callable that takes target_key bytes and returns list of peer IDs
+
+        """
+
+        async def query_function(target_key: bytes) -> list[ID]:
+            """Query for closest peers to target key."""
+            return await self.peer_routing.find_closest_peers_network(target_key)
+
+        return query_function
 
     async def run(self) -> None:
         """Run the DHT service."""
         logger.info(f"Starting Kademlia DHT with peer ID {self.local_peer_id}")
 
+        # Start the RT Refresh Manager in parallel with the main DHT service
+        async with trio.open_nursery() as nursery:
+            # Start the RT Refresh Manager only if random walk is enabled
+            if self.rt_refresh_manager is not None:
+                nursery.start_soon(self.rt_refresh_manager.start)
+                logger.info("RT Refresh Manager started - Random Walk is now active")
+            else:
+                logger.info("Random Walk is disabled - RT Refresh Manager not started")
+
+            # Start the main DHT service loop
+            nursery.start_soon(self._run_main_loop)
+
+    async def _run_main_loop(self) -> None:
+        """Run the main DHT service loop."""
         # Main service loop
         while self.manager.is_running:
             # Periodically refresh the routing table
@@ -134,6 +193,17 @@ class KadDHT(Service):
 
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
+
+    async def stop(self) -> None:
+        """Stop the DHT service and cleanup resources."""
+        logger.info("Stopping Kademlia DHT")
+
+        # Stop the RT Refresh Manager only if it was started
+        if self.rt_refresh_manager is not None:
+            await self.rt_refresh_manager.stop()
+            logger.info("RT Refresh Manager stopped")
+        else:
+            logger.info("RT Refresh Manager was not running (Random Walk disabled)")
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -614,3 +684,15 @@ class KadDHT(Service):
 
         """
         return self.value_store.size()
+
+    def is_random_walk_enabled(self) -> bool:
+        """
+        Check if random walk peer discovery is enabled.
+
+        Returns
+        -------
+        bool
+            True if random walk is enabled, False otherwise.
+
+        """
+        return self.enable_random_walk
