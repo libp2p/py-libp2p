@@ -1,0 +1,5 @@
+Fix multi-address listening bug in swarm.listen()
+
+- Fix early return in swarm.listen() that prevented listening on all addresses
+- Add comprehensive tests for multi-address listening functionality
+- Ensure all available interfaces are properly bound and connectable
