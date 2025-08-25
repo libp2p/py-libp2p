@@ -783,8 +783,6 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
         # seen_seqnos) to list of messages we want to request
-        msg_ids_wanted: list[str] = [
-            msg_id
         msg_ids_wanted: list[MessageID] = [
             parse_message_id_safe(msg_id)
             for msg_id in ihave_msg.messageIDs
