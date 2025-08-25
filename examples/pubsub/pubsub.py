@@ -1,6 +1,5 @@
 import argparse
 import logging
-import socket
 
 import base58
 import multiaddr
@@ -30,6 +29,9 @@ from libp2p.stream_muxer.mplex.mplex import (
 )
 from libp2p.tools.async_service.trio_service import (
     background_trio_service,
+)
+from libp2p.utils.address_validation import (
+    find_free_port,
 )
 
 # Configure logging
@@ -75,13 +77,6 @@ async def publish_loop(pubsub, topic, termination_event):
         except Exception:
             logger.exception("Error in publish loop")
             await trio.sleep(1)  # Avoid tight loop on error
-
-
-def find_free_port():
-    """Find a free port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))  # Bind to a free port provided by the OS
-        return s.getsockname()[1]
 
 
 async def monitor_peer_topics(pubsub, nursery, termination_event):
