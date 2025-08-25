@@ -777,14 +777,18 @@ class GossipSub(IPubsubRouter, Service):
         # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
         # seen_messages cache
         seen_seqnos_and_peers = [
-            seqno_and_from for seqno_and_from in self.pubsub.seen_messages.cache.keys()
+            str(seqno_and_from)
+            for seqno_and_from in self.pubsub.seen_messages.cache.keys()
         ]
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
         # seen_seqnos) to list of messages we want to request
+        msg_ids_wanted: list[str] = [
+            msg_id
         msg_ids_wanted: list[MessageID] = [
             parse_message_id_safe(msg_id)
             for msg_id in ihave_msg.messageIDs
+            if msg_id not in seen_seqnos_and_peers
             if msg_id not in str(seen_seqnos_and_peers)
         ]
 

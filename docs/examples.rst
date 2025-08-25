@@ -14,3 +14,4 @@ Examples
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
+   examples.random_walk
