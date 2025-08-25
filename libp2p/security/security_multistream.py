@@ -17,6 +17,9 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.protocol_muxer.exceptions import (
+    MultiselectError,
+)
 from libp2p.protocol_muxer.multiselect import (
     Multiselect,
 )
@@ -117,7 +120,7 @@ class SecurityMultistream(ABC):
         else:
             # Select protocol if non-initiator
             protocol, _ = await self.multiselect.negotiate(communicator)
-            if protocol is None:
-                raise SecurityUpgradeFailure("No protocol selected")
+        if protocol is None:
+            raise MultiselectError("fail to negotiate a security protocol")
         # Return transport from protocol
         return self.transports[protocol]
