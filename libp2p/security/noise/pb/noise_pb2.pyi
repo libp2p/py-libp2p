@@ -4,11 +4,29 @@ isort:skip_file
 """
 
 import builtins
+import collections.abc
 import google.protobuf.descriptor
+import google.protobuf.internal.containers
 import google.protobuf.message
 import typing
 
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
+
+@typing.final
+class NoiseExtensions(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    STREAM_MUXERS_FIELD_NUMBER: builtins.int
+    @property
+    def stream_muxers(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]: ...
+    def __init__(
+        self,
+        *,
+        stream_muxers: collections.abc.Iterable[builtins.str] | None = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["stream_muxers", b"stream_muxers"]) -> None: ...
+
+global___NoiseExtensions = NoiseExtensions
 
 @typing.final
 class NoiseHandshakePayload(google.protobuf.message.Message):
@@ -23,10 +41,11 @@ class NoiseHandshakePayload(google.protobuf.message.Message):
     def __init__(
         self,
         *,
-        identity_key: builtins.bytes = ...,
-        identity_sig: builtins.bytes = ...,
-        data: builtins.bytes = ...,
+        identity_key: builtins.bytes | None = ...,
+        identity_sig: builtins.bytes | None = ...,
+        data: builtins.bytes | None = ...,
     ) -> None: ...
+    def HasField(self, field_name: typing.Literal["data", b"data", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]) -> builtins.bool: ...
     def ClearField(self, field_name: typing.Literal["data", b"data", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]) -> None: ...
 
 global___NoiseHandshakePayload = NoiseHandshakePayload
