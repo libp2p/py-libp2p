@@ -49,7 +49,6 @@ async def _echo_stream_handler(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str, seed: int | None = None) -> None:
-    # CHANGED: previously hardcoded 0.0.0.0
     if port <= 0:
         port = find_free_port()
     listen_addr = get_available_interfaces(port)
