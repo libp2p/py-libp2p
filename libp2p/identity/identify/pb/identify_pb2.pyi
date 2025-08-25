@@ -22,10 +22,12 @@ class Identify(google.protobuf.message.Message):
     LISTEN_ADDRS_FIELD_NUMBER: builtins.int
     OBSERVED_ADDR_FIELD_NUMBER: builtins.int
     PROTOCOLS_FIELD_NUMBER: builtins.int
+    SIGNEDPEERRECORD_FIELD_NUMBER: builtins.int
     protocol_version: builtins.str
     agent_version: builtins.str
     public_key: builtins.bytes
     observed_addr: builtins.bytes
+    signedPeerRecord: builtins.bytes
     @property
     def listen_addrs(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
     @property
@@ -39,8 +41,9 @@ class Identify(google.protobuf.message.Message):
         listen_addrs: collections.abc.Iterable[builtins.bytes] | None = ...,
         observed_addr: builtins.bytes | None = ...,
         protocols: collections.abc.Iterable[builtins.str] | None = ...,
+        signedPeerRecord: builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["agent_version", b"agent_version", "observed_addr", b"observed_addr", "protocol_version", b"protocol_version", "public_key", b"public_key"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["agent_version", b"agent_version", "listen_addrs", b"listen_addrs", "observed_addr", b"observed_addr", "protocol_version", b"protocol_version", "protocols", b"protocols", "public_key", b"public_key"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["agent_version", b"agent_version", "observed_addr", b"observed_addr", "protocol_version", b"protocol_version", "public_key", b"public_key", "signedPeerRecord", b"signedPeerRecord"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["agent_version", b"agent_version", "listen_addrs", b"listen_addrs", "observed_addr", b"observed_addr", "protocol_version", b"protocol_version", "protocols", b"protocols", "public_key", b"public_key", "signedPeerRecord", b"signedPeerRecord"]) -> None: ...
 
 global___Identify = Identify

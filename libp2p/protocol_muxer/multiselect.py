@@ -83,14 +83,14 @@ class Multiselect(IMultiselectMuxer):
                             raise MultiselectError() from error
 
                     else:
-                        protocol = TProtocol(command)
-                        if protocol in self.handlers:
+                        protocol_to_check = None if not command else TProtocol(command)
+                        if protocol_to_check in self.handlers:
                             try:
-                                await communicator.write(protocol)
+                                await communicator.write(command)
                             except MultiselectCommunicatorError as error:
                                 raise MultiselectError() from error
 
-                            return protocol, self.handlers[protocol]
+                            return protocol_to_check, self.handlers[protocol_to_check]
                         try:
                             await communicator.write(PROTOCOL_NOT_FOUND_MSG)
                         except MultiselectCommunicatorError as error:

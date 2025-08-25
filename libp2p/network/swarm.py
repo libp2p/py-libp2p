@@ -1,3 +1,7 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 import logging
 
 from multiaddr import (
@@ -245,9 +249,11 @@ class Swarm(Service, INetworkService):
         # We need to wait until `self.listener_nursery` is created.
         await self.event_listener_nursery_created.wait()
 
+        success_count = 0
         for maddr in multiaddrs:
             if str(maddr) in self.listeners:
-                return True
+                success_count += 1
+                continue
 
             async def conn_handler(
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
@@ -298,13 +304,14 @@ class Swarm(Service, INetworkService):
                 # Call notifiers since event occurred
                 await self.notify_listen(maddr)
 
-                return True
+                success_count += 1
+                logger.debug("successfully started listening on: %s", maddr)
             except OSError:
                 # Failed. Continue looping.
                 logger.debug("fail to listen on: %s", maddr)
 
-        # No maddr succeeded
-        return False
+        # Return true if at least one address succeeded
+        return success_count > 0
 
     async def close(self) -> None:
         """
@@ -326,8 +333,16 @@ class Swarm(Service, INetworkService):
 
             # Close all listeners
             if hasattr(self, "listeners"):
-                for listener in self.listeners.values():
+                for maddr_str, listener in self.listeners.items():
                     await listener.close()
+                    # Notify about listener closure
+                    try:
+                        multiaddr = Multiaddr(maddr_str)
+                        await self.notify_listen_close(multiaddr)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to notify listen_close for {maddr_str}: {e}"
+                        )
                 self.listeners.clear()
 
             # Close the transport if it exists and has a close method
@@ -411,7 +426,17 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.listen, self, multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
-        raise NotImplementedError
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.closed_stream, self, stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
-        raise NotImplementedError
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.listen_close, self, multiaddr)
+
+    # Generic notifier used by NetStream._notify_closed
+    async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifier, notifee)

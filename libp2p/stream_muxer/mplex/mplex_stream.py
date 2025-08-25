@@ -1,3 +1,5 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from types import (
     TracebackType,
 )
@@ -32,6 +34,72 @@ if TYPE_CHECKING:
     )
 
 
+class ReadWriteLock:
+    """
+    A read-write lock that allows multiple concurrent readers
+    or one exclusive writer, implemented using Trio primitives.
+    """
+
+    def __init__(self) -> None:
+        self._readers = 0
+        self._readers_lock = trio.Lock()  # Protects access to _readers count
+        self._writer_lock = trio.Semaphore(1)  # Allows only one writer at a time
+
+    async def acquire_read(self) -> None:
+        """Acquire a read lock. Multiple readers can hold it simultaneously."""
+        try:
+            async with self._readers_lock:
+                if self._readers == 0:
+                    await self._writer_lock.acquire()
+                self._readers += 1
+        except trio.Cancelled:
+            raise
+
+    async def release_read(self) -> None:
+        """Release a read lock."""
+        async with self._readers_lock:
+            if self._readers == 1:
+                self._writer_lock.release()
+            self._readers -= 1
+
+    async def acquire_write(self) -> None:
+        """Acquire an exclusive write lock."""
+        try:
+            await self._writer_lock.acquire()
+        except trio.Cancelled:
+            raise
+
+    def release_write(self) -> None:
+        """Release the exclusive write lock."""
+        self._writer_lock.release()
+
+    @asynccontextmanager
+    async def read_lock(self) -> AsyncGenerator[None, None]:
+        """Context manager for acquiring and releasing a read lock safely."""
+        acquire = False
+        try:
+            await self.acquire_read()
+            acquire = True
+            yield
+        finally:
+            if acquire:
+                with trio.CancelScope() as scope:
+                    scope.shield = True
+                    await self.release_read()
+
+    @asynccontextmanager
+    async def write_lock(self) -> AsyncGenerator[None, None]:
+        """Context manager for acquiring and releasing a write lock safely."""
+        acquire = False
+        try:
+            await self.acquire_write()
+            acquire = True
+            yield
+        finally:
+            if acquire:
+                self.release_write()
+
+
 class MplexStream(IMuxedStream):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/stream.go
@@ -46,7 +114,7 @@ class MplexStream(IMuxedStream):
     read_deadline: int | None
     write_deadline: int | None
 
-    # TODO: Add lock for read/write to avoid interleaving receiving messages?
+    rw_lock: ReadWriteLock
     close_lock: trio.Lock
 
     # NOTE: `dataIn` is size of 8 in Go implementation.
@@ -80,6 +148,7 @@ class MplexStream(IMuxedStream):
         self.event_remote_closed = trio.Event()
         self.event_reset = trio.Event()
         self.close_lock = trio.Lock()
+        self.rw_lock = ReadWriteLock()
         self.incoming_data_channel = incoming_data_channel
         self._buf = bytearray()
 
@@ -113,48 +182,49 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
-        if n is not None and n < 0:
-            raise ValueError(
-                "the number of bytes to read `n` must be non-negative or "
-                f"`None` to indicate read until EOF, got n={n}"
-            )
-        if self.event_reset.is_set():
-            raise MplexStreamReset
-        if n is None:
-            return await self._read_until_eof()
-        if len(self._buf) == 0:
-            data: bytes
-            # Peek whether there is data available. If yes, we just read until there is
-            # no data, then return.
-            try:
-                data = self.incoming_data_channel.receive_nowait()
-                self._buf.extend(data)
-            except trio.EndOfChannel:
-                raise MplexStreamEOF
-            except trio.WouldBlock:
-                # We know `receive` will be blocked here. Wait for data here with
-                # `receive` and catch all kinds of errors here.
+        async with self.rw_lock.read_lock():
+            if n is not None and n < 0:
+                raise ValueError(
+                    "the number of bytes to read `n` must be non-negative or "
+                    f"`None` to indicate read until EOF, got n={n}"
+                )
+            if self.event_reset.is_set():
+                raise MplexStreamReset
+            if n is None:
+                return await self._read_until_eof()
+            if len(self._buf) == 0:
+                data: bytes
+                # Peek whether there is data available. If yes, we just read until
+                # there is no data, then return.
                 try:
-                    data = await self.incoming_data_channel.receive()
+                    data = self.incoming_data_channel.receive_nowait()
                     self._buf.extend(data)
                 except trio.EndOfChannel:
-                    if self.event_reset.is_set():
-                        raise MplexStreamReset
-                    if self.event_remote_closed.is_set():
-                        raise MplexStreamEOF
-                except trio.ClosedResourceError as error:
-                    # Probably `incoming_data_channel` is closed in `reset` when we are
-                    # waiting for `receive`.
-                    if self.event_reset.is_set():
-                        raise MplexStreamReset
-                    raise Exception(
-                        "`incoming_data_channel` is closed but stream is not reset. "
-                        "This should never happen."
-                    ) from error
-        self._buf.extend(self._read_return_when_blocked())
-        payload = self._buf[:n]
-        self._buf = self._buf[len(payload) :]
-        return bytes(payload)
+                    raise MplexStreamEOF
+                except trio.WouldBlock:
+                    # We know `receive` will be blocked here. Wait for data here with
+                    # `receive` and catch all kinds of errors here.
+                    try:
+                        data = await self.incoming_data_channel.receive()
+                        self._buf.extend(data)
+                    except trio.EndOfChannel:
+                        if self.event_reset.is_set():
+                            raise MplexStreamReset
+                        if self.event_remote_closed.is_set():
+                            raise MplexStreamEOF
+                    except trio.ClosedResourceError as error:
+                        # Probably `incoming_data_channel` is closed in `reset` when
+                        # we are waiting for `receive`.
+                        if self.event_reset.is_set():
+                            raise MplexStreamReset
+                        raise Exception(
+                            "`incoming_data_channel` is closed but stream is not reset."
+                            "This should never happen."
+                        ) from error
+            self._buf.extend(self._read_return_when_blocked())
+            payload = self._buf[:n]
+            self._buf = self._buf[len(payload) :]
+            return bytes(payload)
 
     async def write(self, data: bytes) -> None:
         """
@@ -162,22 +232,21 @@ class MplexStream(IMuxedStream):
 
         :return: number of bytes written
         """
-        if self.event_local_closed.is_set():
-            raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
-        flag = (
-            HeaderTags.MessageInitiator
-            if self.is_initiator
-            else HeaderTags.MessageReceiver
-        )
-        await self.muxed_conn.send_message(flag, data, self.stream_id)
+        async with self.rw_lock.write_lock():
+            if self.event_local_closed.is_set():
+                raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
+            flag = (
+                HeaderTags.MessageInitiator
+                if self.is_initiator
+                else HeaderTags.MessageReceiver
+            )
+            await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
         """
         Closing a stream closes it for writing and closes the remote end for
         reading but allows writing in the other direction.
         """
-        # TODO error handling with timeout
-
         async with self.close_lock:
             if self.event_local_closed.is_set():
                 return
@@ -185,8 +254,17 @@ class MplexStream(IMuxedStream):
         flag = (
             HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
         )
-        # TODO: Raise when `muxed_conn.send_message` fails and `Mplex` isn't shutdown.
-        await self.muxed_conn.send_message(flag, None, self.stream_id)
+
+        try:
+            with trio.fail_after(5):  # timeout in seconds
+                await self.muxed_conn.send_message(flag, None, self.stream_id)
+        except trio.TooSlowError:
+            raise TimeoutError("Timeout while trying to close the stream")
+        except MuxedConnUnavailable:
+            if not self.muxed_conn.event_shutting_down.is_set():
+                raise RuntimeError(
+                    "Failed to send close message and Mplex isn't shutting down"
+                )
 
         _is_remote_closed: bool
         async with self.close_lock:
