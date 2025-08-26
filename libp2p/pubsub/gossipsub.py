@@ -787,7 +787,6 @@ class GossipSub(IPubsubRouter, Service):
             parse_message_id_safe(msg_id)
             for msg_id in ihave_msg.messageIDs
             if msg_id not in seen_seqnos_and_peers
-            if msg_id not in str(seen_seqnos_and_peers)
         ]
 
         # Request messages with IWANT message
