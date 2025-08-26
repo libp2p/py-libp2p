@@ -2,6 +2,7 @@ syntax = "proto2";
 package pb;
 
 message NoiseExtensions {
+    repeated bytes webtransport_certhashes = 1;
     repeated string stream_muxers = 2;
 }
 

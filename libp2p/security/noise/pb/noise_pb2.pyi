@@ -16,15 +16,19 @@ DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
 class NoiseExtensions(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
+    WEBTRANSPORT_CERTHASHES_FIELD_NUMBER: builtins.int
     STREAM_MUXERS_FIELD_NUMBER: builtins.int
+    @property
+    def webtransport_certhashes(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
     @property
     def stream_muxers(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]: ...
     def __init__(
         self,
         *,
+        webtransport_certhashes: collections.abc.Iterable[builtins.bytes] | None = ...,
         stream_muxers: collections.abc.Iterable[builtins.str] | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["stream_muxers", b"stream_muxers"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["stream_muxers", b"stream_muxers", "webtransport_certhashes", b"webtransport_certhashes"]) -> None: ...
 
 global___NoiseExtensions = NoiseExtensions
 

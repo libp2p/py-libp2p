@@ -24,10 +24,7 @@ async def main():
     noise_transport = NoiseTransport(
         # local_key_pair: The key pair used for libp2p identity and authentication
         libp2p_keypair=key_pair,
-        # noise_privkey: The private key used for Noise protocol encryption
         noise_privkey=key_pair.private_key,
-        # early_data: Optional data to send during the handshake
-        # (None means no early data)
         # TODO: add early data
     )
 
