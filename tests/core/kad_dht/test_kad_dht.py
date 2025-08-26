@@ -109,7 +109,7 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
         dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id()), Envelope
     )
 
-    # These are the records that were sent betweeen the peers during the FIND_NODE req
+    # These are the records that were sent between the peers during the FIND_NODE req
     envelope_a_find_peer = dht_a.host.get_peerstore().get_peer_record(
         dht_b.host.get_id()
     )
@@ -124,7 +124,7 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
     record_b_find_peer = envelope_b_find_peer.record()
 
     # This proves that both the records are same, and a latest cached signed record
-    # was passed between the peers during FIND_NODE exceution, which proves the
+    # was passed between the peers during FIND_NODE execution, which proves the
     # signed-record transfer/re-issuing works correctly in FIND_NODE executions.
     assert record_a.seq == record_a_find_peer.seq
     assert record_b.seq == record_b_find_peer.seq
@@ -168,7 +168,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     with trio.fail_after(TEST_TIMEOUT):
         await dht_a.put_value(key, value)
 
-    # These are the records that were sent betweeen the peers during the PUT_VALUE req
+    # These are the records that were sent between the peers during the PUT_VALUE req
     envelope_a_put_value = dht_a.host.get_peerstore().get_peer_record(
         dht_b.host.get_id()
     )
@@ -183,7 +183,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     record_b_put_value = envelope_b_put_value.record()
 
     # This proves that both the records are same, and a latest cached signed record
-    # was passed between the peers during PUT_VALUE exceution, which proves the
+    # was passed between the peers during PUT_VALUE execution, which proves the
     # signed-record transfer/re-issuing works correctly in PUT_VALUE executions.
     assert record_a.seq == record_a_put_value.seq
     assert record_b.seq == record_b_put_value.seq
@@ -205,7 +205,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
         print("the value stored in node b is", dht_b.get_value_store_size())
         logger.debug("Retrieved value: %s", retrieved_value)
 
-    # These are the records that were sent betweeen the peers during the PUT_VALUE req
+    # These are the records that were sent between the peers during the PUT_VALUE req
     envelope_a_get_value = dht_a.host.get_peerstore().get_peer_record(
         dht_b.host.get_id()
     )
@@ -257,7 +257,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
         success = await dht_a.provide(content_id)
         assert success, "Failed to advertise as provider"
 
-    # These are the records that were sent betweeen the peers during
+    # These are the records that were sent between the peers during
     # the ADD_PROVIDER req
     envelope_a_add_prov = dht_a.host.get_peerstore().get_peer_record(
         dht_b.host.get_id()
@@ -273,7 +273,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_b_add_prov = envelope_b_add_prov.record()
 
     # This proves that both the records are same, the latest cached signed record
-    # was passed between the peers during ADD_PROVIDER exceution, which proves the
+    # was passed between the peers during ADD_PROVIDER execution, which proves the
     # signed-record transfer/re-issuing of the latest record works correctly in
     # ADD_PROVIDER executions.
     assert record_a.seq == record_a_add_prov.seq

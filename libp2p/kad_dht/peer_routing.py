@@ -376,7 +376,7 @@ class PeerRouting(IPeerRouting):
                     # Consume the sender's signed-peer-record if sent
                     if not maybe_consume_signed_record(kad_message, self.host, peer_id):
                         logger.error(
-                            "Receivedf an invalid-signed-record, dropping the stream"
+                            "Received an invalid-signed-record, dropping the stream"
                         )
                         return
 

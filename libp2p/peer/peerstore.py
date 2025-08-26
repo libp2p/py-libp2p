@@ -116,7 +116,7 @@ def issue_and_cache_local_record(host: IHost) -> bytes:
         host.get_addrs(),
         host.get_private_key(),
     )
-    # Cache it for nexxt time use
+    # Cache it for next time use
     host.get_peerstore().set_local_record(env)
     return env.marshal_envelope()
 
