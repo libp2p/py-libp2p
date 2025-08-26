@@ -10,6 +10,7 @@ from collections.abc import (
 )
 import logging
 import random
+import statistics
 import time
 from typing import (
     Any,
@@ -29,7 +30,6 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
-    peer_info_from_bytes,
     peer_info_to_bytes,
 )
 from libp2p.peer.peerstore import (
@@ -53,6 +53,10 @@ from .pb import (
 )
 from .pubsub import (
     Pubsub,
+)
+from .score import (
+    PeerScorer,
+    ScoreParams,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -112,6 +116,7 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
+        score_params: ScoreParams | None = None,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -151,6 +156,9 @@ class GossipSub(IPubsubRouter, Service):
         self.back_off = dict()
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
+
+        # Scoring
+        self.scorer: PeerScorer | None = PeerScorer(score_params or ScoreParams())
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -260,6 +268,11 @@ class GossipSub(IPubsubRouter, Service):
                 raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
+            # Publish gate
+            if self.scorer is not None and not self.scorer.allow_publish(
+                peer_id, list(pubsub_msg.topicIDs)
+            ):
+                continue
             stream = self.pubsub.peers[peer_id]
 
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
@@ -320,7 +333,17 @@ class GossipSub(IPubsubRouter, Service):
                         )
                 self.fanout[topic] = fanout_peers
                 gossipsub_peers = fanout_peers
-            send_to.update(gossipsub_peers)
+            # Apply gossip score gate
+            if self.scorer is not None and gossipsub_peers:
+                allowed = {
+                    p
+                    for p in gossipsub_peers
+                    if self.scorer.allow_gossip(p, [topic])
+                    and not self.scorer.is_graylisted(p, [topic])
+                }
+                send_to.update(allowed)
+            else:
+                send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
         yield from send_to.difference([msg_forwarder, origin])
 
@@ -483,6 +506,10 @@ class GossipSub(IPubsubRouter, Service):
 
             self.mcache.shift()
 
+            # scorer decay step
+            if self.scorer is not None:
+                self.scorer.on_heartbeat()
+
             await trio.sleep(self.heartbeat_interval)
 
     async def direct_connect_heartbeat(self) -> None:
@@ -531,6 +558,25 @@ class GossipSub(IPubsubRouter, Service):
                     # Emit GRAFT(topic) control message to peer
                     peers_to_graft[peer].append(topic)
 
+            # Opportunistic grafting based on median scores
+            if self.scorer is not None and num_mesh_peers_in_topic >= self.degree_low:
+                try:
+                    scorer = self.scorer
+                    scores = [scorer.score(p, [topic]) for p in self.mesh[topic]]
+                    if scores:
+                        median_score = statistics.median(scores)
+                        # Find higher-than-median peers outside mesh
+                        candidates = self._get_in_topic_gossipsub_peers_from_minus(
+                            topic, self.degree, self.mesh[topic], True
+                        )
+                        for cand in candidates:
+                            if scorer.score(cand, [topic]) > median_score:
+                                self.mesh[topic].add(cand)
+                                peers_to_graft[cand].append(topic)
+                                break
+                except Exception:
+                    pass
+
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]
                 selected_peers = self.select_from_minus(
@@ -539,6 +585,8 @@ class GossipSub(IPubsubRouter, Service):
                 for peer in selected_peers:
                     # Remove peer from mesh[topic]
                     self.mesh[topic].discard(peer)
+                    if self.scorer is not None:
+                        self.scorer.on_leave_mesh(peer, topic)
 
                     # Emit PRUNE(topic) control message to peer
                     peers_to_prune[peer].append(topic)
@@ -744,10 +792,37 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             try:
-                peer_info = peer_info_from_bytes(peer.signedPeerRecord)
+                # Validate signed peer record if provided; otherwise skip
+                if (
+                    not peer.HasField("signedPeerRecord")
+                    or len(peer.signedPeerRecord) == 0
+                ):
+                    # No signed record available; rely on ambient discovery
+                    continue
+
+                # Validate envelope signature and freshness via peerstore consume
+                if self.pubsub is None:
+                    raise NoPubsubAttached
+
+                # Convert to Envelope and PeerRecord
+                from libp2p.peer.envelope import consume_envelope
+
+                envelope, record = consume_envelope(
+                    peer.signedPeerRecord, "libp2p-peer-record"
+                )
+
+                # Ensure the record matches the advertised peer id
+                if record.peer_id != peer_id:
+                    raise ValueError("peer id mismatch in PX signed record")
+
+                # Store into peerstore and update addrs
+                self.pubsub.host.get_peerstore().consume_peer_record(envelope, ttl=7200)
+
+                # Derive PeerInfo from the record for connect
+                from libp2p.peer.peerinfo import PeerInfo
+
+                peer_info = PeerInfo(record.peer_id, record.addrs)
                 try:
-                    if self.pubsub is None:
-                        raise NoPubsubAttached
                     await self.pubsub.host.connect(peer_info)
                 except Exception as e:
                     logger.warning(
@@ -840,6 +915,12 @@ class GossipSub(IPubsubRouter, Service):
     ) -> None:
         topic: str = graft_msg.topicID
 
+        # Score gate for GRAFT acceptance
+        if self.scorer is not None:
+            if self.scorer.is_graylisted(sender_peer_id, [topic]):
+                await self.emit_prune(topic, sender_peer_id, False, False)
+                return
+
         # Add peer to mesh for topic
         if topic in self.mesh:
             for direct_peer in self.direct_peers:
@@ -862,6 +943,8 @@ class GossipSub(IPubsubRouter, Service):
 
             if sender_peer_id not in self.mesh[topic]:
                 self.mesh[topic].add(sender_peer_id)
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(sender_peer_id, topic)
         else:
             # Respond with PRUNE if not subscribed to the topic
             await self.emit_prune(topic, sender_peer_id, self.do_px, False)
@@ -883,9 +966,16 @@ class GossipSub(IPubsubRouter, Service):
                 self._add_back_off(sender_peer_id, topic, False)
 
             self.mesh[topic].discard(sender_peer_id)
+            if self.scorer is not None:
+                self.scorer.on_leave_mesh(sender_peer_id, topic)
 
         if px_peers:
-            await self._do_px(px_peers)
+            # Score-gate PX acceptance
+            allow_px = True
+            if self.scorer is not None:
+                allow_px = self.scorer.allow_px_from(sender_peer_id, [topic])
+            if allow_px:
+                await self._do_px(px_peers)
 
     # RPC emitters
 

@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass, field
+import math
+from typing import DefaultDict
+
+from libp2p.peer.id import ID
+
+
+@dataclass
+class TopicScoreParams:
+    weight: float = 0.0
+    cap: float = 0.0
+    decay: float = 1.0
+
+
+@dataclass
+class ScoreParams:
+    # Topic-scoped P1..P4
+    p1_time_in_mesh: TopicScoreParams = field(
+        default_factory=lambda: TopicScoreParams()
+    )
+    p2_first_message_deliveries: TopicScoreParams = field(
+        default_factory=lambda: TopicScoreParams()
+    )
+    p3_mesh_message_deliveries: TopicScoreParams = field(
+        default_factory=lambda: TopicScoreParams()
+    )
+    p4_invalid_messages: TopicScoreParams = field(
+        default_factory=lambda: TopicScoreParams()
+    )
+
+    # Global P5..P7
+    p5_behavior_penalty_weight: float = 0.0
+    p5_behavior_penalty_decay: float = 1.0
+    p5_behavior_penalty_threshold: float = 0.0
+
+    p6_appl_slack_weight: float = 0.0
+    p6_appl_slack_decay: float = 1.0
+
+    p7_ip_colocation_weight: float = 0.0
+
+    # Acceptance thresholds
+    publish_threshold: float = -math.inf
+    gossip_threshold: float = -math.inf
+    graylist_threshold: float = -math.inf
+    accept_px_threshold: float = -math.inf
+
+
+class PeerScorer:
+    """
+    Minimal scorer implementing weighted-decayed counters per peer and topic.
+
+    This is intentionally simple and conservative. It provides the hooks required
+    by the Gossipsub v1.1 gates without prescribing specific parameter values.
+    """
+
+    def __init__(self, params: ScoreParams) -> None:
+        self.params = params
+        self.time_in_mesh: DefaultDict[ID, DefaultDict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        self.first_message_deliveries: DefaultDict[ID, DefaultDict[str, float]] = (
+            defaultdict(lambda: defaultdict(float))
+        )
+        self.mesh_message_deliveries: DefaultDict[ID, DefaultDict[str, float]] = (
+            defaultdict(lambda: defaultdict(float))
+        )
+        self.invalid_messages: DefaultDict[ID, DefaultDict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+
+        # Global state
+        self.behavior_penalty: dict[ID, float] = defaultdict(float)
+
+    # ---- Update hooks ----
+    def on_heartbeat(self, dt_seconds: float = 1.0) -> None:
+        # Apply decay to all counters
+        for peer in list(self.time_in_mesh.keys()):
+            for topic in list(self.time_in_mesh[peer].keys()):
+                self.time_in_mesh[peer][topic] = (
+                    self.time_in_mesh[peer][topic] * self.params.p1_time_in_mesh.decay
+                )
+        for peer in list(self.first_message_deliveries.keys()):
+            for topic in list(self.first_message_deliveries[peer].keys()):
+                self.first_message_deliveries[peer][topic] *= (
+                    self.params.p2_first_message_deliveries.decay
+                )
+        for peer in list(self.mesh_message_deliveries.keys()):
+            for topic in list(self.mesh_message_deliveries[peer].keys()):
+                self.mesh_message_deliveries[peer][topic] *= (
+                    self.params.p3_mesh_message_deliveries.decay
+                )
+        for peer in list(self.invalid_messages.keys()):
+            for topic in list(self.invalid_messages[peer].keys()):
+                self.invalid_messages[peer][topic] *= (
+                    self.params.p4_invalid_messages.decay
+                )
+
+        for peer in list(self.behavior_penalty.keys()):
+            self.behavior_penalty[peer] *= self.params.p5_behavior_penalty_decay
+
+    def on_join_mesh(self, peer: ID, topic: str) -> None:
+        # Start counting time in mesh for the peer
+        self.time_in_mesh[peer][topic] += 1.0
+
+    def on_leave_mesh(self, peer: ID, topic: str) -> None:
+        # No-op; counters decay over time.
+        pass
+
+    def on_first_delivery(self, peer: ID, topic: str) -> None:
+        self.first_message_deliveries[peer][topic] += 1.0
+
+    def on_mesh_delivery(self, peer: ID, topic: str) -> None:
+        self.mesh_message_deliveries[peer][topic] += 1.0
+
+    def on_invalid_message(self, peer: ID, topic: str) -> None:
+        self.invalid_messages[peer][topic] += 1.0
+
+    def penalize_behavior(self, peer: ID, amount: float = 1.0) -> None:
+        self.behavior_penalty[peer] += amount
+
+    # ---- Scoring ----
+    def topic_score(self, peer: ID, topic: str) -> float:
+        p = self.params
+        s = 0.0
+        s += p.p1_time_in_mesh.weight * min(
+            self.time_in_mesh[peer][topic], p.p1_time_in_mesh.cap
+        )
+        s += p.p2_first_message_deliveries.weight * min(
+            self.first_message_deliveries[peer][topic],
+            p.p2_first_message_deliveries.cap,
+        )
+        s += p.p3_mesh_message_deliveries.weight * min(
+            self.mesh_message_deliveries[peer][topic], p.p3_mesh_message_deliveries.cap
+        )
+        s -= p.p4_invalid_messages.weight * min(
+            self.invalid_messages[peer][topic], p.p4_invalid_messages.cap
+        )
+        return s
+
+    def score(self, peer: ID, topics: list[str]) -> float:
+        score = 0.0
+        for t in topics:
+            score += self.topic_score(peer, t)
+
+        # Behavior penalty activates beyond threshold
+        if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+            score -= (
+                self.behavior_penalty[peer] - self.params.p5_behavior_penalty_threshold
+            ) * self.params.p5_behavior_penalty_weight
+
+        # TODO: P6/P7 placeholders: app-specific and IP-colocation
+        # terms (not implemented).
+        return score
+
+    # ---- Gates ----
+    def allow_publish(self, peer: ID, topics: list[str]) -> bool:
+        return self.score(peer, topics) >= self.params.publish_threshold
+
+    def allow_gossip(self, peer: ID, topics: list[str]) -> bool:
+        return self.score(peer, topics) >= self.params.gossip_threshold
+
+    def is_graylisted(self, peer: ID, topics: list[str]) -> bool:
+        return self.score(peer, topics) < self.params.graylist_threshold
+
+    def allow_px_from(self, peer: ID, topics: list[str]) -> bool:
+        return self.score(peer, topics) >= self.params.accept_px_threshold
