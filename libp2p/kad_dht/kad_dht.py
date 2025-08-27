@@ -378,7 +378,7 @@ class KadDHT(Service):
 
                             # Process the signed-records of provider if sent
                             if not maybe_consume_signed_record(
-                                message, self.host, peer_id
+                                provider_proto, self.host
                             ):
                                 logger.error(
                                     "Received an invalid-signed-record,"
