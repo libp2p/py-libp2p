@@ -290,7 +290,9 @@ class BasicHost(IHost):
             )
             if protocol is None:
                 await net_stream.reset()
-                raise StreamFailure("No protocol selected")
+                raise StreamFailure(
+                    "Failed to negotiate protocol: no protocol selected"
+                )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
             logger.debug(
