@@ -31,6 +31,7 @@ from libp2p.peer.peer_record import PeerRecord
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -339,6 +340,41 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     # in GET_VALUE executions.
     assert record_a_find_prov.seq == record_a_get_value.seq
     assert record_b_find_prov.seq == record_b_get_value.seq
+
+    # Create a new provider record in dht_a
+    provider_key_pair = create_new_key_pair()
+    provider_peer_id = ID.from_pubkey(provider_key_pair.public_key)
+    provider_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+    provider_peer_info = PeerInfo(peer_id=provider_peer_id, addrs=[provider_addr])
+
+    # Generate a random content ID
+    content_2 = f"random-content-{uuid.uuid4()}".encode()
+    content_id_2 = hashlib.sha256(content_2).digest()
+
+    provider_signed_envelope = create_signed_peer_record(
+        provider_peer_id, [provider_addr], provider_key_pair.private_key
+    )
+    assert (
+        dht_a.host.get_peerstore().consume_peer_record(provider_signed_envelope, 7200)
+        is True
+    )
+
+    # Store this provider record in dht_a
+    dht_a.provider_store.add_provider(content_id_2, provider_peer_info)
+
+    # Fetch the provider-record via peer-discovery at dht_b's end
+    peerinfo = await dht_b.provider_store.find_providers(content_id_2)
+
+    assert len(peerinfo) == 1
+    assert peerinfo[0].peer_id == provider_peer_id
+    provider_envelope = dht_b.host.get_peerstore().get_peer_record(provider_peer_id)
+
+    # This proves that the signed-envelope of provider is consumed on dht_b's end
+    assert provider_envelope is not None
+    assert (
+        provider_signed_envelope.marshal_envelope()
+        == provider_envelope.marshal_envelope()
+    )
 
 
 @pytest.mark.trio
