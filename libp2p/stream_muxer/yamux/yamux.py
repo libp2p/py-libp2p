@@ -127,6 +127,9 @@ class YamuxStream(IMuxedStream):
                         "Timed out waiting for window update after 5 seconds."
                     )
 
+                if self.reset_received:
+                    raise MuxedStreamReset("Stream was reset")
+
                 if self.closed:
                     raise MuxedStreamError("Stream is closed")
 
