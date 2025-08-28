@@ -597,9 +597,8 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, self.degree, current_peers, True
                 )
-                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
-                    peers_to_gossip[peer][topic] = msg_id_strs
+                    peers_to_gossip[peer][topic] = msg_ids
 
         return in_topic_peers, False
 
