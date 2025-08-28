@@ -1,0 +1,1 @@
+KAD-DHT now include signed-peer-records in its protobuf message schema, for more secure peer-discovery.
