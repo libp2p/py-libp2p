@@ -196,8 +196,7 @@ async def test_enhanced_swarm_constructor():
     # Test with custom config
     custom_retry = RetryConfig(max_retries=5, initial_delay=0.5)
     custom_conn = ConnectionConfig(
-        max_connections_per_peer=5,
-        enable_connection_pool=False
+        max_connections_per_peer=5, enable_connection_pool=False
     )
 
     swarm = Swarm(peer_id, peerstore, upgrader, transport, custom_retry, custom_conn)
@@ -216,10 +215,7 @@ async def test_swarm_backoff_calculation():
     transport = Mock()
 
     retry_config = RetryConfig(
-        initial_delay=0.1,
-        max_delay=1.0,
-        backoff_multiplier=2.0,
-        jitter_factor=0.1
+        initial_delay=0.1, max_delay=1.0, backoff_multiplier=2.0, jitter_factor=0.1
     )
 
     swarm = Swarm(peer_id, peerstore, upgrader, transport, retry_config)
@@ -254,7 +250,7 @@ async def test_swarm_retry_logic():
     retry_config = RetryConfig(
         max_retries=2,
         initial_delay=0.01,  # Very short for testing
-        max_delay=0.1
+        max_delay=0.1,
     )
 
     swarm = Swarm(peer_id, peerstore, upgrader, transport, retry_config)
@@ -294,15 +290,11 @@ async def test_swarm_multi_connection_support():
     connection_config = ConnectionConfig(
         max_connections_per_peer=3,
         enable_connection_pool=True,
-        load_balancing_strategy="round_robin"
+        load_balancing_strategy="round_robin",
     )
 
     swarm = Swarm(
-        peer_id,
-        peerstore,
-        upgrader,
-        transport,
-        connection_config=connection_config
+        peer_id, peerstore, upgrader, transport, connection_config=connection_config
     )
 
     # Mock connection pool methods
@@ -330,8 +322,7 @@ async def test_swarm_backward_compatibility():
     # Create swarm with connection pool disabled
     connection_config = ConnectionConfig(enable_connection_pool=False)
     swarm = Swarm(
-        peer_id, peerstore, upgrader, transport,
-        connection_config=connection_config
+        peer_id, peerstore, upgrader, transport, connection_config=connection_config
     )
 
     # Should behave like original swarm
@@ -355,13 +346,11 @@ async def test_swarm_connection_pool_integration():
     transport = Mock()
 
     connection_config = ConnectionConfig(
-        max_connections_per_peer=2,
-        enable_connection_pool=True
+        max_connections_per_peer=2, enable_connection_pool=True
     )
 
     swarm = Swarm(
-        peer_id, peerstore, upgrader, transport,
-        connection_config=connection_config
+        peer_id, peerstore, upgrader, transport, connection_config=connection_config
     )
 
     # Mock successful connection creation
@@ -394,8 +383,7 @@ async def test_swarm_connection_cleanup():
 
     connection_config = ConnectionConfig(enable_connection_pool=True)
     swarm = Swarm(
-        peer_id, peerstore, upgrader, transport,
-        connection_config=connection_config
+        peer_id, peerstore, upgrader, transport, connection_config=connection_config
     )
 
     # Add a connection
