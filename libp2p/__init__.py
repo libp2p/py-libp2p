@@ -47,6 +47,7 @@ from libp2p.peer.id import (
 )
 from libp2p.peer.peerstore import (
     PeerStore,
+    create_signed_peer_record,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -153,7 +154,6 @@ def get_default_muxer_options() -> TMuxerOptions:
         return create_mplex_muxer_option()
     else:  # YAMUX is default
         return create_yamux_muxer_option()
-
 
 def new_swarm(
     key_pair: KeyPair | None = None,
