@@ -18,6 +18,7 @@ The Python implementation of the libp2p networking stack
 
     Examples <examples>
     API <libp2p>
+    tls-support
 
 .. toctree::
     :maxdepth: 1
