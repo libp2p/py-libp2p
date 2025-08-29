@@ -7,12 +7,13 @@ import trio
 from libp2p.abc import ID, INetworkService, PeerInfo
 from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
+from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
-from libp2p.network.exceptions import SwarmException
 
 logger = logging.getLogger("libp2p.discovery.bootstrap")
 resolver = DNSResolver()
+
 
 class BootstrapDiscovery:
     """
@@ -193,7 +194,9 @@ class BootstrapDiscovery:
             )
             # Even for existing peers, try to connect if not already connected
             if peer_info.peer_id not in self.swarm.connections:
-                logger.debug("Starting parallel connection attempt for existing peer...")
+                logger.debug(
+                    "Starting parallel connection attempt for existing peer..."
+                )
                 # Use nursery for parallel connection attempt (non-blocking)
                 try:
                     async with trio.open_nursery() as connection_nursery:
@@ -248,7 +251,7 @@ class BootstrapDiscovery:
                 )
 
                 # Use swarm.dial_peer to connect using stored addresses
-                connection = await self.swarm.dial_peer(peer_id)
+                await self.swarm.dial_peer(peer_id)
 
                 # Calculate connection time
                 connection_time = trio.current_time() - connection_start_time
