@@ -14,6 +14,8 @@ from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
 logger = logging.getLogger("libp2p.discovery.bootstrap")
 resolver = DNSResolver()
 
+DEFAULT_CONNECTION_TIMEOUT = 10
+
 
 class BootstrapDiscovery:
     """
@@ -34,7 +36,7 @@ class BootstrapDiscovery:
         self.peerstore = swarm.peerstore
         self.bootstrap_addrs = bootstrap_addrs or []
         self.discovered_peers: set[str] = set()
-        self.connection_timeout: int = 10
+        self.connection_timeout: int = DEFAULT_CONNECTION_TIMEOUT
 
     async def start(self) -> None:
         """Process bootstrap addresses and emit peer discovery events in parallel."""
@@ -173,20 +175,9 @@ class BootstrapDiscovery:
             peerDiscovery.emit_peer_discovered(peer_info)
             logger.info(f"Peer discovered: {peer_info.peer_id}")
 
-            # Use nursery for parallel connection attempt (non-blocking)
-            try:
-                async with trio.open_nursery() as connection_nursery:
-                    logger.debug("Starting parallel connection attempt...")
-                    connection_nursery.start_soon(
-                        self._connect_to_peer, peer_info.peer_id
-                    )
-            except trio.Cancelled:
-                logger.debug(f"Connection attempt cancelled for {peer_info.peer_id}")
-                raise
-            except Exception as e:
-                logger.warning(
-                    f"Connection nursery failed for {peer_info.peer_id}: {e}"
-                )
+            # Connect to peer (parallel across different bootstrap addresses)
+            logger.debug("Connecting to discovered peer...")
+            await self._connect_to_peer(peer_info.peer_id)
 
         else:
             logger.debug(
@@ -194,33 +185,15 @@ class BootstrapDiscovery:
             )
             # Even for existing peers, try to connect if not already connected
             if peer_info.peer_id not in self.swarm.connections:
-                logger.debug(
-                    "Starting parallel connection attempt for existing peer..."
-                )
-                # Use nursery for parallel connection attempt (non-blocking)
-                try:
-                    async with trio.open_nursery() as connection_nursery:
-                        connection_nursery.start_soon(
-                            self._connect_to_peer, peer_info.peer_id
-                        )
-                except trio.Cancelled:
-                    logger.debug(
-                        f"Connection attempt cancelled for existing peer "
-                        f"{peer_info.peer_id}"
-                    )
-                    raise
-                except Exception as e:
-                    logger.warning(
-                        f"Connection nursery failed for existing peer "
-                        f"{peer_info.peer_id}: {e}"
-                    )
+                logger.debug("Connecting to existing peer...")
+                await self._connect_to_peer(peer_info.peer_id)
 
     async def _connect_to_peer(self, peer_id: ID) -> None:
         """
         Attempt to establish a connection to a peer with timeout.
 
         Uses swarm.dial_peer to connect using addresses stored in peerstore.
-        Times out after connection_timeout seconds to prevent hanging.
+        Times out after self.connection_timeout seconds to prevent hanging.
         """
         logger.debug(f"Connection attempt for peer: {peer_id}")
 
