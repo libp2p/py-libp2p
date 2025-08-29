@@ -118,6 +118,8 @@ class SecurityMultistream(ABC):
             # Select protocol if non-initiator
             protocol, _ = await self.multiselect.negotiate(communicator)
         if protocol is None:
-            raise MultiselectError("fail to negotiate a security protocol")
+            raise MultiselectError(
+                "fail to negotiate a security protocol: no protocl selected"
+            )
         # Return transport from protocol
         return self.transports[protocol]
