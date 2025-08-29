@@ -56,6 +56,8 @@ from libp2p.peer.id import (
 from libp2p.peer.peerdata import (
     PeerDataError,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
 )
@@ -247,6 +249,10 @@ class Pubsub(Service, IPubsub):
             packet.subscriptions.extend(
                 [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
             )
+        # Add the sender's signedRecord in the RPC message
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
+
         return packet
 
     async def continuously_read_stream(self, stream: INetStream) -> None:
@@ -263,6 +269,14 @@ class Pubsub(Service, IPubsub):
                 incoming: bytes = await read_varint_prefixed_bytes(stream)
                 rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
                 rpc_incoming.ParseFromString(incoming)
+
+                # Process the sender's signed-record if sent
+                if not maybe_consume_signed_record(rpc_incoming, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the incoming msg"
+                    )
+                    continue
+
                 if rpc_incoming.publish:
                     # deal with RPC.publish
                     for msg in rpc_incoming.publish:
@@ -572,6 +586,9 @@ class Pubsub(Service, IPubsub):
             [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
         )
 
+        # Add the senderRecord of the peer in the RPC msg
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
         # Send out subscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
 
@@ -604,6 +621,9 @@ class Pubsub(Service, IPubsub):
         packet.subscriptions.extend(
             [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)]
         )
+        # Add the senderRecord of the peer in the RPC msg
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
 
         # Send out unsubscribe message to all peers
         await self.message_all_peers(packet.SerializeToString())
