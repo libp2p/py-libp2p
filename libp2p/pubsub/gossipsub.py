@@ -25,13 +25,11 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.peer.peerinfo import (
-    PeerInfo,
-    peer_info_to_bytes,
-)
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import (
     PERMANENT_ADDR_TTL,
 )
@@ -792,45 +790,54 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             try:
-                # Validate signed peer record if provided; otherwise skip
-                if (
-                    not peer.HasField("signedPeerRecord")
-                    or len(peer.signedPeerRecord) == 0
-                ):
-                    # No signed record available; rely on ambient discovery
-                    continue
+                # Validate signed peer record if provided;
+                # otherwise try to connect directly
+                if peer.HasField("signedPeerRecord") and len(peer.signedPeerRecord) > 0:
+                    # Validate envelope signature and freshness via peerstore consume
+                    if self.pubsub is None:
+                        raise NoPubsubAttached
 
-                # Validate envelope signature and freshness via peerstore consume
-                if self.pubsub is None:
-                    raise NoPubsubAttached
-
-                # Convert to Envelope and PeerRecord
-                from libp2p.peer.envelope import consume_envelope
-
-                envelope, record = consume_envelope(
-                    peer.signedPeerRecord, "libp2p-peer-record"
-                )
-
-                # Ensure the record matches the advertised peer id
-                if record.peer_id != peer_id:
-                    raise ValueError("peer id mismatch in PX signed record")
-
-                # Store into peerstore and update addrs
-                self.pubsub.host.get_peerstore().consume_peer_record(envelope, ttl=7200)
-
-                # Derive PeerInfo from the record for connect
-                from libp2p.peer.peerinfo import PeerInfo
-
-                peer_info = PeerInfo(record.peer_id, record.addrs)
-                try:
-                    await self.pubsub.host.connect(peer_info)
-                except Exception as e:
-                    logger.warning(
-                        "failed to connect to px peer %s: %s",
-                        peer_id,
-                        e,
+                    envelope, record = consume_envelope(
+                        peer.signedPeerRecord, "libp2p-peer-record"
                     )
-                    continue
+
+                    # Ensure the record matches the advertised peer id
+                    if record.peer_id != peer_id:
+                        raise ValueError("peer id mismatch in PX signed record")
+
+                    # Store into peerstore and update addrs
+                    self.pubsub.host.get_peerstore().consume_peer_record(
+                        envelope, ttl=7200
+                    )
+
+                    peer_info = PeerInfo(record.peer_id, record.addrs)
+                    try:
+                        await self.pubsub.host.connect(peer_info)
+                    except Exception as e:
+                        logger.warning(
+                            "failed to connect to px peer %s: %s",
+                            peer_id,
+                            e,
+                        )
+                        continue
+                else:
+                    # No signed record available; try to use existing connection info
+                    if self.pubsub is None:
+                        raise NoPubsubAttached
+
+                    try:
+                        # Try to get existing peer info from peerstore
+                        existing_peer_info = self.pubsub.host.get_peerstore().peer_info(
+                            peer_id
+                        )
+                        await self.pubsub.host.connect(existing_peer_info)
+                    except Exception as e:
+                        logger.debug(
+                            "peer %s not found in peerstore or connection failed: %s",
+                            peer_id,
+                            e,
+                        )
+                        continue
             except Exception as e:
                 logger.warning(
                     "failed to parse peer info from px peer %s: %s",
@@ -1045,11 +1052,18 @@ class GossipSub(IPubsubRouter, Service):
             for peer in exchange_peers:
                 if self.pubsub is None:
                     raise NoPubsubAttached
-                peer_info = self.pubsub.host.get_peerstore().peer_info(peer)
-                signed_peer_record: rpc_pb2.PeerInfo = rpc_pb2.PeerInfo()
-                signed_peer_record.peerID = peer.to_bytes()
-                signed_peer_record.signedPeerRecord = peer_info_to_bytes(peer_info)
-                prune_msg.peers.append(signed_peer_record)
+
+                # Try to get the signed peer record envelope from peerstore
+                envelope = self.pubsub.host.get_peerstore().get_peer_record(peer)
+                peer_info_msg: rpc_pb2.PeerInfo = rpc_pb2.PeerInfo()
+                peer_info_msg.peerID = peer.to_bytes()
+
+                if envelope is not None:
+                    # Use the signed envelope
+                    peer_info_msg.signedPeerRecord = envelope.marshal_envelope()
+                # If no signed record available, include peer without signed record
+
+                prune_msg.peers.append(peer_info_msg)
 
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         control_msg.prune.extend([prune_msg])
