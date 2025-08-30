@@ -16,12 +16,14 @@ maintainers = [
     { name = "Dave Grantham", email = "dwg@linuxprogrammer.org" },
 ]
 dependencies = [
+    "aioquic>=1.2.0",
     "base58>=1.0.3",
-    "coincurve>=10.0.0",
+    "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "fastecdsa==2.3.2; sys_platform != 'win32'",
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
-    # "multiaddr>=0.0.9",
+    # "multiaddr (>=0.0.9,<0.0.10)",
     "multiaddr @ git+https://github.com/multiformats/py-multiaddr.git@db8124e2321f316d3b7d2733c7df11d6ad9c03e6",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
@@ -32,7 +34,6 @@ dependencies = [
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
-    "fastecdsa==2.3.2; sys_platform != 'win32'",
     "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
@@ -282,4 +283,5 @@ project_excludes = [
     "**/*pb2.py",
     "**/*.pyi",
     ".venv/**",
+    "./tests/interop/nim_libp2p",
 ]
