@@ -147,6 +147,8 @@ async def run_echo_test(server_addr: str, messages: list[str]):
                 logger.info(f"Got echo: {response}")
                 responses.append(response)
 
+                assert False, "FORCED FAILURE"
+
                 # Verify echo
                 assert message == response, (
                     f"Echo failed: sent {message!r}, got {response!r}"
