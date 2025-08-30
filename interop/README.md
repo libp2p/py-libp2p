@@ -9,13 +9,13 @@ docker run -p 6379:6379 -it redis:latest
 ## Listener
 
 ```bash
-transport=tcp ip=127.0.0.1  redis_addr=6379 port=8001 test_timeout_seconds=180 security=noise muxer=yamux is_dialer=false python3 native_ping.py
+transport=tcp ip=127.0.0.1  redis_addr=6379 port=8001 test_timeout_seconds=180 security=noise muxer=yamux is_dialer=false python3 interop/exec/native_ping.py
 ```
 
 ## Dialer
 
 ```bash
-transport=tcp ip=127.0.0.1  redis_addr=6379 port=8001 test_timeout_seconds=180 security=noise  muxer=yamux is_dialer=true python3 native_ping.py
+transport=tcp ip=127.0.0.1  redis_addr=6379 port=8001 test_timeout_seconds=180 security=noise  muxer=yamux is_dialer=true python3 interop/exec/native_ping.py
 ```
 
 ## From the Rust-side (Listener)
