@@ -40,6 +40,7 @@ from .peerinfo import (
 
 PERMANENT_ADDR_TTL = 0
 
+
 def create_signed_peer_record(
     peer_id: ID, addrs: list[Multiaddr], pvt_key: PrivateKey
 ) -> Envelope:

@@ -30,6 +30,9 @@ from libp2p.io.abc import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import (
+    env_to_send_in_RPC
+)
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
@@ -63,10 +66,8 @@ from .resources import (
     RelayResourceManager,
 )
 from .utils import (
-    maybe_consume_signed_record,
-    env_to_send_in_RPC
-    )
-
+    maybe_consume_signed_record
+)
 logger = logging.getLogger("libp2p.relay.circuit_v2")
 
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
