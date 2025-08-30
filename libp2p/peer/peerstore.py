@@ -40,6 +40,14 @@ from .peerinfo import (
 
 PERMANENT_ADDR_TTL = 0
 
+def create_signed_peer_record(
+    peer_id: ID, addrs: list[Multiaddr], pvt_key: PrivateKey
+) -> Envelope:
+    """Creates a signed_peer_record wrapped in an Envelope"""
+    record = PeerRecord(peer_id, addrs)
+    envelope = seal_record(record, pvt_key)
+    return envelope
+
 
 def create_signed_peer_record(
     peer_id: ID, addrs: list[Multiaddr], pvt_key: PrivateKey
@@ -139,6 +147,15 @@ class PeerStore(IPeerStore):
         self.peer_record_map: dict[ID, PeerRecordState] = {}
         self.local_peer_record: Envelope | None = None
         self.max_records = max_records
+        self.local_peer_record: Envelope | None = None
+
+    def get_local_record(self) -> Envelope | None:
+        """Get the local-signed-record wrapped in Envelope"""
+        return self.local_peer_record
+
+    def set_local_record(self, envelope: Envelope) -> None:
+        """Set the local-signed-record wrapped in Envelope"""
+        self.local_peer_record = envelope
 
     def get_local_record(self) -> Envelope | None:
         """Get the local-signed-record wrapped in Envelope"""
