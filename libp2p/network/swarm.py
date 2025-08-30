@@ -2,8 +2,6 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from libp2p.transport.quic.connection import QUICConnection
-from typing import cast
 import logging
 import sys
 from typing import cast
