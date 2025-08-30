@@ -116,21 +116,48 @@ class CircuitV2Transport(ITransport):
 
         """
         # Extract peer ID from multiaddr - P_P2P code is 0x01A5 (421)
-        peer_id_str = maddr.value_for_protocol("p2p")
-        if not peer_id_str:
-            raise ConnectionError("Multiaddr does not contain peer ID")
+        relay_id_str = None
+        relay_maddr = None
+        dest_id_str = None
+        found_circuit = False
+        relay_maddr_end_index = None
 
-        peer_id = ID.from_base58(peer_id_str)
-        peer_info = PeerInfo(peer_id, [maddr])
+        for idx, (proto, value) in enumerate(maddr.items()):
+            if proto.name == "p2p-circuit":
+                found_circuit = True
+                relay_maddr_end_index = idx 
+            elif proto.name == "p2p":
+                if not found_circuit and relay_id_str is None:
+                    relay_id_str = value
+                elif found_circuit and dest_id_str is None:
+                    dest_id_str = value
 
+        if relay_id_str is not None and relay_maddr_end_index is not None:
+            relay_maddr = multiaddr.Multiaddr("/".join(str(maddr).split("/")[:relay_maddr_end_index*2+1]))
+        if not relay_id_str:
+            raise ConnectionError("Multiaddr does not contain relay peer ID")
+        if not dest_id_str:
+            raise ConnectionError("Multiaddr does not contain destination peer ID after p2p-circuit")
+
+        logger.debug(f"Relay peer ID: {relay_id_str} , \n {relay_maddr}")
+
+        dest_info = PeerInfo(ID.from_base58(dest_id_str), [maddr])
+        logger.debug(f"Dialing destination peer ID: {dest_id_str} , \n {maddr}")
         # Use the internal dial_peer_info method
-        return await self.dial_peer_info(peer_info)
+        if isinstance(relay_id_str, str):
+            relay_peer_id = ID.from_base58(relay_id_str)
+        elif isinstance(relay_id_str, ID):
+            relay_peer_id = relay_id_str
+        else:
+            raise ConnectionError("relay_id_str must be a string or ID")
+        relay_peer_info = PeerInfo(relay_peer_id, [relay_maddr])
+        return await self.dial_peer_info(dest_info=dest_info, relay_info=relay_peer_info)
 
     async def dial_peer_info(
         self,
-        peer_info: PeerInfo,
+        dest_info: PeerInfo,
         *,
-        relay_peer_id: ID | None = None,
+        relay_info: PeerInfo | None = None,
     ) -> RawConnection:
         """
         Dial a peer through a relay.
@@ -154,11 +181,13 @@ class CircuitV2Transport(ITransport):
 
         """
         # If no specific relay is provided, try to find one
-        if relay_peer_id is None:
-            relay_peer_id = await self._select_relay(peer_info)
+        relay_peer_id = relay_info.peer_id
+        if relay_info is None:
+            relay_peer_id = await self._select_relay(dest_info)
             if not relay_peer_id:
                 raise ConnectionError("No suitable relay found")
-
+            relay_info = self.host.get_peerstore().peer_info(relay_peer_id)
+        await self.host.connect(relay_info)
         # Get a stream to the relay
         try:
             logger.debug(
@@ -184,17 +213,22 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
-
-            # Send HOP CONNECT message
-            hop_msg = HopMessage(
+            # # Send HOP CONNECT message
+            # hop_msg = HopMessage(
+            #     type=HopMessage.CONNECT,
+            #     peer=peer_info.peer_id.to_bytes(),
+            # )
+            # await relay_stream.write(hop_msg.SerializeToString())
+            
+            connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
-                peer=peer_info.peer_id.to_bytes(),
+                peer=dest_info.peer_id.to_bytes(),
             )
-            await relay_stream.write(hop_msg.SerializeToString())
-
+            await relay_stream.write(connect_msg.SerializeToString())
+            
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
-                resp_bytes = await relay_stream.read()
+                resp_bytes = await relay_stream.read(1024)
                 resp = HopMessage()
                 resp.ParseFromString(resp_bytes)
 
@@ -270,11 +304,7 @@ class CircuitV2Transport(ITransport):
                 type=HopMessage.RESERVE,
                 peer=self.host.get_id().to_bytes(),
             )
-            logger.debug("=== SENDING RESERVATION REQUEST ===")
-            logger.debug("Message type: %s", reserve_msg.type)
-            logger.debug("Peer ID: %s", self.host.get_id())
-            logger.debug("Raw message: %s", reserve_msg)
-
+            
             try:
                 await stream.write(reserve_msg.SerializeToString())
                 logger.debug("Successfully sent reservation request")
@@ -283,24 +313,14 @@ class CircuitV2Transport(ITransport):
                 raise
 
             # Read response with timeout
-            logger.debug("=== WAITING FOR RESERVATION RESPONSE ===")
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 try:
-                    resp_bytes = await stream.read()
+                    resp_bytes = await stream.read(1024)
                     logger.debug(
                         "Received reservation response: %d bytes", len(resp_bytes)
                     )
                     resp = HopMessage()
                     resp.ParseFromString(resp_bytes)
-                    logger.debug("=== PARSED RESERVATION RESPONSE ===")
-                    logger.debug("Message type: %s", resp.type)
-                    logger.debug(
-                        "Status code: %s", getattr(resp.status, "code", "unknown")
-                    )
-                    logger.debug(
-                        "Status message: %s", getattr(resp.status, "message", "unknown")
-                    )
-                    logger.debug("Raw response: %s", resp)
                 except Exception as e:
                     logger.error(
                         "Failed to read/parse reservation response: %s", str(e)
