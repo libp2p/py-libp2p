@@ -1,5 +1,5 @@
 Multiple Connections Per Peer
-============================
+=============================
 
 This example demonstrates how to use the multiple connections per peer feature in py-libp2p.
 
@@ -35,7 +35,7 @@ The feature is configured through the `ConnectionConfig` class:
     )
 
 Load Balancing Strategies
-------------------------
+-------------------------
 
 Two load balancing strategies are available:
 
@@ -74,7 +74,7 @@ The new API provides direct access to multiple connections:
     single_conn = swarm.get_connection(peer_id)
 
 Backward Compatibility
----------------------
+----------------------
 
 Existing code continues to work through backward compatibility features:
 
@@ -89,10 +89,10 @@ Existing code continues to work through backward compatibility features:
 Example
 -------
 
-See :doc:`examples/doc-examples/multiple_connections_example.py` for a complete working example.
+A complete working example is available in the `examples/doc-examples/multiple_connections_example.py` file.
 
 Production Configuration
------------------------
+-------------------------
 
 For production use, consider these settings:
 
@@ -121,7 +121,7 @@ For production use, consider these settings:
     )
 
 Architecture
------------
+------------
 
 The implementation follows the same architectural patterns as the Go and JavaScript reference implementations:
 
