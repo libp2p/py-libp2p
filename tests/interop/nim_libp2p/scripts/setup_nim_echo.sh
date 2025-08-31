@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Simple setup script for nim echo server interop testing
+# tests/interop/nim_libp2p/scripts/setup_nim_echo.sh
+# Cache-aware setup that skips installation if packages exist
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${SCRIPT_DIR}/.."
 
 # Colors
 GREEN='\033[0;32m'
@@ -13,86 +17,58 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${SCRIPT_DIR}/.."
-NIM_LIBP2P_DIR="${PROJECT_ROOT}/nim-libp2p"
+main() {
+    log_info "Setting up nim echo server for interop testing..."
 
-# Check prerequisites
-check_nim() {
-    if ! command -v nim &> /dev/null; then
-        log_error "Nim not found. Install with: curl -sSf https://nim-lang.org/choosenim/init.sh | sh"
+    # Check if nim is available
+    if ! command -v nim &> /dev/null || ! command -v nimble &> /dev/null; then
+        log_error "Nim not found. Please install nim first."
         exit 1
     fi
-    if ! command -v nimble &> /dev/null; then
-        log_error "Nimble not found. Please install Nim properly."
-        exit 1
-    fi
-}
 
-# Setup nim-libp2p dependency
-setup_nim_libp2p() {
-    log_info "Setting up nim-libp2p dependency..."
+    cd "${PROJECT_DIR}"
 
-    if [ ! -d "${NIM_LIBP2P_DIR}" ]; then
-        log_info "Cloning nim-libp2p..."
-        git clone https://github.com/status-im/nim-libp2p.git "${NIM_LIBP2P_DIR}"
+    # Create logs directory
+    mkdir -p logs
+
+    # Check if binary already exists
+    if [[ -f "nim_echo_server" ]]; then
+        log_info "nim_echo_server already exists, skipping build"
+        return 0
     fi
 
-    cd "${NIM_LIBP2P_DIR}"
-    log_info "Installing nim-libp2p dependencies..."
-    nimble install -y --depsOnly
-}
+    # Check if libp2p is already installed (cache-aware)
+    if nimble list -i | grep -q "libp2p"; then
+        log_info "libp2p already installed, skipping installation"
+    else
+        log_info "Installing nim-libp2p globally..."
+        nimble install -y libp2p
+    fi
 
-# Build nim echo server
-build_echo_server() {
     log_info "Building nim echo server..."
+    # Compile the echo server
+    nim c \
+        -d:release \
+        -d:chronicles_log_level=INFO \
+        -d:libp2p_quic_support \
+        -d:chronos_event_loop=iocp \
+        -d:ssl \
+        --opt:speed \
+        --mm:orc \
+        --verbosity:1 \
+        -o:nim_echo_server \
+        nim_echo_server.nim
 
-    cd "${PROJECT_ROOT}"
-
-    # Create nimble file if it doesn't exist
-    cat > nim_echo_test.nimble << 'EOF'
-# Package
-version = "0.1.0"
-author = "py-libp2p interop"
-description = "nim echo server for interop testing"
-license = "MIT"
-
-# Dependencies
-requires "nim >= 1.6.0"
-requires "libp2p"
-requires "chronos"
-requires "stew"
-
-# Binary
-bin = @["nim_echo_server"]
-EOF
-
-    # Build the server
-    log_info "Compiling nim echo server..."
-    nim c -d:release -d:chronicles_log_level=INFO -d:libp2p_quic_support --opt:speed --gc:orc -o:nim_echo_server nim_echo_server.nim
-
-    if [ -f "nim_echo_server" ]; then
+    # Verify binary was created
+    if [[ -f "nim_echo_server" ]]; then
         log_info "✅ nim_echo_server built successfully"
+        log_info "Binary size: $(ls -lh nim_echo_server | awk '{print $5}')"
     else
         log_error "❌ Failed to build nim_echo_server"
         exit 1
     fi
-}
 
-main() {
-    log_info "Setting up nim echo server for interop testing..."
-
-    # Create logs directory
-    mkdir -p "${PROJECT_ROOT}/logs"
-
-    # Clean up any existing processes
-    pkill -f "nim_echo_server" || true
-
-    check_nim
-    setup_nim_libp2p
-    build_echo_server
-
-    log_info "🎉 Setup complete! You can now run: python -m pytest test_echo_interop.py -v"
+    log_info "🎉 Setup complete!"
 }
 
 main "$@"

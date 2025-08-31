@@ -78,6 +78,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-xdist>=2.4.0",
     "pytest-trio>=0.5.2",
+    "pytest-timeout>=2.4.0",
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
@@ -89,11 +90,12 @@ docs = [
     "tomli; python_version < '3.11'",
 ]
 test = [
+    "factory-boy>=2.12.0,<3.0.0",
     "p2pclient==0.2.0",
     "pytest>=7.0.0",
-    "pytest-xdist>=2.4.0",
+    "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
-    "factory-boy>=2.12.0,<3.0.0",
+    "pytest-xdist>=2.4.0",
 ]
 
 [tool.setuptools]

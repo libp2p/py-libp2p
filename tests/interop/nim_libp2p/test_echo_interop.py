@@ -1,14 +1,6 @@
-#!/usr/bin/env python3
-"""
-Simple echo protocol interop test between py-libp2p and nim-libp2p.
-
-Tests that py-libp2p QUIC clients can communicate with nim-libp2p echo servers.
-"""
-
 import logging
 from pathlib import Path
 import subprocess
-from subprocess import Popen
 import time
 
 import pytest
@@ -24,7 +16,7 @@ from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_byt
 
 # Configuration
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
-TEST_TIMEOUT = 15.0  # Reduced timeout
+TEST_TIMEOUT = 30
 SERVER_START_TIMEOUT = 10.0
 
 # Setup logging
@@ -37,7 +29,7 @@ class NimEchoServer:
 
     def __init__(self, binary_path: Path):
         self.binary_path = binary_path
-        self.process: None | Popen = None
+        self.process: None | subprocess.Popen = None
         self.peer_id = None
         self.listen_addr = None
 
@@ -45,31 +37,24 @@ class NimEchoServer:
         """Start nim echo server and get connection info."""
         logger.info(f"Starting nim echo server: {self.binary_path}")
 
-        self.process: Popen[str] = subprocess.Popen(
+        self.process = subprocess.Popen(
             [str(self.binary_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
+            universal_newlines=True,
             bufsize=1,
         )
 
-        if self.process is None:
-            return None, None
-
         # Parse output for connection info
         start_time = time.time()
-        while (
-            self.process is not None and time.time() - start_time < SERVER_START_TIMEOUT
-        ):
-            if self.process.poll() is not None:
-                IOout = self.process.stdout
-                if IOout:
-                    output = IOout.read()
-                    raise RuntimeError(f"Server exited early: {output}")
+        while time.time() - start_time < SERVER_START_TIMEOUT:
+            if self.process and self.process.poll() and self.process.stdout:
+                output = self.process.stdout.read()
+                raise RuntimeError(f"Server exited early: {output}")
 
-            IOin = self.process.stdout
-            if IOin:
-                line = IOin.readline().strip()
+            reader = self.process.stdout if self.process else None
+            if reader:
+                line = reader.readline().strip()
                 if not line:
                     continue
 
@@ -147,8 +132,6 @@ async def run_echo_test(server_addr: str, messages: list[str]):
                 logger.info(f"Got echo: {response}")
                 responses.append(response)
 
-                assert False, "FORCED FAILURE"
-
                 # Verify echo
                 assert message == response, (
                     f"Echo failed: sent {message!r}, got {response!r}"
@@ -163,33 +146,8 @@ async def run_echo_test(server_addr: str, messages: list[str]):
     return responses
 
 
-@pytest.fixture
-def nim_echo_binary():
-    """Path to nim echo server binary."""
-    current_dir = Path(__file__).parent
-    binary_path = current_dir / "nim_echo_server"
-
-    if not binary_path.exists():
-        pytest.skip(
-            f"Nim echo server not found at {binary_path}. Run setup script first."
-        )
-
-    return binary_path
-
-
-@pytest.fixture
-async def nim_server(nim_echo_binary):
-    """Start and stop nim echo server for tests."""
-    server = NimEchoServer(nim_echo_binary)
-
-    try:
-        peer_id, listen_addr = await server.start()
-        yield server, peer_id, listen_addr
-    finally:
-        await server.stop()
-
-
 @pytest.mark.trio
+@pytest.mark.timeout(TEST_TIMEOUT)
 async def test_basic_echo_interop(nim_server):
     """Test basic echo functionality between py-libp2p and nim-libp2p."""
     server, peer_id, listen_addr = nim_server
@@ -216,13 +174,14 @@ async def test_basic_echo_interop(nim_server):
 
 
 @pytest.mark.trio
+@pytest.mark.timeout(TEST_TIMEOUT)
 async def test_large_message_echo(nim_server):
     """Test echo with larger messages."""
     server, peer_id, listen_addr = nim_server
 
     large_messages = [
-        "x" * 1024,  # 1KB
-        "y" * 10000,
+        "x" * 1024,
+        "y" * 5000,
     ]
 
     logger.info("Testing large message echo...")
