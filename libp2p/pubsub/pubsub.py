@@ -84,6 +84,9 @@ from .validators import (
 
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
+# DefaultMaximumMessageSize is 1mb.
+
+DefaultMaxMessageSize = 1 << 20
 
 logger = logging.getLogger("libp2p.pubsub")
 
@@ -136,6 +139,8 @@ class Pubsub(Service, IPubsub):
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
 
+    maxMessageSize: int
+    
     def __init__(
         self,
         host: IHost,
@@ -219,6 +224,8 @@ class Pubsub(Service, IPubsub):
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
+        
+        self.maxMessageSize = DefaultMaxMessageSize
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
