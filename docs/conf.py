@@ -16,20 +16,23 @@
 # sys.path.insert(0, os.path.abspath('.'))
 
 import doctest
-import os
 import sys
 from unittest.mock import MagicMock
 
 try:
     import tomllib
-except ModuleNotFoundError:
+except ImportError:
     # For Python < 3.11
-    import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
+    import tomli as tomllib  # type: ignore
 
 # Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-from libp2p.utils.paths import get_project_root, join_paths
-
-pyproject_path = join_paths(get_project_root(), "pyproject.toml")
+try:
+    from libp2p.utils.paths import get_project_root, join_paths
+    pyproject_path = join_paths(get_project_root(), "pyproject.toml")
+except ImportError:
+    # Fallback for documentation builds where libp2p is not available
+    import os
+    pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)
