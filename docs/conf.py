@@ -27,7 +27,9 @@ except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
 # Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+from libp2p.utils.paths import get_project_root, join_paths
+
+pyproject_path = join_paths(get_project_root(), "pyproject.toml")
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)

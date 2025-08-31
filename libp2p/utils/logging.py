@@ -1,7 +1,4 @@
 import atexit
-from datetime import (
-    datetime,
-)
 import logging
 import logging.handlers
 import os
@@ -148,13 +145,10 @@ def setup_logging() -> None:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        # Default log file with timestamp and unique identifier
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        unique_id = os.urandom(4).hex()  # Add a unique identifier to prevent collisions
-        if os.name == "nt":  # Windows
-            log_file = f"C:\\Windows\\Temp\\py-libp2p_{timestamp}_{unique_id}.log"
-        else:  # Unix-like
-            log_file = f"/tmp/py-libp2p_{timestamp}_{unique_id}.log"
+        # Use cross-platform temp file creation
+        from libp2p.utils.paths import create_temp_file
+
+        log_file = str(create_temp_file(prefix="py-libp2p_", suffix=".log"))
 
         # Print the log file path so users know where to find it
         print(f"Logging to: {log_file}", file=sys.stderr)

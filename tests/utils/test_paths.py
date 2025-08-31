@@ -3,20 +3,24 @@ Tests for cross-platform path utilities.
 """
 
 import os
-import tempfile
 from pathlib import Path
-import pytest
+import tempfile
 
 from libp2p.utils.paths import (
-    get_temp_dir,
-    get_project_root,
-    join_paths,
-    ensure_dir_exists,
-    get_config_dir,
-    get_script_dir,
     create_temp_file,
-    resolve_relative_path,
+    ensure_dir_exists,
+    find_executable,
+    get_binary_path,
+    get_config_dir,
+    get_project_root,
+    get_python_executable,
+    get_script_binary_path,
+    get_script_dir,
+    get_temp_dir,
+    get_venv_path,
+    join_paths,
     normalize_path,
+    resolve_relative_path,
 )
 
 
@@ -84,8 +88,8 @@ class TestPathUtilities:
         """Test platform-specific config directory."""
         config_dir = get_config_dir()
         assert isinstance(config_dir, Path)
-        
-        if os.name == 'nt':  # Windows
+
+        if os.name == "nt":  # Windows
             # Should be in AppData/Roaming or user home
             assert "AppData" in str(config_dir) or "py-libp2p" in str(config_dir)
         else:  # Unix-like
@@ -120,7 +124,7 @@ class TestPathUtilities:
         """Test relative path resolution."""
         base_path = tmp_path / "base"
         base_path.mkdir()
-        
+
         # Test relative path
         relative_path = "subdir/file.txt"
         result = resolve_relative_path(base_path, relative_path)
@@ -128,7 +132,7 @@ class TestPathUtilities:
         assert result == expected
 
         # Test absolute path (platform-agnostic)
-        if os.name == 'nt':  # Windows
+        if os.name == "nt":  # Windows
             absolute_path = "C:\\absolute\\path"
         else:  # Unix-like
             absolute_path = "/absolute/path"
@@ -149,14 +153,72 @@ class TestPathUtilities:
         assert result.is_absolute()
         assert result == absolute_path.resolve()
 
+    def test_get_venv_path(self, monkeypatch):
+        """Test virtual environment path detection."""
+        # Test when no virtual environment is active
+        # Temporarily clear VIRTUAL_ENV to test the "no venv" case
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        result = get_venv_path()
+        assert result is None
+
+        # Test when virtual environment is active
+        test_venv_path = "/path/to/venv"
+        monkeypatch.setenv("VIRTUAL_ENV", test_venv_path)
+        result = get_venv_path()
+        assert result == Path(test_venv_path)
+
+    def test_get_python_executable(self):
+        """Test Python executable path detection."""
+        result = get_python_executable()
+        assert isinstance(result, Path)
+        assert result.exists()
+        assert result.name.startswith("python")
+
+    def test_find_executable(self):
+        """Test executable finding in PATH."""
+        # Test with non-existent executable
+        result = find_executable("nonexistent_executable")
+        assert result is None
+
+        # Test with existing executable (python should be available)
+        result = find_executable("python")
+        if result:
+            assert isinstance(result, Path)
+            assert result.exists()
+
+    def test_get_script_binary_path(self):
+        """Test script binary path detection."""
+        result = get_script_binary_path()
+        assert isinstance(result, Path)
+        assert result.exists()
+        assert result.is_dir()
+
+    def test_get_binary_path(self, monkeypatch):
+        """Test binary path resolution with virtual environment."""
+        # Test when no virtual environment is active
+        result = get_binary_path("python")
+        if result:
+            assert isinstance(result, Path)
+            assert result.exists()
+
+        # Test when virtual environment is active
+        test_venv_path = "/path/to/venv"
+        monkeypatch.setenv("VIRTUAL_ENV", test_venv_path)
+        # This test is more complex as it depends on the actual venv structure
+        # We'll just verify the function doesn't crash
+        result = get_binary_path("python")
+        # Result can be None if binary not found in venv
+        if result:
+            assert isinstance(result, Path)
+
 
 class TestCrossPlatformCompatibility:
     """Test cross-platform compatibility."""
 
     def test_config_dir_platform_specific_windows(self, monkeypatch):
         """Test config directory respects Windows conventions."""
-        monkeypatch.setattr('os.name', 'nt')
-        monkeypatch.setenv('APPDATA', 'C:\\Users\\Test\\AppData\\Roaming')
+        monkeypatch.setattr("os.name", "nt")
+        monkeypatch.setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
         config_dir = get_config_dir()
         assert "AppData" in str(config_dir)
         assert "py-libp2p" in str(config_dir)
@@ -167,9 +229,9 @@ class TestCrossPlatformCompatibility:
         result = join_paths("dir1", "dir2", "file.txt")
         expected = Path("dir1") / "dir2" / "file.txt"
         assert result == expected
-        
+
         # Test that the result uses correct separators for the platform
-        if os.name == 'nt':  # Windows
+        if os.name == "nt":  # Windows
             assert "\\" in str(result) or "/" in str(result)
         else:  # Unix-like
             assert "/" in str(result)
@@ -211,3 +273,10 @@ class TestBackwardCompatibility:
         assert isinstance(create_temp_file(), Path)
         assert isinstance(resolve_relative_path(".", "test"), Path)
         assert isinstance(normalize_path("."), Path)
+        assert isinstance(get_python_executable(), Path)
+        assert isinstance(get_script_binary_path(), Path)
+
+        # Test optional return types
+        venv_path = get_venv_path()
+        if venv_path is not None:
+            assert isinstance(venv_path, Path)
