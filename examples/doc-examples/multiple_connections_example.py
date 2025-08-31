@@ -71,8 +71,7 @@ async def example_multiple_connections_api() -> None:
     logger.info("Demonstrating multiple connections API...")
 
     connection_config = ConnectionConfig(
-        max_connections_per_peer=3,
-        load_balancing_strategy="round_robin"
+        max_connections_per_peer=3, load_balancing_strategy="round_robin"
     )
 
     swarm = new_swarm(connection_config=connection_config)

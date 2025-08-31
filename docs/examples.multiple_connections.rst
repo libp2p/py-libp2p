@@ -63,13 +63,13 @@ The new API provides direct access to multiple connections:
 
     # Get all connections to a peer
     peer_connections = swarm.get_connections(peer_id)
-    
+
     # Get all connections (across all peers)
     all_connections = swarm.get_connections()
-    
+
     # Get the complete connections map
     connections_map = swarm.get_connections_map()
-    
+
     # Backward compatibility - get single connection
     single_conn = swarm.get_connection(peer_id)
 
@@ -82,7 +82,7 @@ Existing code continues to work through backward compatibility features:
 
     # Legacy 1:1 mapping (returns first connection for each peer)
     legacy_connections = swarm.connections_legacy
-    
+
     # Single connection access (returns first available connection)
     conn = swarm.get_connection(peer_id)
 
