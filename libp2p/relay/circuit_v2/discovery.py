@@ -45,6 +45,9 @@ from .protocol import (
 from .protocol_buffer import (
     StatusCode,
 )
+from .lib.peer.peerstore import (
+    env_to_send_in_RPC
+)
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
@@ -391,10 +394,13 @@ class RelayDiscovery(Service):
                 return False
 
             try:
+
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
                 # Create and send reservation request
                 request = HopMessage(
                     type=HopMessage.RESERVE,
                     peer=self.host.get_id().to_bytes(),
+                    signedRecord=envelope_bytes,
                 )
 
                 with trio.fail_after(self.stream_timeout):
@@ -409,6 +415,13 @@ class RelayDiscovery(Service):
                     # Parse response
                     response = HopMessage()
                     response.ParseFromString(response_bytes)
+
+                    if not maybe_consume_signed_record(response, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Check if reservation was successful
                     if response.type == HopMessage.RESERVE and response.HasField(
