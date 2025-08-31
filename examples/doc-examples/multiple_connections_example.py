@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Example demonstrating the enhanced Swarm with retry logic, exponential backoff,
-and multi-connection support.
+Example demonstrating multiple connections per peer support in libp2p.
 
 This example shows how to:
-1. Configure retry behavior with exponential backoff
-2. Enable multi-connection support with connection pooling
-3. Use different load balancing strategies
+1. Configure multiple connections per peer
+2. Use different load balancing strategies
+3. Access multiple connections through the new API
 4. Maintain backward compatibility
 """
 
-import asyncio
 import logging
+
+import trio
 
 from libp2p import new_swarm
 from libp2p.network.swarm import ConnectionConfig, RetryConfig
@@ -21,64 +21,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def example_basic_enhanced_swarm() -> None:
-    """Example of basic enhanced Swarm usage."""
-    logger.info("Creating enhanced Swarm with default configuration...")
+async def example_basic_multiple_connections() -> None:
+    """Example of basic multiple connections per peer usage."""
+    logger.info("Creating swarm with multiple connections support...")
 
-    # Create enhanced swarm with default retry and connection config
+    # Create swarm with default configuration
     swarm = new_swarm()
-    # Use default configuration values directly
-    default_retry = RetryConfig()
     default_connection = ConnectionConfig()
 
     logger.info(f"Swarm created with peer ID: {swarm.get_peer_id()}")
-    logger.info(f"Retry config: max_retries={default_retry.max_retries}")
     logger.info(
         f"Connection config: max_connections_per_peer="
         f"{default_connection.max_connections_per_peer}"
     )
-    logger.info(f"Connection pool enabled: {default_connection.enable_connection_pool}")
 
     await swarm.close()
-    logger.info("Basic enhanced Swarm example completed")
-
-
-async def example_custom_retry_config() -> None:
-    """Example of custom retry configuration."""
-    logger.info("Creating enhanced Swarm with custom retry configuration...")
-
-    # Custom retry configuration for aggressive retry behavior
-    retry_config = RetryConfig(
-        max_retries=5,  # More retries
-        initial_delay=0.05,  # Faster initial retry
-        max_delay=10.0,  # Lower max delay
-        backoff_multiplier=1.5,  # Less aggressive backoff
-        jitter_factor=0.2,  # More jitter
-    )
-
-    # Create swarm with custom retry config
-    swarm = new_swarm(retry_config=retry_config)
-
-    logger.info("Custom retry config applied:")
-    logger.info(f"  Max retries: {retry_config.max_retries}")
-    logger.info(f"  Initial delay: {retry_config.initial_delay}s")
-    logger.info(f"  Max delay: {retry_config.max_delay}s")
-    logger.info(f"  Backoff multiplier: {retry_config.backoff_multiplier}")
-    logger.info(f"  Jitter factor: {retry_config.jitter_factor}")
-
-    await swarm.close()
-    logger.info("Custom retry config example completed")
+    logger.info("Basic multiple connections example completed")
 
 
 async def example_custom_connection_config() -> None:
     """Example of custom connection configuration."""
-    logger.info("Creating enhanced Swarm with custom connection configuration...")
+    logger.info("Creating swarm with custom connection configuration...")
 
     # Custom connection configuration for high-performance scenarios
     connection_config = ConnectionConfig(
         max_connections_per_peer=5,  # More connections per peer
         connection_timeout=60.0,  # Longer timeout
-        enable_connection_pool=True,  # Enable connection pooling
         load_balancing_strategy="least_loaded",  # Use least loaded strategy
     )
 
@@ -91,9 +59,6 @@ async def example_custom_connection_config() -> None:
     )
     logger.info(f"  Connection timeout: {connection_config.connection_timeout}s")
     logger.info(
-        f"  Connection pool enabled: {connection_config.enable_connection_pool}"
-    )
-    logger.info(
         f"  Load balancing strategy: {connection_config.load_balancing_strategy}"
     )
 
@@ -101,22 +66,39 @@ async def example_custom_connection_config() -> None:
     logger.info("Custom connection config example completed")
 
 
-async def example_backward_compatibility() -> None:
-    """Example showing backward compatibility."""
-    logger.info("Creating enhanced Swarm with backward compatibility...")
+async def example_multiple_connections_api() -> None:
+    """Example of using the new multiple connections API."""
+    logger.info("Demonstrating multiple connections API...")
 
-    # Disable connection pool to maintain original behavior
-    connection_config = ConnectionConfig(enable_connection_pool=False)
+    connection_config = ConnectionConfig(
+        max_connections_per_peer=3,
+        load_balancing_strategy="round_robin"
+    )
 
-    # Create swarm with connection pool disabled
     swarm = new_swarm(connection_config=connection_config)
 
-    logger.info("Backward compatibility mode:")
+    logger.info("Multiple connections API features:")
+    logger.info("  - dial_peer() returns list[INetConn]")
+    logger.info("  - get_connections(peer_id) returns list[INetConn]")
+    logger.info("  - get_connections_map() returns dict[ID, list[INetConn]]")
     logger.info(
-        f"  Connection pool enabled: {connection_config.enable_connection_pool}"
+        "  - get_connection(peer_id) returns INetConn | None (backward compatibility)"
     )
-    logger.info(f"  Connections dict type: {type(swarm.connections)}")
-    logger.info("  Retry logic still available: 3 max retries")
+
+    await swarm.close()
+    logger.info("Multiple connections API example completed")
+
+
+async def example_backward_compatibility() -> None:
+    """Example of backward compatibility features."""
+    logger.info("Demonstrating backward compatibility...")
+
+    swarm = new_swarm()
+
+    logger.info("Backward compatibility features:")
+    logger.info("  - connections_legacy property provides 1:1 mapping")
+    logger.info("  - get_connection() method for single connection access")
+    logger.info("  - Existing code continues to work")
 
     await swarm.close()
     logger.info("Backward compatibility example completed")
@@ -124,7 +106,7 @@ async def example_backward_compatibility() -> None:
 
 async def example_production_ready_config() -> None:
     """Example of production-ready configuration."""
-    logger.info("Creating enhanced Swarm with production-ready configuration...")
+    logger.info("Creating swarm with production-ready configuration...")
 
     # Production-ready retry configuration
     retry_config = RetryConfig(
@@ -139,7 +121,6 @@ async def example_production_ready_config() -> None:
     connection_config = ConnectionConfig(
         max_connections_per_peer=3,  # Balance between performance and resource usage
         connection_timeout=30.0,  # Reasonable timeout
-        enable_connection_pool=True,  # Enable for better performance
         load_balancing_strategy="round_robin",  # Simple, predictable strategy
     )
 
@@ -160,17 +141,17 @@ async def example_production_ready_config() -> None:
 
 async def main() -> None:
     """Run all examples."""
-    logger.info("Enhanced Swarm Examples")
+    logger.info("Multiple Connections Per Peer Examples")
     logger.info("=" * 50)
 
     try:
-        await example_basic_enhanced_swarm()
-        logger.info("-" * 30)
-
-        await example_custom_retry_config()
+        await example_basic_multiple_connections()
         logger.info("-" * 30)
 
         await example_custom_connection_config()
+        logger.info("-" * 30)
+
+        await example_multiple_connections_api()
         logger.info("-" * 30)
 
         await example_backward_compatibility()
@@ -187,4 +168,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    trio.run(main)
