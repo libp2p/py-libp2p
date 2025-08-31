@@ -11,7 +11,6 @@ from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.utils.varint import encode_varint_prefixed, read_varint_prefixed_bytes
 
 # Configuration
@@ -88,16 +87,10 @@ class NimEchoServer:
 async def run_echo_test(server_addr: str, messages: list[str]):
     """Test echo protocol against nim server with proper timeout handling."""
     # Create py-libp2p QUIC client with shorter timeouts
-    quic_config = QUICTransportConfig(
-        idle_timeout=10.0,
-        max_concurrent_streams=10,
-        connection_timeout=5.0,
-        enable_draft29=False,
-    )
 
     host = new_host(
+        enable_quic=True,
         key_pair=create_new_key_pair(),
-        transport_opt={"quic_config": quic_config},
     )
 
     listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/udp/0/quic-v1")

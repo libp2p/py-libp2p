@@ -1,3 +1,5 @@
+import logging
+
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
 from libp2p.transport.quic.transport import QUICTransport
@@ -87,7 +89,7 @@ MUXER_YAMUX = "YAMUX"
 MUXER_MPLEX = "MPLEX"
 DEFAULT_NEGOTIATE_TIMEOUT = 5
 
-
+logger = logging.getLogger(__name__)
 
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     """
@@ -163,7 +165,8 @@ def new_swarm(
     peerstore_opt: IPeerStore | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
-    transport_opt: dict[Any, Any] | None = None,
+    enable_quic: bool = False,
+    quic_transport_opt: QUICTransportConfig | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -174,7 +177,8 @@ def new_swarm(
     :param peerstore_opt: optional peerstore
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
-    :param transport_opt: options for transport
+    :param enable_quic: enable quic for transport
+    :param quic_transport_opt: options for transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -182,6 +186,10 @@ def new_swarm(
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
     """
+    if not enable_quic and quic_transport_opt is not None:
+        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        quic_transport_opt = None
+
     if key_pair is None:
         key_pair = generate_new_rsa_identity()
 
@@ -190,22 +198,17 @@ def new_swarm(
     transport: TCP | QUICTransport
 
     if listen_addrs is None:
-        transport_opt = transport_opt or {}
-        quic_config: QUICTransportConfig | None = transport_opt.get('quic_config')
-
-        if quic_config:
-            transport = QUICTransport(key_pair.private_key, quic_config)
+        if enable_quic:
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             transport = TCP()
     else:
         addr = listen_addrs[0]
-        is_quic = addr.__contains__("quic") or addr.__contains__("quic-v1")
+        is_quic = is_quic_multiaddr(addr)
         if addr.__contains__("tcp"):
             transport = TCP()
         elif is_quic:
-            transport_opt = transport_opt or {}
-            quic_config = transport_opt.get('quic_config', QUICTransportConfig())
-            transport = QUICTransport(key_pair.private_key, quic_config)
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
 
@@ -266,7 +269,8 @@ def new_host(
     enable_mDNS: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-    transport_opt: dict[Any, Any] | None = None,
+    enable_quic: bool = False,
+    quic_transport_opt:  QUICTransportConfig | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -280,17 +284,23 @@ def new_host(
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
-    :param transport_opt: optional dictionary of properties of transport
+    :param enable_quic: optinal choice to use QUIC for transport
+    :param transport_opt: optional configuration for quic transport
     :return: return a host instance
     """
+
+    if not enable_quic and quic_transport_opt is not None:
+        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+
     swarm = new_swarm(
+        enable_quic=enable_quic,
         key_pair=key_pair,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        transport_opt=transport_opt
+        quic_transport_opt=quic_transport_opt if enable_quic else None
     )
 
     if disc_opt is not None:

@@ -655,13 +655,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         return info
 
-    # Legacy compatibility for existing code
-    async def verify_peer_identity(self) -> None:
-        """
-        Legacy method for compatibility - delegates to security manager.
-        """
-        await self._verify_peer_identity_with_security()
-
     # Stream management methods (IMuxedConn interface)
 
     async def open_stream(self, timeout: float = 5.0) -> QUICStream:

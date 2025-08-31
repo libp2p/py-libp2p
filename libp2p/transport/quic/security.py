@@ -1163,20 +1163,3 @@ def create_quic_security_transport(
 
     """
     return QUICTLSConfigManager(libp2p_private_key, peer_id)
-
-
-# Legacy compatibility functions for existing code
-def generate_libp2p_tls_config(private_key: PrivateKey, peer_id: ID) -> TLSConfig:
-    """
-    Legacy function for compatibility with existing transport code.
-
-    Args:
-        private_key: libp2p private key
-        peer_id: libp2p peer ID
-
-    Returns:
-        TLS configuration
-
-    """
-    generator = CertificateGenerator()
-    return generator.generate_certificate(private_key, peer_id)

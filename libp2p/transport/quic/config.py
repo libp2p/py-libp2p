@@ -51,9 +51,13 @@ class QUICTransportConfig:
     """Configuration for QUIC transport."""
 
     # Connection settings
-    idle_timeout: float = 30.0  # Connection idle timeout in seconds
-    max_datagram_size: int = 1200  # Maximum UDP datagram size
-    local_port: int | None = None  # Local port for binding (None = random)
+    idle_timeout: float = 30.0  # Seconds before an idle connection is closed.
+    max_datagram_size: int = (
+        1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
+    )
+    local_port: int | None = (
+        None  # Local port to bind to. If None, a random port is chosen.
+    )
 
     # Protocol version support
     enable_draft29: bool = True  # Enable QUIC draft-29 for compatibility
@@ -102,14 +106,14 @@ class QUICTransportConfig:
     """Timeout for graceful stream close (seconds)."""
 
     # Flow control configuration
-    STREAM_FLOW_CONTROL_WINDOW: int = 512 * 1024  # 512KB
+    STREAM_FLOW_CONTROL_WINDOW: int = 1024 * 1024  # 1MB
     """Per-stream flow control window size."""
 
-    CONNECTION_FLOW_CONTROL_WINDOW: int = 768 * 1024  # 768KB
+    CONNECTION_FLOW_CONTROL_WINDOW: int = 1536 * 1024  # 1.5MB
     """Connection-wide flow control window size."""
 
     # Buffer management
-    MAX_STREAM_RECEIVE_BUFFER: int = 1024 * 1024  # 1MB
+    MAX_STREAM_RECEIVE_BUFFER: int = 2 * 1024 * 1024  # 2MB
     """Maximum receive buffer size per stream."""
 
     STREAM_RECEIVE_BUFFER_LOW_WATERMARK: int = 64 * 1024  # 64KB

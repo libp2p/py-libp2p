@@ -19,7 +19,6 @@ from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.transport.quic.config import QUICTransportConfig
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
@@ -52,18 +51,10 @@ async def run_server(port: int, seed: int | None = None) -> None:
 
         secret = secrets.token_bytes(32)
 
-    # QUIC transport configuration
-    quic_config = QUICTransportConfig(
-        idle_timeout=30.0,
-        max_concurrent_streams=100,
-        connection_timeout=10.0,
-        enable_draft29=False,
-    )
-
     # Create host with QUIC transport
     host = new_host(
+        enable_quic=True,
         key_pair=create_new_key_pair(secret),
-        transport_opt={"quic_config": quic_config},
     )
 
     # Server mode: start listener
@@ -98,18 +89,10 @@ async def run_client(destination: str, seed: int | None = None) -> None:
 
         secret = secrets.token_bytes(32)
 
-    # QUIC transport configuration
-    quic_config = QUICTransportConfig(
-        idle_timeout=30.0,
-        max_concurrent_streams=100,
-        connection_timeout=10.0,
-        enable_draft29=False,
-    )
-
     # Create host with QUIC transport
     host = new_host(
+        enable_quic=True,
         key_pair=create_new_key_pair(secret),
-        transport_opt={"quic_config": quic_config},
     )
 
     # Client mode: NO listener, just connect
