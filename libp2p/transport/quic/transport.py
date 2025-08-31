@@ -5,7 +5,6 @@ QUIC Transport implementation
 import copy
 import logging
 import ssl
-import sys
 from typing import TYPE_CHECKING, cast
 
 from aioquic.quic.configuration import (
@@ -66,11 +65,6 @@ from .security import (
 QUIC_V1_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_V1
 QUIC_DRAFT29_PROTOCOL = QUICTransportConfig.PROTOCOL_QUIC_DRAFT29
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] [%(name)s]  %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
 logger = logging.getLogger(__name__)
 
 

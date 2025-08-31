@@ -37,7 +37,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Add Nim installation for interop tests
       - name: Install Nim for interop testing
         if: matrix.toxenv == 'interop'
         run: |
@@ -46,7 +45,6 @@ jobs:
           echo "$HOME/.nimble/bin" >> $GITHUB_PATH
           echo "$HOME/.choosenim/toolchains/nim-stable/bin" >> $GITHUB_PATH
 
-      # Cache nimble packages - ADD THIS
       - name: Cache nimble packages
         if: matrix.toxenv == 'interop'
         uses: actions/cache@v4

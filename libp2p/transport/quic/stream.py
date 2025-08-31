@@ -1,7 +1,6 @@
 """
-QUIC Stream implementation for py-libp2p Module 3.
-Based on patterns from go-libp2p and js-libp2p QUIC implementations.
-Uses aioquic's native stream capabilities with libp2p interface compliance.
+QUIC Stream implementation
+Provides stream interface over QUIC's native multiplexing.
 """
 
 from enum import Enum

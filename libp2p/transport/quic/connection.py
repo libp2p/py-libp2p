@@ -1,12 +1,11 @@
 """
 QUIC Connection implementation.
-Uses aioquic's sans-IO core with trio for async operations.
+Manages bidirectional QUIC connections with integrated stream multiplexing.
 """
 
 from collections.abc import Awaitable, Callable
 import logging
 import socket
-from sys import stdout
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -37,14 +36,7 @@ if TYPE_CHECKING:
     from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
-logging.root.handlers = []
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler(stdout)],
-)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class QUICConnection(IRawConnection, IMuxedConn):
@@ -66,11 +58,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
     - COMPLETE connection ID management (fixes the original issue)
     """
 
-    MAX_CONCURRENT_STREAMS = 100
+    MAX_CONCURRENT_STREAMS = 256
     MAX_INCOMING_STREAMS = 1000
     MAX_OUTGOING_STREAMS = 1000
-    STREAM_ACCEPT_TIMEOUT = 30.0
-    CONNECTION_HANDSHAKE_TIMEOUT = 30.0
+    STREAM_ACCEPT_TIMEOUT = 60.0
+    CONNECTION_HANDSHAKE_TIMEOUT = 60.0
     CONNECTION_CLOSE_TIMEOUT = 10.0
 
     def __init__(
@@ -107,7 +99,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._remote_peer_id = remote_peer_id
         self._local_peer_id = local_peer_id
         self.peer_id = remote_peer_id or local_peer_id
-        self.__is_initiator = is_initiator
+        self._is_initiator = is_initiator
         self._maddr = maddr
         self._transport = transport
         self._security_manager = security_manager
@@ -198,7 +190,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         For libp2p, we primarily use bidirectional streams.
         """
-        if self.__is_initiator:
+        if self._is_initiator:
             return 0  # Client starts with 0, then 4, 8, 12...
         else:
             return 1  # Server starts with 1, then 5, 9, 13...
@@ -208,7 +200,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
     @property
     def is_initiator(self) -> bool:  # type: ignore
         """Check if this connection is the initiator."""
-        return self.__is_initiator
+        return self._is_initiator
 
     @property
     def is_closed(self) -> bool:
@@ -283,7 +275,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         try:
             # If this is a client connection, we need to establish the connection
-            if self.__is_initiator:
+            if self._is_initiator:
                 await self._initiate_connection()
             else:
                 # For server connections, we're already connected via the listener
@@ -383,7 +375,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
-        if self.__is_initiator:
+        if self._is_initiator:
             self._nursery.start_soon(async_fn=self._client_packet_receiver)
 
         self._nursery.start_soon(async_fn=self._event_processing_loop)
@@ -616,7 +608,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             "handshake_complete": self._handshake_completed,
             "peer_id": str(self._remote_peer_id) if self._remote_peer_id else None,
             "local_peer_id": str(self._local_peer_id),
-            "is_initiator": self.__is_initiator,
+            "is_initiator": self._is_initiator,
             "has_certificate": self._peer_certificate is not None,
             "security_manager_available": self._security_manager is not None,
         }
@@ -808,8 +800,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             logger.debug(f"Removed stream {stream_id} from connection")
 
-    # *** UPDATED: Complete QUIC event handling - FIXES THE ORIGINAL ISSUE ***
-
     async def _process_quic_events(self) -> None:
         """Process all pending QUIC events."""
         if self._event_processing_active:
@@ -868,8 +858,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except Exception as e:
             logger.error(f"Error handling QUIC event {type(event).__name__}: {e}")
 
-    # *** NEW: Connection ID event handlers - THE MAIN FIX ***
-
     async def _handle_connection_id_issued(
         self, event: events.ConnectionIdIssued
     ) -> None:
@@ -919,10 +907,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
         if self._current_connection_id == event.connection_id:
             if self._available_connection_ids:
                 self._current_connection_id = next(iter(self._available_connection_ids))
-                logger.debug(
-                    f"Switching new connection ID: {self._current_connection_id.hex()}"
-                )
-                self._stats["connection_id_changes"] += 1
+                if self._current_connection_id:
+                    logger.debug(
+                        "Switching to new connection ID: "
+                        f"{self._current_connection_id.hex()}"
+                    )
+                    self._stats["connection_id_changes"] += 1
+                else:
+                    logger.warning("⚠️ No available connection IDs after retirement!")
+                    logger.debug("⚠️ No available connection IDs after retirement!")
             else:
                 self._current_connection_id = None
                 logger.warning("⚠️ No available connection IDs after retirement!")
@@ -930,8 +923,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Update statistics
         self._stats["connection_ids_retired"] += 1
-
-    # *** NEW: Additional event handlers for completeness ***
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""
@@ -956,8 +947,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             stream: QUICStream = self._streams[event.stream_id]
             # Handle stop sending on the stream if method exists
             await stream.handle_stop_sending(event.error_code)
-
-    # *** EXISTING event handlers (unchanged) ***
 
     async def _handle_handshake_completed(
         self, event: events.HandshakeCompleted
@@ -1108,7 +1097,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         - Even IDs are client-initiated
         - Odd IDs are server-initiated
         """
-        if self.__is_initiator:
+        if self._is_initiator:
             # We're the client, so odd stream IDs are incoming
             return stream_id % 2 == 1
         else:
@@ -1336,7 +1325,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             QUICStreamTimeoutError: If read timeout occurs.
 
         """
-        # This method doesn't make sense for a muxed connection
         # It's here for interface compatibility but should not be used
         raise NotImplementedError(
             "Use streams for reading data from QUIC connections. "
@@ -1399,7 +1387,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         return (
             f"QUICConnection(peer={self._remote_peer_id}, "
             f"addr={self._remote_addr}, "
-            f"initiator={self.__is_initiator}, "
+            f"initiator={self._is_initiator}, "
             f"verified={self._peer_verified}, "
             f"established={self._established}, "
             f"streams={len(self._streams)}, "

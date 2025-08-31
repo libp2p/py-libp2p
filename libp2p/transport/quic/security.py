@@ -778,6 +778,16 @@ class PeerAuthenticator:
 
         """
         try:
+            from datetime import datetime, timezone
+
+            now = datetime.now(timezone.utc)
+
+            if certificate.not_valid_after_utc < now:
+                raise QUICPeerVerificationError("Certificate has expired")
+
+            if certificate.not_valid_before_utc > now:
+                raise QUICPeerVerificationError("Certificate not yet valid")
+
             # Extract libp2p extension
             libp2p_extension = None
             for extension in certificate.extensions:
