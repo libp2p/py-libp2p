@@ -130,7 +130,7 @@ async def run_node(port: int, mode: str, demo_interval: int = 30) -> None:
         # Create host and DHT
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair, bootstrap=DEFAULT_BOOTSTRAP_NODES)
-        listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+        listen_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
         async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
             # Start maintenance tasks
@@ -139,7 +139,7 @@ async def run_node(port: int, mode: str, demo_interval: int = 30) -> None:
 
             peer_id = host.get_id().pretty()
             logger.info(f"Node peer ID: {peer_id}")
-            logger.info(f"Node address: /ip4/0.0.0.0/tcp/{port}/p2p/{peer_id}")
+            logger.info(f"Node address: /ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}")
 
             # Create and start DHT with Random Walk enabled
             dht = KadDHT(host, dht_mode, enable_random_walk=True)

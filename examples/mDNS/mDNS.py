@@ -33,7 +33,7 @@ def onPeerDiscovery(peerinfo: PeerInfo):
 async def run(port: int) -> None:
     secret = secrets.token_bytes(32)
     key_pair = create_new_key_pair(secret)
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     peerDiscovery.register_peer_discovered_handler(onPeerDiscovery)
 

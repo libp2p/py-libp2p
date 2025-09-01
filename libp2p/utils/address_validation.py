@@ -99,7 +99,7 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
 
     # Fallback if nothing discovered
     if not addrs:
-        addrs.append(Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}"))
+        addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
 
     return addrs
 
@@ -148,8 +148,8 @@ def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
         if "/ip4/127." in str(c) or "/ip6/::1" in str(c):
             return c
 
-    # As a final fallback, produce a wildcard
-    return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
+    # As a final fallback, produce a loopback address
+    return Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}")
 
 
 __all__ = [

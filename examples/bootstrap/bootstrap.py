@@ -59,7 +59,7 @@ async def run(port: int, bootstrap_addrs: list[str]) -> None:
     key_pair = create_new_key_pair(secret)
 
     # Create listen address
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     # Register peer discovery handler
     peerDiscovery.register_peer_discovered_handler(on_peer_discovery)

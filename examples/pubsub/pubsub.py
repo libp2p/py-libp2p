@@ -109,7 +109,7 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
         port = find_free_port()
         logger.info(f"Using random available port: {port}")
 
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     # Create a new libp2p host
     host = new_host(

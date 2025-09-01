@@ -58,7 +58,7 @@ def print_identify_response(identify_response: Identify):
 
 
 async def run(port: int, destination: str, use_varint_format: bool = True) -> None:
-    localhost_ip = "0.0.0.0"
+    localhost_ip = "127.0.0.1"
 
     if not destination:
         # Create first host (listener)
@@ -79,10 +79,9 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
             # Start the peer-store cleanup task
             nursery.start_soon(host_a.get_peerstore().start_cleanup_task, 60)
 
-            # Get the actual address and replace 0.0.0.0 with 127.0.0.1 for client
-            # connections
+            # Get the actual address
             server_addr = str(host_a.get_addrs()[0])
-            client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
+            client_addr = server_addr
 
             format_name = "length-prefixed" if use_varint_format else "raw protobuf"
             format_flag = "--raw-format" if not use_varint_format else ""

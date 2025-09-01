@@ -216,7 +216,7 @@ async def run_listener(
     )
 
     # Start listening
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     try:
         async with host.run([listen_addr]):
@@ -275,7 +275,7 @@ async def run_dialer(
     )
 
     # Start listening on a different port
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     async with host.run([listen_addr]):
         logger.info("Dialer host ready!")

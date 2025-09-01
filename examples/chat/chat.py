@@ -40,7 +40,7 @@ async def write_data(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
     host = new_host()
     async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
