@@ -41,7 +41,7 @@ Create a file named ``relay_node.py`` with the following content:
     logger = logging.getLogger("relay_node")
 
     async def run_relay():
-        listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/9000")
+        listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/9000")
         host = new_host()
 
         config = RelayConfig(
@@ -139,7 +139,7 @@ Create a file named ``destination_node.py`` with the following content:
         Run a simple destination node that accepts connections.
         This is a simplified version that doesn't use the relay functionality.
         """
-        listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/9001")
+        listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/9001")
         host = new_host()
 
         # Configure as a relay receiver (stop)
@@ -259,7 +259,7 @@ Create a file named ``source_node.py`` with the following content:
 
     async def run_source(relay_peer_id=None, destination_peer_id=None):
         # Create a libp2p host
-        listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/9002")
+        listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/9002")
         host = new_host()
 
         # Configure as a relay client
@@ -428,7 +428,7 @@ Running the Example
        Relay node multiaddr: /ip4/127.0.0.1/tcp/9000/p2p/QmaUigQJ9nJERa6GaZuyfaiX91QjYwoQJ46JS3k7ys7SLx
        ==================================================
 
-       Listening on: [<Multiaddr /ip4/0.0.0.0/tcp/9000/p2p/QmaUigQJ9nJERa6GaZuyfaiX91QjYwoQJ46JS3k7ys7SLx>]
+       Listening on: [<Multiaddr /ip4/127.0.0.1/tcp/9000/p2p/QmaUigQJ9nJERa6GaZuyfaiX91QjYwoQJ46JS3k7ys7SLx>]
        Protocol service started
        Relay service started successfully
        Relay limits: RelayLimits(duration=3600, data=10485760, max_circuit_conns=8, max_reservations=4)
@@ -447,7 +447,7 @@ Running the Example
        Use this ID in the source node: QmPBr38KeQG2ibyL4fxq6yJWpfoVNCqJMHBdNyn1Qe4h5s
        ==================================================
 
-       Listening on: [<Multiaddr /ip4/0.0.0.0/tcp/9001/p2p/QmPBr38KeQG2ibyL4fxq6yJWpfoVNCqJMHBdNyn1Qe4h5s>]
+       Listening on: [<Multiaddr /ip4/127.0.0.1/tcp/9001/p2p/QmPBr38KeQG2ibyL4fxq6yJWpfoVNCqJMHBdNyn1Qe4h5s>]
        Registered echo protocol handler
        Protocol service started
        Transport created
@@ -469,7 +469,7 @@ Running the Example
 
        $ python source_node.py
        Source node started with ID: QmPyM56cgmFoHTgvMgGfDWRdVRQznmxCDDDg2dJ8ygVXj3
-       Listening on: [<Multiaddr /ip4/0.0.0.0/tcp/9002/p2p/QmPyM56cgmFoHTgvMgGfDWRdVRQznmxCDDDg2dJ8ygVXj3>]
+       Listening on: [<Multiaddr /ip4/127.0.0.1/tcp/9002/p2p/QmPyM56cgmFoHTgvMgGfDWRdVRQznmxCDDDg2dJ8ygVXj3>]
        Protocol service started
        No relay peer ID provided. Please enter the relay\'s peer ID:
        Enter relay peer ID: QmaUigQJ9nJERa6GaZuyfaiX91QjYwoQJ46JS3k7ys7SLx
