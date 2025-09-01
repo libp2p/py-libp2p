@@ -27,6 +27,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )
@@ -36,7 +37,6 @@ from .config import (
     DEFAULT_DISCOVERY_STREAM_TIMEOUT,
     DEFAULT_PEER_PROTOCOL_TIMEOUT,
 )
-from libp2p.peer.peerstore import env_to_send_in_RPC
 from .pb.circuit_pb2 import (
     HopMessage,
 )
