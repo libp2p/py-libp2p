@@ -164,8 +164,8 @@ async def test_live_peers_unexpected_drop(security_protocol):
         assert peer_a_id in host_b.get_live_peers()
 
         # Simulate unexpected connection drop by directly closing the connection
-        conn = host_a.get_network().connections[peer_b_id]
-        await conn.muxed_conn.close()
+        conns = host_a.get_network().connections[peer_b_id]
+        await conns[0].muxed_conn.close()
 
         # Allow for connection cleanup
         await trio.sleep(0.1)
