@@ -1,0 +1,2 @@
+Enhanced security by defaulting to loopback address (127.0.0.1) instead of wildcard binding.
+All examples and core modules now use secure default addresses to prevent unintended public exposure.
