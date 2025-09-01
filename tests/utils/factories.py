@@ -669,8 +669,8 @@ async def swarm_conn_pair_factory(
     async with swarm_pair_factory(
         security_protocol=security_protocol, muxer_opt=muxer_opt
     ) as swarms:
-        conn_0 = swarms[0].connections[swarms[1].get_peer_id()]
-        conn_1 = swarms[1].connections[swarms[0].get_peer_id()]
+        conn_0 = swarms[0].connections[swarms[1].get_peer_id()][0]
+        conn_1 = swarms[1].connections[swarms[0].get_peer_id()][0]
         yield cast(SwarmConn, conn_0), cast(SwarmConn, conn_1)
 
 
