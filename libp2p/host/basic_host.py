@@ -297,6 +297,11 @@ class BasicHost(IHost):
             protocol, handler = await self.multiselect.negotiate(
                 MultiselectCommunicator(net_stream), self.negotiate_timeout
             )
+            if protocol is None:
+                await net_stream.reset()
+                raise StreamFailure(
+                    "Failed to negotiate protocol: no protocol selected"
+                )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
             logger.debug(
