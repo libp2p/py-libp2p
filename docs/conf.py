@@ -291,7 +291,9 @@ texinfo_documents = [
 ]
 
 # Prevent autodoc from trying to import module from tests.factories
-autodoc_mock_imports = ["tests.factories"]
+autodoc_mock_imports = ["tests.factories"
+                        "libp2p.relay.circuit_v2.lib"
+]
 
 # Documents to append as an appendix to all manuals.
 # texinfo_appendices = []
