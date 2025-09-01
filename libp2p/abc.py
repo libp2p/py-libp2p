@@ -1412,15 +1412,16 @@ class INetwork(ABC):
     ----------
     peerstore : IPeerStore
         The peer store for managing peer information.
-    connections : dict[ID, INetConn]
-        A mapping of peer IDs to network connections.
+    connections : dict[ID, list[INetConn]]
+        A mapping of peer IDs to lists of network connections
+        (multiple connections per peer).
     listeners : dict[str, IListener]
         A mapping of listener identifiers to listener instances.
 
     """
 
     peerstore: IPeerStore
-    connections: dict[ID, INetConn]
+    connections: dict[ID, list[INetConn]]
     listeners: dict[str, IListener]
 
     @abstractmethod
@@ -1436,9 +1437,56 @@ class INetwork(ABC):
         """
 
     @abstractmethod
-    async def dial_peer(self, peer_id: ID) -> INetConn:
+    def get_connections(self, peer_id: ID | None = None) -> list[INetConn]:
         """
-        Create a connection to the specified peer.
+        Get connections for peer (like JS getConnections, Go ConnsToPeer).
+
+        Parameters
+        ----------
+        peer_id : ID | None
+            The peer ID to get connections for. If None, returns all connections.
+
+        Returns
+        -------
+        list[INetConn]
+            List of connections to the specified peer, or all connections
+            if peer_id is None.
+
+        """
+
+    @abstractmethod
+    def get_connections_map(self) -> dict[ID, list[INetConn]]:
+        """
+        Get all connections map (like JS getConnectionsMap).
+
+        Returns
+        -------
+        dict[ID, list[INetConn]]
+            The complete mapping of peer IDs to their connection lists.
+
+        """
+
+    @abstractmethod
+    def get_connection(self, peer_id: ID) -> INetConn | None:
+        """
+        Get single connection for backward compatibility.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to get a connection for.
+
+        Returns
+        -------
+        INetConn | None
+            The first available connection, or None if no connections exist.
+
+        """
+
+    @abstractmethod
+    async def dial_peer(self, peer_id: ID) -> list[INetConn]:
+        """
+        Create connections to the specified peer with load balancing.
 
         Parameters
         ----------
@@ -1447,8 +1495,8 @@ class INetwork(ABC):
 
         Returns
         -------
-        INetConn
-            The network connection instance to the specified peer.
+        list[INetConn]
+            List of established connections to the peer.
 
         Raises
         ------

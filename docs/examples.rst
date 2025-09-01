@@ -15,3 +15,4 @@ Examples
    examples.kademlia
    examples.mDNS
    examples.random_walk
+   examples.multiple_connections

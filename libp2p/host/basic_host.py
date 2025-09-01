@@ -338,7 +338,7 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to check
         :return: True if peer has an active connection, False otherwise
         """
-        return peer_id in self._network.connections
+        return len(self._network.get_connections(peer_id)) > 0
 
     def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
         """
@@ -347,4 +347,4 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to get info for
         :return: Connection object if peer is connected, None otherwise
         """
-        return self._network.connections.get(peer_id)
+        return self._network.get_connection(peer_id)

@@ -178,3 +178,6 @@ env.bak/
 #lockfiles
 uv.lock
 poetry.lock
+
+# Sphinx documentation build
+_build/
