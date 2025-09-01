@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import tempfile
 
+import pytest
+
 from libp2p.utils.paths import (
     create_temp_file,
     ensure_dir_exists,
@@ -217,6 +219,12 @@ class TestCrossPlatformCompatibility:
 
     def test_config_dir_platform_specific_windows(self, monkeypatch):
         """Test config directory respects Windows conventions."""
+        import platform
+        
+        # Only run this test on Windows systems
+        if platform.system() != "Windows":
+            pytest.skip("This test only runs on Windows systems")
+            
         monkeypatch.setattr("os.name", "nt")
         monkeypatch.setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
         config_dir = get_config_dir()
