@@ -1,9 +1,7 @@
 from libp2p.abc import (
-    IListener,
     IMuxedConn,
     IRawConnection,
     ISecureConn,
-    ITransport,
 )
 from libp2p.custom_types import (
     TMuxerOptions,
@@ -42,10 +40,6 @@ class TransportUpgrader:
     ):
         self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
         self.muxer_multistream = MuxerMultistream(muxer_transports_by_protocol)
-
-    def upgrade_listener(self, transport: ITransport, listeners: IListener) -> None:
-        """Upgrade multiaddr listeners to libp2p-transport listeners."""
-        # TODO: Figure out what to do with this function.
 
     async def upgrade_security(
         self,
