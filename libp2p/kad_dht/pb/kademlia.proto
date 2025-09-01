@@ -27,6 +27,7 @@ message Message {
         bytes id = 1;
         repeated bytes addrs = 2;
         ConnectionType connection = 3;
+        optional bytes signedRecord = 4;    // Envelope(PeerRecord) encoded
     }
 
     MessageType type = 1;
@@ -35,4 +36,6 @@ message Message {
     Record record = 3;
     repeated Peer closerPeers = 8;
     repeated Peer providerPeers = 9;
+
+    optional bytes senderRecord = 11;   // Envelope(PeerRecord) encoded
 }

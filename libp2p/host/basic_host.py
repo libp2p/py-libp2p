@@ -43,6 +43,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -109,6 +110,14 @@ class BasicHost(IHost):
             self.mDNS = MDNSDiscovery(network)
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
+
+        # Cache a signed-record if the local-node in the PeerStore
+        envelope = create_signed_peer_record(
+            self.get_id(),
+            self.get_addrs(),
+            self.get_private_key(),
+        )
+        self.get_peerstore().set_local_record(envelope)
 
     def get_id(self) -> ID:
         """
@@ -288,6 +297,11 @@ class BasicHost(IHost):
             protocol, handler = await self.multiselect.negotiate(
                 MultiselectCommunicator(net_stream), self.negotiate_timeout
             )
+            if protocol is None:
+                await net_stream.reset()
+                raise StreamFailure(
+                    "Failed to negotiate protocol: no protocol selected"
+                )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
             logger.debug(
@@ -329,7 +343,7 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to check
         :return: True if peer has an active connection, False otherwise
         """
-        return peer_id in self._network.connections
+        return len(self._network.get_connections(peer_id)) > 0
 
     def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
         """
@@ -338,4 +352,4 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to get info for
         :return: Connection object if peer is connected, None otherwise
         """
-        return self._network.connections.get(peer_id)
+        return self._network.get_connection(peer_id)
