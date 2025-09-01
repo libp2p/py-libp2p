@@ -30,9 +30,7 @@ from libp2p.io.abc import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.peer.peerstore import (
-    env_to_send_in_RPC
-)
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
@@ -65,9 +63,8 @@ from .resources import (
     RelayLimits,
     RelayResourceManager,
 )
-from .utils import (
-    maybe_consume_signed_record
-)
+from .utils import maybe_consume_signed_record
+
 logger = logging.getLogger("libp2p.relay.circuit_v2")
 
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
@@ -337,13 +334,13 @@ class CircuitV2Protocol(Service):
                         pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
                         pb_status.message = "Empty message received"
 
-                         # Create sender_signed_peer_record for the response
+                        # Create sender_signed_peer_record for the response
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
 
                         response = HopMessage(
                             type=HopMessage.STATUS,
                             status=pb_status,
-                            signedRecord=envelope_bytes
+                            signedRecord=envelope_bytes,
                         )
                         await stream.write(response.SerializeToString())
                         await trio.sleep(0.5)  # Longer wait to ensure message is sent
@@ -382,7 +379,6 @@ class CircuitV2Protocol(Service):
 
                 # Create sender_signed_peer_record for the response
                 envelope_bytes, _ = env_to_send_in_RPC(self.host)
-
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
@@ -477,7 +473,7 @@ class CircuitV2Protocol(Service):
             if stop_msg.HasField("senderRecord"):
                 if not maybe_consume_signed_record(stop_msg, self.host):
                     logger.error("Received invalid signed-records. Closing stream")
-                    await self._close_stream()
+                    await self._close_stream(stream)
                     return
 
             if stop_msg.type != StopMessage.CONNECT:
@@ -872,7 +868,6 @@ class CircuitV2Protocol(Service):
                     signedRecord=envelope_bytes,
                 )
 
-
                 msg_bytes = status_msg.SerializeToString()
                 logger.debug("Status message serialized (%d bytes)", len(msg_bytes))
 
@@ -912,7 +907,7 @@ class CircuitV2Protocol(Service):
                 status_msg = StopMessage(
                     type=StopMessage.STATUS,
                     status=pb_status,
-                    senderRecord=envelope_bytes
+                    senderRecord=envelope_bytes,
                 )
 
                 await stream.write(status_msg.SerializeToString())
