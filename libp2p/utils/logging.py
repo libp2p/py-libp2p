@@ -104,7 +104,7 @@ def setup_logging() -> None:
     if _current_listener is not None:
         _current_listener.stop()
         _current_listener = None
-    
+
     # Close and clear existing handlers
     for handler in _current_handlers:
         if isinstance(handler, logging.FileHandler):
@@ -200,7 +200,7 @@ def setup_logging() -> None:
 
     # Store handlers globally for cleanup
     _current_handlers.extend(handlers)
-    
+
     # Start the listener AFTER configuring all loggers
     _current_listener = logging.handlers.QueueListener(
         log_queue, *handlers, respect_handler_level=True
@@ -219,7 +219,7 @@ def cleanup_logging() -> None:
     if _current_listener is not None:
         _current_listener.stop()
         _current_listener = None
-    
+
     # Close all file handlers to ensure proper cleanup on Windows
     for handler in _current_handlers:
         if isinstance(handler, logging.FileHandler):

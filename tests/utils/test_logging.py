@@ -180,10 +180,10 @@ async def test_custom_log_file(clean_env):
         # Stop the listener to ensure all messages are written
         if _current_listener is not None:
             _current_listener.stop()
-            
+
         # Give a moment for the listener to fully stop
         await trio.sleep(0.05)
-            
+
         # Close all file handlers to release the file
         for handler in _current_handlers:
             if isinstance(handler, logging.FileHandler):
@@ -203,12 +203,14 @@ async def test_default_log_file(clean_env):
 
     with patch("libp2p.utils.paths.create_temp_file") as mock_create_temp:
         # Mock the temp file creation to return a predictable path
-        mock_temp_file = Path(tempfile.gettempdir()) / "test_py-libp2p_20240101_120000.log"
+        mock_temp_file = (
+            Path(tempfile.gettempdir()) / "test_py-libp2p_20240101_120000.log"
+        )
         mock_create_temp.return_value = mock_temp_file
-        
+
         # Remove the log file if it exists
         mock_temp_file.unlink(missing_ok=True)
-        
+
         setup_logging()
 
         # Wait for the listener to be ready
@@ -223,10 +225,10 @@ async def test_default_log_file(clean_env):
         # Stop the listener to ensure all messages are written
         if _current_listener is not None:
             _current_listener.stop()
-            
+
         # Give a moment for the listener to fully stop
         await trio.sleep(0.05)
-            
+
         # Close all file handlers to release the file
         for handler in _current_handlers:
             if isinstance(handler, logging.FileHandler):
