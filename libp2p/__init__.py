@@ -1,3 +1,5 @@
+"""Libp2p Python implementation."""
+
 from collections.abc import (
     Mapping,
     Sequence,
@@ -6,15 +8,12 @@ from importlib.metadata import version as __version
 from typing import (
     Literal,
     Optional,
-    Type,
-    cast,
 )
 
 import multiaddr
 
 from libp2p.abc import (
     IHost,
-    IMuxedConn,
     INetworkService,
     IPeerRouting,
     IPeerStore,
@@ -32,9 +31,6 @@ from libp2p.custom_types import (
     TProtocol,
     TSecurityOptions,
 )
-from libp2p.discovery.mdns.mdns import (
-    MDNSDiscovery,
-)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -42,6 +38,8 @@ from libp2p.host.routed_host import (
     RoutedHost,
 )
 from libp2p.network.swarm import (
+    ConnectionConfig,
+    RetryConfig,
     Swarm,
 )
 from libp2p.peer.id import (
@@ -55,17 +53,19 @@ from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
+)
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    PROTOCOL_ID as YAMUX_PROTOCOL_ID,
     Yamux,
 )
-from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
@@ -86,7 +86,6 @@ DEFAULT_MUXER = "YAMUX"
 MUXER_YAMUX = "YAMUX"
 MUXER_MPLEX = "MPLEX"
 DEFAULT_NEGOTIATE_TIMEOUT = 5
-
 
 
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
@@ -163,6 +162,8 @@ def new_swarm(
     peerstore_opt: IPeerStore | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    retry_config: Optional["RetryConfig"] = None,
+    connection_config: Optional["ConnectionConfig"] = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -239,7 +240,14 @@ def new_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
-    return Swarm(id_opt, peerstore, upgrader, transport)
+    return Swarm(
+        id_opt,
+        peerstore,
+        upgrader,
+        transport,
+        retry_config=retry_config,
+        connection_config=connection_config
+    )
 
 
 def new_host(
@@ -279,6 +287,12 @@ def new_host(
 
     if disc_opt is not None:
         return RoutedHost(swarm, disc_opt, enable_mDNS, bootstrap)
-    return BasicHost(network=swarm,enable_mDNS=enable_mDNS , bootstrap=bootstrap, negotitate_timeout=negotiate_timeout)
+    return BasicHost(
+        network=swarm,
+        enable_mDNS=enable_mDNS,
+        bootstrap=bootstrap,
+        negotitate_timeout=negotiate_timeout
+    )
+
 
 __version__ = __version("libp2p")
