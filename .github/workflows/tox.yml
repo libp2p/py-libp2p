@@ -79,3 +79,29 @@ jobs:
             export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"
           fi
           python -m tox run -r
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        toxenv: [core, wheel]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install tox
+      - name: Test with tox
+        shell: bash
+        run: |
+          if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
+            python -m tox run -e windows-wheel
+          else
+            python -m tox run -e py311-${{ matrix.toxenv }}
+          fi
