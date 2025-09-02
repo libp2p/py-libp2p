@@ -52,3 +52,19 @@ class ConnectionConfig:
     max_connections_per_peer: int = 3
     connection_timeout: float = 30.0
     load_balancing_strategy: str = "round_robin"  # or "least_loaded"
+
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        if not (
+            self.load_balancing_strategy == "round_robin"
+            or self.load_balancing_strategy == "least_loaded"
+        ):
+            raise ValueError(
+                "Load balancing strategy can only be 'round_robin' or 'least_loaded'"
+            )
+
+        if self.max_connections_per_peer < 1:
+            raise ValueError("Max connection per peer should be atleast 1")
+
+        if self.connection_timeout < 0:
+            raise ValueError("Connection timeout should be positive")

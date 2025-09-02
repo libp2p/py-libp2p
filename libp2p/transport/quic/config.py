@@ -87,8 +87,14 @@ class QUICTransportConfig(ConnectionConfig):
     MAX_INCOMING_STREAMS: int = 1000
     """Maximum number of incoming streams per connection."""
 
+    CONNECTION_HANDSHAKE_TIMEOUT: float = 60.0
+    """Timeout for connection handshake (seconds)."""
+
     MAX_OUTGOING_STREAMS: int = 1000
     """Maximum number of outgoing streams per connection."""
+
+    CONNECTION_CLOSE_TIMEOUT: int = 10
+    """Timeout for opening new connection (seconds)."""
 
     # Stream timeouts
     STREAM_OPEN_TIMEOUT: float = 5.0
@@ -282,24 +288,6 @@ class QUICStreamFlowControlConfig:
         self.max_window_size = max_window_size
         self.window_update_threshold = window_update_threshold
         self.enable_auto_tuning = enable_auto_tuning
-
-
-class QUICStreamMetricsConfig:
-    """Configuration for QUIC stream metrics collection."""
-
-    def __init__(
-        self,
-        enable_latency_tracking: bool = True,
-        enable_throughput_tracking: bool = True,
-        enable_error_tracking: bool = True,
-        metrics_retention_duration: float = 3600.0,  # 1 hour
-        metrics_aggregation_interval: float = 60.0,  # 1 minute
-    ):
-        self.enable_latency_tracking = enable_latency_tracking
-        self.enable_throughput_tracking = enable_throughput_tracking
-        self.enable_error_tracking = enable_error_tracking
-        self.metrics_retention_duration = metrics_retention_duration
-        self.metrics_aggregation_interval = metrics_aggregation_interval
 
 
 def create_stream_config_for_use_case(

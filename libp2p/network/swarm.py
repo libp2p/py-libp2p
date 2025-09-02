@@ -465,8 +465,6 @@ class Swarm(Service, INetworkService):
             # Default to first connection
             return connections[0]
 
-    # >>>>>>> upstream/main
-
     async def listen(self, *multiaddrs: Multiaddr) -> bool:
         """
         :param multiaddrs: one or many multiaddrs to start listening on

@@ -61,7 +61,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
     MAX_CONCURRENT_STREAMS = 256
     MAX_INCOMING_STREAMS = 1000
     MAX_OUTGOING_STREAMS = 1000
-    STREAM_ACCEPT_TIMEOUT = 60.0
     CONNECTION_HANDSHAKE_TIMEOUT = 60.0
     CONNECTION_CLOSE_TIMEOUT = 10.0
 
@@ -145,7 +144,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
 
-        # *** NEW: Connection ID tracking - CRITICAL for fixing the original issue ***
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
         self._retired_connection_ids: set[bytes] = set()
@@ -154,6 +152,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Event processing control
         self._event_processing_active = False
         self._pending_events: list[events.QuicEvent] = []
+
+        # Set quic connection configuration
+        self.CONNECTION_CLOSE_TIMEOUT = transport._config.CONNECTION_CLOSE_TIMEOUT
+        self.MAX_INCOMING_STREAMS = transport._config.MAX_INCOMING_STREAMS
+        self.MAX_OUTGOING_STREAMS = transport._config.MAX_OUTGOING_STREAMS
+        self.CONNECTION_HANDSHAKE_TIMEOUT = (
+            transport._config.CONNECTION_HANDSHAKE_TIMEOUT
+        )
 
         # Performance and monitoring
         self._connection_start_time = time.time()
@@ -166,7 +172,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             "bytes_received": 0,
             "packets_sent": 0,
             "packets_received": 0,
-            # *** NEW: Connection ID statistics ***
             "connection_ids_issued": 0,
             "connection_ids_retired": 0,
             "connection_id_changes": 0,
@@ -191,11 +196,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         For libp2p, we primarily use bidirectional streams.
         """
         if self._is_initiator:
-            return 0  # Client starts with 0, then 4, 8, 12...
+            return 0
         else:
-            return 1  # Server starts with 1, then 5, 9, 13...
-
-    # Properties
+            return 1
 
     @property
     def is_initiator(self) -> bool:  # type: ignore
@@ -234,7 +237,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Get the remote peer ID."""
         return self._remote_peer_id
 
-    # *** NEW: Connection ID management methods ***
     def get_connection_id_stats(self) -> dict[str, Any]:
         """Get connection ID statistics and current state."""
         return {
@@ -420,7 +422,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Check for idle streams that can be cleaned up
                 await self._cleanup_idle_streams()
 
-                # *** NEW: Log connection ID status periodically ***
                 if logger.isEnabledFor(logging.DEBUG):
                     cid_stats = self.get_connection_id_stats()
                     logger.debug(f"Connection ID stats: {cid_stats}")

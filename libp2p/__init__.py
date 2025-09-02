@@ -1,3 +1,5 @@
+"""Libp2p Python implementation."""
+
 import logging
 
 from libp2p.transport.quic.utils import is_quic_multiaddr
@@ -197,10 +199,10 @@ def new_swarm(
     id_opt = generate_peer_id_from(key_pair)
 
     transport: TCP | QUICTransport
+    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
 
     if listen_addrs is None:
         if enable_quic:
-            quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
             transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             transport = TCP()
@@ -210,7 +212,6 @@ def new_swarm(
         if addr.__contains__("tcp"):
             transport = TCP()
         elif is_quic:
-            quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
             transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
