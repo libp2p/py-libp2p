@@ -42,9 +42,11 @@ from libp2p.host.routed_host import (
     RoutedHost,
 )
 from libp2p.network.swarm import (
-    ConnectionConfig,
-    RetryConfig,
     Swarm,
+)
+from libp2p.network.config import (
+    ConnectionConfig,
+    RetryConfig
 )
 from libp2p.peer.id import (
     ID,
@@ -169,7 +171,7 @@ def new_swarm(
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
     retry_config: Optional["RetryConfig"] = None,
-    connection_config: "ConnectionConfig" | QUICTransportConfig | None = None,
+    connection_config: ConnectionConfig | QUICTransportConfig | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.

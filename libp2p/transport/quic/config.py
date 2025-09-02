@@ -10,6 +10,7 @@ import ssl
 from typing import Any, Literal, TypedDict
 
 from libp2p.custom_types import TProtocol
+from libp2p.network.config import ConnectionConfig
 
 
 class QUICTransportKwargs(TypedDict, total=False):
@@ -47,12 +48,10 @@ class QUICTransportKwargs(TypedDict, total=False):
 
 
 @dataclass
-class QUICTransportConfig:
+class QUICTransportConfig(ConnectionConfig):
     """Configuration for QUIC transport."""
 
     # Connection settings
-    max_connections_per_peer: int = 3
-    load_balancing_strategy: str = "round_robin"
     idle_timeout: float = 30.0  # Seconds before an idle connection is closed.
     max_datagram_size: int = (
         1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
