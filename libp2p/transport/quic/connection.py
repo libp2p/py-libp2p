@@ -58,12 +58,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
     - COMPLETE connection ID management (fixes the original issue)
     """
 
-    MAX_CONCURRENT_STREAMS = 256
-    MAX_INCOMING_STREAMS = 1000
-    MAX_OUTGOING_STREAMS = 1000
-    CONNECTION_HANDSHAKE_TIMEOUT = 60.0
-    CONNECTION_CLOSE_TIMEOUT = 10.0
-
     def __init__(
         self,
         quic_connection: QuicConnection,
@@ -160,6 +154,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.CONNECTION_HANDSHAKE_TIMEOUT = (
             transport._config.CONNECTION_HANDSHAKE_TIMEOUT
         )
+        self.MAX_CONCURRENT_STREAMS = transport._config.MAX_CONCURRENT_STREAMS
 
         # Performance and monitoring
         self._connection_start_time = time.time()
@@ -891,7 +886,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         This handles when the peer tells us to stop using a connection ID.
         """
         logger.debug(f"🗑️ CONNECTION ID RETIRED: {event.connection_id.hex()}")
-        logger.debug(f"🗑️ CONNECTION ID RETIRED: {event.connection_id.hex()}")
 
         # Remove from available IDs and add to retired set
         self._available_connection_ids.discard(event.connection_id)
@@ -909,11 +903,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     self._stats["connection_id_changes"] += 1
                 else:
                     logger.warning("⚠️ No available connection IDs after retirement!")
-                    logger.debug("⚠️ No available connection IDs after retirement!")
             else:
                 self._current_connection_id = None
                 logger.warning("⚠️ No available connection IDs after retirement!")
-                logger.debug("⚠️ No available connection IDs after retirement!")
 
         # Update statistics
         self._stats["connection_ids_retired"] += 1

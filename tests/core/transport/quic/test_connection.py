@@ -12,6 +12,7 @@ import trio
 
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
+from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.exceptions import (
     QUICConnectionClosedError,
@@ -55,13 +56,22 @@ class TestQUICConnection:
         return mock
 
     @pytest.fixture
+    def mock_quic_transport(self):
+        mock = Mock()
+        mock._config = QUICTransportConfig()
+        return mock
+
+    @pytest.fixture
     def mock_resource_scope(self):
         """Create mock resource scope."""
         return MockResourceScope()
 
     @pytest.fixture
     def quic_connection(
-        self, mock_quic_connection: Mock, mock_resource_scope: MockResourceScope
+        self,
+        mock_quic_connection: Mock,
+        mock_quic_transport: Mock,
+        mock_resource_scope: MockResourceScope,
     ):
         """Create test QUIC connection with enhanced features."""
         private_key = create_new_key_pair().private_key
@@ -75,7 +85,7 @@ class TestQUICConnection:
             local_peer_id=peer_id,
             is_initiator=True,
             maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic"),
-            transport=Mock(),
+            transport=mock_quic_transport,
             resource_scope=mock_resource_scope,
             security_manager=mock_security_manager,
         )
