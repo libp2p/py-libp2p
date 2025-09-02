@@ -11,6 +11,7 @@ from collections.abc import (
 from importlib.metadata import version as __version
 from typing import (
     Literal,
+    Optional,
 )
 
 import multiaddr
@@ -34,9 +35,6 @@ from libp2p.custom_types import (
     TProtocol,
     TSecurityOptions,
 )
-from libp2p.discovery.mdns.mdns import (
-    MDNSDiscovery,
-)
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -44,6 +42,8 @@ from libp2p.host.routed_host import (
     RoutedHost,
 )
 from libp2p.network.swarm import (
+    ConnectionConfig,
+    RetryConfig,
     Swarm,
 )
 from libp2p.peer.id import (
@@ -57,17 +57,19 @@ from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
 )
-from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
-from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
+)
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    PROTOCOL_ID as YAMUX_PROTOCOL_ID,
     Yamux,
 )
-from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
@@ -166,7 +168,8 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
-    quic_transport_opt: QUICTransportConfig | None = None,
+    retry_config: Optional["RetryConfig"] = None,
+    connection_config: "ConnectionConfig" | QUICTransportConfig | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -186,10 +189,6 @@ def new_swarm(
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
     """
-    if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
-        quic_transport_opt = None
-
     if key_pair is None:
         key_pair = generate_new_rsa_identity()
 
@@ -199,6 +198,7 @@ def new_swarm(
 
     if listen_addrs is None:
         if enable_quic:
+            quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
             transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             transport = TCP()
@@ -208,6 +208,7 @@ def new_swarm(
         if addr.__contains__("tcp"):
             transport = TCP()
         elif is_quic:
+            quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
             transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
@@ -255,7 +256,14 @@ def new_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
-    return Swarm(id_opt, peerstore, upgrader, transport)
+    return Swarm(
+        id_opt,
+        peerstore,
+        upgrader,
+        transport,
+        retry_config=retry_config,
+        connection_config=connection_config
+    )
 
 
 def new_host(
@@ -300,11 +308,17 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        quic_transport_opt=quic_transport_opt if enable_quic else None
+        connection_config=quic_transport_opt if enable_quic else None
     )
 
     if disc_opt is not None:
         return RoutedHost(swarm, disc_opt, enable_mDNS, bootstrap)
-    return BasicHost(network=swarm,enable_mDNS=enable_mDNS , bootstrap=bootstrap, negotitate_timeout=negotiate_timeout)
+    return BasicHost(
+        network=swarm,
+        enable_mDNS=enable_mDNS,
+        bootstrap=bootstrap,
+        negotitate_timeout=negotiate_timeout
+    )
+
 
 __version__ = __version("libp2p")

@@ -51,6 +51,9 @@ async def perform_simple_test(assertion_func, security_protocol):
 
         # Extract the secured connection from either Mplex or Yamux implementation
         def get_secured_conn(conn):
+            # conn is now a list, get the first connection
+            if isinstance(conn, list):
+                conn = conn[0]
             muxed_conn = conn.muxed_conn
             # Direct attribute access for known implementations
             has_secured_conn = hasattr(muxed_conn, "secured_conn")
