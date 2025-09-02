@@ -293,7 +293,7 @@ class GossipSub(IPubsubRouter, Service):
             floodsub_peers: set[ID] = {
                 peer_id
                 for peer_id in self.pubsub.peer_topics[topic]
-                if self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
+                if peer_id in self.peer_protocol and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
             }
             send_to.update(floodsub_peers)
 
