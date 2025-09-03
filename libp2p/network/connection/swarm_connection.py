@@ -143,7 +143,8 @@ class SwarmConn(INetConn):
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
-            # As long as `common_stream_handler`, remove the stream.
+            # Always remove the stream when the handler finishes
+            # Use simple remove_stream since stream handles notifications itself
             self.remove_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
@@ -197,3 +198,10 @@ class SwarmConn(INetConn):
         if stream not in self.streams:
             return
         self.streams.remove(stream)
+
+    async def _remove_stream(self, stream: NetStream) -> None:
+        """Remove stream and notify about closure."""
+        if stream not in self.streams:
+            return
+        self.streams.remove(stream)
+        await self.swarm.notify_closed_stream(stream)

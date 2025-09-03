@@ -106,34 +106,49 @@ class NetStream(INetStream):
         try:
             if self.state == StreamState.RESET:
                 raise StreamReset("Cannot write to stream; stream is reset")
+            elif self.state == StreamState.CLOSED:
+                raise StreamClosed("Cannot write to stream; stream is closed")
             elif self.state != StreamState.OPEN:
                 raise StreamClosed("Cannot write to stream; not open")
             else:
                 await self.muxed_stream.write(data)
         except MuxedStreamClosed as error:
-            self.set_state(StreamState.CLOSED)
+            # Only set state to CLOSED if it wasn't already set
+            if self.state != StreamState.CLOSED:
+                self.set_state(StreamState.CLOSED)
             raise StreamClosed() from error
         except MuxedStreamReset as error:
-            self.set_state(StreamState.RESET)
+            # Only set state to RESET if it wasn't already set
+            if self.state != StreamState.RESET:
+                self.set_state(StreamState.RESET)
             raise StreamReset() from error
 
     async def close(self) -> None:
         """Close stream."""
+        # Don't set state to CLOSED immediately - keep it OPEN for pending operations
+        # Only set to CLOSED after the underlying stream is fully closed
         await self.muxed_stream.close()
+        # Now it's safe to set the state to CLOSED
         self.set_state(StreamState.CLOSED)
+        # Notify that the stream is closed
         await self.remove()
 
     async def reset(self) -> None:
         """Reset stream."""
+        # Don't set state to RESET immediately - keep it OPEN for pending operations
+        # Only set to RESET after the underlying stream is fully reset
         await self.muxed_stream.reset()
+        # Now it's safe to set the state to RESET
         self.set_state(StreamState.RESET)
+        # Notify that the stream is closed/reset
         await self.remove()
 
     async def remove(self) -> None:
         """
         Remove the stream from the connection and notify swarm that stream was closed.
+        This method should only be called when the stream is no longer needed.
         """
-        if self.swarm_conn is not None:
+        if self.swarm_conn is not None and self in self.swarm_conn.streams:
             self.swarm_conn.remove_stream(self)
             await self.swarm_conn.swarm.notify_closed_stream(self)
 
