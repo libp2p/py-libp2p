@@ -85,7 +85,9 @@ class MuxerMultistream:
         else:
             protocol, _ = await self.multiselect.negotiate(communicator)
         if protocol is None:
-            raise MultiselectError("fail to negotiate a stream muxer protocol")
+            raise MultiselectError(
+                "Fail to negotiate a stream muxer protocol: no protocol selected"
+            )
         return self.transports[protocol]
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
