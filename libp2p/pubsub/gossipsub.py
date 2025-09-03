@@ -273,7 +273,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Get message ID for IDONTWANT
         if self.pubsub is not None:
-            msg_id = self.pubsub._msg_id_constructor(pubsub_msg)
+            msg_id = self.pubsub.get_message_id(pubsub_msg)
         else:
             # Fallback to default ID construction
             msg_id = pubsub_msg.seqno + pubsub_msg.from_id

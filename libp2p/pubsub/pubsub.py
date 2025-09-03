@@ -801,6 +801,19 @@ class Pubsub(Service, IPubsub):
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
 
+    def get_message_id(self, msg: rpc_pb2.Message) -> bytes:
+        """
+        Get the message ID for a given message using the configured
+        message ID constructor.
+
+        This method provides a public interface for external components (like routers)
+        to access message ID construction functionality.
+
+        :param msg: the message to get the ID for
+        :return: the message ID as bytes
+        """
+        return self._msg_id_constructor(msg)
+
     async def write_msg(self, stream: INetStream, rpc_msg: rpc_pb2.RPC) -> bool:
         """
         Write an RPC message to a stream with proper error handling.
