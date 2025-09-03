@@ -975,13 +975,18 @@ class GossipSub(IPubsubRouter, Service):
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
         packet.control.CopyFrom(control_msg)
 
-        # Get stream for peer from pubsub
-        if to_peer not in self.pubsub.peers:
-            logger.debug(
-                "Fail to emit control message to %s: peer record not exist", to_peer
-            )
-            return
-        peer_stream = self.pubsub.peers[to_peer]
+        await self.send_rpc(to_peer, packet, False)
 
-        # Write rpc to stream
-        await self.pubsub.write_msg(peer_stream, packet)
+    # Urgent will be true in case of IDONTWANT message 
+    async def send_rpc(self, to_peer: ID, rpc: rpc_pb2.RPC, urgent: bool) -> None:
+        # TODO: Piggyback message retries
+        queue = self.pubsub.peer_queue
+        msg_bytes = rpc.SerializeToString()
+        msg_size = len(msg_bytes)
+        if msg_size < self.pubsub.maxMessageSize:
+            self.do_send_rpc(to_peer, rpc, queue, urgent)
+            return
+        else:
+            rpc_list = rpc.split(self.pubsub.maxMessageSize)
+            
+    
