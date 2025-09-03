@@ -44,6 +44,8 @@ class RPC(google.protobuf.message.Message):
     SUBSCRIPTIONS_FIELD_NUMBER: builtins.int
     PUBLISH_FIELD_NUMBER: builtins.int
     CONTROL_FIELD_NUMBER: builtins.int
+    SENDERRECORD_FIELD_NUMBER: builtins.int
+    senderRecord: builtins.bytes
     @property
     def subscriptions(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___RPC.SubOpts]: ...
     @property
@@ -56,9 +58,10 @@ class RPC(google.protobuf.message.Message):
         subscriptions: collections.abc.Iterable[global___RPC.SubOpts] | None = ...,
         publish: collections.abc.Iterable[global___Message] | None = ...,
         control: global___ControlMessage | None = ...,
+        senderRecord: builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["control", b"control"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["control", b"control", "publish", b"publish", "subscriptions", b"subscriptions"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["control", b"control", "senderRecord", b"senderRecord"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["control", b"control", "publish", b"publish", "senderRecord", b"senderRecord", "subscriptions", b"subscriptions"]) -> None: ...
 
 global___RPC = RPC
 
