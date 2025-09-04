@@ -108,23 +108,33 @@ class ConnectionConfig:
     including connection limits, timeouts, load balancing strategies, and
     health monitoring parameters.
 
-    Attributes:
-        max_connections_per_peer: Maximum number of connections allowed to a single
-                                 peer. Default: 3 connections
-        connection_timeout: Timeout in seconds for establishing new connections.
-                           Default: 30.0 seconds
-        load_balancing_strategy: Strategy for distributing streams across
-                                 connections. Options: "round_robin" (default),
-                                 "least_loaded", "health_based", or "latency_based"
-        enable_health_monitoring: Whether to enable connection health monitoring.
-                                  Default: True
-        health_check_interval: Interval in seconds between health checks.
-                               Default: 60.0 seconds
-        ping_timeout: Timeout in seconds for ping operations. Default: 5.0 seconds
-        min_health_threshold: Minimum health score (0.0-1.0) for connections.
-                              Default: 0.3
-        min_connections_per_peer: Minimum connections to maintain per peer.
-                                  Default: 1
+    Attributes
+    ----------
+    max_connections_per_peer : int
+        Maximum number of connections allowed to a single peer. Default: 3 connections.
+
+    connection_timeout : float
+        Timeout in seconds for establishing new connections. Default: 30.0 seconds.
+
+    load_balancing_strategy : str
+        Strategy for distributing streams across connections.
+        Options: "round_robin" (default),
+        "least_loaded", "health_based", or "latency_based".
+
+    enable_health_monitoring : bool
+        Whether to enable connection health monitoring. Default: True.
+
+    health_check_interval : float
+        Interval in seconds between health checks. Default: 60.0 seconds.
+
+    ping_timeout : float
+        Timeout in seconds for ping operations. Default: 5.0 seconds.
+
+    min_health_threshold : float
+        Minimum health score (0.0-1.0) for connections. Default: 0.3.
+
+    min_connections_per_peer : int
+        Minimum connections to maintain per peer. Default: 1.
 
     """
 
