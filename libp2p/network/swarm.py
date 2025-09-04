@@ -515,14 +515,18 @@ class Swarm(Service, INetworkService):
               - Call listener listen with the multiaddr
               - Map multiaddr to listener
         """
+        logger.debug(f"Swarm.listen called with multiaddrs: {multiaddrs}")
         # We need to wait until `self.listener_nursery` is created.
         await self.event_listener_nursery_created.wait()
 
         success_count = 0
         for maddr in multiaddrs:
+            logger.debug(f"Swarm.listen processing multiaddr: {maddr}")
             if str(maddr) in self.listeners:
-                success_count += 1
-                continue
+                logger.debug(f"Swarm.listen: listener already exists for {maddr}")
+                return True
+            success_count += 1
+            continue
 
             async def conn_handler(
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
@@ -562,13 +566,17 @@ class Swarm(Service, INetworkService):
 
             try:
                 # Success
+                logger.debug(f"Swarm.listen: creating listener for {maddr}")
                 listener = self.transport.create_listener(conn_handler)
+                logger.debug(f"Swarm.listen: listener created for {maddr}")
                 self.listeners[str(maddr)] = listener
                 # TODO: `listener.listen` is not bounded with nursery. If we want to be
                 #   I/O agnostic, we should change the API.
                 if self.listener_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
+                logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
                 await listener.listen(maddr, self.listener_nursery)
+                logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")
 
                 # Call notifiers since event occurred
                 await self.notify_listen(maddr)
