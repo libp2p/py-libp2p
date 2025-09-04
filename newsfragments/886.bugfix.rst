@@ -1,0 +1,2 @@
+Fixed cross-platform path handling by replacing hardcoded OS-specific
+paths with standardized utilities in core modules and examples.
