@@ -39,3 +39,4 @@ ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 UnsubscribeFn = Callable[[], Awaitable[None]]
 TQUICStreamHandlerFn = Callable[[QUICStream], Awaitable[None]]
 TQUICConnHandlerFn = Callable[[QUICConnection], Awaitable[None]]
+MessageID = NewType("MessageID", str)
