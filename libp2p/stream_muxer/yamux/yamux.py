@@ -84,6 +84,7 @@ class YamuxStream(IMuxedStream):
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
         self.rw_lock = ReadWriteLock
+        self.close_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
@@ -264,30 +265,32 @@ class YamuxStream(IMuxedStream):
                 return data
 
     async def close(self) -> None:
-        if not self.send_closed:
-            logger.debug(f"Half-closing stream {self.stream_id} (local end)")
-            header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
-            )
-            await self.conn.secured_conn.write(header)
-            self.send_closed = True
+        async with self.close_lock:
+            if not self.send_closed:
+                logger.debug(f"Half-closing stream {self.stream_id} (local end)")
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
+                )
+                await self.conn.secured_conn.write(header)
+                self.send_closed = True
 
-        # Only set fully closed if both directions are closed
-        if self.send_closed and self.recv_closed:
-            self.closed = True
-        else:
-            # Stream is half-closed but not fully closed
-            self.closed = False
+            # Only set fully closed if both directions are closed
+            if self.send_closed and self.recv_closed:
+                self.closed = True
+            else:
+                # Stream is half-closed but not fully closed
+                self.closed = False
 
     async def reset(self) -> None:
         if not self.closed:
-            logger.debug(f"Resetting stream {self.stream_id}")
-            header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
-            )
-            await self.conn.secured_conn.write(header)
-            self.closed = True
-            self.reset_received = True  # Mark as reset
+            async with self.close_lock:
+                logger.debug(f"Resetting stream {self.stream_id}")
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
+                )
+                await self.conn.secured_conn.write(header)
+                self.closed = True
+                self.reset_received = True  # Mark as reset
 
     def set_deadline(self, ttl: int) -> bool:
         """
