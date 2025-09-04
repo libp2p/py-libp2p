@@ -31,7 +31,7 @@ async def example_advanced_health_metrics() -> None:
         ping_timeout=2.0,  # Faster ping timeout
         min_health_threshold=0.5,  # Higher threshold
         min_connections_per_peer=2,
-        load_balancing_strategy="health_based"
+        load_balancing_strategy="health_based",
     )
 
     swarm = new_swarm(connection_config=connection_config)

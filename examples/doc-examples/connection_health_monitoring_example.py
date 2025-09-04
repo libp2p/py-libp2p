@@ -32,7 +32,7 @@ async def example_health_monitoring_basic() -> None:
         ping_timeout=3.0,  # 3 second ping timeout
         min_health_threshold=0.4,  # Minimum health score
         min_connections_per_peer=2,  # Maintain at least 2 connections
-        load_balancing_strategy="health_based"  # Use health-based selection
+        load_balancing_strategy="health_based",  # Use health-based selection
     )
 
     # Create swarm with health monitoring
@@ -63,15 +63,13 @@ async def example_health_based_load_balancing() -> None:
         connection_config = ConnectionConfig(
             enable_health_monitoring=True,
             load_balancing_strategy=strategy,
-            health_check_interval=60.0
+            health_check_interval=60.0,
         )
 
         swarm = new_swarm(connection_config=connection_config)
 
         logger.info(f"Strategy '{strategy}':")
-        logger.info(
-            f"  Load balancing: {connection_config.load_balancing_strategy}"
-        )
+        logger.info(f"  Load balancing: {connection_config.load_balancing_strategy}")
         logger.info(
             f"  Health monitoring: {connection_config.enable_health_monitoring}"
         )
@@ -93,7 +91,7 @@ async def example_health_monitoring_custom() -> None:
         ping_timeout=10.0,  # Longer timeout for slow networks
         min_health_threshold=0.6,  # Higher threshold for production
         min_connections_per_peer=3,  # Maintain more connections
-        load_balancing_strategy="health_based"  # Prioritize healthy connections
+        load_balancing_strategy="health_based",  # Prioritize healthy connections
     )
 
     swarm = new_swarm(connection_config=connection_config)
@@ -120,7 +118,7 @@ async def example_health_monitoring_disabled() -> None:
     # Disable health monitoring for performance-critical scenarios
     connection_config = ConnectionConfig(
         enable_health_monitoring=False,
-        load_balancing_strategy="round_robin"  # Fall back to simple strategy
+        load_balancing_strategy="round_robin",  # Fall back to simple strategy
     )
 
     swarm = new_swarm(connection_config=connection_config)

@@ -41,10 +41,10 @@ health monitoring parameters:
     swarm = new_swarm(connection_config=connection_config)
 
 Configuration Options
---------------------
+---------------------
 
 Health Monitoring Settings
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **enable_health_monitoring**: Enable/disable health monitoring (default: True)
 - **health_check_interval**: Interval between health checks in seconds (default: 60.0)
@@ -53,7 +53,7 @@ Health Monitoring Settings
 - **min_connections_per_peer**: Minimum connections to maintain per peer (default: 1)
 
 Load Balancing Strategies
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **round_robin**: Simple round-robin selection (default)
 - **least_loaded**: Select connection with fewest streams
@@ -80,7 +80,7 @@ The system tracks various connection health metrics:
 - **Peak/Average Bandwidth**: Performance trend analysis
 
 Example: Health-Based Load Balancing
------------------------------------
+------------------------------------
 
 .. code-block:: python
 
@@ -119,13 +119,13 @@ The enhanced health monitoring provides advanced capabilities:
     # Access advanced health metrics
     peer_health = swarm.get_peer_health_summary(peer_id)
     global_health = swarm.get_global_health_summary()
-    
+
     # Export metrics in different formats
     json_metrics = swarm.export_health_metrics("json")
     prometheus_metrics = swarm.export_health_metrics("prometheus")
 
 Example: Disabling Health Monitoring
------------------------------------
+------------------------------------
 
 For performance-critical scenarios, health monitoring can be disabled:
 
@@ -140,7 +140,7 @@ For performance-critical scenarios, health monitoring can be disabled:
     swarm = new_swarm(connection_config=connection_config)
 
 Running the Example
-------------------
+-------------------
 
 To run the connection health monitoring example:
 
@@ -164,7 +164,7 @@ Benefits
 5. **Compliance**: Match capabilities of Go and JavaScript libp2p implementations
 
 Integration with Existing Code
------------------------------
+------------------------------
 
 Health monitoring integrates seamlessly with existing multiple connections support:
 
@@ -173,5 +173,4 @@ Health monitoring integrates seamlessly with existing multiple connections suppo
 - Existing load balancing strategies continue to work
 - Backward compatibility is maintained
 
-For more information, see the :doc:`multiple_connections` example and the
-:doc:`../libp2p.network` module documentation.
+For more information, see the :doc:`../libp2p.network` module documentation.

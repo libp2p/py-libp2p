@@ -105,7 +105,7 @@ class TestEnhancedConnectionHealth:
 
         # Update bandwidth metrics
         health.update_bandwidth_metrics(1024, 2048)  # 1KB sent, 2KB received
-        health.update_bandwidth_metrics(512, 1024)   # 0.5KB sent, 1KB received
+        health.update_bandwidth_metrics(512, 1024)  # 0.5KB sent, 1KB received
 
         # Verify bandwidth tracking
         assert health.total_bytes_sent == 1536  # 1024 + 512
@@ -150,17 +150,17 @@ class TestEnhancedSwarmHealthMonitoring:
         transport = AsyncMock()
 
         connection_config = ConnectionConfig(
-            enable_health_monitoring=True,
-            health_check_interval=10.0
+            enable_health_monitoring=True, health_check_interval=10.0
         )
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Verify enhanced health monitoring infrastructure
-        assert hasattr(swarm, 'health_data')
-        assert hasattr(swarm, 'health_config')
-        assert hasattr(swarm, '_health_metrics_collector')
+        assert hasattr(swarm, "health_data")
+        assert hasattr(swarm, "health_config")
+        assert hasattr(swarm, "_health_metrics_collector")
 
         await swarm.close()
 
@@ -172,12 +172,11 @@ class TestEnhancedSwarmHealthMonitoring:
         upgrader = Mock()
         transport = AsyncMock()
 
-        connection_config = ConnectionConfig(
-            enable_health_monitoring=True
-        )
+        connection_config = ConnectionConfig(enable_health_monitoring=True)
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Test event recording methods
         mock_conn = MockConnection(peer_id)
@@ -199,12 +198,11 @@ class TestEnhancedSwarmHealthMonitoring:
         upgrader = Mock()
         transport = AsyncMock()
 
-        connection_config = ConnectionConfig(
-            enable_health_monitoring=True
-        )
+        connection_config = ConnectionConfig(enable_health_monitoring=True)
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Test JSON export
         json_metrics = swarm.export_health_metrics("json")
@@ -230,12 +228,11 @@ class TestEnhancedSwarmHealthMonitoring:
         upgrader = Mock()
         transport = AsyncMock()
 
-        connection_config = ConnectionConfig(
-            enable_health_monitoring=True
-        )
+        connection_config = ConnectionConfig(enable_health_monitoring=True)
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Test peer health summary
         peer_summary = swarm.get_peer_health_summary(peer_id)

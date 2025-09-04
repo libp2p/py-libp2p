@@ -9,7 +9,7 @@ load balancing.
 from dataclasses import dataclass
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 # These imports are used for type checking only
 if TYPE_CHECKING:
@@ -81,9 +81,7 @@ class ConnectionHealth:
         stability_score = self.connection_stability
 
         self.health_score = (
-            latency_score * 0.4 +
-            success_score * 0.4 +
-            stability_score * 0.2
+            latency_score * 0.4 + success_score * 0.4 + stability_score * 0.2
         )
 
     def update_ping_metrics(self, latency: float, success: bool) -> None:
@@ -171,8 +169,8 @@ class ConnectionHealth:
 
         # Calculate rolling average bandwidth
         if self.bandwidth_usage:
-            self.average_bandwidth = (
-                sum(self.bandwidth_usage.values()) / len(self.bandwidth_usage)
+            self.average_bandwidth = sum(self.bandwidth_usage.values()) / len(
+                self.bandwidth_usage
             )
 
         self.last_bandwidth_check = current_time
@@ -190,7 +188,8 @@ class ConnectionHealth:
 
         # Calculate error rate in last hour
         recent_errors = [
-            error for timestamp, error in self.error_history
+            error
+            for timestamp, error in self.error_history
             if current_time - timestamp < 3600  # Last hour
         ]
 
@@ -204,7 +203,7 @@ class ConnectionHealth:
         # Update overall health score
         self.update_health_score()
 
-    def get_health_summary(self) -> Dict[str, Any]:
+    def get_health_summary(self) -> dict[str, Any]:
         """Get a comprehensive health summary."""
         return {
             "health_score": self.health_score,
@@ -219,10 +218,10 @@ class ConnectionHealth:
             "total_bytes_received": self.total_bytes_received,
             "peak_bandwidth_bps": self.peak_bandwidth,
             "average_bandwidth_bps": self.average_bandwidth,
-            "recent_errors": len([
-                e for t, e in self.error_history if time.time() - t < 3600
-            ]),
-            "connection_events": len(self.connection_events)
+            "recent_errors": len(
+                [e for t, e in self.error_history if time.time() - t < 3600]
+            ),
+            "connection_events": len(self.connection_events),
         }
 
 
@@ -269,9 +268,7 @@ class HealthConfig:
         if self.max_ping_latency <= 0:
             raise ValueError("max_ping_latency must be positive")
         if not 0.0 <= self.min_ping_success_rate <= 1.0:
-            raise ValueError(
-                "min_ping_success_rate must be between 0.0 and 1.0"
-            )
+            raise ValueError("min_ping_success_rate must be between 0.0 and 1.0")
         if self.max_failed_streams < 0:
             raise ValueError("max_failed_streams must be non-negative")
         if self.max_connection_age <= 0:
@@ -281,7 +278,7 @@ class HealthConfig:
 
 
 def create_default_connection_health(
-    established_at: float | None = None
+    established_at: float | None = None,
 ) -> ConnectionHealth:
     """Create a new ConnectionHealth instance with default values."""
     current_time = time.time()
@@ -307,5 +304,5 @@ def create_default_connection_health(
         connection_events=[],
         last_bandwidth_check=current_time,
         peak_bandwidth=0.0,
-        average_bandwidth=0.0
+        average_bandwidth=0.0,
     )

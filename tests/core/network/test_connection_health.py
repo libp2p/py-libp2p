@@ -136,15 +136,16 @@ class TestSwarmHealthMonitoring:
         connection_config = ConnectionConfig(
             enable_health_monitoring=True,
             health_check_interval=0.1,  # Fast for testing
-            min_health_threshold=0.5
+            min_health_threshold=0.5,
         )
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Verify health monitoring infrastructure is initialized
-        assert hasattr(swarm, 'health_data')
-        assert hasattr(swarm, 'health_config')
+        assert hasattr(swarm, "health_data")
+        assert hasattr(swarm, "health_config")
         assert swarm.health_data == {}
 
         await swarm.close()
@@ -159,15 +160,14 @@ class TestSwarmHealthMonitoring:
         transport = AsyncMock()
 
         # Create connection config with health monitoring disabled
-        connection_config = ConnectionConfig(
-            enable_health_monitoring=False
+        connection_config = ConnectionConfig(enable_health_monitoring=False)
+
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
         )
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
-
         # Verify health monitoring is not initialized
-        assert not hasattr(swarm, 'health_data')
+        assert not hasattr(swarm, "health_data")
 
         await swarm.close()
 
@@ -182,12 +182,12 @@ class TestSwarmHealthMonitoring:
 
         # Create connection config with health-based load balancing
         connection_config = ConnectionConfig(
-            enable_health_monitoring=True,
-            load_balancing_strategy="health_based"
+            enable_health_monitoring=True, load_balancing_strategy="health_based"
         )
 
-        swarm = Swarm(peer_id, peerstore, upgrader, transport,
-                     connection_config=connection_config)
+        swarm = Swarm(
+            peer_id, peerstore, upgrader, transport, connection_config=connection_config
+        )
 
         # Verify the strategy is set
         assert swarm.connection_config.load_balancing_strategy == "health_based"
