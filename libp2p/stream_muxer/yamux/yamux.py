@@ -83,7 +83,7 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
-        self.rw_lock = ReadWriteLock
+        self.rw_lock = ReadWriteLock()
         self.close_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
