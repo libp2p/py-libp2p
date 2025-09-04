@@ -1,0 +1,1 @@
+PubSub routers now include signed-peer-records in RPC messages for secure peer-info exchange.
