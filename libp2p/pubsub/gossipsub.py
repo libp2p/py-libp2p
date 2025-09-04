@@ -1,6 +1,3 @@
-from ast import (
-    literal_eval,
-)
 from collections import (
     defaultdict,
 )
@@ -22,6 +19,7 @@ from libp2p.abc import (
     IPubsubRouter,
 )
 from libp2p.custom_types import (
+    MessageID,
     TProtocol,
 )
 from libp2p.peer.id import (
@@ -55,6 +53,10 @@ from .pb import (
 )
 from .pubsub import (
     Pubsub,
+)
+from .utils import (
+    parse_message_id_safe,
+    safe_parse_message_id,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -794,8 +796,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
         # seen_seqnos) to list of messages we want to request
-        msg_ids_wanted: list[str] = [
-            msg_id
+        msg_ids_wanted: list[MessageID] = [
+            parse_message_id_safe(msg_id)
             for msg_id in ihave_msg.messageIDs
             if msg_id not in seen_seqnos_and_peers
         ]
@@ -811,9 +813,9 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        # FIXME: Update type of message ID
-        # FIXME: Find a better way to parse the msg ids
-        msg_ids: list[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
+        msg_ids: list[tuple[bytes, bytes]] = [
+            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
+        ]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
