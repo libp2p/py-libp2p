@@ -37,3 +37,4 @@ SyncValidatorFn = Callable[[ID, rpc_pb2.Message], bool]
 AsyncValidatorFn = Callable[[ID, rpc_pb2.Message], Awaitable[bool]]
 ValidatorFn = Union[SyncValidatorFn, AsyncValidatorFn]
 UnsubscribeFn = Callable[[], Awaitable[None]]
+MessageID = NewType("MessageID", str)
