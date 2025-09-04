@@ -1,0 +1,1 @@
+Add automatic peer dialing in bootstrap module using trio.Nursery.
