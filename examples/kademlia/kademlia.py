@@ -41,6 +41,7 @@ from libp2p.tools.async_service import (
 from libp2p.tools.utils import (
     info_from_p2p_addr,
 )
+from libp2p.utils.paths import get_script_dir, join_paths
 
 # Configure logging
 logging.basicConfig(
@@ -53,8 +54,8 @@ logger = logging.getLogger("kademlia-example")
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
 # Get the directory where this script is located
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_ADDR_LOG = os.path.join(SCRIPT_DIR, "server_node_addr.txt")
+SCRIPT_DIR = get_script_dir(__file__)
+SERVER_ADDR_LOG = join_paths(SCRIPT_DIR, "server_node_addr.txt")
 
 # Set the level for all child loggers
 for module in [
