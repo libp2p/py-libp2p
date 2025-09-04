@@ -15,6 +15,7 @@ import pytest
 import trio
 
 from libp2p.utils.logging import (
+    _current_handlers,
     _current_listener,
     _listener_ready,
     log_queue,
@@ -24,12 +25,18 @@ from libp2p.utils.logging import (
 
 def _reset_logging():
     """Reset all logging state."""
-    global _current_listener, _listener_ready
+    global _current_listener, _listener_ready, _current_handlers
 
     # Stop existing listener if any
     if _current_listener is not None:
         _current_listener.stop()
         _current_listener = None
+
+    # Close all file handlers to ensure proper cleanup on Windows
+    for handler in _current_handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+    _current_handlers.clear()
 
     # Reset the event
     _listener_ready = threading.Event()
@@ -174,6 +181,15 @@ async def test_custom_log_file(clean_env):
         if _current_listener is not None:
             _current_listener.stop()
 
+        # Give a moment for the listener to fully stop
+        await trio.sleep(0.05)
+
+        # Close all file handlers to release the file
+        for handler in _current_handlers:
+            if isinstance(handler, logging.FileHandler):
+                handler.flush()  # Ensure all writes are flushed
+                handler.close()
+
         # Check if the file exists and contains our message
         assert log_file.exists()
         content = log_file.read_text()
@@ -185,16 +201,15 @@ async def test_default_log_file(clean_env):
     """Test logging to the default file path."""
     os.environ["LIBP2P_DEBUG"] = "INFO"
 
-    with patch("libp2p.utils.logging.datetime") as mock_datetime:
-        # Mock the timestamp to have a predictable filename
-        mock_datetime.now.return_value.strftime.return_value = "20240101_120000"
+    with patch("libp2p.utils.paths.create_temp_file") as mock_create_temp:
+        # Mock the temp file creation to return a predictable path
+        mock_temp_file = (
+            Path(tempfile.gettempdir()) / "test_py-libp2p_20240101_120000.log"
+        )
+        mock_create_temp.return_value = mock_temp_file
 
         # Remove the log file if it exists
-        if os.name == "nt":  # Windows
-            log_file = Path("C:/Windows/Temp/20240101_120000_py-libp2p.log")
-        else:  # Unix-like
-            log_file = Path("/tmp/20240101_120000_py-libp2p.log")
-        log_file.unlink(missing_ok=True)
+        mock_temp_file.unlink(missing_ok=True)
 
         setup_logging()
 
@@ -211,9 +226,18 @@ async def test_default_log_file(clean_env):
         if _current_listener is not None:
             _current_listener.stop()
 
-        # Check the default log file
-        if log_file.exists():  # Only check content if we have write permission
-            content = log_file.read_text()
+        # Give a moment for the listener to fully stop
+        await trio.sleep(0.05)
+
+        # Close all file handlers to release the file
+        for handler in _current_handlers:
+            if isinstance(handler, logging.FileHandler):
+                handler.flush()  # Ensure all writes are flushed
+                handler.close()
+
+        # Check the mocked temp file
+        if mock_temp_file.exists():
+            content = mock_temp_file.read_text()
             assert "Test message" in content
 
 
