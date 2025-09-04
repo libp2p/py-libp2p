@@ -13,7 +13,6 @@ from libp2p.abc import (
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
-
 from libp2p.stream_muxer.rw_lock import (
     ReadWriteLock
 )
