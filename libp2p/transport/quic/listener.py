@@ -267,56 +267,37 @@ class QUICListener(IListener):
             return value, 8
 
     async def _process_packet(self, data: bytes, addr: tuple[str, int]) -> None:
-        """Process incoming QUIC packet with fine-grained locking."""
+        """Process incoming QUIC packet with optimized routing."""
         try:
             self._stats["packets_processed"] += 1
             self._stats["bytes_received"] += len(data)
 
-            logger.debug(f"Processing packet of {len(data)} bytes from {addr}")
-
-            # Parse packet header OUTSIDE the lock
             packet_info = self.parse_quic_packet(data)
             if packet_info is None:
-                logger.error(f"Failed to parse packet header quic packet from {addr}")
                 self._stats["invalid_packets"] += 1
                 return
 
             dest_cid = packet_info.destination_cid
-            connection_obj = None
-            pending_quic_conn = None
 
+            # Single lock acquisition with all lookups
             async with self._connection_lock:
-                if dest_cid in self._connections:
-                    connection_obj = self._connections[dest_cid]
-                    logger.debug(f"Routing to established connection {dest_cid.hex()}")
+                connection_obj = self._connections.get(dest_cid)
+                pending_quic_conn = self._pending_connections.get(dest_cid)
 
-                elif dest_cid in self._pending_connections:
-                    pending_quic_conn = self._pending_connections[dest_cid]
-                    logger.debug(f"Routing to pending connection {dest_cid.hex()}")
-
-                else:
-                    # Check if this is a new connection
-                    if packet_info.packet_type.name == "INITIAL":
-                        logger.debug(
-                            f"Received INITIAL Packet Creating new conn for {addr}"
-                        )
-
-                        # Create new connection INSIDE the lock for safety
+                if not connection_obj and not pending_quic_conn:
+                    if packet_info.packet_type == QuicPacketType.INITIAL:
                         pending_quic_conn = await self._handle_new_connection(
                             data, addr, packet_info
                         )
                     else:
                         return
 
-            # CRITICAL: Process packets OUTSIDE the lock to prevent deadlock
+            # Process outside the lock
             if connection_obj:
-                # Handle established connection
                 await self._handle_established_connection_packet(
                     connection_obj, data, addr, dest_cid
                 )
-
             elif pending_quic_conn:
-                # Handle pending connection
                 await self._handle_pending_connection_packet(
                     pending_quic_conn, data, addr, dest_cid
                 )
@@ -431,6 +412,7 @@ class QUICListener(IListener):
                     f"No configuration found for version 0x{packet_info.version:08x}"
                 )
                 await self._send_version_negotiation(addr, packet_info.source_cid)
+                return None
 
             if not quic_config:
                 raise QUICListenError("Cannot determine QUIC configuration")

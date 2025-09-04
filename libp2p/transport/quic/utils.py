@@ -108,21 +108,21 @@ def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> tuple[str, int]:
         # Try to get IPv4 address
         try:
             host = maddr.value_for_protocol(multiaddr.protocols.P_IP4)  # type: ignore
-        except ValueError:
+        except Exception:
             pass
 
         # Try to get IPv6 address if IPv4 not found
         if host is None:
             try:
                 host = maddr.value_for_protocol(multiaddr.protocols.P_IP6)  # type: ignore
-            except ValueError:
+            except Exception:
                 pass
 
         # Get UDP port
         try:
             port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)  # type: ignore
             port = int(port_str)
-        except ValueError:
+        except Exception:
             pass
 
         if host is None or port is None:
@@ -203,8 +203,7 @@ def create_quic_multiaddr(
         if version == "quic-v1" or version == "/quic-v1":
             quic_proto = QUIC_V1_PROTOCOL
         elif version == "quic" or version == "/quic":
-            # This is DRAFT Protocol
-            quic_proto = QUIC_V1_PROTOCOL
+            quic_proto = QUIC_DRAFT29_PROTOCOL
         else:
             raise QUICInvalidMultiaddrError(f"Invalid QUIC version: {version}")
 

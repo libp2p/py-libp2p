@@ -192,7 +192,7 @@ class TestQUICConnection:
             await trio.sleep(10)  # Longer than timeout
 
         with patch.object(
-            quic_connection._stream_id_lock, "acquire", side_effect=slow_acquire
+            quic_connection._stream_lock, "acquire", side_effect=slow_acquire
         ):
             with pytest.raises(
                 QUICStreamTimeoutError, match="Stream creation timed out"
