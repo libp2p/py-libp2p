@@ -1,7 +1,4 @@
 import atexit
-from datetime import (
-    datetime,
-)
 import logging
 import logging.handlers
 import os
@@ -20,6 +17,9 @@ log_queue: "queue.Queue[Any]" = queue.Queue()
 
 # Store the current listener to stop it on exit
 _current_listener: logging.handlers.QueueListener | None = None
+
+# Store the handlers for proper cleanup
+_current_handlers: list[logging.Handler] = []
 
 # Event to track when the listener is ready
 _listener_ready = threading.Event()
@@ -95,7 +95,7 @@ def setup_logging() -> None:
         - Child loggers inherit their parent's level unless explicitly set
         - The root libp2p logger controls the default level
     """
-    global _current_listener, _listener_ready
+    global _current_listener, _listener_ready, _current_handlers
 
     # Reset the event
     _listener_ready.clear()
@@ -104,6 +104,12 @@ def setup_logging() -> None:
     if _current_listener is not None:
         _current_listener.stop()
         _current_listener = None
+
+    # Close and clear existing handlers
+    for handler in _current_handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+    _current_handlers.clear()
 
     # Get the log level from environment variable
     debug_str = os.environ.get("LIBP2P_DEBUG", "")
@@ -148,13 +154,10 @@ def setup_logging() -> None:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        # Default log file with timestamp and unique identifier
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        unique_id = os.urandom(4).hex()  # Add a unique identifier to prevent collisions
-        if os.name == "nt":  # Windows
-            log_file = f"C:\\Windows\\Temp\\py-libp2p_{timestamp}_{unique_id}.log"
-        else:  # Unix-like
-            log_file = f"/tmp/py-libp2p_{timestamp}_{unique_id}.log"
+        # Use cross-platform temp file creation
+        from libp2p.utils.paths import create_temp_file
+
+        log_file = str(create_temp_file(prefix="py-libp2p_", suffix=".log"))
 
         # Print the log file path so users know where to find it
         print(f"Logging to: {log_file}", file=sys.stderr)
@@ -195,6 +198,9 @@ def setup_logging() -> None:
             logger.setLevel(level)
             logger.propagate = False  # Prevent message duplication
 
+    # Store handlers globally for cleanup
+    _current_handlers.extend(handlers)
+
     # Start the listener AFTER configuring all loggers
     _current_listener = logging.handlers.QueueListener(
         log_queue, *handlers, respect_handler_level=True
@@ -209,7 +215,13 @@ def setup_logging() -> None:
 @atexit.register
 def cleanup_logging() -> None:
     """Clean up logging resources on exit."""
-    global _current_listener
+    global _current_listener, _current_handlers
     if _current_listener is not None:
         _current_listener.stop()
         _current_listener = None
+
+    # Close all file handlers to ensure proper cleanup on Windows
+    for handler in _current_handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+    _current_handlers.clear()
