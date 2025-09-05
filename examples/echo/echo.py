@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import secrets
 
@@ -27,6 +28,11 @@ from libp2p.utils.address_validation import (
     find_free_port,
     get_available_interfaces,
 )
+
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 MAX_READ_LEN = 2**32 - 1

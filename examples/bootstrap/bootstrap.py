@@ -2,7 +2,6 @@ import argparse
 import logging
 import secrets
 
-import multiaddr
 import trio
 
 from libp2p import new_host
@@ -54,18 +53,22 @@ BOOTSTRAP_PEERS = [
 
 async def run(port: int, bootstrap_addrs: list[str]) -> None:
     """Run the bootstrap discovery example."""
+    from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+
+    if port <= 0:
+        port = find_free_port()
+
     # Generate key pair
     secret = secrets.token_bytes(32)
     key_pair = create_new_key_pair(secret)
 
-    # Create listen address
-    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    # Create listen addresses for all available interfaces
+    listen_addrs = get_available_interfaces(port)
 
     # Register peer discovery handler
     peerDiscovery.register_peer_discovered_handler(on_peer_discovery)
 
     logger.info("🚀 Starting Bootstrap Discovery Example")
-    logger.info(f"📍 Listening on: {listen_addr}")
     logger.info(f"🌐 Bootstrap peers: {len(bootstrap_addrs)}")
 
     print("\n" + "=" * 60)
@@ -80,7 +83,16 @@ async def run(port: int, bootstrap_addrs: list[str]) -> None:
     host = new_host(key_pair=key_pair, bootstrap=bootstrap_addrs)
 
     try:
-        async with host.run(listen_addrs=[listen_addr]):
+        async with host.run(listen_addrs=listen_addrs):
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            logger.info("Listener ready, listening on:")
+            print("Listener ready, listening on:")
+            for addr in all_addrs:
+                logger.info(f"{addr}")
+                print(f"{addr}")
+
             # Keep running and log peer discovery events
             await trio.sleep_forever()
     except KeyboardInterrupt:

@@ -20,6 +20,11 @@ from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
+
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
 
@@ -38,6 +43,12 @@ async def _echo_stream_handler(stream: INetStream) -> None:
 
 async def run_server(port: int, seed: int | None = None) -> None:
     """Run echo server with QUIC transport."""
+    from libp2p.utils.address_validation import find_free_port
+
+    if port <= 0:
+        port = find_free_port()
+
+    # For QUIC, we need to use UDP addresses
     listen_addr = Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic")
 
     if seed:
@@ -63,10 +74,18 @@ async def run_server(port: int, seed: int | None = None) -> None:
             print(f"I am {host.get_id().to_string()}")
             host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            print("Listener ready, listening on:")
+            for addr in all_addrs:
+                print(f"{addr}")
+
+            # Use the first address as the default for the client command
+            default_addr = all_addrs[0]
             print(
-                "Run this from the same folder in another console:\n\n"
-                f"python3 ./examples/echo/echo_quic.py "
-                f"-d {host.get_addrs()[0]}\n"
+                f"\nRun this from the same folder in another console:\n\n"
+                f"python3 ./examples/echo/echo_quic.py -d {default_addr}\n"
             )
             print("Waiting for incoming QUIC connections...")
             await trio.sleep_forever()
@@ -173,6 +192,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    logging.getLogger("aioquic").setLevel(logging.DEBUG)
     main()

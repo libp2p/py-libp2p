@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 
 import multiaddr
@@ -16,6 +17,11 @@ from libp2p.network.stream.net_stream import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 PROTOCOL_ID = TProtocol("/chat/1.0.0")
 MAX_READ_LEN = 2**32 - 1
@@ -40,9 +46,14 @@ async def write_data(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+
+    if port <= 0:
+        port = find_free_port()
+
+    listen_addrs = get_available_interfaces(port)
     host = new_host()
-    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
@@ -54,10 +65,18 @@ async def run(port: int, destination: str) -> None:
 
             host.set_stream_handler(PROTOCOL_ID, stream_handler)
 
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            print("Listener ready, listening on:\n")
+            for addr in all_addrs:
+                print(f"{addr}")
+
+            # Use the first address as the default for the client command
+            default_addr = all_addrs[0]
             print(
-                "Run this from the same folder in another console:\n\n"
-                f"chat-demo "
-                f"-d {host.get_addrs()[0]}\n"
+                f"\nRun this from the same folder in another console:\n\n"
+                f"chat-demo -d {default_addr}\n"
             )
             print("Waiting for incoming connection...")
 

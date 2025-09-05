@@ -150,26 +150,39 @@ async def run_node(
 
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
-        listen_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
-        async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        from libp2p.utils.address_validation import get_available_interfaces
+
+        listen_addrs = get_available_interfaces(port)
+
+        async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
             # Start the peer-store cleanup task
             nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
             peer_id = host.get_id().pretty()
-            addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
+
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            logger.info("Listener ready, listening on:")
+            for addr in all_addrs:
+                logger.info(f"{addr}")
+
+            # Use the first address as the default for the bootstrap command
+            default_addr = all_addrs[0]
+            bootstrap_cmd = f"--bootstrap {default_addr}"
+            logger.info("To connect to this node, use: %s", bootstrap_cmd)
+
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
             dht = KadDHT(host, dht_mode)
             # take all peer ids from the host and add them to the dht
             for peer_id in host.get_peerstore().peer_ids():
                 await dht.routing_table.add_peer(peer_id)
             logger.info(f"Connected to bootstrap nodes: {host.get_connected_peers()}")
-            bootstrap_cmd = f"--bootstrap {addr_str}"
-            logger.info("To connect to this node, use: %s", bootstrap_cmd)
 
             # Save server address in server mode
             if dht_mode == DHTMode.SERVER:
-                save_server_addr(addr_str)
+                save_server_addr(str(default_addr))
 
             # Start the DHT service
             async with background_trio_service(dht):
