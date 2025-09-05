@@ -142,9 +142,9 @@ def main() -> None:
 
     QUIC provides built-in TLS security and stream multiplexing over UDP.
 
-    To use it, first run 'python ./echo_quic_fixed.py -p <PORT>', where <PORT> is
+    To use it, first run 'echo-quic-demo -p <PORT>', where <PORT> is
     the UDP port number. Then, run another host with ,
-    'python ./echo_quic_fixed.py -d <DESTINATION>'
+    'echo-quic-demo -d <DESTINATION>'
     where <DESTINATION> is the QUIC multiaddress of the previous listener host.
     """
 

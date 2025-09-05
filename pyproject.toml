@@ -53,6 +53,7 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
+echo-quic-demo="examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
