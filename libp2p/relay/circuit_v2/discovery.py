@@ -395,6 +395,7 @@ class RelayDiscovery(Service):
                 return False
 
             try:
+                # Prepare signed envelope
                 envelope_bytes, _ = env_to_send_in_RPC(self.host)
                 # Create and send reservation request
                 request = HopMessage(
@@ -415,14 +416,7 @@ class RelayDiscovery(Service):
                     # Parse response
                     response = HopMessage()
                     response.ParseFromString(response_bytes)
-
-                    if not maybe_consume_signed_record(response, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return False
-
+                    
                     # Check if reservation was successful
                     if response.type == HopMessage.RESERVE and response.HasField(
                         "status"

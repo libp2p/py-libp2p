@@ -194,11 +194,12 @@ class CircuitV2Transport(ITransport):
             resp = HopMessage()
             resp.ParseFromString(resp_bytes)
 
-            # Consume the source signed_peer_record
-            if not maybe_consume_signed_record(resp, self.host, relay_peer_id):
+            # Get destination peer SPR from the relay's response and validate it
+            dest_signed_envelope = resp.signedRecord
+            if not maybe_consume_signed_record(resp, self.host, dest_signed_envelope):
                 logger.error("Received an invalid-signed-record, dropping the stream")
                 await relay_stream.close()
-                raise ConnectionError("Invalid signed record from relay")
+                raise ConnectionError("Invalid signed record")
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
@@ -267,6 +268,7 @@ class CircuitV2Transport(ITransport):
 
         """
         try:
+            # Create signed envelope for the reservation request to relay
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             # Send reservation request
             reserve_msg = HopMessage(
