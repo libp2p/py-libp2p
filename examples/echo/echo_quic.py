@@ -48,8 +48,8 @@ async def run_server(port: int, seed: int | None = None) -> None:
     if port <= 0:
         port = find_free_port()
 
-    # For QUIC, we need to use UDP addresses
-    listen_addr = Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic")
+    # For QUIC, we need to use UDP addresses - use loopback for security
+    listen_addr = Multiaddr(f"/ip4/127.0.0.1/udp/{port}/quic")
 
     if seed:
         import random
