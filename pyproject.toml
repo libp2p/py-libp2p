@@ -16,12 +16,14 @@ maintainers = [
     { name = "Dave Grantham", email = "dwg@linuxprogrammer.org" },
 ]
 dependencies = [
+    "aioquic>=1.2.0",
     "base58>=1.0.3",
-    "coincurve>=10.0.0",
+    "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "fastecdsa==2.3.2; sys_platform != 'win32'",
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
-    # "multiaddr>=0.0.9",
+    # "multiaddr (>=0.0.9,<0.0.10)",
     "multiaddr @ git+https://github.com/multiformats/py-multiaddr.git@db8124e2321f316d3b7d2733c7df11d6ad9c03e6",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
@@ -32,7 +34,6 @@ dependencies = [
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
-    "fastecdsa==2.3.2; sys_platform != 'win32'",
     "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
@@ -52,6 +53,7 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
+echo-quic-demo="examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
@@ -77,6 +79,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-xdist>=2.4.0",
     "pytest-trio>=0.5.2",
+    "pytest-timeout>=2.4.0",
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
@@ -88,11 +91,12 @@ docs = [
     "tomli; python_version < '3.11'",
 ]
 test = [
+    "factory-boy>=2.12.0,<3.0.0",
     "p2pclient==0.2.0",
     "pytest>=7.0.0",
-    "pytest-xdist>=2.4.0",
+    "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
-    "factory-boy>=2.12.0,<3.0.0",
+    "pytest-xdist>=2.4.0",
 ]
 
 [tool.setuptools]
@@ -282,4 +286,5 @@ project_excludes = [
     "**/*pb2.py",
     "**/*.pyi",
     ".venv/**",
+    "./tests/interop/nim_libp2p",
 ]
