@@ -29,8 +29,7 @@ from .pubsub import (
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
-logger = logging.getLogger("libp2p.pubsub.floodsub")
-
+logger = logging.getLogger(__name__)
 
 class FloodSub(IPubsubRouter):
     protocols: list[TProtocol]

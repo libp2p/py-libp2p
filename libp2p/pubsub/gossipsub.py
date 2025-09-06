@@ -60,7 +60,7 @@ from .pubsub import (
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 
-logger = logging.getLogger("libp2p.pubsub.gossipsub")
+logger = logging.getLogger(__name__)
 
 
 class GossipSub(IPubsubRouter, Service):
