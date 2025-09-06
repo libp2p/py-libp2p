@@ -12,6 +12,7 @@ from libp2p.network.stream.exceptions import (
     StreamError,
     StreamReset,
 )
+from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -327,6 +328,10 @@ async def test_circuit_v2_reservation_basic():
                 request.ParseFromString(request_data)
                 logger.info("Mock handler parsed request: type=%s", request.type)
 
+                # Check if reservation request has signed records
+                if request.HasField("signedRecord"):
+                    # NOTE: `request.signedRecord` is `bytes`.
+                    assert isinstance(request.signedRecord, bytes)
                 # Only handle RESERVE requests
                 if request.type == proto.HopMessage.RESERVE:
                     # Create a valid response
@@ -389,7 +394,10 @@ async def test_circuit_v2_reservation_basic():
 
                 logger.info("Preparing reservation request")
                 request = proto.HopMessage(
-                    type=proto.HopMessage.RESERVE, peer=client_host.get_id().to_bytes()
+                    type=proto.HopMessage.RESERVE, peer=client_host.get_id().to_bytes(),
+                    # Client sends its signed peer records in reservation request
+                    signedRecord=client_host.get_peerstore()
+                    .get_peer_record(client_host.get_id()),
                 )
 
                 logger.info("Sending reservation request")
@@ -467,6 +475,21 @@ async def test_circuit_v2_reservation_limit():
                     logger.info(
                         "Mock handler received reservation request from %s", peer_id
                     )
+                    # Check if reservation request has signed records
+                    if not request.HasField("signedRecord"):
+                        logger.warning(
+                            "Reservation request from %s is missing signedRecord",
+                            peer_id,
+                        )
+                        response = proto.HopMessage(
+                            type=proto.HopMessage.RESERVE,
+                            status=proto.Status(
+                                code=proto.Status.INVALID_ARGUMENT,
+                                message="Missing signedRecord",
+                            ),
+                        )
+                        await stream.write(response.SerializeToString())
+                        return
 
                     # Check if we've reached reservation limit
                     if (
@@ -559,7 +582,10 @@ async def test_circuit_v2_reservation_limit():
 
                 logger.info("Preparing reservation request for client1")
                 request1 = proto.HopMessage(
-                    type=proto.HopMessage.RESERVE, peer=client1_host.get_id().to_bytes()
+                    type=proto.HopMessage.RESERVE,
+                    peer=client1_host.get_id().to_bytes(),
+                    signedRecord=client1_host.get_peerstore()
+                    .get_peer_record(client1_host.get_id()),
                 )
 
                 logger.info("Sending reservation request for client1")
@@ -615,7 +641,10 @@ async def test_circuit_v2_reservation_limit():
 
                 logger.info("Preparing reservation request for client2")
                 request2 = proto.HopMessage(
-                    type=proto.HopMessage.RESERVE, peer=client2_host.get_id().to_bytes()
+                    type=proto.HopMessage.RESERVE,
+                    peer=client2_host.get_id().to_bytes(),
+                    signedRecord=client2_host.host.get_peerstore()
+                    .get_peer_record(client2_host.get_id()),
                 )
 
                 logger.info("Sending reservation request for client2")
@@ -663,3 +692,64 @@ async def test_circuit_v2_reservation_limit():
         finally:
             await close_stream(stream1)
             await close_stream(stream2)
+
+
+@pytest.mark.trio
+async def test_circuit_v2_fails_with_invalid_SPR():
+    """Test that relay correctly rejects reservations with invalid SPRs."""
+    async with HostFactory.create_batch_and_listen(2) as hosts:
+        relay_host, client_host = hosts
+        logger.info("Created hosts for test_circuit_v2_fails_with_invalid_SPR")
+
+        # Handler that checks SPR validity
+        async def spr_validation_handler(stream):
+            try:
+                request_data = await stream.read(MAX_READ_LEN)
+                request = proto.HopMessage()
+                request.ParseFromString(request_data)
+
+                if request.type == proto.HopMessage.RESERVE:
+                    # Reject specific invalid SPR
+                    if (request.HasField("signedRecord") and
+                        request.signedRecord == b"invalid-spr"):
+                        status_code = proto.Status.INVALID_ARGUMENT
+                        message = "Invalid SPR rejected"
+                    else:
+                        status_code = proto.Status.OK
+                        message = "Valid SPR accepted"
+
+                    response = proto.HopMessage(
+                        type=proto.HopMessage.RESERVE,
+                        status=proto.Status(code=status_code, message=message),
+                    )
+                    await stream.write(response.SerializeToString())
+                    await trio.sleep(2)  # Brief wait for client to read
+            except Exception as e:
+                logger.error("Handler error: %s", str(e))
+
+        relay_host.set_stream_handler(PROTOCOL_ID, spr_validation_handler)
+        await connect(client_host, relay_host)
+        await trio.sleep(SLEEP_TIME)
+
+        # Test invalid SPR rejection
+        async with client_host.new_stream(relay_host.get_id(), [PROTOCOL_ID]) as stream:
+            request = proto.HopMessage(
+                type=proto.HopMessage.RESERVE,
+                peer=client_host.get_id().to_bytes(),
+                signedRecord=b"invalid-spr",  # Invalid SPR
+            )
+            await stream.write(request.SerializeToString())
+            await trio.sleep(SLEEP_TIME)
+
+            response_bytes = await stream.read(MAX_READ_LEN)
+            assert response_bytes, "No response received"
+
+            response = proto.HopMessage()
+            response.ParseFromString(response_bytes)
+
+            assert response.HasField("status"), "No status field"
+            assert response.status.code == proto.Status.INVALID_ARGUMENT, (
+                f"Expected INVALID_ARGUMENT, got {response.status.code}"
+            )
+            logger.info("Successfully verified invalid SPR rejection")
+
