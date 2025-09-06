@@ -44,6 +44,9 @@ from libp2p.stream_muxer.exceptions import (
     MuxedStreamError,
     MuxedStreamReset,
 )
+from libp2p.stream_muxer.rw_lock import (
+    ReadWriteLock
+)
 
 # Configure logger for this module
 logger = logging.getLogger("libp2p.stream_muxer.yamux")
@@ -80,6 +83,8 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
+        self.rw_lock = ReadWriteLock()
+        self.close_lock = trio.Lock()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
@@ -95,52 +100,54 @@ class YamuxStream(IMuxedStream):
         await self.close()
 
     async def write(self, data: bytes) -> None:
-        if self.send_closed:
-            raise MuxedStreamError("Stream is closed for sending")
+        async with self.rw_lock.write_lock():
+        
+            if self.send_closed:
+                raise MuxedStreamError("Stream is closed for sending")
 
-        # Flow control: Check if we have enough send window
-        total_len = len(data)
-        sent = 0
-        logger.debug(f"Stream {self.stream_id}: Starts writing {total_len} bytes ")
-        while sent < total_len:
-            # Wait for available window with timeout
-            timeout = False
-            async with self.window_lock:
-                if self.send_window == 0:
-                    logger.debug(
-                        f"Stream {self.stream_id}: Window is zero, waiting for update"
+            # Flow control: Check if we have enough send window
+            total_len = len(data)
+            sent = 0
+            logger.debug(f"Stream {self.stream_id}: Starts writing {total_len} bytes ")
+            while sent < total_len:
+                # Wait for available window with timeout
+                timeout = False
+                async with self.window_lock:
+                    if self.send_window == 0:
+                        logger.debug(
+                            f"Stream {self.stream_id}: Window is zero, waiting for update"
+                        )
+                        # Release lock and wait with timeout
+                        self.window_lock.release()
+                        # To avoid re-acquiring the lock immediately,
+                        with trio.move_on_after(5.0) as cancel_scope:
+                            while self.send_window == 0 and not self.closed:
+                                await trio.sleep(0.01)
+                            # If we timed out, cancel the scope
+                            timeout = cancel_scope.cancelled_caught
+                        # Re-acquire lock
+                        await self.window_lock.acquire()
+
+                    # If we timed out waiting for window update, raise an error
+                    if timeout:
+                        raise MuxedStreamError(
+                            "Timed out waiting for window update after 5 seconds."
+                        )
+
+                    if self.closed:
+                        raise MuxedStreamError("Stream is closed")
+
+                    # Calculate how much we can send now
+                    to_send = min(self.send_window, total_len - sent)
+                    chunk = data[sent : sent + to_send]
+                    self.send_window -= to_send
+
+                    # Send the data
+                    header = struct.pack(
+                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(chunk)
                     )
-                    # Release lock and wait with timeout
-                    self.window_lock.release()
-                    # To avoid re-acquiring the lock immediately,
-                    with trio.move_on_after(5.0) as cancel_scope:
-                        while self.send_window == 0 and not self.closed:
-                            await trio.sleep(0.01)
-                        # If we timed out, cancel the scope
-                        timeout = cancel_scope.cancelled_caught
-                    # Re-acquire lock
-                    await self.window_lock.acquire()
-
-                # If we timed out waiting for window update, raise an error
-                if timeout:
-                    raise MuxedStreamError(
-                        "Timed out waiting for window update after 5 seconds."
-                    )
-
-                if self.closed:
-                    raise MuxedStreamError("Stream is closed")
-
-                # Calculate how much we can send now
-                to_send = min(self.send_window, total_len - sent)
-                chunk = data[sent : sent + to_send]
-                self.send_window -= to_send
-
-                # Send the data
-                header = struct.pack(
-                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(chunk)
-                )
-                await self.conn.secured_conn.write(header + chunk)
-                sent += to_send
+                    await self.conn.secured_conn.write(header + chunk)
+                    sent += to_send
 
     async def send_window_update(self, increment: int, skip_lock: bool = False) -> None:
         """
@@ -186,101 +193,104 @@ class YamuxStream(IMuxedStream):
         if n is None:
             n = -1
 
-        # If the stream is closed for receiving and the buffer is empty, raise EOF
-        if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
-            logger.debug(
-                f"Stream {self.stream_id}: Stream closed for receiving and buffer empty"
-            )
-            raise MuxedStreamEOF("Stream is closed for receiving")
-
-        if n == -1:
-            data = b""
-            while not self.conn.event_shutting_down.is_set():
-                # Check if there's data in the buffer
-                buffer = self.conn.stream_buffers.get(self.stream_id)
-
-                # If buffer is not available, check if stream is closed
-                if buffer is None:
-                    logger.debug(f"Stream {self.stream_id}: No buffer available")
-                    raise MuxedStreamEOF("Stream buffer closed")
-
-                # If we have data in buffer, process it
-                if len(buffer) > 0:
-                    chunk = bytes(buffer)
-                    buffer.clear()
-                    data += chunk
-
-                    # Send window update for the chunk we just read
-                    async with self.window_lock:
-                        self.recv_window += len(chunk)
-                        logger.debug(f"Stream {self.stream_id}: Update {len(chunk)}")
-                        await self.send_window_update(len(chunk), skip_lock=True)
-
-                # If stream is closed (FIN received) and buffer is empty, break
-                if self.recv_closed and len(buffer) == 0:
-                    logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
-                    break
-
-                # If stream was reset, raise reset error
-                if self.reset_received:
-                    logger.debug(f"Stream {self.stream_id}: Stream was reset")
-                    raise MuxedStreamReset("Stream was reset")
-
-                # Wait for more data or stream closure
-                logger.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
-                await self.conn.stream_events[self.stream_id].wait()
-                self.conn.stream_events[self.stream_id] = trio.Event()
-
-            # After loop exit, first check if we have data to return
-            if data:
+        async with self.rw_lock.read_lock():
+            # If the stream is closed for receiving and the buffer is empty, raise EOF
+            if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
                 logger.debug(
-                    f"Stream {self.stream_id}: Returning {len(data)} bytes after loop"
+                    f"Stream {self.stream_id}: Stream closed for receiving and buffer empty"
                 )
+                raise MuxedStreamEOF("Stream is closed for receiving")
+
+            if n == -1:
+                data = b""
+                while not self.conn.event_shutting_down.is_set():
+                    # Check if there's data in the buffer
+                    buffer = self.conn.stream_buffers.get(self.stream_id)
+
+                    # If buffer is not available, check if stream is closed
+                    if buffer is None:
+                        logger.debug(f"Stream {self.stream_id}: No buffer available")
+                        raise MuxedStreamEOF("Stream buffer closed")
+
+                    # If we have data in buffer, process it
+                    if len(buffer) > 0:
+                        chunk = bytes(buffer)
+                        buffer.clear()
+                        data += chunk
+
+                        # Send window update for the chunk we just read
+                        async with self.window_lock:
+                            self.recv_window += len(chunk)
+                            logger.debug(f"Stream {self.stream_id}: Update {len(chunk)}")
+                            await self.send_window_update(len(chunk), skip_lock=True)
+
+                    # If stream is closed (FIN received) and buffer is empty, break
+                    if self.recv_closed and len(buffer) == 0:
+                        logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
+                        break
+
+                    # If stream was reset, raise reset error
+                    if self.reset_received:
+                        logger.debug(f"Stream {self.stream_id}: Stream was reset")
+                        raise MuxedStreamReset("Stream was reset")
+
+                    # Wait for more data or stream closure
+                    logger.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+
+                # After loop exit, first check if we have data to return
+                if data:
+                    logger.debug(
+                        f"Stream {self.stream_id}: Returning {len(data)} bytes after loop"
+                    )
+                    return data
+
+                # No data accumulated, now check why we exited the loop
+                if self.conn.event_shutting_down.is_set():
+                    logger.debug(f"Stream {self.stream_id}: Connection shutting down")
+                    raise MuxedStreamEOF("Connection shut down")
+
+                # Return empty data
+                return b""
+            else:
+                data = await self.conn.read_stream(self.stream_id, n)
+                async with self.window_lock:
+                    self.recv_window += len(data)
+                    logger.debug(
+                        f"Stream {self.stream_id}: Sending window update after read, "
+                        f"increment={len(data)}"
+                    )
+                    await self.send_window_update(len(data), skip_lock=True)
                 return data
 
-            # No data accumulated, now check why we exited the loop
-            if self.conn.event_shutting_down.is_set():
-                logger.debug(f"Stream {self.stream_id}: Connection shutting down")
-                raise MuxedStreamEOF("Connection shut down")
-
-            # Return empty data
-            return b""
-        else:
-            data = await self.conn.read_stream(self.stream_id, n)
-            async with self.window_lock:
-                self.recv_window += len(data)
-                logger.debug(
-                    f"Stream {self.stream_id}: Sending window update after read, "
-                    f"increment={len(data)}"
-                )
-                await self.send_window_update(len(data), skip_lock=True)
-            return data
-
     async def close(self) -> None:
-        if not self.send_closed:
-            logger.debug(f"Half-closing stream {self.stream_id} (local end)")
-            header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
-            )
-            await self.conn.secured_conn.write(header)
-            self.send_closed = True
+        async with self.close_lock:
+            if not self.send_closed:
+                logger.debug(f"Half-closing stream {self.stream_id} (local end)")
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
+                )
+                await self.conn.secured_conn.write(header)
+                self.send_closed = True
 
-        # Only set fully closed if both directions are closed
-        if self.send_closed and self.recv_closed:
-            self.closed = True
-        else:
-            # Stream is half-closed but not fully closed
-            self.closed = False
+            # Only set fully closed if both directions are closed
+            if self.send_closed and self.recv_closed:
+                self.closed = True
+            else:
+                # Stream is half-closed but not fully closed
+                self.closed = False
 
     async def reset(self) -> None:
         if not self.closed:
-            logger.debug(f"Resetting stream {self.stream_id}")
-            header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
-            )
-            await self.conn.secured_conn.write(header)
-            self.closed = True
-            self.reset_received = True  # Mark as reset
+            async with self.close_lock:
+                logger.debug(f"Resetting stream {self.stream_id}")
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
+                )
+                await self.conn.secured_conn.write(header)
+                self.closed = True
+                self.reset_received = True  # Mark as reset
 
     def set_deadline(self, ttl: int) -> bool:
         """
