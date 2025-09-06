@@ -33,7 +33,9 @@ from .exceptions import (
 class StreamState(Enum):
     INIT = auto()
     OPEN = auto()
-    CLOSED = auto()
+    CLOSE_READ = auto()
+    CLOSE_WRITE = auto()
+    CLOSE_BOTH = auto()
     RESET = auto()
     ERROR = auto()
 
@@ -85,14 +87,20 @@ class NetStream(INetStream):
         :param n: number of bytes to read
         :return: Bytes read from the stream
         """
+        if self.state == StreamState.RESET:
+            raise StreamReset("Cannot read from stream; stream is reset")
+        elif self.state == StreamState.CLOSE_READ:
+            raise StreamClosed("Cannot read from stream; closed for reading")
+        # Note: Allow reading from CLOSE_BOTH state - there might still be buffered data
+
         try:
-            if self.state == StreamState.RESET:
-                raise StreamReset("Cannot read from stream; stream is reset")
-            elif self.state != StreamState.OPEN:
-                raise StreamClosed("Cannot read from stream; not open")
-            else:
-                return await self.muxed_stream.read(n)
+            return await self.muxed_stream.read(n)
         except MuxedStreamEOF as error:
+            # Handle state transitions when EOF is encountered
+            if self.state == StreamState.CLOSE_WRITE:
+                self.set_state(StreamState.CLOSE_BOTH)
+            elif self.state == StreamState.OPEN:
+                self.set_state(StreamState.CLOSE_READ)
             raise StreamEOF() from error
         except MuxedStreamReset as error:
             raise StreamReset() from error
@@ -106,49 +114,54 @@ class NetStream(INetStream):
         try:
             if self.state == StreamState.RESET:
                 raise StreamReset("Cannot write to stream; stream is reset")
-            elif self.state == StreamState.CLOSED:
-                raise StreamClosed("Cannot write to stream; stream is closed")
-            elif self.state != StreamState.OPEN:
-                raise StreamClosed("Cannot write to stream; not open")
+            elif self.state in [StreamState.CLOSE_WRITE, StreamState.CLOSE_BOTH]:
+                raise StreamClosed("Cannot write to stream; closed for writing")
             else:
                 await self.muxed_stream.write(data)
         except MuxedStreamClosed as error:
-            # Only set state to CLOSED if it wasn't already set
-            if self.state != StreamState.CLOSED:
-                self.set_state(StreamState.CLOSED)
+            if self.state == StreamState.CLOSE_READ:
+                self.set_state(StreamState.CLOSE_BOTH)
+            elif self.state == StreamState.OPEN:
+                self.set_state(StreamState.CLOSE_WRITE)
             raise StreamClosed() from error
         except MuxedStreamReset as error:
-            # Only set state to RESET if it wasn't already set
-            if self.state != StreamState.RESET:
-                self.set_state(StreamState.RESET)
+            self.set_state(StreamState.RESET)
             raise StreamReset() from error
 
     async def close(self) -> None:
-        """Close stream."""
-        # Don't set state to CLOSED immediately - keep it OPEN for pending operations
-        # Only set to CLOSED after the underlying stream is fully closed
+        """Close stream completely and clean up resources."""
         await self.muxed_stream.close()
-        # Now it's safe to set the state to CLOSED
-        self.set_state(StreamState.CLOSED)
-        # Notify that the stream is closed
+        self.set_state(StreamState.CLOSE_BOTH)
         await self.remove()
+
+    async def close_read(self) -> None:
+        """Close the stream for reading only."""
+        if self.state == StreamState.OPEN:
+            self.set_state(StreamState.CLOSE_READ)
+        elif self.state == StreamState.CLOSE_WRITE:
+            self.set_state(StreamState.CLOSE_BOTH)
+            await self.remove()
+
+    async def close_write(self) -> None:
+        """Close the stream for writing only."""
+        await self.muxed_stream.close()
+        if self.state == StreamState.OPEN:
+            self.set_state(StreamState.CLOSE_WRITE)
+        elif self.state == StreamState.CLOSE_READ:
+            self.set_state(StreamState.CLOSE_BOTH)
+            await self.remove()
 
     async def reset(self) -> None:
         """Reset stream."""
-        # Don't set state to RESET immediately - keep it OPEN for pending operations
-        # Only set to RESET after the underlying stream is fully reset
         await self.muxed_stream.reset()
-        # Now it's safe to set the state to RESET
         self.set_state(StreamState.RESET)
-        # Notify that the stream is closed/reset
         await self.remove()
 
     async def remove(self) -> None:
         """
         Remove the stream from the connection and notify swarm that stream was closed.
-        This method should only be called when the stream is no longer needed.
         """
-        if self.swarm_conn is not None and self in self.swarm_conn.streams:
+        if self.swarm_conn is not None:
             self.swarm_conn.remove_stream(self)
             await self.swarm_conn.swarm.notify_closed_stream(self)
 
