@@ -52,12 +52,11 @@ from .pb import (
 from .pubsub import (
     Pubsub,
 )
-
 from .score import (
     PeerScorer,
     ScoreParams,
 )
-  from .utils import (
+from .utils import (
     parse_message_id_safe,
     safe_parse_message_id,
 )
