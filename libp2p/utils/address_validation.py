@@ -73,8 +73,9 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     seen_v4: set[str] = set()
 
     for ip in _safe_get_network_addrs(4):
-        seen_v4.add(ip)
-        addrs.append(Multiaddr(f"/ip4/{ip}/{protocol}/{port}"))
+        if ip not in seen_v4:  # Avoid duplicates
+            seen_v4.add(ip)
+            addrs.append(Multiaddr(f"/ip4/{ip}/{protocol}/{port}"))
 
     # Ensure IPv4 loopback is always included when IPv4 interfaces are discovered
     if seen_v4 and "127.0.0.1" not in seen_v4:
@@ -89,8 +90,9 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     #
     # seen_v6: set[str] = set()
     # for ip in _safe_get_network_addrs(6):
-    #     seen_v6.add(ip)
-    #     addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
+    #     if ip not in seen_v6:  # Avoid duplicates
+    #         seen_v6.add(ip)
+    #         addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
     #
     # # Always include IPv6 loopback for testing purposes when IPv6 is available
     # # This ensures IPv6 functionality can be tested even without global IPv6 addresses
@@ -99,7 +101,7 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
 
     # Fallback if nothing discovered
     if not addrs:
-        addrs.append(Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}"))
+        addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
 
     return addrs
 
@@ -148,8 +150,8 @@ def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
         if "/ip4/127." in str(c) or "/ip6/::1" in str(c):
             return c
 
-    # As a final fallback, produce a wildcard
-    return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
+    # As a final fallback, produce a loopback address
+    return Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}")
 
 
 __all__ = [

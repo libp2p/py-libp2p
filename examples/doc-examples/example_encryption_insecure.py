@@ -40,7 +40,7 @@ async def main():
 
     # Configure the listening address
     port = 8000
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     # Start the host
     async with host.run(listen_addrs=[listen_addr]):

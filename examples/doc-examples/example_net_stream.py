@@ -173,7 +173,7 @@ async def run_enhanced_demo(
     """
     Run enhanced echo demo with NetStream state management.
     """
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
     # Generate or use provided key
     if seed:
