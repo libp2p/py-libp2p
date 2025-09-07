@@ -234,19 +234,3 @@ class RendezvousDiscovery:
         self.caches.clear()
         self._discover_locks.clear()
 
-
-def create_rendezvous_discovery(
-    host: IHost, 
-    rendezvous_peer: PeerID
-) -> RendezvousDiscovery:
-    """
-    Factory function to create a RendezvousDiscovery instance.
-    
-    Args:
-        host: The libp2p host
-        rendezvous_peer: Peer ID of the rendezvous server
-        
-    Returns:
-        RendezvousDiscovery instance
-    """
-    return RendezvousDiscovery(host, rendezvous_peer)

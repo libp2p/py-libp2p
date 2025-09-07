@@ -24,7 +24,6 @@ from libp2p import new_host
 from libp2p.discovery.rendezvous import (
     RendezvousService,
     RendezvousDiscovery,
-    create_rendezvous_discovery,
     config,
 )
 from libp2p.peer.id import ID
@@ -89,8 +88,8 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
             return
         
         # Create rendezvous discovery
-        discovery = create_rendezvous_discovery(host, server_info.peer_id)
-        
+        discovery = RendezvousDiscovery(host, server_info.peer_id)
+
         try:
             print(f"Client started with peer ID: {host.get_id()}")
             

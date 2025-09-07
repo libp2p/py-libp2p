@@ -7,7 +7,7 @@ through a centralized rendezvous point.
 """
 
 from .client import RendezvousClient
-from .discovery import RendezvousDiscovery, create_rendezvous_discovery
+from .discovery import RendezvousDiscovery
 from .service import RendezvousService
 from . import config
 from .errors import (
@@ -24,7 +24,6 @@ from .errors import (
 __all__ = [
     "RendezvousClient",
     "RendezvousDiscovery", 
-    "create_rendezvous_discovery",
     "RendezvousService",
     "config",
     "RendezvousError",
