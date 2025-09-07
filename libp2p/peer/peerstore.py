@@ -18,6 +18,7 @@ from trio import MemoryReceiveChannel, MemorySendChannel
 from libp2p.abc import (
     IHost,
     IPeerStore,
+    MetadataValue,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -275,7 +276,7 @@ class PeerStore(IPeerStore):
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -290,7 +291,7 @@ class PeerStore(IPeerStore):
             return val
         raise PeerStoreError("peer ID not found")
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
