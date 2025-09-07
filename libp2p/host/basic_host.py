@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 # telling it to listen on the given listen addresses.
 
 
-logger = logging.getLogger("libp2p.network.basic_host")
+logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 
