@@ -17,6 +17,7 @@ from typing import (
     Any,
     AsyncContextManager,
     Optional,
+    Union,
 )
 
 from multiaddr import (
@@ -61,6 +62,9 @@ from libp2p.pubsub.pb import (
 from libp2p.tools.async_service import (
     ServiceAPI,
 )
+
+# Type alias for metadata values - JSON-serializable types
+MetadataValue = Union[str, int, float, bool, list, dict, None]
 
 # -------------------------- raw_connection interface.py --------------------------
 
@@ -377,7 +381,7 @@ class IPeerMetadata(ABC):
     """
 
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve metadata for a specified peer.
 
@@ -388,7 +392,7 @@ class IPeerMetadata(ABC):
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store metadata for a specified peer.
 
@@ -843,7 +847,7 @@ class IPeerStore(
 
     # -------METADATA---------
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve the value associated with a key for a specified peer.
 
@@ -856,7 +860,7 @@ class IPeerStore(
 
         Returns
         -------
-        Any
+        MetadataValue
             The value corresponding to the specified key.
 
         Raises
@@ -867,7 +871,7 @@ class IPeerStore(
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store a key-value pair for the specified peer.
 
@@ -877,7 +881,7 @@ class IPeerStore(
             The identifier of the peer.
         key : str
             The key for the data.
-        val : Any
+        val : MetadataValue
             The value to store.
 
         """
@@ -2132,7 +2136,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def put_metadata(self, key: str, val: Any) -> None:
+    def put_metadata(self, key: str, val: MetadataValue) -> None:
         """
         Store a metadata key-value pair for the peer.
 
@@ -2140,13 +2144,13 @@ class IPeerData(ABC):
         ----------
         key : str
             The metadata key.
-        val : Any
+        val : MetadataValue
             The value to associate with the key.
 
         """
 
     @abstractmethod
-    def get_metadata(self, key: str) -> IPeerMetadata:
+    def get_metadata(self, key: str) -> MetadataValue:
         """
         Retrieve metadata for a given key.
 
@@ -2157,7 +2161,7 @@ class IPeerData(ABC):
 
         Returns
         -------
-        IPeerMetadata
+        MetadataValue
             The metadata value for the given key.
 
         Raises
