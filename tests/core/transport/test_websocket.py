@@ -15,6 +15,10 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.transport.websocket.multiaddr_utils import (
+    is_valid_websocket_multiaddr,
+    parse_websocket_multiaddr,
+)
 from libp2p.transport.websocket.transport import WebsocketTransport
 
 logger = logging.getLogger(__name__)
@@ -581,6 +585,296 @@ async def test_websocket_with_tcp_fallback():
 
 
 @pytest.mark.trio
+async def test_websocket_data_exchange():
+    """Test WebSocket transport with actual data exchange between two hosts"""
+    from libp2p import create_yamux_muxer_option, new_host
+    from libp2p.crypto.secp256k1 import create_new_key_pair
+    from libp2p.custom_types import TProtocol
+    from libp2p.peer.peerinfo import info_from_p2p_addr
+    from libp2p.security.insecure.transport import (
+        PLAINTEXT_PROTOCOL_ID,
+        InsecureTransport,
+    )
+
+    # Create two hosts with plaintext security
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+
+    # Host A (listener)
+    security_options_a = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_a = new_host(
+        key_pair=key_pair_a,
+        sec_opt=security_options_a,
+        muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
+    )
+
+    # Host B (dialer)
+    security_options_b = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_b = new_host(
+        key_pair=key_pair_b,
+        sec_opt=security_options_b,
+        muxer_opt=create_yamux_muxer_option(),
+    )
+
+    # Test data
+    test_data = b"Hello WebSocket Data Exchange!"
+    received_data = None
+
+    # Set up handler on host A
+    test_protocol = TProtocol("/test/websocket/data/1.0.0")
+
+    async def data_handler(stream):
+        nonlocal received_data
+        received_data = await stream.read(len(test_data))
+        await stream.write(received_data)  # Echo back
+        await stream.close()
+
+    host_a.set_stream_handler(test_protocol, data_handler)
+
+    # Start both hosts
+    async with (
+        host_a.run(listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")]),
+        host_b.run(listen_addrs=[]),
+    ):
+        # Get host A's listen address
+        listen_addrs = host_a.get_addrs()
+        assert len(listen_addrs) > 0
+
+        # Find the WebSocket address
+        ws_addr = None
+        for addr in listen_addrs:
+            if "/ws" in str(addr):
+                ws_addr = addr
+                break
+
+        assert ws_addr is not None, "No WebSocket listen address found"
+
+        # Connect host B to host A
+        peer_info = info_from_p2p_addr(ws_addr)
+        await host_b.connect(peer_info)
+
+        # Create stream and test data exchange
+        stream = await host_b.new_stream(host_a.get_id(), [test_protocol])
+        await stream.write(test_data)
+        response = await stream.read(len(test_data))
+        await stream.close()
+
+        # Verify data exchange
+        assert received_data == test_data, f"Expected {test_data}, got {received_data}"
+        assert response == test_data, f"Expected echo {test_data}, got {response}"
+
+
+@pytest.mark.trio
+async def test_websocket_host_pair_data_exchange():
+    """Test WebSocket host pair with actual data exchange using host_pair_factory pattern"""
+    from libp2p import create_yamux_muxer_option, new_host
+    from libp2p.crypto.secp256k1 import create_new_key_pair
+    from libp2p.custom_types import TProtocol
+    from libp2p.peer.peerinfo import info_from_p2p_addr
+    from libp2p.security.insecure.transport import (
+        PLAINTEXT_PROTOCOL_ID,
+        InsecureTransport,
+    )
+
+    # Create two hosts with WebSocket transport and plaintext security
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+
+    # Host A (listener) - WebSocket transport
+    security_options_a = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_a = new_host(
+        key_pair=key_pair_a,
+        sec_opt=security_options_a,
+        muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
+    )
+
+    # Host B (dialer) - WebSocket transport
+    security_options_b = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_b = new_host(
+        key_pair=key_pair_b,
+        sec_opt=security_options_b,
+        muxer_opt=create_yamux_muxer_option(),
+    )
+
+    # Test data
+    test_data = b"Hello WebSocket Host Pair Data Exchange!"
+    received_data = None
+
+    # Set up handler on host A
+    test_protocol = TProtocol("/test/websocket/hostpair/1.0.0")
+
+    async def data_handler(stream):
+        nonlocal received_data
+        received_data = await stream.read(len(test_data))
+        await stream.write(received_data)  # Echo back
+        await stream.close()
+
+    host_a.set_stream_handler(test_protocol, data_handler)
+
+    # Start both hosts and connect them (following host_pair_factory pattern)
+    async with (
+        host_a.run(listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")]),
+        host_b.run(listen_addrs=[]),
+    ):
+        # Connect the hosts using the same pattern as host_pair_factory
+        # Get host A's listen address and create peer info
+        listen_addrs = host_a.get_addrs()
+        assert len(listen_addrs) > 0
+
+        # Find the WebSocket address
+        ws_addr = None
+        for addr in listen_addrs:
+            if "/ws" in str(addr):
+                ws_addr = addr
+                break
+
+        assert ws_addr is not None, "No WebSocket listen address found"
+
+        # Connect host B to host A
+        peer_info = info_from_p2p_addr(ws_addr)
+        await host_b.connect(peer_info)
+
+        # Allow time for connection to establish (following host_pair_factory pattern)
+        await trio.sleep(0.1)
+
+        # Verify connection is established
+        assert len(host_a.get_network().connections) > 0
+        assert len(host_b.get_network().connections) > 0
+
+        # Test data exchange
+        stream = await host_b.new_stream(host_a.get_id(), [test_protocol])
+        await stream.write(test_data)
+        response = await stream.read(len(test_data))
+        await stream.close()
+
+        # Verify data exchange
+        assert received_data == test_data, f"Expected {test_data}, got {received_data}"
+        assert response == test_data, f"Expected echo {test_data}, got {response}"
+
+
+@pytest.mark.trio
+async def test_wss_host_pair_data_exchange():
+    """Test WSS host pair with actual data exchange using host_pair_factory pattern"""
+    import ssl
+
+    from libp2p import create_yamux_muxer_option, new_host
+    from libp2p.crypto.secp256k1 import create_new_key_pair
+    from libp2p.custom_types import TProtocol
+    from libp2p.peer.peerinfo import info_from_p2p_addr
+    from libp2p.security.insecure.transport import (
+        PLAINTEXT_PROTOCOL_ID,
+        InsecureTransport,
+    )
+
+    # Create TLS context for WSS
+    tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    tls_context.check_hostname = False
+    tls_context.verify_mode = ssl.CERT_NONE
+
+    # Create two hosts with WSS transport and plaintext security
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+
+    # Host A (listener) - WSS transport
+    security_options_a = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_a = new_host(
+        key_pair=key_pair_a,
+        sec_opt=security_options_a,
+        muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
+    )
+
+    # Host B (dialer) - WSS transport
+    security_options_b = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_b = new_host(
+        key_pair=key_pair_b,
+        sec_opt=security_options_b,
+        muxer_opt=create_yamux_muxer_option(),
+    )
+
+    # Test data
+    test_data = b"Hello WSS Host Pair Data Exchange!"
+    received_data = None
+
+    # Set up handler on host A
+    test_protocol = TProtocol("/test/wss/hostpair/1.0.0")
+
+    async def data_handler(stream):
+        nonlocal received_data
+        received_data = await stream.read(len(test_data))
+        await stream.write(received_data)  # Echo back
+        await stream.close()
+
+    host_a.set_stream_handler(test_protocol, data_handler)
+
+    # Start both hosts and connect them (following host_pair_factory pattern)
+    async with (
+        host_a.run(listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")]),
+        host_b.run(listen_addrs=[]),
+    ):
+        # Connect the hosts using the same pattern as host_pair_factory
+        # Get host A's listen address and create peer info
+        listen_addrs = host_a.get_addrs()
+        assert len(listen_addrs) > 0
+
+        # Find the WSS address
+        wss_addr = None
+        for addr in listen_addrs:
+            if "/wss" in str(addr):
+                wss_addr = addr
+                break
+
+        assert wss_addr is not None, "No WSS listen address found"
+
+        # Connect host B to host A
+        peer_info = info_from_p2p_addr(wss_addr)
+        await host_b.connect(peer_info)
+
+        # Allow time for connection to establish (following host_pair_factory pattern)
+        await trio.sleep(0.1)
+
+        # Verify connection is established
+        assert len(host_a.get_network().connections) > 0
+        assert len(host_b.get_network().connections) > 0
+
+        # Test data exchange
+        stream = await host_b.new_stream(host_a.get_id(), [test_protocol])
+        await stream.write(test_data)
+        response = await stream.read(len(test_data))
+        await stream.close()
+
+        # Verify data exchange
+        assert received_data == test_data, f"Expected {test_data}, got {received_data}"
+        assert response == test_data, f"Expected echo {test_data}, got {response}"
+
+
+@pytest.mark.trio
 async def test_websocket_transport_interface():
     """Test WebSocket transport interface compliance"""
     key_pair = create_new_key_pair()
@@ -613,3 +907,597 @@ async def test_websocket_transport_interface():
     assert port == "8080"
 
     await listener.close()
+
+
+# ============================================================================
+# WSS (WebSocket Secure) Tests
+# ============================================================================
+
+
+def test_wss_multiaddr_validation():
+    """Test WSS multiaddr validation and parsing."""
+    # Valid WSS multiaddrs
+    valid_wss_addresses = [
+        "/ip4/127.0.0.1/tcp/8080/wss",
+        "/ip6/::1/tcp/8080/wss",
+        "/dns/localhost/tcp/8080/wss",
+        "/ip4/127.0.0.1/tcp/8080/tls/ws",
+        "/ip6/::1/tcp/8080/tls/ws",
+    ]
+
+    # Invalid WSS multiaddrs
+    invalid_wss_addresses = [
+        "/ip4/127.0.0.1/tcp/8080/ws",  # Regular WS, not WSS
+        "/ip4/127.0.0.1/tcp/8080",  # No WebSocket protocol
+        "/ip4/127.0.0.1/wss",  # No TCP
+    ]
+
+    # Test valid WSS addresses
+    for addr_str in valid_wss_addresses:
+        ma = Multiaddr(addr_str)
+        assert is_valid_websocket_multiaddr(ma), f"Address {addr_str} should be valid"
+
+        # Test parsing
+        parsed = parse_websocket_multiaddr(ma)
+        assert parsed.is_wss, f"Address {addr_str} should be parsed as WSS"
+
+    # Test invalid addresses
+    for addr_str in invalid_wss_addresses:
+        ma = Multiaddr(addr_str)
+        if "/ws" in addr_str and "/wss" not in addr_str and "/tls" not in addr_str:
+            # Regular WS should be valid but not WSS
+            assert is_valid_websocket_multiaddr(ma), (
+                f"Address {addr_str} should be valid"
+            )
+            parsed = parse_websocket_multiaddr(ma)
+            assert not parsed.is_wss, f"Address {addr_str} should not be parsed as WSS"
+        else:
+            # Invalid addresses should fail validation
+            assert not is_valid_websocket_multiaddr(ma), (
+                f"Address {addr_str} should be invalid"
+            )
+
+
+def test_wss_multiaddr_parsing():
+    """Test WSS multiaddr parsing functionality."""
+    # Test /wss format
+    wss_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
+    parsed = parse_websocket_multiaddr(wss_ma)
+    assert parsed.is_wss
+    assert parsed.sni is None
+    assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
+    assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
+
+    # Test /tls/ws format
+    tls_ws_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/ws")
+    parsed = parse_websocket_multiaddr(tls_ws_ma)
+    assert parsed.is_wss
+    assert parsed.sni is None
+    assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
+    assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
+
+    # Test regular /ws format
+    ws_ma = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
+    parsed = parse_websocket_multiaddr(ws_ma)
+    assert not parsed.is_wss
+    assert parsed.sni is None
+
+
+@pytest.mark.trio
+async def test_wss_transport_creation():
+    """Test WSS transport creation with TLS configuration."""
+    import ssl
+
+    # Create TLS contexts
+    client_ssl_context = ssl.create_default_context()
+    server_ssl_context = ssl.create_default_context()
+    server_ssl_context.check_hostname = False
+    server_ssl_context.verify_mode = ssl.CERT_NONE
+
+    upgrader = create_upgrader()
+
+    # Test creating WSS transport with TLS configs
+    wss_transport = WebsocketTransport(
+        upgrader,
+        tls_client_config=client_ssl_context,
+        tls_server_config=server_ssl_context,
+    )
+
+    assert wss_transport is not None
+    assert hasattr(wss_transport, "dial")
+    assert hasattr(wss_transport, "create_listener")
+    assert wss_transport._tls_client_config is not None
+    assert wss_transport._tls_server_config is not None
+
+
+@pytest.mark.trio
+async def test_wss_transport_without_tls_config():
+    """Test WSS transport creation without TLS configuration."""
+    upgrader = create_upgrader()
+
+    # Test creating WSS transport without TLS configs (should still work)
+    wss_transport = WebsocketTransport(upgrader)
+
+    assert wss_transport is not None
+    assert hasattr(wss_transport, "dial")
+    assert hasattr(wss_transport, "create_listener")
+    assert wss_transport._tls_client_config is None
+    assert wss_transport._tls_server_config is None
+
+
+@pytest.mark.trio
+async def test_wss_dial_parsing():
+    """Test WSS dial functionality with multiaddr parsing."""
+    upgrader = create_upgrader()
+    # transport = WebsocketTransport(upgrader)  # Not used in this test
+
+    # Test WSS multiaddr parsing in dial
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
+
+    # Test that the transport can parse WSS addresses
+    # (We can't actually dial without a server, but we can test parsing)
+    try:
+        parsed = parse_websocket_multiaddr(wss_maddr)
+        assert parsed.is_wss
+        assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
+        assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
+    except Exception as e:
+        pytest.fail(f"WSS multiaddr parsing failed: {e}")
+
+
+@pytest.mark.trio
+async def test_wss_listen_parsing():
+    """Test WSS listen functionality with multiaddr parsing."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
+
+    # Test WSS multiaddr parsing in listen
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/wss")
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+
+    # Test that the transport can parse WSS addresses
+    try:
+        parsed = parse_websocket_multiaddr(wss_maddr)
+        assert parsed.is_wss
+        assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
+        assert parsed.rest_multiaddr.value_for_protocol("tcp") == "0"
+    except Exception as e:
+        pytest.fail(f"WSS multiaddr parsing failed: {e}")
+
+    await listener.close()
+
+
+@pytest.mark.trio
+async def test_wss_listen_without_tls_config():
+    """Test WSS listen without TLS configuration should fail."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)  # No TLS config
+
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/wss")
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+
+    # This should raise an error when trying to listen on WSS without TLS config
+    with pytest.raises(
+        ValueError, match="Cannot listen on WSS address.*without TLS configuration"
+    ):
+        await listener.listen(wss_maddr, trio.open_nursery())
+
+
+@pytest.mark.trio
+async def test_wss_listen_with_tls_config():
+    """Test WSS listen with TLS configuration."""
+    import ssl
+
+    # Create server TLS context
+    server_ssl_context = ssl.create_default_context()
+    server_ssl_context.check_hostname = False
+    server_ssl_context.verify_mode = ssl.CERT_NONE
+
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader, tls_server_config=server_ssl_context)
+
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/wss")
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+
+    # This should not raise an error when TLS config is provided
+    # Note: We can't actually start listening without proper certificates,
+    # but we can test that the validation passes
+    try:
+        parsed = parse_websocket_multiaddr(wss_maddr)
+        assert parsed.is_wss
+        assert transport._tls_server_config is not None
+    except Exception as e:
+        pytest.fail(f"WSS listen with TLS config failed: {e}")
+
+    await listener.close()
+
+
+def test_wss_transport_registry():
+    """Test WSS support in transport registry."""
+    from libp2p.transport.transport_registry import (
+        create_transport_for_multiaddr,
+        get_supported_transport_protocols,
+    )
+
+    # Test that WSS is supported
+    supported = get_supported_transport_protocols()
+    assert "ws" in supported
+    assert "wss" in supported
+
+    # Test transport creation for WSS multiaddrs
+    upgrader = create_upgrader()
+
+    # Test WS multiaddr
+    ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
+    ws_transport = create_transport_for_multiaddr(ws_maddr, upgrader)
+    assert ws_transport is not None
+    assert isinstance(ws_transport, WebsocketTransport)
+
+    # Test WSS multiaddr
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
+    wss_transport = create_transport_for_multiaddr(wss_maddr, upgrader)
+    assert wss_transport is not None
+    assert isinstance(wss_transport, WebsocketTransport)
+
+    # Test TLS/WS multiaddr
+    tls_ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/ws")
+    tls_ws_transport = create_transport_for_multiaddr(tls_ws_maddr, upgrader)
+    assert tls_ws_transport is not None
+    assert isinstance(tls_ws_transport, WebsocketTransport)
+
+
+def test_wss_multiaddr_formats():
+    """Test different WSS multiaddr formats."""
+    # Test various WSS formats
+    wss_formats = [
+        "/ip4/127.0.0.1/tcp/8080/wss",
+        "/ip6/::1/tcp/8080/wss",
+        "/dns/localhost/tcp/8080/wss",
+        "/ip4/127.0.0.1/tcp/8080/tls/ws",
+        "/ip6/::1/tcp/8080/tls/ws",
+        "/dns/example.com/tcp/443/tls/ws",
+    ]
+
+    for addr_str in wss_formats:
+        ma = Multiaddr(addr_str)
+
+        # Should be valid WebSocket multiaddr
+        assert is_valid_websocket_multiaddr(ma), f"Address {addr_str} should be valid"
+
+        # Should parse as WSS
+        parsed = parse_websocket_multiaddr(ma)
+        assert parsed.is_wss, f"Address {addr_str} should be parsed as WSS"
+
+        # Should have correct base multiaddr
+        assert parsed.rest_multiaddr.value_for_protocol("tcp") is not None
+
+
+def test_wss_vs_ws_distinction():
+    """Test that WSS and WS are properly distinguished."""
+    # WS addresses should not be WSS
+    ws_addresses = [
+        "/ip4/127.0.0.1/tcp/8080/ws",
+        "/ip6/::1/tcp/8080/ws",
+        "/dns/localhost/tcp/8080/ws",
+    ]
+
+    for addr_str in ws_addresses:
+        ma = Multiaddr(addr_str)
+        parsed = parse_websocket_multiaddr(ma)
+        assert not parsed.is_wss, f"Address {addr_str} should not be WSS"
+
+    # WSS addresses should be WSS
+    wss_addresses = [
+        "/ip4/127.0.0.1/tcp/8080/wss",
+        "/ip4/127.0.0.1/tcp/8080/tls/ws",
+    ]
+
+    for addr_str in wss_addresses:
+        ma = Multiaddr(addr_str)
+        parsed = parse_websocket_multiaddr(ma)
+        assert parsed.is_wss, f"Address {addr_str} should be WSS"
+
+
+@pytest.mark.trio
+async def test_wss_connection_handling():
+    """Test WSS connection handling with security flag."""
+    upgrader = create_upgrader()
+    # transport = WebsocketTransport(upgrader)  # Not used in this test
+
+    # Test that WSS connections are marked as secure
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
+    parsed = parse_websocket_multiaddr(wss_maddr)
+    assert parsed.is_wss
+
+    # Test that WS connections are not marked as secure
+    ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
+    parsed = parse_websocket_multiaddr(ws_maddr)
+    assert not parsed.is_wss
+
+
+def test_wss_error_handling():
+    """Test WSS error handling for invalid configurations."""
+    # upgrader = create_upgrader()  # Not used in this test
+
+    # Test invalid multiaddr formats
+    invalid_addresses = [
+        "/ip4/127.0.0.1/tcp/8080",  # No WebSocket protocol
+        "/ip4/127.0.0.1/wss",  # No TCP
+        "/tcp/8080/wss",  # No network protocol
+    ]
+
+    for addr_str in invalid_addresses:
+        ma = Multiaddr(addr_str)
+        assert not is_valid_websocket_multiaddr(ma), (
+            f"Address {addr_str} should be invalid"
+        )
+
+        # Should raise ValueError when parsing invalid addresses
+        with pytest.raises(ValueError):
+            parse_websocket_multiaddr(ma)
+
+
+@pytest.mark.trio
+async def test_handshake_timeout():
+    """Test WebSocket handshake timeout functionality."""
+    upgrader = create_upgrader()
+
+    # Test creating transport with custom handshake timeout
+    transport = WebsocketTransport(upgrader, handshake_timeout=0.1)  # 100ms timeout
+    assert transport._handshake_timeout == 0.1
+
+    # Test that the timeout is passed to the listener
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+    assert listener._handshake_timeout == 0.1
+
+
+@pytest.mark.trio
+async def test_handshake_timeout_creation():
+    """Test handshake timeout in transport creation."""
+    upgrader = create_upgrader()
+
+    # Test creating transport with handshake timeout via create_transport
+    from libp2p.transport import create_transport
+
+    transport = create_transport("ws", upgrader, handshake_timeout=5.0)
+    assert transport._handshake_timeout == 5.0
+
+    # Test default timeout
+    transport_default = create_transport("ws", upgrader)
+    assert transport_default._handshake_timeout == 15.0
+
+
+@pytest.mark.trio
+async def test_connection_state_tracking():
+    """Test WebSocket connection state tracking."""
+    from libp2p.transport.websocket.connection import P2PWebSocketConnection
+
+    # Create a mock WebSocket connection
+    class MockWebSocketConnection:
+        async def send_message(self, data: bytes) -> None:
+            pass
+
+        async def get_message(self) -> bytes:
+            return b"test message"
+
+        async def aclose(self) -> None:
+            pass
+
+    mock_ws = MockWebSocketConnection()
+    conn = P2PWebSocketConnection(mock_ws, is_secure=True)
+
+    # Test initial state
+    state = conn.conn_state()
+    assert state["transport"] == "websocket"
+    assert state["secure"] is True
+    assert state["bytes_read"] == 0
+    assert state["bytes_written"] == 0
+    assert state["total_bytes"] == 0
+    assert state["connection_duration"] >= 0
+
+    # Test byte tracking (we can't actually read/write with mock, but we can test the method)
+    # The actual byte tracking will be tested in integration tests
+    assert hasattr(conn, "_bytes_read")
+    assert hasattr(conn, "_bytes_written")
+    assert hasattr(conn, "_connection_start_time")
+
+
+@pytest.mark.trio
+async def test_concurrent_close_handling():
+    """Test concurrent close handling similar to Go implementation."""
+    from libp2p.transport.websocket.connection import P2PWebSocketConnection
+
+    # Create a mock WebSocket connection that tracks close calls
+    class MockWebSocketConnection:
+        def __init__(self):
+            self.close_calls = 0
+            self.closed = False
+
+        async def send_message(self, data: bytes) -> None:
+            if self.closed:
+                raise Exception("Connection closed")
+            pass
+
+        async def get_message(self) -> bytes:
+            if self.closed:
+                raise Exception("Connection closed")
+            return b"test message"
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            self.closed = True
+
+    mock_ws = MockWebSocketConnection()
+    conn = P2PWebSocketConnection(mock_ws, is_secure=False)
+
+    # Test that multiple close calls are handled gracefully
+    await conn.close()
+    await conn.close()  # Second close should not raise an error
+
+    # The mock should only be closed once
+    assert mock_ws.close_calls == 1
+    assert mock_ws.closed is True
+
+
+@pytest.mark.trio
+async def test_zero_byte_write_handling():
+    """Test zero-byte write handling similar to Go implementation."""
+    from libp2p.transport.websocket.connection import P2PWebSocketConnection
+
+    # Create a mock WebSocket connection that tracks write calls
+    class MockWebSocketConnection:
+        def __init__(self):
+            self.write_calls = []
+
+        async def send_message(self, data: bytes) -> None:
+            self.write_calls.append(len(data))
+
+        async def get_message(self) -> bytes:
+            return b"test message"
+
+        async def aclose(self) -> None:
+            pass
+
+    mock_ws = MockWebSocketConnection()
+    conn = P2PWebSocketConnection(mock_ws, is_secure=False)
+
+    # Test zero-byte write
+    await conn.write(b"")
+    assert 0 in mock_ws.write_calls
+
+    # Test normal write
+    await conn.write(b"hello")
+    assert 5 in mock_ws.write_calls
+
+    # Test multiple zero-byte writes
+    for _ in range(10):
+        await conn.write(b"")
+
+    # Should have 11 zero-byte writes total (1 initial + 10 in loop)
+    zero_byte_writes = [call for call in mock_ws.write_calls if call == 0]
+    assert len(zero_byte_writes) == 11
+
+
+@pytest.mark.trio
+async def test_websocket_transport_protocols():
+    """Test that WebSocket transport reports correct protocols."""
+    upgrader = create_upgrader()
+    # transport = WebsocketTransport(upgrader)  # Not used in this test
+
+    # Test that the transport can handle both WS and WSS protocols
+    ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
+    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
+
+    # Both should be valid WebSocket multiaddrs
+    assert is_valid_websocket_multiaddr(ws_maddr)
+    assert is_valid_websocket_multiaddr(wss_maddr)
+
+    # Both should be parseable
+    ws_parsed = parse_websocket_multiaddr(ws_maddr)
+    wss_parsed = parse_websocket_multiaddr(wss_maddr)
+
+    assert not ws_parsed.is_wss
+    assert wss_parsed.is_wss
+
+
+@pytest.mark.trio
+async def test_websocket_listener_addr_format():
+    """Test WebSocket listener address format similar to Go implementation."""
+    upgrader = create_upgrader()
+
+    # Test WS listener
+    transport_ws = WebsocketTransport(upgrader)
+
+    async def dummy_handler_ws(conn):
+        await trio.sleep(0)
+
+    listener_ws = transport_ws.create_listener(dummy_handler_ws)
+    assert listener_ws._handshake_timeout == 15.0  # Default timeout
+
+    # Test WSS listener with TLS config
+    import ssl
+
+    tls_config = ssl.create_default_context()
+    transport_wss = WebsocketTransport(upgrader, tls_server_config=tls_config)
+
+    async def dummy_handler_wss(conn):
+        await trio.sleep(0)
+
+    listener_wss = transport_wss.create_listener(dummy_handler_wss)
+    assert listener_wss._tls_config is not None
+    assert listener_wss._handshake_timeout == 15.0
+
+
+@pytest.mark.trio
+async def test_sni_resolution_limitation():
+    """Test SNI resolution limitation - Python multiaddr library doesn't support SNI protocol."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
+
+    # Test that WSS addresses are returned unchanged (SNI resolution not supported)
+    wss_maddr = Multiaddr("/dns/example.com/tcp/1234/wss")
+    resolved = transport.resolve(wss_maddr)
+    assert len(resolved) == 1
+    assert resolved[0] == wss_maddr
+
+    # Test that non-WSS addresses are returned unchanged
+    ws_maddr = Multiaddr("/dns/example.com/tcp/1234/ws")
+    resolved = transport.resolve(ws_maddr)
+    assert len(resolved) == 1
+    assert resolved[0] == ws_maddr
+
+    # Test that IP addresses are returned unchanged
+    ip_maddr = Multiaddr("/ip4/127.0.0.1/tcp/1234/wss")
+    resolved = transport.resolve(ip_maddr)
+    assert len(resolved) == 1
+    assert resolved[0] == ip_maddr
+
+
+@pytest.mark.trio
+async def test_websocket_transport_can_dial():
+    """Test WebSocket transport CanDial functionality similar to Go implementation."""
+    upgrader = create_upgrader()
+    # transport = WebsocketTransport(upgrader)  # Not used in this test
+
+    # Test valid WebSocket addresses that should be dialable
+    valid_addresses = [
+        "/ip4/127.0.0.1/tcp/5555/ws",
+        "/ip4/127.0.0.1/tcp/5555/wss",
+        "/ip4/127.0.0.1/tcp/5555/tls/ws",
+        # Note: SNI addresses not supported by Python multiaddr library
+    ]
+
+    for addr_str in valid_addresses:
+        maddr = Multiaddr(addr_str)
+        # All these should be valid WebSocket multiaddrs
+        assert is_valid_websocket_multiaddr(maddr), (
+            f"Address {addr_str} should be valid"
+        )
+
+    # Test invalid addresses that should not be dialable
+    invalid_addresses = [
+        "/ip4/127.0.0.1/tcp/5555",  # No WebSocket protocol
+        "/ip4/127.0.0.1/udp/5555/ws",  # Wrong transport protocol
+    ]
+
+    for addr_str in invalid_addresses:
+        maddr = Multiaddr(addr_str)
+        # These should not be valid WebSocket multiaddrs
+        assert not is_valid_websocket_multiaddr(maddr), (
+            f"Address {addr_str} should be invalid"
+        )

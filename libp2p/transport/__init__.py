@@ -10,19 +10,25 @@ from .transport_registry import (
 from .upgrader import TransportUpgrader
 from libp2p.abc import ITransport
 
-def create_transport(protocol: str, upgrader: TransportUpgrader | None = None) -> ITransport:
+def create_transport(protocol: str, upgrader: TransportUpgrader | None = None, **kwargs) -> ITransport:
     """
     Convenience function to create a transport instance.
 
-    :param protocol: The transport protocol ("tcp", "ws", or custom)
+    :param protocol: The transport protocol ("tcp", "ws", "wss", or custom)
     :param upgrader: Optional transport upgrader (required for WebSocket)
+    :param kwargs: Additional arguments for transport construction (e.g., tls_client_config, tls_server_config)
     :return: Transport instance
     """
     # First check if it's a built-in protocol
-    if protocol == "ws":
+    if protocol in ["ws", "wss"]:
         if upgrader is None:
             raise ValueError(f"WebSocket transport requires an upgrader")
-        return WebsocketTransport(upgrader)
+        return WebsocketTransport(
+            upgrader,
+            tls_client_config=kwargs.get("tls_client_config"),
+            tls_server_config=kwargs.get("tls_server_config"),
+            handshake_timeout=kwargs.get("handshake_timeout", 15.0)
+        )
     elif protocol == "tcp":
         return TCP()
     else:
@@ -30,7 +36,7 @@ def create_transport(protocol: str, upgrader: TransportUpgrader | None = None) -
         registry = get_transport_registry()
         transport_class = registry.get_transport(protocol)
         if transport_class:
-            transport = registry.create_transport(protocol, upgrader)
+            transport = registry.create_transport(protocol, upgrader, **kwargs)
             if transport is None:
                 raise ValueError(f"Failed to create transport for protocol: {protocol}")
             return transport

@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 import logging
+import ssl
 from typing import Any
 
 from multiaddr import Multiaddr
@@ -10,6 +11,7 @@ from trio_websocket import serve_websocket
 from libp2p.abc import IListener
 from libp2p.custom_types import THandler
 from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
 
 from .connection import P2PWebSocketConnection
 
@@ -21,9 +23,17 @@ class WebsocketListener(IListener):
     Listen on /ip4/.../tcp/.../ws addresses, handshake WS, wrap into RawConnection.
     """
 
-    def __init__(self, handler: THandler, upgrader: TransportUpgrader) -> None:
+    def __init__(
+        self,
+        handler: THandler,
+        upgrader: TransportUpgrader,
+        tls_config: ssl.SSLContext | None = None,
+        handshake_timeout: float = 15.0,
+    ) -> None:
         self._handler = handler
         self._upgrader = upgrader
+        self._tls_config = tls_config
+        self._handshake_timeout = handshake_timeout
         self._server = None
         self._shutdown_event = trio.Event()
         self._nursery: trio.Nursery | None = None
@@ -31,24 +41,36 @@ class WebsocketListener(IListener):
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
-        addr_str = str(maddr)
-        if addr_str.endswith("/wss"):
-            raise NotImplementedError("/wss (TLS) not yet supported")
 
+        # Parse the WebSocket multiaddr to determine if it's secure
+        try:
+            parsed = parse_websocket_multiaddr(maddr)
+        except ValueError as e:
+            raise ValueError(f"Invalid WebSocket multiaddr: {e}") from e
+
+        # Check if WSS is requested but no TLS config provided
+        if parsed.is_wss and self._tls_config is None:
+            raise ValueError(
+                f"Cannot listen on WSS address {maddr} without TLS configuration"
+            )
+
+        # Extract host and port from the base multiaddr
         host = (
-            maddr.value_for_protocol("ip4")
-            or maddr.value_for_protocol("ip6")
-            or maddr.value_for_protocol("dns")
-            or maddr.value_for_protocol("dns4")
-            or maddr.value_for_protocol("dns6")
+            parsed.rest_multiaddr.value_for_protocol("ip4")
+            or parsed.rest_multiaddr.value_for_protocol("ip6")
+            or parsed.rest_multiaddr.value_for_protocol("dns")
+            or parsed.rest_multiaddr.value_for_protocol("dns4")
+            or parsed.rest_multiaddr.value_for_protocol("dns6")
             or "0.0.0.0"
         )
-        port_str = maddr.value_for_protocol("tcp")
+        port_str = parsed.rest_multiaddr.value_for_protocol("tcp")
         if port_str is None:
             raise ValueError(f"No TCP port found in multiaddr: {maddr}")
         port = int(port_str)
 
-        logger.debug(f"WebsocketListener: host={host}, port={port}")
+        logger.debug(
+            f"WebsocketListener: host={host}, port={port}, secure={parsed.is_wss}"
+        )
 
         async def serve_websocket_tcp(
             handler: Callable[[Any], Awaitable[None]],
@@ -57,30 +79,44 @@ class WebsocketListener(IListener):
             task_status: TaskStatus[Any],
         ) -> None:
             """Start TCP server and handle WebSocket connections manually"""
-            logger.debug("serve_websocket_tcp %s %s", host, port)
+            logger.debug(
+                "serve_websocket_tcp %s %s (secure=%s)", host, port, parsed.is_wss
+            )
 
             async def websocket_handler(request: Any) -> None:
                 """Handle WebSocket requests"""
                 logger.debug("WebSocket request received")
                 try:
-                    # Accept the WebSocket connection
-                    ws_connection = await request.accept()
-                    logger.debug("WebSocket handshake successful")
+                    # Apply handshake timeout
+                    with trio.fail_after(self._handshake_timeout):
+                        # Accept the WebSocket connection
+                        ws_connection = await request.accept()
+                        logger.debug("WebSocket handshake successful")
 
-                    # Create the WebSocket connection wrapper
-                    conn = P2PWebSocketConnection(ws_connection)  # type: ignore[no-untyped-call]
+                        # Create the WebSocket connection wrapper
+                        conn = P2PWebSocketConnection(
+                            ws_connection, is_secure=parsed.is_wss
+                        )  # type: ignore[no-untyped-call]
 
-                    # Call the handler function that was passed to create_listener
-                    # This handler will handle the security and muxing upgrades
-                    logger.debug("Calling connection handler")
-                    await self._handler(conn)
+                        # Call the handler function that was passed to create_listener
+                        # This handler will handle the security and muxing upgrades
+                        logger.debug("Calling connection handler")
+                        await self._handler(conn)
 
-                    # Don't keep the connection alive indefinitely
-                    # Let the handler manage the connection lifecycle
+                        # Don't keep the connection alive indefinitely
+                        # Let the handler manage the connection lifecycle
+                        logger.debug(
+                            "Handler completed, connection will be managed by handler"
+                        )
+
+                except trio.TooSlowError:
                     logger.debug(
-                        "Handler completed, connection will be managed by handler"
+                        f"WebSocket handshake timeout after {self._handshake_timeout}s"
                     )
-
+                    try:
+                        await request.reject(408)  # Request Timeout
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.debug(f"WebSocket connection error: {e}")
                     logger.debug(f"Error type: {type(e)}")
@@ -94,8 +130,9 @@ class WebsocketListener(IListener):
                         pass
 
             # Use trio_websocket.serve_websocket for proper WebSocket handling
+            ssl_context = self._tls_config if parsed.is_wss else None
             await serve_websocket(
-                websocket_handler, host, port, None, task_status=task_status
+                websocket_handler, host, port, ssl_context, task_status=task_status
             )
 
         # Store the nursery for shutdown
@@ -133,6 +170,8 @@ class WebsocketListener(IListener):
             # This is a WebSocketServer object
             port = self._listeners.port
             # Create a multiaddr from the port
+            # Note: We don't know if this is WS or WSS from the server object
+            # For now, assume WS - this could be improved by storing the original multiaddr
             return (Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws"),)
         else:
             # This is a list of listeners (like TCP)

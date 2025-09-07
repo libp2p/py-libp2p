@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any
 
 import trio
@@ -15,17 +16,29 @@ class P2PWebSocketConnection(ReadWriteCloser):
     that libp2p protocols expect.
     """
 
-    def __init__(self, ws_connection: Any, ws_context: Any = None) -> None:
+    def __init__(
+        self, ws_connection: Any, ws_context: Any = None, is_secure: bool = False
+    ) -> None:
         self._ws_connection = ws_connection
         self._ws_context = ws_context
+        self._is_secure = is_secure
         self._read_buffer = b""
         self._read_lock = trio.Lock()
+        self._connection_start_time = time.time()
+        self._bytes_read = 0
+        self._bytes_written = 0
+        self._closed = False
+        self._close_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
+        if self._closed:
+            raise IOException("Connection is closed")
+
         try:
             logger.debug(f"WebSocket writing {len(data)} bytes")
             # Send as a binary WebSocket message
             await self._ws_connection.send_message(data)
+            self._bytes_written += len(data)
             logger.debug(f"WebSocket wrote {len(data)} bytes successfully")
         except Exception as e:
             logger.error(f"WebSocket write failed: {e}")
@@ -37,6 +50,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
         This implementation provides byte-level access to WebSocket messages,
         which is required for Noise protocol handshake.
         """
+        if self._closed:
+            raise IOException("Connection is closed")
+
         async with self._read_lock:
             try:
                 logger.debug(
@@ -49,6 +65,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                     if n is None:
                         result = self._read_buffer
                         self._read_buffer = b""
+                        self._bytes_read += len(result)
                         logger.debug(
                             f"WebSocket read returning all buffered data: "
                             f"{len(result)} bytes"
@@ -58,6 +75,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                         if len(self._read_buffer) >= n:
                             result = self._read_buffer[:n]
                             self._read_buffer = self._read_buffer[n:]
+                            self._bytes_read += len(result)
                             logger.debug(
                                 f"WebSocket read returning {len(result)} bytes "
                                 f"from buffer"
@@ -96,6 +114,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 if n is None:
                     result = self._read_buffer
                     self._read_buffer = b""
+                    self._bytes_read += len(result)
                     logger.debug(
                         f"WebSocket read returning all data: {len(result)} bytes"
                     )
@@ -104,6 +123,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                     if len(self._read_buffer) >= n:
                         result = self._read_buffer[:n]
                         self._read_buffer = self._read_buffer[n:]
+                        self._bytes_read += len(result)
                         logger.debug(
                             f"WebSocket read returning exact {len(result)} bytes"
                         )
@@ -112,6 +132,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                         # This should never happen due to the while loop above
                         result = self._read_buffer
                         self._read_buffer = b""
+                        self._bytes_read += len(result)
                         logger.debug(
                             f"WebSocket read returning remaining {len(result)} bytes"
                         )
@@ -122,11 +143,38 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 raise IOException from e
 
     async def close(self) -> None:
-        # Close the WebSocket connection
-        await self._ws_connection.aclose()
-        # Exit the context manager if we have one
-        if self._ws_context is not None:
-            await self._ws_context.__aexit__(None, None, None)
+        """Close the WebSocket connection. This method is idempotent."""
+        async with self._close_lock:
+            if self._closed:
+                return  # Already closed
+
+            try:
+                # Close the WebSocket connection
+                await self._ws_connection.aclose()
+                # Exit the context manager if we have one
+                if self._ws_context is not None:
+                    await self._ws_context.__aexit__(None, None, None)
+            except Exception as e:
+                logger.error(f"WebSocket close error: {e}")
+                # Don't raise here, as close() should be idempotent
+            finally:
+                self._closed = True
+
+    def conn_state(self) -> dict[str, Any]:
+        """
+        Return connection state information similar to Go's ConnState() method.
+
+        :return: Dictionary containing connection state information
+        """
+        current_time = time.time()
+        return {
+            "transport": "websocket",
+            "secure": self._is_secure,
+            "connection_duration": current_time - self._connection_start_time,
+            "bytes_read": self._bytes_read,
+            "bytes_written": self._bytes_written,
+            "total_bytes": self._bytes_read + self._bytes_written,
+        }
 
     def get_remote_address(self) -> tuple[str, int] | None:
         # Try to get remote address from the WebSocket connection

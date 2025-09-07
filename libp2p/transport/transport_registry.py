@@ -11,7 +11,17 @@ from multiaddr.protocols import Protocol
 from libp2p.abc import ITransport
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.transport.websocket.transport import WebsocketTransport
+from libp2p.transport.websocket.multiaddr_utils import (
+    is_valid_websocket_multiaddr,
+)
+
+
+# Import WebsocketTransport here to avoid circular imports
+def _get_websocket_transport():
+    from libp2p.transport.websocket.transport import WebsocketTransport
+
+    return WebsocketTransport
+
 
 logger = logging.getLogger("libp2p.transport.registry")
 
@@ -56,48 +66,6 @@ def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
         return False
 
 
-def _is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
-    """
-    Validate that a multiaddr has a valid WebSocket structure.
-
-    :param maddr: The multiaddr to validate
-    :return: True if valid WebSocket structure, False otherwise
-    """
-    try:
-        # WebSocket multiaddr should have structure like /ip4/127.0.0.1/tcp/8080/ws
-        # or /ip6/::1/tcp/8080/ws
-        protocols: list[Protocol] = list(maddr.protocols())
-
-        # Must have at least 3 protocols: network (ip4/ip6/dns4/dns6) + tcp + ws
-        if len(protocols) < 3:
-            return False
-
-        # First protocol should be a network protocol (ip4, ip6, dns4, dns6)
-        if protocols[0].name not in ["ip4", "ip6", "dns4", "dns6"]:
-            return False
-
-        # Second protocol should be tcp
-        if protocols[1].name != "tcp":
-            return False
-
-        # Last protocol should be ws
-        if protocols[-1].name != "ws":
-            return False
-
-        # Should not have any protocols between tcp and ws
-        if len(protocols) > 3:
-            # Check if the additional protocols are valid continuations
-            valid_continuations = ["p2p"]  # Add more as needed
-            for i in range(2, len(protocols) - 1):
-                if protocols[i].name not in valid_continuations:
-                    return False
-
-        return True
-
-    except Exception:
-        return False
-
-
 class TransportRegistry:
     """
     Registry for mapping multiaddr protocols to transport implementations.
@@ -112,8 +80,10 @@ class TransportRegistry:
         # Register TCP transport for /tcp protocol
         self.register_transport("tcp", TCP)
 
-        # Register WebSocket transport for /ws protocol
+        # Register WebSocket transport for /ws and /wss protocols
+        WebsocketTransport = _get_websocket_transport()
         self.register_transport("ws", WebsocketTransport)
+        self.register_transport("wss", WebsocketTransport)
 
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
@@ -158,7 +128,7 @@ class TransportRegistry:
             return None
 
         try:
-            if protocol == "ws":
+            if protocol in ["ws", "wss"]:
                 # WebSocket transport requires upgrader
                 if upgrader is None:
                     logger.warning(
@@ -166,6 +136,7 @@ class TransportRegistry:
                     )
                     return None
                 # Use explicit WebsocketTransport to avoid type issues
+                WebsocketTransport = _get_websocket_transport()
                 return WebsocketTransport(upgrader)
             else:
                 # TCP transport doesn't require upgrader
@@ -205,11 +176,18 @@ def create_transport_for_multiaddr(
 
         # Check for supported transport protocols in order of preference
         # We need to validate that the multiaddr structure is valid for our transports
-        if "ws" in protocols:
-            # For WebSocket, we need a valid structure like /ip4/127.0.0.1/tcp/8080/ws
-            # Check if the multiaddr has proper WebSocket structure
-            if _is_valid_websocket_multiaddr(maddr):
-                return _global_registry.create_transport("ws", upgrader)
+        if "ws" in protocols or "wss" in protocols or "tls" in protocols:
+            # For WebSocket, we need a valid structure like:
+            # /ip4/127.0.0.1/tcp/8080/ws (insecure)
+            # /ip4/127.0.0.1/tcp/8080/wss (secure)
+            # /ip4/127.0.0.1/tcp/8080/tls/ws (secure with TLS)
+            # /ip4/127.0.0.1/tcp/8080/tls/sni/example.com/ws (secure with SNI)
+            if is_valid_websocket_multiaddr(maddr):
+                # Determine if this is a secure WebSocket connection
+                if "wss" in protocols or "tls" in protocols:
+                    return _global_registry.create_transport("wss", upgrader)
+                else:
+                    return _global_registry.create_transport("ws", upgrader)
         elif "tcp" in protocols:
             # For TCP, we need a valid structure like /ip4/127.0.0.1/tcp/8080
             # Check if the multiaddr has proper TCP structure
