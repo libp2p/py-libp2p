@@ -260,10 +260,9 @@ class GossipSub(IPubsubRouter, Service):
                 raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
-            stream = self.pubsub.peers[peer_id]
 
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await self.pubsub.write_msg(stream, rpc_msg)
+            await self.send_rpc(to_peer=peer_id, rpc=rpc_msg, urgent=False)
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
@@ -830,11 +829,9 @@ class GossipSub(IPubsubRouter, Service):
                 sender_peer_id,
             )
             return
-        peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        await self.pubsub.write_msg(peer_stream, packet)
-
+        await self.send_rpc(to_peer=sender_peer_id, rpc=packet)
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
     ) -> None:
@@ -977,16 +974,35 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.send_rpc(to_peer, packet, False)
 
-    # Urgent will be true in case of IDONTWANT message 
+    # Urgent will be true in case of IDONTWANT message
     async def send_rpc(self, to_peer: ID, rpc: rpc_pb2.RPC, urgent: bool) -> None:
         # TODO: Piggyback message retries
-        queue = self.pubsub.peer_queue
+
         msg_bytes = rpc.SerializeToString()
         msg_size = len(msg_bytes)
-        if msg_size < self.pubsub.maxMessageSize:
-            self.do_send_rpc(to_peer, rpc, queue, urgent)
+        max_message_size = self.pubsub.maxMessageSize
+        if msg_size < max_message_size:
+            await self.do_send_rpc(rpc, to_peer, urgent)
             return
         else:
-            rpc_list = rpc.split(self.pubsub.maxMessageSize)
-            
-    
+            rpc_list = self.pubsub.split_rpc(pb_rpc=rpc, limit=max_message_size)
+            for rpc in rpc_list:
+                if rpc.ByteSize() > max_message_size:
+                    self.drop_rpc(rpc)
+                    continue
+                await self.do_send_rpc(rpc, to_peer, urgent)
+
+    async def do_send_rpc(self, rpc: rpc_pb2.RPC, to_peer: ID, urgent: bool) -> None:
+        peer_queue = self.pubsub.peer_queue[to_peer]
+        try:
+            if urgent:
+                await peer_queue.urgent_push(rpc=rpc, block=False)
+            else:
+                await peer_queue.push(rpc=rpc, block=False)
+        except Exception as e:
+            logger.error(f"Failed to enqueue RPC to peer {to_peer}: {e}")
+            self.drop_rpc(rpc)
+
+    def drop_rpc(self, rpc: rpc_pb2.RPC) -> None:
+        pass
+
