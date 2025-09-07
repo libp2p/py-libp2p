@@ -37,6 +37,8 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from enum import Enum, auto
+
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
@@ -48,6 +50,15 @@ from .protocol_buffer import (
     StatusCode,
     create_status,
 )
+from .config import (
+    DEFAULT_MAX_CIRCUIT_DURATION,
+    DEFAULT_MAX_CIRCUIT_BYTES,
+    DEFAULT_MAX_CIRCUIT_CONNS,
+    DEFAULT_MAX_RESERVATIONS,
+    STREAM_READ_TIMEOUT,
+    STREAM_WRITE_TIMEOUT,
+    STREAM_CLOSE_TIMEOUT,
+)
 from .resources import (
     RelayLimits,
     RelayResourceManager,
@@ -58,18 +69,19 @@ logger = logging.getLogger("libp2p.relay.circuit_v2")
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
 
-# Default limits for relay resources
+# Direction enum for data piping
+class Pipe(Enum):
+    SRC_TO_DST = auto()
+    DST_TO_SRC = auto()
+
+# Default limits for relay resources (single source of truth)
 DEFAULT_RELAY_LIMITS = RelayLimits(
-    duration=60 * 60,  # 1 hour
-    data=1024 * 1024 * 1024,  # 1GB
-    max_circuit_conns=8,
-    max_reservations=4,
+    duration=DEFAULT_MAX_CIRCUIT_DURATION,
+    data=DEFAULT_MAX_CIRCUIT_BYTES,
+    max_circuit_conns=DEFAULT_MAX_CIRCUIT_CONNS,
+    max_reservations=DEFAULT_MAX_RESERVATIONS,
 )
 
-# Stream operation timeouts
-STREAM_READ_TIMEOUT = 15  # seconds
-STREAM_WRITE_TIMEOUT = 15  # seconds
-STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 5  # Maximum number of read retries
 
 
@@ -458,8 +470,20 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, src_stream, stream, peer_id)
-                nursery.start_soon(self._relay_data, stream, src_stream, peer_id)
+                nursery.start_soon(
+                    self._relay_data,
+                    src_stream,
+                    stream,
+                    peer_id,
+                    Pipe.SRC_TO_DST,
+                )
+                nursery.start_soon(
+                    self._relay_data,
+                    stream,
+                    src_stream,
+                    peer_id,
+                    Pipe.DST_TO_SRC,
+                )
 
         except trio.TooSlowError:
             logger.error("Timeout reading from stop stream")
@@ -648,8 +672,20 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, stream, dst_stream, peer_id)
-                nursery.start_soon(self._relay_data, dst_stream, stream, peer_id)
+                nursery.start_soon(
+                    self._relay_data,
+                    stream,
+                    dst_stream,
+                    peer_id,
+                    Pipe.SRC_TO_DST,
+                )
+                nursery.start_soon(
+                    self._relay_data,
+                    dst_stream,
+                    stream,
+                    peer_id,
+                    Pipe.DST_TO_SRC,
+                )
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
@@ -685,6 +721,7 @@ class CircuitV2Protocol(Service):
         src_stream: INetStream,
         dst_stream: INetStream,
         peer_id: ID,
+        direction: Pipe,
     ) -> None:
         """
         Relay data between two streams.
@@ -704,7 +741,7 @@ class CircuitV2Protocol(Service):
                 # Read data with retries
                 data = await self._read_stream_with_retry(src_stream)
                 if not data:
-                    logger.info("Source stream closed/reset")
+                    logger.info("%s closed/reset", direction.name)
                     break
 
                 # Write data with timeout
@@ -712,10 +749,10 @@ class CircuitV2Protocol(Service):
                     with trio.fail_after(STREAM_WRITE_TIMEOUT):
                         await dst_stream.write(data)
                 except trio.TooSlowError:
-                    logger.error("Timeout writing to destination stream")
+                    logger.error("Timeout writing in %s", direction.name)
                     break
                 except Exception as e:
-                    logger.error("Error writing to destination stream: %s", str(e))
+                    logger.error("Error writing in %s: %s", direction.name, str(e))
                     break
 
                 # Update resource usage

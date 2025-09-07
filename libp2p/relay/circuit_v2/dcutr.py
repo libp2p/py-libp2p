@@ -38,6 +38,11 @@ from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
 from libp2p.tools.async_service import (
     Service,
 )
+from .config import (
+    STREAM_READ_TIMEOUT,
+    STREAM_WRITE_TIMEOUT,
+    DIAL_TIMEOUT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +51,6 @@ PROTOCOL_ID = TProtocol("/libp2p/dcutr")
 
 # Maximum message size for DCUtR (4KiB as per spec)
 MAX_MESSAGE_SIZE = 4 * 1024
-
-# Timeouts
-STREAM_READ_TIMEOUT = 30  # seconds
-STREAM_WRITE_TIMEOUT = 30  # seconds
-DIAL_TIMEOUT = 10  # seconds
 
 # Maximum number of hole punch attempts per peer
 MAX_HOLE_PUNCH_ATTEMPTS = 5

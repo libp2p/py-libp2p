@@ -19,10 +19,10 @@ from libp2p.peer.id import (
     ID,
 )
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
+# REACHABILITY_TIMEOUT now imported from config
+from .config import REACHABILITY_TIMEOUT
 
-# Timeout for reachability checks
-REACHABILITY_TIMEOUT = 10  # seconds
+logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
 
 # Define private IP ranges
 PRIVATE_IP_RANGES = [
