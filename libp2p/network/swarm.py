@@ -211,7 +211,7 @@ class Swarm(Service, INetworkService):
 
         Returns
         -------
-        dict[ID, list[INetConn]]
+        Dict[ID, List[INetConn]]
             The complete mapping of peer IDs to their connection lists.
 
         """
@@ -1021,7 +1021,7 @@ class Swarm(Service, INetworkService):
 
         Returns
         -------
-        dict[ID, INetConn]
+        Dict[ID, INetConn]
             Legacy mapping with only the first connection per peer.
 
         """
