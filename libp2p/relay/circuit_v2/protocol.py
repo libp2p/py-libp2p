@@ -26,9 +26,11 @@ from libp2p.custom_types import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
@@ -52,6 +54,7 @@ from .resources import (
     RelayLimits,
     RelayResourceManager,
 )
+from .utils import maybe_consume_signed_record
 
 logger = logging.getLogger("libp2p.relay.circuit_v2")
 
@@ -372,6 +375,13 @@ class CircuitV2Protocol(Service):
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                 return
 
+            # Consume signed records if sent
+            if hop_msg.HasField("signedRecord"):
+                if not maybe_consume_signed_record(hop_msg, self.host):
+                    logger.error("Received invalid signed-records. Closing stream")
+                    await stream.close()
+                    return
+
             # Process based on message type
             if hop_msg.type == HopMessage.RESERVE:
                 logger.debug("Handling RESERVE message from %s", remote_id)
@@ -419,6 +429,12 @@ class CircuitV2Protocol(Service):
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
+            if stop_msg.HasField("senderRecord"):
+                if not maybe_consume_signed_record(stop_msg, self.host):
+                    logger.error("Received invalid signed-records. Closing stream")
+                    await self._close_stream(stream)
+                    return
+
             if stop_msg.type != StopMessage.CONNECT:
                 # Use direct attribute access to create status object for error response
                 await self._send_stop_status(
@@ -450,6 +466,7 @@ class CircuitV2Protocol(Service):
                 StatusCode.OK,
                 "Connection established",
             )
+
             await self._send_stop_status(
                 stream,
                 StatusCode.OK,
@@ -497,6 +514,7 @@ class CircuitV2Protocol(Service):
                     message="Reservation limit exceeded",
                 )
 
+
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
                     status=status.to_pb(),
@@ -513,6 +531,7 @@ class CircuitV2Protocol(Service):
                 status = create_status(
                     code=StatusCode.OK, message="Reservation accepted"
                 )
+
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
@@ -601,20 +620,34 @@ class CircuitV2Protocol(Service):
                 if not dst_stream:
                     raise ConnectionError("Could not connect to destination")
 
+                # Get remote peer's signed_peer_record and send to the destination peer
+                src_peer_id = cast(INetStreamWithExtras, stream).get_remote_peer_id()
+                signed_envelope = self.host.get_peerstore().get_peer_record(src_peer_id)
+
                 # Send STOP CONNECT message
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
-                    # Cast to extended interface with get_remote_peer_id
-                    peer=cast(INetStreamWithExtras, stream)
-                    .get_remote_peer_id()
-                    .to_bytes(),
+                # Cast to extended interface with get_remote_peer_id
+                    peer=src_peer_id.to_bytes(),
                 )
+                if signed_envelope:
+                    stop_msg.senderRecord = signed_envelope.marshal_envelope()
+
                 await dst_stream.write(stop_msg.SerializeToString())
 
                 # Wait for response from destination
                 resp_bytes = await dst_stream.read()
                 resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
+
+                if resp.HasField("senderRecord"):
+                    if not maybe_consume_signed_record(resp, self.host):
+                        logger.error(
+                            "Received invalid signed-records from destination. "
+                            "Closing stream"
+                        )
+                        await stream.close()
+                        return
 
                 # Handle status attributes from the response
                 if resp.HasField("status"):
@@ -639,11 +672,15 @@ class CircuitV2Protocol(Service):
             if reservation:
                 reservation.active_connections += 1
 
+            # Get destination peer's SPR to send to source
+            dest_signed_envelope = self.host.get_peerstore().get_peer_record(peer_id)
+
             # Send success status
             await self._send_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                dest_signed_envelope,
             )
 
             # Start relaying data
@@ -740,6 +777,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: int,
         message: str,
+        envelope: Envelope | None = None,
     ) -> None:
         """Send a status message."""
         try:
@@ -752,9 +790,11 @@ class CircuitV2Protocol(Service):
                 )  # Cast to Any to avoid type errors
                 pb_status.message = message
 
+                # Send destination signed envelope to source in case of HOP status OK message
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
                     status=pb_status,
+                    signedRecord=envelope,
                 )
 
                 msg_bytes = status_msg.SerializeToString()
@@ -794,6 +834,7 @@ class CircuitV2Protocol(Service):
                     type=StopMessage.STATUS,
                     status=pb_status,
                 )
+
                 await stream.write(status_msg.SerializeToString())
                 await trio.sleep(0.5)  # Ensure message is sent
         except Exception as e:
