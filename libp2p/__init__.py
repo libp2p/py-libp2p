@@ -390,7 +390,8 @@ def new_host(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -411,11 +412,22 @@ def new_host(
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
+    :param connection_config: optional configuration for connection management and health monitoring
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning(
+            "QUIC config provided but QUIC not enabled, ignoring QUIC config"
+        )
+
+    # Determine which connection config to use
+    effective_connection_config: ConnectionConfig | QUICTransportConfig | None = None
+    if enable_quic and quic_transport_opt is not None:
+        effective_connection_config = quic_transport_opt
+    elif connection_config is not None:
+        # Use the provided ConnectionConfig for health monitoring
+        effective_connection_config = connection_config
 
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
@@ -436,7 +448,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_connection_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,

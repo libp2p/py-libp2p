@@ -22,3 +22,4 @@ Examples
    examples.random_walk
    examples.multiple_connections
    examples.websocket
+   examples.connection_health_monitoring
