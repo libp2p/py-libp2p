@@ -61,12 +61,12 @@ ______________________________________________________________________
 
 ### Discovery
 
-| **Discovery**        | **Status** |                                     **Source**                                     |
-| -------------------- | :--------: | :--------------------------------------------------------------------------------: |
-| **`bootstrap`**      |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/bootstrap) |
-| **`random-walk`**    |     🌱     |                                                                                    |
-| **`mdns-discovery`** |     ✅     |   [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns)    |
-| **`rendezvous`**     |     🌱     |                                                                                    |
+| **Discovery**        | **Status** |                                      **Source**                                      |
+| -------------------- | :--------: | :----------------------------------------------------------------------------------: |
+| **`bootstrap`**      |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/bootstrap)  |
+| **`random-walk`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/random_walk) |
+| **`mdns-discovery`** |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns)     |
+| **`rendezvous`**     |     🌱     |                                                                                      |
 
 ______________________________________________________________________
 
