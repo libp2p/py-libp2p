@@ -9,6 +9,11 @@ Subpackages
 
    libp2p.transport.tcp
 
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.transport.quic
+
 Submodules
 ----------
 
