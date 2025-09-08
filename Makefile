@@ -46,7 +46,7 @@ typecheck:
 	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
 
 test:
-	python -m pytest tests -n auto
+	python -m pytest tests -n auto --timeout=300
 
 pr: clean fix lint typecheck test
 
