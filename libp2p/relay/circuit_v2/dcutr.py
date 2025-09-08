@@ -38,10 +38,11 @@ from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
 from libp2p.tools.async_service import (
     Service,
 )
+
 from .config import (
+    DIAL_TIMEOUT,
     STREAM_READ_TIMEOUT,
     STREAM_WRITE_TIMEOUT,
-    DIAL_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)

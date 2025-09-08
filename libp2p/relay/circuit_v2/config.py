@@ -9,7 +9,6 @@ from dataclasses import (
     dataclass,
     field,
 )
-
 from enum import Flag, auto
 
 from libp2p.peer.peerinfo import (
@@ -60,9 +59,12 @@ REACHABILITY_TIMEOUT = 10  # seconds
 
 
 class RelayRole(Flag):
-    """Bit-flag enum that captures the three possible relay capabilities.
+    """
+    Bit-flag enum that captures the three possible relay capabilities.
 
-    A node can combine multiple roles via bit-wise OR, e.g. ``RelayRole.HOP | RelayRole.STOP``.
+    A node can combine multiple roles using bit-wise OR, for example::
+
+        RelayRole.HOP | RelayRole.STOP
     """
 
     HOP = auto()  # Act as a relay for others ("hop")

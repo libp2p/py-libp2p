@@ -20,7 +20,6 @@ from libp2p.peer.id import (
 )
 
 # REACHABILITY_TIMEOUT now imported from config
-from .config import REACHABILITY_TIMEOUT
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
 

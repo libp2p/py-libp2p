@@ -30,6 +30,7 @@ from libp2p.peer.id import (
 from libp2p.tools.async_service import (
     Service,
 )
+
 from .config import (
     DEFAULT_DISCOVERY_INTERVAL as CFG_DISCOVERY_INTERVAL,
 )
@@ -168,8 +169,8 @@ class RelayDiscovery(Service):
                     self._discovered_relays[peer_id].last_seen = time.time()
                     continue
 
-                # Check if peer supports the relay protocol
-                with trio.move_on_after(PEER_PROTOCOL_TIMEOUT):  # Don't wait too long for protocol info
+                # Don't wait too long for protocol info
+                with trio.move_on_after(PEER_PROTOCOL_TIMEOUT):
                     if await self._supports_relay_protocol(peer_id):
                         await self._add_relay(peer_id)
 
@@ -181,7 +182,7 @@ class RelayDiscovery(Service):
                     key=lambda x: x[1].last_seen,
                     reverse=True,
                 )
-                to_remove = sorted_relays[MAX_RELAYS_TO_TRACK :]
+                to_remove = sorted_relays[MAX_RELAYS_TO_TRACK:]
                 for peer_id, _ in to_remove:
                     del self._discovered_relays[peer_id]
 

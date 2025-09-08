@@ -8,9 +8,7 @@ including reservations and connection limits.
 from dataclasses import (
     dataclass,
 )
-
 from enum import Enum, auto
-
 import hashlib
 import os
 import time
@@ -22,8 +20,10 @@ from libp2p.peer.id import (
 # Import the protobuf definitions
 from .pb.circuit_pb2 import Reservation as PbReservation
 
-RANDOM_BYTES_LENGTH = 16 #128 bits of randomness
-TIMESTAMP_MULTIPLIER = 1000000 # To convert seconds to microseconds
+RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
+TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
+
+
 # Reservation status enum
 class ReservationStatus(Enum):
     """Lifecycle status of a relay reservation."""
@@ -31,6 +31,7 @@ class ReservationStatus(Enum):
     ACTIVE = auto()
     EXPIRED = auto()
     REJECTED = auto()
+
 
 @dataclass
 class RelayLimits:
@@ -101,8 +102,9 @@ class Reservation:
     @property
     def status(self) -> ReservationStatus:
         """Return the current status as a ``ReservationStatus`` enum."""
-
-        return ReservationStatus.EXPIRED if self.is_expired() else ReservationStatus.ACTIVE
+        return (
+            ReservationStatus.EXPIRED if self.is_expired() else ReservationStatus.ACTIVE
+        )
 
     def can_accept_connection(self) -> bool:
         """Check if a new connection can be accepted."""

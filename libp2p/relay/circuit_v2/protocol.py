@@ -5,6 +5,7 @@ This module implements the Circuit Relay v2 protocol as specified in:
 https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
+from enum import Enum, auto
 import logging
 import time
 from typing import (
@@ -37,8 +38,15 @@ from libp2p.tools.async_service import (
     Service,
 )
 
-from enum import Enum, auto
-
+from .config import (
+    DEFAULT_MAX_CIRCUIT_BYTES,
+    DEFAULT_MAX_CIRCUIT_CONNS,
+    DEFAULT_MAX_CIRCUIT_DURATION,
+    DEFAULT_MAX_RESERVATIONS,
+    STREAM_CLOSE_TIMEOUT,
+    STREAM_READ_TIMEOUT,
+    STREAM_WRITE_TIMEOUT,
+)
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
@@ -50,15 +58,6 @@ from .protocol_buffer import (
     StatusCode,
     create_status,
 )
-from .config import (
-    DEFAULT_MAX_CIRCUIT_DURATION,
-    DEFAULT_MAX_CIRCUIT_BYTES,
-    DEFAULT_MAX_CIRCUIT_CONNS,
-    DEFAULT_MAX_RESERVATIONS,
-    STREAM_READ_TIMEOUT,
-    STREAM_WRITE_TIMEOUT,
-    STREAM_CLOSE_TIMEOUT,
-)
 from .resources import (
     RelayLimits,
     RelayResourceManager,
@@ -69,10 +68,12 @@ logger = logging.getLogger("libp2p.relay.circuit_v2")
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
 
+
 # Direction enum for data piping
 class Pipe(Enum):
     SRC_TO_DST = auto()
     DST_TO_SRC = auto()
+
 
 # Default limits for relay resources (single source of truth)
 DEFAULT_RELAY_LIMITS = RelayLimits(
@@ -734,6 +735,9 @@ class CircuitV2Protocol(Service):
             Destination stream to write to
         peer_id : ID
             ID of the peer being relayed
+
+        direction : Pipe
+            Direction of data flow (``Pipe.SRC_TO_DST`` or ``Pipe.DST_TO_SRC``)
 
         """
         try:
