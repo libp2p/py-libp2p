@@ -320,6 +320,7 @@ def new_host(
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -337,11 +338,22 @@ def new_host(
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
+    :param connection_config: optional configuration for connection management and health monitoring
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning(
+            "QUIC config provided but QUIC not enabled, ignoring QUIC config"
+        )
+
+    # Determine which connection config to use
+    effective_connection_config: ConnectionConfig | QUICTransportConfig | None = None
+    if enable_quic and quic_transport_opt is not None:
+        effective_connection_config = quic_transport_opt
+    elif connection_config is not None:
+        # Use the provided ConnectionConfig for health monitoring
+        effective_connection_config = connection_config
 
     swarm = new_swarm(
         enable_quic=enable_quic,
@@ -351,7 +363,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_connection_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config
     )

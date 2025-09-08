@@ -9,6 +9,7 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
     Optional,
 )
 
@@ -320,6 +321,33 @@ class BasicHost(IHost):
 
     async def close(self) -> None:
         await self._network.close()
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_peer_health_summary"):
+            return self._network.get_peer_health_summary(peer_id)
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_global_health_summary"):
+            return self._network.get_global_health_summary()
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "export_health_metrics"):
+            return self._network.export_health_metrics(format)
+        return "{}" if format == "json" else ""
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
