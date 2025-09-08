@@ -36,10 +36,48 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+
+      - name: Install Nim for interop testing
+        if: matrix.toxenv == 'interop'
+        run: |
+          echo "Installing Nim for nim-libp2p interop testing..."
+          curl -sSf https://nim-lang.org/choosenim/init.sh | sh -s -- -y --firstInstall
+          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
+          echo "$HOME/.choosenim/toolchains/nim-stable/bin" >> $GITHUB_PATH
+
+      - name: Cache nimble packages
+        if: matrix.toxenv == 'interop'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nimble
+            ~/.choosenim/toolchains/*/lib
+          key: ${{ runner.os }}-nimble-${{ hashFiles('**/nim_echo_server.nim') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Build nim interop binaries
+        if: matrix.toxenv == 'interop'
+        run: |
+          export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"
+          cd tests/interop/nim_libp2p
+          ./scripts/setup_nim_echo.sh
+
       - run: |
           python -m pip install --upgrade pip
           python -m pip install tox
-      - run: |
+
+      - name: Run Tests or Generate Docs
+        run: |
+          if [[ "${{ matrix.toxenv }}" == 'docs' ]]; then
+            export TOXENV=docs
+          else
+            export TOXENV=py${{ matrix.python }}-${{ matrix.toxenv }}
+          fi
+          # Set PATH for nim commands during tox
+          if [[ "${{ matrix.toxenv }}" == 'interop' ]]; then
+            export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"
+          fi
           python -m tox run -r
 
   windows:

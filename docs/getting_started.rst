@@ -28,6 +28,11 @@ For Python, the most common transport is TCP. Here's how to set up a basic TCP t
 .. literalinclude:: ../examples/doc-examples/example_transport.py
    :language: python
 
+Also, QUIC is a modern transport protocol that provides built-in TLS security and stream multiplexing over UDP:
+
+.. literalinclude:: ../examples/doc-examples/example_quic_transport.py
+   :language: python
+
 Connection Encryption
 ^^^^^^^^^^^^^^^^^^^^^
 
