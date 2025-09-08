@@ -66,7 +66,7 @@ async def run_rendezvous_server(port: int = 0):
             print("\nShutting down rendezvous server...")
 
 
-async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_NAMESPACE):
+async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_NAMESPACE, enable_refresh: bool = False):
     """Run a client that registers and discovers peers."""
     listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
     host = new_host()
@@ -93,10 +93,14 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
         try:
             print(f"Client started with peer ID: {host.get_id()}")
             
-            # Register under a namespace
+            # Register under a namespace with optional auto-refresh
             print(f"Registering in namespace '{namespace}'...")
-            ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)  # Use default TTL
-            print(f"✓ Registered with TTL {ttl}s")
+            if enable_refresh:
+                ttl = await discovery.advertise(namespace, ttl=60, nursery=nursery)
+                print(f"✓ Registered with TTL {ttl}s (auto-refresh enabled)")
+            else:
+                ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
+                print(f"✓ Registered with TTL {ttl}s")
             
             # Wait a moment for registration to propagate
             await trio.sleep(1)
@@ -119,9 +123,14 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
                 print("No other peers found (only self)")
             
             # Keep running for demonstration
-            print("\nKeeping registration active for 30 seconds...")
-            print("Start another client instance to see peer discovery in action!")
-            await trio.sleep(30)
+            if enable_refresh:
+                print("\nRefresh mode: Registration will auto-refresh every ~48s (80% of 60s TTL)")
+                print("Running for 2 minutes to demonstrate refresh...")
+                await trio.sleep(120)  # 2 minutes to see refresh in action
+            else:
+                print("\nKeeping registration active for 30 seconds...")
+                print("Start another client instance to see peer discovery in action!")
+                await trio.sleep(30)
             
             # Unregister
             print(f"Unregistering from namespace '{namespace}'...")
@@ -136,7 +145,7 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
             await discovery.close()
 
 
-async def run(mode: str, address: str = "", namespace: str = config.DEFAULT_NAMESPACE, port: int = 0):
+async def run(mode: str, address: str = "", namespace: str = config.DEFAULT_NAMESPACE, port: int = 0, enable_refresh: bool = False):
     """Main run function."""
     if mode == "server":
         await run_rendezvous_server(port)
@@ -144,7 +153,7 @@ async def run(mode: str, address: str = "", namespace: str = config.DEFAULT_NAME
         if not address:
             print("Please provide rendezvous server address")
             return
-        await run_client_example(address, namespace)
+        await run_client_example(address, namespace, enable_refresh)
     else:
         print("Unknown mode. Use 'server' or 'client'")
 
@@ -164,8 +173,15 @@ def main():
        
     2. Start one or more clients (in separate terminals):
        python rendezvous.py --mode client <server_multiaddr>
+       
+    3. Enable automatic refresh for long-running clients:
+       python rendezvous.py --mode client <server_multiaddr> --refresh
 
     Example server multiaddr: /ip4/127.0.0.1/tcp/12345/p2p/QmPeerID...
+    
+    Refresh mode automatically:
+    - Re-registers the peer before TTL expires (at 80% of TTL)
+    - Refreshes discovery cache when it gets stale
     """
     
     parser = argparse.ArgumentParser(
@@ -206,13 +222,19 @@ def main():
         help="Enable verbose logging"
     )
     
+    parser.add_argument(
+        "-r", "--refresh",
+        action="store_true",
+        help="Enable automatic refresh for registration and discovery cache"
+    )
+    
     args = parser.parse_args()
     
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
     try:
-        trio.run(run, args.mode, args.address, args.namespace, args.port)
+        trio.run(run, args.mode, args.address, args.namespace, args.port, args.refresh)
     except KeyboardInterrupt:
         print("\nExiting...")
 

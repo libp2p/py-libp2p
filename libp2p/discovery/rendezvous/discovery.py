@@ -73,7 +73,7 @@ class RendezvousDiscovery:
     Rendezvous-based peer discovery.
     
     This class provides a high-level interface for peer discovery using
-    the rendezvous protocol, including caching and pagination support.
+    the rendezvous protocol, including caching and optional refresh support.
     """
     
     def __init__(self, host: IHost, rendezvous_peer: PeerID):
@@ -88,19 +88,45 @@ class RendezvousDiscovery:
         self.client = RendezvousClient(host, rendezvous_peer)
         self.caches: Dict[str, PeerCache] = {}
         self._discover_locks: Dict[str, trio.Lock] = {}
+        self._refresh_tasks: Dict[str, int] = {}
+        
+    async def start_refresh_task(self, nursery: trio.Nursery, namespace: str, ttl: int) -> None:
+        """Start a simple refresh task for a namespace."""
+        self._refresh_tasks[namespace] = ttl
+        nursery.start_soon(self._refresh_loop, namespace, ttl)
     
-    async def advertise(self, namespace: str, ttl: int = 7200) -> float:
+    async def _refresh_loop(self, namespace: str, ttl: int) -> None:
+        """Simple refresh loop - just re-register periodically."""
+        refresh_interval = ttl * 0.8  # Refresh at 80% of TTL
+        
+        while namespace in self._refresh_tasks:
+            await trio.sleep(refresh_interval)
+            if namespace in self._refresh_tasks:  # Check again after sleep
+                try:
+                    await self.client.register(namespace, ttl)
+                    logger.debug(f"Refreshed registration for '{namespace}'")
+                except Exception as e:
+                    logger.warning(f"Failed to refresh registration for '{namespace}': {e}")
+    
+    async def advertise(self, namespace: str, ttl: int = 7200, nursery: Optional[trio.Nursery] = None) -> float:
         """
         Advertise this peer under a namespace.
         
         Args:
             namespace: Namespace to advertise under
             ttl: Time-to-live in seconds
+            nursery: Optional nursery to start refresh task
             
         Returns:
             Actual TTL granted by the server
         """
-        return await self.client.register(namespace, ttl)
+        actual_ttl = await self.client.register(namespace, ttl)
+        
+        # Start refresh task if nursery provided
+        if nursery is not None:
+            await self.start_refresh_task(nursery, namespace, actual_ttl)
+        
+        return actual_ttl
     
     async def find_peers(
         self, 
@@ -210,6 +236,9 @@ class RendezvousDiscovery:
         """
         await self.client.unregister(namespace)
         
+        # Stop refresh task
+        self._refresh_tasks.pop(namespace, None)
+        
         # Clear cache for this namespace
         if namespace in self.caches:
             self.caches[namespace].clear()
@@ -230,7 +259,7 @@ class RendezvousDiscovery:
     
     async def close(self) -> None:
         """Close the discovery service and clean up resources."""
-        await self.client.close()
+        self._refresh_tasks.clear()
         self.caches.clear()
         self._discover_locks.clear()
-
+        await self.client.close()
