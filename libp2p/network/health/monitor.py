@@ -249,8 +249,8 @@ class ConnectionHealthMonitor(Service):
                     new_conn = await self.swarm.dial_peer(peer_id)
                     if new_conn:
                         logger.info(
-                             f"Successfully established replacement connection to "
-                             f"{peer_id}"
+                            f"Successfully established replacement connection to "
+                            f"{peer_id}"
                         )
                     else:
                         logger.warning(
@@ -258,8 +258,8 @@ class ConnectionHealthMonitor(Service):
                         )
                 else:
                     logger.warning(
-                         f"No addresses available for {peer_id}, "
-                         f"cannot establish replacement"
+                        f"No addresses available for {peer_id}, "
+                        f"cannot establish replacement"
                     )
 
             except Exception as e:
@@ -277,9 +277,9 @@ class ConnectionHealthMonitor(Service):
     def _has_health_data(self, peer_id: ID, conn: INetConn) -> bool:
         """Check if health data exists for a connection."""
         return (
-            hasattr(self.swarm, 'health_data') and
-            peer_id in self.swarm.health_data and
-            conn in self.swarm.health_data[peer_id]
+            hasattr(self.swarm, "health_data")
+            and peer_id in self.swarm.health_data
+            and conn in self.swarm.health_data[peer_id]
         )
 
     async def get_monitoring_status(self) -> dict[str, Any]:

@@ -91,17 +91,17 @@ The health monitoring features are now accessible through the high-level host AP
 .. code-block:: python
 
     # Access health information through the host interface
-    
+
     # Get health summary for a specific peer
     peer_health = host.get_connection_health(peer_id)
     print(f"Peer health: {peer_health}")
-    
+
     # Get global network health summary
     network_health = host.get_network_health_summary()
     print(f"Total peers: {network_health.get('total_peers', 0)}")
     print(f"Total connections: {network_health.get('total_connections', 0)}")
     print(f"Average health: {network_health.get('average_peer_health', 0.0)}")
-    
+
     # Export metrics in different formats
     json_metrics = host.export_health_metrics("json")
     prometheus_metrics = host.export_health_metrics("prometheus")
@@ -174,11 +174,11 @@ The enhanced health monitoring provides advanced capabilities:
         # Get detailed health information
         peer_health = host.get_connection_health(peer_id)
         global_health = host.get_network_health_summary()
-        
+
         # Export metrics in different formats
         json_metrics = host.export_health_metrics("json")
         prometheus_metrics = host.export_health_metrics("prometheus")
-        
+
         print(f"Network health summary: {global_health}")
 
 Example: Latency-Based Load Balancing
@@ -231,7 +231,7 @@ Health monitoring is fully backwards compatible:
 
     # Existing code continues to work unchanged
     host = new_host()  # Uses default configuration (health monitoring disabled)
-    
+
     # Only when you explicitly enable it does health monitoring activate
     config = ConnectionConfig(enable_health_monitoring=True)
     host_with_health = new_host(connection_config=config)

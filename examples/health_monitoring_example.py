@@ -38,7 +38,7 @@ async def example_host_health_monitoring_enabled():
     # This solves the API inconsistency from the previous PR
     host = new_host(
         key_pair=create_new_key_pair(),
-        connection_config=config  # ← Key improvement: health monitoring through host
+        connection_config=config,  # ← Key improvement: health monitoring through host
     )
 
     logger.info("Host created with health monitoring enabled")
@@ -68,10 +68,7 @@ async def example_host_health_monitoring_disabled():
     )
 
     # Create host without health monitoring
-    host = new_host(
-        key_pair=create_new_key_pair(),
-        connection_config=config
-    )
+    host = new_host(key_pair=create_new_key_pair(), connection_config=config)
 
     logger.info("Host created with health monitoring disabled")
     logger.info(f"Health monitoring status: {config.enable_health_monitoring}")
@@ -97,10 +94,7 @@ async def example_different_load_balancing_strategies():
             load_balancing_strategy=strategy,
         )
 
-        host = new_host(
-            key_pair=create_new_key_pair(),
-            connection_config=config
-        )
+        host = new_host(key_pair=create_new_key_pair(), connection_config=config)
 
         logger.info(f"Created host with strategy: {strategy}")
 
@@ -131,10 +125,7 @@ async def example_backward_compatibility():
 
     # ✅ NEW API with explicit config
     config = ConnectionConfig(enable_health_monitoring=False)
-    host_new_style = new_host(
-        key_pair=create_new_key_pair(),
-        connection_config=config
-    )
+    host_new_style = new_host(key_pair=create_new_key_pair(), connection_config=config)
     logger.info("✅ New-style host creation with explicit config")
 
     await host_new_style.close()
@@ -158,9 +149,9 @@ async def main():
     logger.info("✅ Health methods available on host interface")
     logger.info("✅ Backward compatibility maintained")
     logger.info("✅ Health-based and latency-based load balancing")
-    logger.info("\n" + "="*60)
+    logger.info("\n" + "=" * 60)
     logger.info("📋 IMPLEMENTATION STATUS: COMPLETE")
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info("✅ Phase 1: Data structures and configuration")
     logger.info("✅ Phase 2: Proactive monitoring service")
     logger.info("✅ Phase 3: Health reporting and metrics")

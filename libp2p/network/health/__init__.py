@@ -13,7 +13,7 @@ from .data_structures import (
 from .monitor import ConnectionHealthMonitor
 
 __all__ = [
-    "ConnectionHealth", 
+    "ConnectionHealth",
     "create_default_connection_health",
     "ConnectionHealthMonitor",
 ]
