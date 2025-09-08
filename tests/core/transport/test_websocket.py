@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 import pytest
+from exceptiongroup import ExceptionGroup
 from multiaddr import Multiaddr
 import trio
 
@@ -623,6 +624,7 @@ async def test_websocket_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # WebSocket transport
     )
 
     # Test data
@@ -675,7 +677,10 @@ async def test_websocket_data_exchange():
 
 @pytest.mark.trio
 async def test_websocket_host_pair_data_exchange():
-    """Test WebSocket host pair with actual data exchange using host_pair_factory pattern"""
+    """
+    Test WebSocket host pair with actual data exchange using host_pair_factory
+    pattern.
+    """
     from libp2p import create_yamux_muxer_option, new_host
     from libp2p.crypto.secp256k1 import create_new_key_pair
     from libp2p.custom_types import TProtocol
@@ -712,6 +717,7 @@ async def test_websocket_host_pair_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # WebSocket transport
     )
 
     # Test data
@@ -784,16 +790,102 @@ async def test_wss_host_pair_data_exchange():
         InsecureTransport,
     )
 
-    # Create TLS context for WSS
-    tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    tls_context.check_hostname = False
-    tls_context.verify_mode = ssl.CERT_NONE
+    # Create TLS contexts for WSS (separate for client and server)
+    # For testing, we need to create a self-signed certificate
+    try:
+        import datetime
+        import ipaddress
+        import os
+        import tempfile
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+        # Create certificate
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
+            ]
+        )
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_after(
+                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+            )
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("localhost"),
+                        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
+
+        # Create temporary files for cert and key
+        cert_file = tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".crt")
+        key_file = tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".key")
+
+        # Write certificate and key to files
+        cert_file.write(cert.public_bytes(serialization.Encoding.PEM))
+        key_file.write(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+
+        cert_file.close()
+        key_file.close()
+
+        # Server context for listener (Host A)
+        server_tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        server_tls_context.load_cert_chain(cert_file.name, key_file.name)
+
+        # Client context for dialer (Host B)
+        client_tls_context = ssl.create_default_context()
+        client_tls_context.check_hostname = False
+        client_tls_context.verify_mode = ssl.CERT_NONE
+
+        # Clean up temp files after use
+        def cleanup_certs():
+            try:
+                os.unlink(cert_file.name)
+                os.unlink(key_file.name)
+            except Exception:
+                pass
+
+    except ImportError:
+        pytest.skip("cryptography package required for WSS tests")
+    except Exception as e:
+        pytest.skip(f"Failed to create test certificates: {e}")
 
     # Create two hosts with WSS transport and plaintext security
     key_pair_a = create_new_key_pair()
     key_pair_b = create_new_key_pair()
 
-    # Host A (listener) - WSS transport
+    # Host A (listener) - WSS transport with server TLS config
     security_options_a = {
         PLAINTEXT_PROTOCOL_ID: InsecureTransport(
             local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
@@ -804,9 +896,10 @@ async def test_wss_host_pair_data_exchange():
         sec_opt=security_options_a,
         muxer_opt=create_yamux_muxer_option(),
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
+        tls_server_config=server_tls_context,
     )
 
-    # Host B (dialer) - WSS transport
+    # Host B (dialer) - WSS transport with client TLS config
     security_options_b = {
         PLAINTEXT_PROTOCOL_ID: InsecureTransport(
             local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
@@ -816,6 +909,8 @@ async def test_wss_host_pair_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # Ensure WSS transport
+        tls_client_config=client_tls_context,
     )
 
     # Test data
@@ -1028,7 +1123,7 @@ async def test_wss_transport_without_tls_config():
 @pytest.mark.trio
 async def test_wss_dial_parsing():
     """Test WSS dial functionality with multiaddr parsing."""
-    upgrader = create_upgrader()
+    # upgrader = create_upgrader()  # Not used in this test
     # transport = WebsocketTransport(upgrader)  # Not used in this test
 
     # Test WSS multiaddr parsing in dial
@@ -1085,10 +1180,15 @@ async def test_wss_listen_without_tls_config():
     listener = transport.create_listener(dummy_handler)
 
     # This should raise an error when trying to listen on WSS without TLS config
-    with pytest.raises(
-        ValueError, match="Cannot listen on WSS address.*without TLS configuration"
-    ):
-        await listener.listen(wss_maddr, trio.open_nursery())
+    with pytest.raises(ExceptionGroup) as exc_info:
+        async with trio.open_nursery() as nursery:
+            await listener.listen(wss_maddr, nursery)
+
+    # Check that the ExceptionGroup contains the expected ValueError
+    assert len(exc_info.value.exceptions) == 1
+    assert isinstance(exc_info.value.exceptions[0], ValueError)
+    assert "Cannot listen on WSS address" in str(exc_info.value.exceptions[0])
+    assert "without TLS configuration" in str(exc_info.value.exceptions[0])
 
 
 @pytest.mark.trio
@@ -1213,7 +1313,7 @@ def test_wss_vs_ws_distinction():
 @pytest.mark.trio
 async def test_wss_connection_handling():
     """Test WSS connection handling with security flag."""
-    upgrader = create_upgrader()
+    # upgrader = create_upgrader()  # Not used in this test
     # transport = WebsocketTransport(upgrader)  # Not used in this test
 
     # Test that WSS connections are marked as secure
@@ -1263,7 +1363,9 @@ async def test_handshake_timeout():
         await trio.sleep(0)
 
     listener = transport.create_listener(dummy_handler)
-    assert listener._handshake_timeout == 0.1
+    # Type assertion to access private attribute for testing
+    assert hasattr(listener, "_handshake_timeout")
+    assert getattr(listener, "_handshake_timeout") == 0.1
 
 
 @pytest.mark.trio
@@ -1275,11 +1377,14 @@ async def test_handshake_timeout_creation():
     from libp2p.transport import create_transport
 
     transport = create_transport("ws", upgrader, handshake_timeout=5.0)
-    assert transport._handshake_timeout == 5.0
+    # Type assertion to access private attribute for testing
+    assert hasattr(transport, "_handshake_timeout")
+    assert getattr(transport, "_handshake_timeout") == 5.0
 
     # Test default timeout
     transport_default = create_transport("ws", upgrader)
-    assert transport_default._handshake_timeout == 15.0
+    assert hasattr(transport_default, "_handshake_timeout")
+    assert getattr(transport_default, "_handshake_timeout") == 15.0
 
 
 @pytest.mark.trio
@@ -1310,7 +1415,8 @@ async def test_connection_state_tracking():
     assert state["total_bytes"] == 0
     assert state["connection_duration"] >= 0
 
-    # Test byte tracking (we can't actually read/write with mock, but we can test the method)
+    # Test byte tracking (we can't actually read/write with mock, but we can test
+    # the method)
     # The actual byte tracking will be tested in integration tests
     assert hasattr(conn, "_bytes_read")
     assert hasattr(conn, "_bytes_written")
@@ -1396,7 +1502,7 @@ async def test_zero_byte_write_handling():
 @pytest.mark.trio
 async def test_websocket_transport_protocols():
     """Test that WebSocket transport reports correct protocols."""
-    upgrader = create_upgrader()
+    # upgrader = create_upgrader()  # Not used in this test
     # transport = WebsocketTransport(upgrader)  # Not used in this test
 
     # Test that the transport can handle both WS and WSS protocols
@@ -1427,7 +1533,9 @@ async def test_websocket_listener_addr_format():
         await trio.sleep(0)
 
     listener_ws = transport_ws.create_listener(dummy_handler_ws)
-    assert listener_ws._handshake_timeout == 15.0  # Default timeout
+    # Type assertion to access private attribute for testing
+    assert hasattr(listener_ws, "_handshake_timeout")
+    assert getattr(listener_ws, "_handshake_timeout") == 15.0  # Default timeout
 
     # Test WSS listener with TLS config
     import ssl
@@ -1439,13 +1547,19 @@ async def test_websocket_listener_addr_format():
         await trio.sleep(0)
 
     listener_wss = transport_wss.create_listener(dummy_handler_wss)
-    assert listener_wss._tls_config is not None
-    assert listener_wss._handshake_timeout == 15.0
+    # Type assertion to access private attributes for testing
+    assert hasattr(listener_wss, "_tls_config")
+    assert getattr(listener_wss, "_tls_config") is not None
+    assert hasattr(listener_wss, "_handshake_timeout")
+    assert getattr(listener_wss, "_handshake_timeout") == 15.0
 
 
 @pytest.mark.trio
 async def test_sni_resolution_limitation():
-    """Test SNI resolution limitation - Python multiaddr library doesn't support SNI protocol."""
+    """
+    Test SNI resolution limitation - Python multiaddr library doesn't support
+    SNI protocol.
+    """
     upgrader = create_upgrader()
     transport = WebsocketTransport(upgrader)
 
@@ -1471,7 +1585,7 @@ async def test_sni_resolution_limitation():
 @pytest.mark.trio
 async def test_websocket_transport_can_dial():
     """Test WebSocket transport CanDial functionality similar to Go implementation."""
-    upgrader = create_upgrader()
+    # upgrader = create_upgrader()  # Not used in this test
     # transport = WebsocketTransport(upgrader)  # Not used in this test
 
     # Test valid WebSocket addresses that should be dialable

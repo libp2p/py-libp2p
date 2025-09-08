@@ -125,7 +125,7 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
         # Find the WebSocket protocol
         ws_protocol_found = False
         tls_found = False
-        sni_found = False
+        # sni_found = False  # Not used currently
 
         for i, protocol in enumerate(protocols[2:], start=2):
             if protocol.name in ws_protocols:
@@ -134,7 +134,7 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
             elif protocol.name in tls_protocols:
                 tls_found = True
             elif protocol.name in sni_protocols:
-                # sni_found = True  # Not used in current implementation
+                pass  # sni_found = True  # Not used in current implementation
 
         if not ws_protocol_found:
             return False

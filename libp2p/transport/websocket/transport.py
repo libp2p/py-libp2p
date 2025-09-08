@@ -2,7 +2,6 @@ import logging
 import ssl
 
 from multiaddr import Multiaddr
-import trio
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
@@ -68,8 +67,6 @@ class WebsocketTransport(ITransport):
         )
 
         try:
-            from trio_websocket import open_websocket_url
-
             # Prepare SSL context for WSS connections
             ssl_context = None
             if parsed.is_wss:
@@ -83,19 +80,63 @@ class WebsocketTransport(ITransport):
                         ssl_context.check_hostname = False
                         ssl_context.verify_mode = ssl.CERT_NONE
 
-            # Use the context manager but don't exit it immediately
-            # The connection will be closed when the RawConnection is closed
-            ws_context = open_websocket_url(ws_url, ssl_context=ssl_context)
+            logger.debug(f"WebsocketTransport.dial opening connection to {ws_url}")
 
-            # Apply handshake timeout
+            # Use a different approach: start background nursery that will persist
+            logger.debug("WebsocketTransport.dial establishing connection")
+
+            # Import trio-websocket functions
+            from trio_websocket import connect_websocket
+            from trio_websocket._impl import _url_to_host
+
+            # Parse the WebSocket URL to get host, port, resource
+            # like trio-websocket does
+            ws_host, ws_port, ws_resource, ws_ssl_context = _url_to_host(
+                ws_url, ssl_context
+            )
+
+            logger.debug(
+                f"WebsocketTransport.dial parsed URL: host={ws_host}, "
+                f"port={ws_port}, resource={ws_resource}"
+            )
+
+            # Instead of fighting trio-websocket's lifecycle, let's try using
+            # a persistent task that will keep the WebSocket alive
+            # This mimics what trio-websocket does internally but with our control
+
+            # Create a background task manager for this connection
+            import trio
+
+            nursery_manager = trio.lowlevel.current_task().parent_nursery
+            if nursery_manager is None:
+                raise OpenConnectionError(
+                    f"No parent nursery available for WebSocket connection to {maddr}"
+                )
+
+            # Apply timeout to the connection process
             with trio.fail_after(self._handshake_timeout):
-                ws = await ws_context.__aenter__()
+                logger.debug("WebsocketTransport.dial connecting WebSocket")
+                ws = await connect_websocket(
+                    nursery_manager,  # Use the existing nursery from libp2p
+                    ws_host,
+                    ws_port,
+                    ws_resource,
+                    use_ssl=ws_ssl_context,
+                    message_queue_size=1024,  # Reasonable defaults
+                    max_message_size=16 * 1024 * 1024,  # 16MB max message
+                )
+                logger.debug("WebsocketTransport.dial WebSocket connection established")
 
-            conn = P2PWebSocketConnection(ws, ws_context, is_secure=parsed.is_wss)  # type: ignore[attr-defined]
-            return RawConnection(conn, initiator=True)
+                # Create our connection wrapper
+                # Pass None for nursery since we're using the parent nursery
+                conn = P2PWebSocketConnection(ws, None, is_secure=parsed.is_wss)
+                logger.debug("WebsocketTransport.dial created P2PWebSocketConnection")
+
+                return RawConnection(conn, initiator=True)
         except trio.TooSlowError as e:
             raise OpenConnectionError(
-                f"WebSocket handshake timeout after {self._handshake_timeout}s for {maddr}"
+                f"WebSocket handshake timeout after {self._handshake_timeout}s "
+                f"for {maddr}"
             ) from e
         except Exception as e:
             raise OpenConnectionError(f"Failed to dial WebSocket {maddr}: {e}") from e
@@ -149,7 +190,8 @@ class WebsocketTransport(ITransport):
             return [maddr]
 
         # Create new multiaddr with SNI
-        # For /dns/example.com/tcp/8080/wss -> /dns/example.com/tcp/8080/tls/sni/example.com/ws
+        # For /dns/example.com/tcp/8080/wss ->
+        # /dns/example.com/tcp/8080/tls/sni/example.com/ws
         try:
             # Remove /wss and add /tls/sni/example.com/ws
             without_wss = maddr.decapsulate(Multiaddr("/wss"))

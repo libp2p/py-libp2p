@@ -2,6 +2,7 @@
 Transport registry for dynamic transport selection based on multiaddr protocols.
 """
 
+from collections.abc import Callable
 import logging
 from typing import Any
 
@@ -16,8 +17,21 @@ from libp2p.transport.websocket.multiaddr_utils import (
 )
 
 
+# Import QUIC utilities here to avoid circular imports
+def _get_quic_transport() -> Any:
+    from libp2p.transport.quic.transport import QUICTransport
+
+    return QUICTransport
+
+
+def _get_quic_validation() -> Callable[[Multiaddr], bool]:
+    from libp2p.transport.quic.utils import is_quic_multiaddr
+
+    return is_quic_multiaddr
+
+
 # Import WebsocketTransport here to avoid circular imports
-def _get_websocket_transport():
+def _get_websocket_transport() -> Any:
     from libp2p.transport.websocket.transport import WebsocketTransport
 
     return WebsocketTransport
@@ -85,6 +99,11 @@ class TransportRegistry:
         self.register_transport("ws", WebsocketTransport)
         self.register_transport("wss", WebsocketTransport)
 
+        # Register QUIC transport for /quic and /quic-v1 protocols
+        QUICTransport = _get_quic_transport()
+        self.register_transport("quic", QUICTransport)
+        self.register_transport("quic-v1", QUICTransport)
+
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
     ) -> None:
@@ -137,7 +156,22 @@ class TransportRegistry:
                     return None
                 # Use explicit WebsocketTransport to avoid type issues
                 WebsocketTransport = _get_websocket_transport()
-                return WebsocketTransport(upgrader)
+                return WebsocketTransport(
+                    upgrader,
+                    tls_client_config=kwargs.get("tls_client_config"),
+                    tls_server_config=kwargs.get("tls_server_config"),
+                    handshake_timeout=kwargs.get("handshake_timeout", 15.0),
+                )
+            elif protocol in ["quic", "quic-v1"]:
+                # QUIC transport requires private_key
+                private_key = kwargs.get("private_key")
+                if private_key is None:
+                    logger.warning(f"QUIC transport '{protocol}' requires private_key")
+                    return None
+                # Use explicit QUICTransport to avoid type issues
+                QUICTransport = _get_quic_transport()
+                config = kwargs.get("config")
+                return QUICTransport(private_key, config)
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()
@@ -161,13 +195,15 @@ def register_transport(protocol: str, transport_class: type[ITransport]) -> None
 
 
 def create_transport_for_multiaddr(
-    maddr: Multiaddr, upgrader: TransportUpgrader
+    maddr: Multiaddr, upgrader: TransportUpgrader, **kwargs: Any
 ) -> ITransport | None:
     """
     Create the appropriate transport for a given multiaddr.
 
     :param maddr: The multiaddr to create transport for
     :param upgrader: The transport upgrader instance
+    :param kwargs: Additional arguments for transport construction
+                   (e.g., private_key for QUIC)
     :return: Transport instance or None if no suitable transport found
     """
     try:
@@ -176,7 +212,20 @@ def create_transport_for_multiaddr(
 
         # Check for supported transport protocols in order of preference
         # We need to validate that the multiaddr structure is valid for our transports
-        if "ws" in protocols or "wss" in protocols or "tls" in protocols:
+        if "quic" in protocols or "quic-v1" in protocols:
+            # For QUIC, we need a valid structure like:
+            # /ip4/127.0.0.1/udp/4001/quic
+            # /ip4/127.0.0.1/udp/4001/quic-v1
+            is_quic_multiaddr = _get_quic_validation()
+            if is_quic_multiaddr(maddr):
+                # Determine QUIC version
+                if "quic-v1" in protocols:
+                    return _global_registry.create_transport(
+                        "quic-v1", upgrader, **kwargs
+                    )
+                else:
+                    return _global_registry.create_transport("quic", upgrader, **kwargs)
+        elif "ws" in protocols or "wss" in protocols or "tls" in protocols:
             # For WebSocket, we need a valid structure like:
             # /ip4/127.0.0.1/tcp/8080/ws (insecure)
             # /ip4/127.0.0.1/tcp/8080/wss (secure)
@@ -185,9 +234,9 @@ def create_transport_for_multiaddr(
             if is_valid_websocket_multiaddr(maddr):
                 # Determine if this is a secure WebSocket connection
                 if "wss" in protocols or "tls" in protocols:
-                    return _global_registry.create_transport("wss", upgrader)
+                    return _global_registry.create_transport("wss", upgrader, **kwargs)
                 else:
-                    return _global_registry.create_transport("ws", upgrader)
+                    return _global_registry.create_transport("ws", upgrader, **kwargs)
         elif "tcp" in protocols:
             # For TCP, we need a valid structure like /ip4/127.0.0.1/tcp/8080
             # Check if the multiaddr has proper TCP structure

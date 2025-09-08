@@ -8,7 +8,6 @@ including both WS and WSS (WebSocket Secure) scenarios.
 
 import pytest
 from multiaddr import Multiaddr
-import trio
 
 from libp2p import create_yamux_muxer_option, new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
@@ -58,6 +57,8 @@ async def test_websocket_p2p_plaintext():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
+        # transport
     )
 
     # Test data
@@ -152,6 +153,8 @@ async def test_websocket_p2p_noise():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
+        # transport
     )
 
     # Test data
@@ -246,6 +249,8 @@ async def test_websocket_p2p_libp2p_ping():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
+        # transport
     )
 
     # Set up ping handler on host A (standard libp2p ping protocol)
@@ -301,7 +306,10 @@ async def test_websocket_p2p_libp2p_ping():
 
 @pytest.mark.trio
 async def test_websocket_p2p_multiple_streams():
-    """Test Python-to-Python WebSocket communication with multiple concurrent streams."""
+    """
+    Test Python-to-Python WebSocket communication with multiple concurrent
+    streams.
+    """
     # Create two hosts with Noise security
     key_pair_a = create_new_key_pair()
     key_pair_b = create_new_key_pair()
@@ -337,6 +345,8 @@ async def test_websocket_p2p_multiple_streams():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
+        # transport
     )
 
     # Test protocol
@@ -385,7 +395,9 @@ async def test_websocket_p2p_multiple_streams():
             return response
 
         # Run all streams concurrently
-        tasks = [create_stream_and_test(i, test_data_list[i]) for i in range(num_streams)]
+        tasks = [
+            create_stream_and_test(i, test_data_list[i]) for i in range(num_streams)
+        ]
         responses = []
         for task in tasks:
             responses.append(await task)
@@ -439,6 +451,8 @@ async def test_websocket_p2p_connection_state():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
+        # transport
     )
 
     # Set up handler on host A
@@ -488,21 +502,23 @@ async def test_websocket_p2p_connection_state():
 
         # Get the connection to host A
         conn_to_a = None
-        for peer_id, conn in connections.items():
+        for peer_id, conn_list in connections.items():
             if peer_id == host_a.get_id():
-                conn_to_a = conn
+                # connections maps peer_id to list of connections, get the first one
+                conn_to_a = conn_list[0] if conn_list else None
                 break
 
         assert conn_to_a is not None, "Should have connection to host A"
 
         # Test that the connection has the expected properties
         assert hasattr(conn_to_a, "muxed_conn"), "Connection should have muxed_conn"
-        assert hasattr(conn_to_a.muxed_conn, "conn"), (
-            "Muxed connection should have underlying conn"
+        assert hasattr(conn_to_a.muxed_conn, "secured_conn"), (
+            "Muxed connection should have underlying secured_conn"
         )
 
         # If the underlying connection is our WebSocket connection, test its state
-        underlying_conn = conn_to_a.muxed_conn.conn
+        # Type assertion to access private attribute for testing
+        underlying_conn = getattr(conn_to_a.muxed_conn, "secured_conn")
         if hasattr(underlying_conn, "conn_state"):
             state = underlying_conn.conn_state()
             assert "connection_start_time" in state, (

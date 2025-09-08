@@ -1,3 +1,5 @@
+from typing import Any
+
 from .tcp.tcp import TCP
 from .websocket.transport import WebsocketTransport
 from .transport_registry import (
@@ -10,7 +12,7 @@ from .transport_registry import (
 from .upgrader import TransportUpgrader
 from libp2p.abc import ITransport
 
-def create_transport(protocol: str, upgrader: TransportUpgrader | None = None, **kwargs) -> ITransport:
+def create_transport(protocol: str, upgrader: TransportUpgrader | None = None, **kwargs: Any) -> ITransport:
     """
     Convenience function to create a transport instance.
 
