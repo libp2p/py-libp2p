@@ -203,7 +203,7 @@ def new_swarm(
 
     id_opt = generate_peer_id_from(key_pair)
 
-    transport: TCP | QUICTransport
+    transport: TCP | QUICTransport | ITransport
     quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
 
     if listen_addrs is None:
@@ -261,7 +261,6 @@ def new_swarm(
     )
 
     # Create transport based on listen_addrs or default to TCP
-    transport: ITransport
     if listen_addrs is None:
         transport = TCP()
     else:
@@ -274,7 +273,7 @@ def new_swarm(
             if addr.__contains__("tcp"):
                 transport = TCP()
             elif addr.__contains__("quic"):
-                raise ValueError("QUIC not yet supported")
+                transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
             else:
                 supported_protocols = get_supported_transport_protocols()
                 raise ValueError(
