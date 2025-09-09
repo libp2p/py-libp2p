@@ -38,6 +38,10 @@ from libp2p.network.stream.net_stream import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+from libp2p.utils.address_validation import (
+    get_available_interfaces,
+    get_optimal_binding_address,
+)
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
@@ -173,7 +177,9 @@ async def run_enhanced_demo(
     """
     Run enhanced echo demo with NetStream state management.
     """
-    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    # Use the new address paradigm
+    listen_addrs = get_available_interfaces(port)
+    optimal_addr = get_optimal_binding_address(port)
 
     # Generate or use provided key
     if seed:
@@ -185,7 +191,7 @@ async def run_enhanced_demo(
 
     host = new_host(key_pair=create_new_key_pair(secret))
 
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=listen_addrs):
         print(f"Host ID: {host.get_id().to_string()}")
         print("=" * 60)
 
@@ -196,10 +202,12 @@ async def run_enhanced_demo(
             # type: ignore: Stream is type of NetStream
             host.set_stream_handler(PROTOCOL_ID, enhanced_echo_handler)
 
+            # Use optimal address for client command
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
             print(
                 "Run client from another console:\n"
                 f"python3 example_net_stream.py "
-                f"-d {host.get_addrs()[0]}\n"
+                f"-d {optimal_addr_with_peer}\n"
             )
             print("Waiting for connections...")
             print("Press Ctrl+C to stop server")

@@ -27,6 +27,7 @@ from libp2p.peer.peerinfo import (
 from libp2p.utils.address_validation import (
     find_free_port,
     get_available_interfaces,
+    get_optimal_binding_address,
 )
 
 # Configure minimal logging
@@ -82,9 +83,13 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
             for addr in listen_addr:
                 print(f"{addr}/p2p/{peer_id}")
 
+            # Get optimal address for display
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{peer_id}"
+
             print(
                 "\nRun this from the same folder in another console:\n\n"
-                f"echo-demo -d {host.get_addrs()[0]}\n"
+                f"echo-demo -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming connections...")
             await trio.sleep_forever()

@@ -1,12 +1,12 @@
 """
-Tests to verify that all examples use 127.0.0.1 instead of 0.0.0.0
+Tests to verify that all examples use the new address paradigm consistently
 """
 
 from pathlib import Path
 
 
-class TestExamplesBindAddress:
-    """Test suite to verify all examples use secure bind addresses"""
+class TestExamplesAddressParadigm:
+    """Test suite to verify all examples use the new address paradigm consistently"""
 
     def get_example_files(self):
         """Get all Python files in the examples directory"""
@@ -32,49 +32,26 @@ class TestExamplesBindAddress:
 
         return found_wildcards
 
-    def test_no_wildcard_binding_in_examples(self):
-        """Test that no example files use 0.0.0.0 for binding"""
+    def test_examples_use_address_paradigm(self):
+        """Test that examples use the new address paradigm functions"""
         example_files = self.get_example_files()
 
-        # Skip certain files that might legitimately discuss wildcards
-        skip_files = [
-            "network_discover.py",  # This demonstrates wildcard expansion
-        ]
-
-        files_with_wildcards = {}
-
-        for filepath in example_files:
-            if any(skip in str(filepath) for skip in skip_files):
-                continue
-
-            wildcards = self.check_file_for_wildcard_binding(filepath)
-            if wildcards:
-                files_with_wildcards[str(filepath)] = wildcards
-
-        # Assert no wildcards found
-        if files_with_wildcards:
-            error_msg = "Found wildcard bindings in example files:\n"
-            for filepath, occurrences in files_with_wildcards.items():
-                error_msg += f"\n{filepath}:\n"
-                for line_num, line in occurrences:
-                    error_msg += f"  Line {line_num}: {line}\n"
-
-            assert False, error_msg
-
-    def test_examples_use_loopback_address(self):
-        """Test that examples use 127.0.0.1 for local binding"""
-        example_files = self.get_example_files()
-
-        # Files that should contain listen addresses
-        files_with_networking = [
-            "ping/ping.py",
+        # Files that should use the new paradigm
+        networking_examples = [
+            "echo/echo.py",
             "chat/chat.py",
+            "ping/ping.py",
             "bootstrap/bootstrap.py",
             "pubsub/pubsub.py",
             "identify/identify.py",
         ]
 
-        for filename in files_with_networking:
+        paradigm_functions = [
+            "get_available_interfaces",
+            "get_optimal_binding_address",
+        ]
+
+        for filename in networking_examples:
             filepath = None
             for example_file in example_files:
                 if filename in str(example_file):
@@ -87,24 +64,54 @@ class TestExamplesBindAddress:
             with open(filepath, encoding="utf-8") as f:
                 content = f.read()
 
-            # Check for proper loopback usage
-            has_loopback = "127.0.0.1" in content or "localhost" in content
-            has_multiaddr_loopback = "/ip4/127.0.0.1/" in content
+            # Check that the file uses the new paradigm functions
+            for func in paradigm_functions:
+                assert func in content, (
+                    f"{filepath} should use {func} from the new address paradigm"
+                )
 
-            assert has_loopback or has_multiaddr_loopback, (
-                f"{filepath} should use loopback address (127.0.0.1)"
+    def test_wildcard_available_as_feature(self):
+        """Test that wildcard is available as a feature when needed"""
+        example_files = self.get_example_files()
+
+        # Check that network_discover.py demonstrates wildcard usage
+        network_discover_file = None
+        for example_file in example_files:
+            if "network_discover.py" in str(example_file):
+                network_discover_file = example_file
+                break
+
+        if network_discover_file:
+            with open(network_discover_file, encoding="utf-8") as f:
+                content = f.read()
+
+            # Should demonstrate wildcard expansion
+            assert "0.0.0.0" in content, (
+                f"{network_discover_file} should demonstrate wildcard usage"
+            )
+            assert "expand_wildcard_address" in content, (
+                f"{network_discover_file} should use expand_wildcard_address"
             )
 
-    def test_doc_examples_use_loopback(self):
-        """Test that documentation examples use secure addresses"""
+    def test_doc_examples_use_paradigm(self):
+        """Test that documentation examples use the new address paradigm"""
         doc_examples_dir = Path("examples/doc-examples")
         if not doc_examples_dir.exists():
             return
 
         doc_example_files = list(doc_examples_dir.glob("*.py"))
 
+        paradigm_functions = [
+            "get_available_interfaces",
+            "get_optimal_binding_address",
+        ]
+
         for filepath in doc_example_files:
-            wildcards = self.check_file_for_wildcard_binding(filepath)
-            assert not wildcards, (
-                f"Documentation example {filepath} contains wildcard binding"
-            )
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
+
+            # Check that doc examples use the new paradigm
+            for func in paradigm_functions:
+                assert func in content, (
+                    f"Documentation example {filepath} should use {func}"
+                )

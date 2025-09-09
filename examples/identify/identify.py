@@ -63,7 +63,10 @@ def print_identify_response(identify_response: Identify):
 
 
 async def run(port: int, destination: str, use_varint_format: bool = True) -> None:
-    from libp2p.utils.address_validation import get_available_interfaces
+    from libp2p.utils.address_validation import (
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if not destination:
         # Create first host (listener)
@@ -100,11 +103,12 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
             for addr in all_addrs:
                 print(f"{addr}")
 
-            # Use the first address as the default for the client command
-            default_addr = all_addrs[0]
+            # Use optimal address for the client command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
             print(
                 f"\nRun this from the same folder in another console:\n\n"
-                f"identify-demo {format_flag} -d {default_addr}\n"
+                f"identify-demo {format_flag} -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming identify request...")
 
@@ -152,6 +156,7 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         from libp2p.utils.address_validation import (
             find_free_port,
             get_available_interfaces,
+            get_optimal_binding_address,
         )
 
         if port <= 0:

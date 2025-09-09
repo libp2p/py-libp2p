@@ -46,7 +46,11 @@ async def write_data(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+    from libp2p.utils.address_validation import (
+        find_free_port,
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if port <= 0:
         port = find_free_port()
@@ -72,11 +76,12 @@ async def run(port: int, destination: str) -> None:
             for addr in all_addrs:
                 print(f"{addr}")
 
-            # Use the first address as the default for the client command
-            default_addr = all_addrs[0]
+            # Use optimal address for the client command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
             print(
                 f"\nRun this from the same folder in another console:\n\n"
-                f"chat-demo -d {default_addr}\n"
+                f"chat-demo -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming connection...")
 

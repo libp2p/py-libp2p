@@ -3,38 +3,24 @@ from __future__ import annotations
 import socket
 
 from multiaddr import Multiaddr
-
-try:
-    from multiaddr.utils import (  # type: ignore
-        get_network_addrs,
-        get_thin_waist_addresses,
-    )
-
-    _HAS_THIN_WAIST = True
-except ImportError:  # pragma: no cover - only executed in older environments
-    _HAS_THIN_WAIST = False
-    get_thin_waist_addresses = None  # type: ignore
-    get_network_addrs = None  # type: ignore
+from multiaddr.utils import get_network_addrs, get_thin_waist_addresses
 
 
 def _safe_get_network_addrs(ip_version: int) -> list[str]:
     """
     Internal safe wrapper. Returns a list of IP addresses for the requested IP version.
-    Falls back to minimal defaults when Thin Waist helpers are missing.
 
     :param ip_version: 4 or 6
     """
-    if _HAS_THIN_WAIST and get_network_addrs:
-        try:
-            return get_network_addrs(ip_version) or []
-        except Exception:  # pragma: no cover - defensive
-            return []
-    # Fallback behavior (very conservative)
-    if ip_version == 4:
-        return ["127.0.0.1"]
-    if ip_version == 6:
-        return ["::1"]
-    return []
+    try:
+        return get_network_addrs(ip_version) or []
+    except Exception:  # pragma: no cover - defensive
+        # Fallback behavior (very conservative)
+        if ip_version == 4:
+            return ["127.0.0.1"]
+        if ip_version == 6:
+            return ["::1"]
+        return []
 
 
 def find_free_port() -> int:
@@ -47,16 +33,13 @@ def find_free_port() -> int:
 def _safe_expand(addr: Multiaddr, port: int | None = None) -> list[Multiaddr]:
     """
     Internal safe expansion wrapper. Returns a list of Multiaddr objects.
-    If Thin Waist isn't available, returns [addr] (identity).
     """
-    if _HAS_THIN_WAIST and get_thin_waist_addresses:
-        try:
-            if port is not None:
-                return get_thin_waist_addresses(addr, port=port) or []
-            return get_thin_waist_addresses(addr) or []
-        except Exception:  # pragma: no cover - defensive
-            return [addr]
-    return [addr]
+    try:
+        if port is not None:
+            return get_thin_waist_addresses(addr, port=port) or []
+        return get_thin_waist_addresses(addr) or []
+    except Exception:  # pragma: no cover - defensive
+        return [addr]
 
 
 def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr]:
@@ -122,6 +105,20 @@ def expand_wildcard_address(
     return expanded
 
 
+def get_wildcard_address(port: int, protocol: str = "tcp") -> Multiaddr:
+    """
+    Get wildcard address (0.0.0.0) when explicitly needed.
+
+    This function provides access to wildcard binding as a feature when
+    explicitly required, preserving the ability to bind to all interfaces.
+
+    :param port: Port number.
+    :param protocol: Transport protocol.
+    :return: A Multiaddr with wildcard binding (0.0.0.0).
+    """
+    return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
+
+
 def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
     """
     Choose an optimal address for an example to bind to:
@@ -157,6 +154,7 @@ def get_optimal_binding_address(port: int, protocol: str = "tcp") -> Multiaddr:
 __all__ = [
     "get_available_interfaces",
     "get_optimal_binding_address",
+    "get_wildcard_address",
     "expand_wildcard_address",
     "find_free_port",
 ]

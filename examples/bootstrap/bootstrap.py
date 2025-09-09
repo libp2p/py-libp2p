@@ -53,7 +53,11 @@ BOOTSTRAP_PEERS = [
 
 async def run(port: int, bootstrap_addrs: list[str]) -> None:
     """Run the bootstrap discovery example."""
-    from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+    from libp2p.utils.address_validation import (
+        find_free_port,
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if port <= 0:
         port = find_free_port()
@@ -92,6 +96,12 @@ async def run(port: int, bootstrap_addrs: list[str]) -> None:
             for addr in all_addrs:
                 logger.info(f"{addr}")
                 print(f"{addr}")
+
+            # Display optimal address for reference
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
+            logger.info(f"Optimal address: {optimal_addr_with_peer}")
+            print(f"Optimal address: {optimal_addr_with_peer}")
 
             # Keep running and log peer discovery events
             await trio.sleep_forever()

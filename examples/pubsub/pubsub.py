@@ -102,7 +102,10 @@ async def monitor_peer_topics(pubsub, nursery, termination_event):
 
 
 async def run(topic: str, destination: str | None, port: int | None) -> None:
-    from libp2p.utils.address_validation import get_available_interfaces
+    from libp2p.utils.address_validation import (
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if port is None or port == 0:
         port = find_free_port()
@@ -162,11 +165,14 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
                     for addr in all_addrs:
                         logger.info(f"{addr}")
 
-                    # Use the first address as the default for the client command
-                    default_addr = all_addrs[0]
+                    # Use optimal address for the client command
+                    optimal_addr = get_optimal_binding_address(port)
+                    optimal_addr_with_peer = (
+                        f"{optimal_addr}/p2p/{host.get_id().to_string()}"
+                    )
                     logger.info(
                         f"\nRun this from the same folder in another console:\n\n"
-                        f"pubsub-demo -d {default_addr}\n"
+                        f"pubsub-demo -d {optimal_addr_with_peer}\n"
                     )
                     logger.info("Waiting for peers...")
 

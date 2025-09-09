@@ -151,7 +151,10 @@ async def run_node(
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair)
 
-        from libp2p.utils.address_validation import get_available_interfaces
+        from libp2p.utils.address_validation import (
+            get_available_interfaces,
+            get_optimal_binding_address,
+        )
 
         listen_addrs = get_available_interfaces(port)
 
@@ -168,9 +171,10 @@ async def run_node(
             for addr in all_addrs:
                 logger.info(f"{addr}")
 
-            # Use the first address as the default for the bootstrap command
-            default_addr = all_addrs[0]
-            bootstrap_cmd = f"--bootstrap {default_addr}"
+            # Use optimal address for the bootstrap command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
+            bootstrap_cmd = f"--bootstrap {optimal_addr_with_peer}"
             logger.info("To connect to this node, use: %s", bootstrap_cmd)
 
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
@@ -182,7 +186,7 @@ async def run_node(
 
             # Save server address in server mode
             if dht_mode == DHTMode.SERVER:
-                save_server_addr(str(default_addr))
+                save_server_addr(str(optimal_addr_with_peer))
 
             # Start the DHT service
             async with background_trio_service(dht):
