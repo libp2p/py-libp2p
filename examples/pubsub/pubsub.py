@@ -102,14 +102,16 @@ async def monitor_peer_topics(pubsub, nursery, termination_event):
 
 
 async def run(topic: str, destination: str | None, port: int | None) -> None:
-    # Initialize network settings
-    localhost_ip = "127.0.0.1"
+    from libp2p.utils.address_validation import (
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if port is None or port == 0:
         port = find_free_port()
         logger.info(f"Using random available port: {port}")
 
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addrs = get_available_interfaces(port)
 
     # Create a new libp2p host
     host = new_host(
@@ -138,12 +140,11 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
 
     pubsub = Pubsub(host, gossipsub)
     termination_event = trio.Event()  # Event to signal termination
-    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
         logger.info(f"Node started with peer ID: {host.get_id()}")
-        logger.info(f"Listening on: {listen_addr}")
         logger.info("Initializing PubSub and GossipSub...")
         async with background_trio_service(pubsub):
             async with background_trio_service(gossipsub):
@@ -157,10 +158,21 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
 
                 if not destination:
                     # Server mode
+                    # Get all available addresses with peer ID
+                    all_addrs = host.get_addrs()
+
+                    logger.info("Listener ready, listening on:")
+                    for addr in all_addrs:
+                        logger.info(f"{addr}")
+
+                    # Use optimal address for the client command
+                    optimal_addr = get_optimal_binding_address(port)
+                    optimal_addr_with_peer = (
+                        f"{optimal_addr}/p2p/{host.get_id().to_string()}"
+                    )
                     logger.info(
-                        "Run this script in another console with:\n"
-                        f"pubsub-demo "
-                        f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
+                        f"\nRun this from the same folder in another console:\n\n"
+                        f"pubsub-demo -d {optimal_addr_with_peer}\n"
                     )
                     logger.info("Waiting for peers...")
 
@@ -181,11 +193,6 @@ async def run(topic: str, destination: str | None, port: int | None) -> None:
                     logger.info(
                         f"Connecting to peer: {info.peer_id} "
                         f"using protocols: {protocols_in_maddr}"
-                    )
-                    logger.info(
-                        "Run this script in another console with:\n"
-                        f"pubsub-demo "
-                        f"-d /ip4/{localhost_ip}/tcp/{port}/p2p/{host.get_id()}\n"
                     )
                     try:
                         await host.connect(info)

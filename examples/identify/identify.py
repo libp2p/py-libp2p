@@ -20,6 +20,11 @@ from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
 
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
+
 logger = logging.getLogger("libp2p.identity.identify-example")
 
 
@@ -58,11 +63,19 @@ def print_identify_response(identify_response: Identify):
 
 
 async def run(port: int, destination: str, use_varint_format: bool = True) -> None:
-    localhost_ip = "0.0.0.0"
+    from libp2p.utils.address_validation import (
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
     if not destination:
         # Create first host (listener)
-        listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
+        if port <= 0:
+            from libp2p.utils.address_validation import find_free_port
+
+            port = find_free_port()
+
+        listen_addrs = get_available_interfaces(port)
         host_a = new_host()
 
         # Set up identify handler with specified format
@@ -73,23 +86,29 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
         host_a.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
 
         async with (
-            host_a.run(listen_addrs=[listen_addr]),
+            host_a.run(listen_addrs=listen_addrs),
             trio.open_nursery() as nursery,
         ):
             # Start the peer-store cleanup task
             nursery.start_soon(host_a.get_peerstore().start_cleanup_task, 60)
 
-            # Get the actual address and replace 0.0.0.0 with 127.0.0.1 for client
-            # connections
-            server_addr = str(host_a.get_addrs()[0])
-            client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
+            # Get all available addresses with peer ID
+            all_addrs = host_a.get_addrs()
 
             format_name = "length-prefixed" if use_varint_format else "raw protobuf"
             format_flag = "--raw-format" if not use_varint_format else ""
+
+            print(f"First host listening (using {format_name} format).")
+            print("Listener ready, listening on:\n")
+            for addr in all_addrs:
+                print(f"{addr}")
+
+            # Use optimal address for the client command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
             print(
-                f"First host listening (using {format_name} format). "
-                f"Run this from another console:\n\n"
-                f"identify-demo {format_flag} -d {client_addr}\n"
+                f"\nRun this from the same folder in another console:\n\n"
+                f"identify-demo {format_flag} -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming identify request...")
 
@@ -134,11 +153,20 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
 
     else:
         # Create second host (dialer)
-        listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}")
+        from libp2p.utils.address_validation import (
+            find_free_port,
+            get_available_interfaces,
+            get_optimal_binding_address,
+        )
+
+        if port <= 0:
+            port = find_free_port()
+
+        listen_addrs = get_available_interfaces(port)
         host_b = new_host()
 
         async with (
-            host_b.run(listen_addrs=[listen_addr]),
+            host_b.run(listen_addrs=listen_addrs),
             trio.open_nursery() as nursery,
         ):
             # Start the peer-store cleanup task
