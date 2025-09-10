@@ -12,10 +12,11 @@ def mock_upnp_gateway():
     mock_miniupnpc = MagicMock()
     mock_gateway = MagicMock()
     mock_miniupnpc.UPnP.return_value = mock_gateway
-    
+
     with patch("libp2p.discovery.upnp.miniupnpc", mock_miniupnpc):
         # Import UpnpManager after mocking miniupnpc
         from libp2p.discovery.upnp import UpnpManager
+
         yield mock_gateway, UpnpManager
 
 
