@@ -93,6 +93,10 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 import libp2p.security.secio.transport as secio
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
@@ -192,6 +196,12 @@ def security_options_factory_factory(
             transport_factory = secio_transport_factory
         elif protocol_id == NOISE_PROTOCOL_ID:
             transport_factory = noise_transport_factory
+        elif protocol_id == TLS_PROTOCOL_ID:
+
+            def tls_transport_factory(key_pair):
+                return TLSTransport(key_pair)
+
+            transport_factory = tls_transport_factory
         else:
             raise Exception(f"security transport {protocol_id} is not supported")
         return {protocol_id: transport_factory(key_pair)}
@@ -273,6 +283,42 @@ async def noise_conn_factory(
                 "local or remote secure conn has not been successfully upgraded"
                 f"local_secure_conn={local_secure_conn}, "
                 f"remote_secure_conn={remote_secure_conn}"
+            )
+        yield local_secure_conn, remote_secure_conn
+
+
+@asynccontextmanager
+async def tls_conn_factory(
+    nursery: trio.Nursery,
+    client_transport: TLSTransport | None = None,
+    server_transport: TLSTransport | None = None,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    local_transport = client_transport or TLSTransport(create_secp256k1_key_pair())
+    remote_transport = server_transport or TLSTransport(create_secp256k1_key_pair())
+    # Trust each other's certs for test handshake
+    local_transport.trust_peer_cert_pem(remote_transport.get_certificate_pem())
+    remote_transport.trust_peer_cert_pem(local_transport.get_certificate_pem())
+
+    local_secure_conn: ISecureConn | None = None
+    remote_secure_conn: ISecureConn | None = None
+
+    async def upgrade_local_conn(local_conn: IRawConnection) -> None:
+        nonlocal local_secure_conn
+        local_secure_conn = await local_transport.secure_outbound(
+            local_conn, remote_transport.local_peer
+        )
+
+    async def upgrade_remote_conn(remote_conn: IRawConnection) -> None:
+        nonlocal remote_secure_conn
+        remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
+
+    async with raw_conn_factory(nursery) as (local_conn, remote_conn):
+        async with trio.open_nursery() as n:
+            n.start_soon(upgrade_local_conn, local_conn)
+            n.start_soon(upgrade_remote_conn, remote_conn)
+        if local_secure_conn is None or remote_secure_conn is None:
+            raise Exception(
+                "local or remote secure conn has not been successfully upgraded"
             )
         yield local_secure_conn, remote_secure_conn
 
