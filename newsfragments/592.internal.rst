@@ -1,0 +1,1 @@
+remove FIXME comment since it's obsolete and 32-byte prefix support is there but not enabled by default

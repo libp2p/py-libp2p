@@ -1,0 +1,1 @@
+Fix type for gossipsub_message_id for consistency and security

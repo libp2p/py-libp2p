@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
@@ -22,7 +23,8 @@ if TYPE_CHECKING:
 
 
 """
-Reference: https://github.com/libp2p/go-libp2p-swarm/blob/04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
+Reference: https://github.com/libp2p/go-libp2p-swarm/blob/
+04c86bbdafd390651cb2ee14e334f7caeedad722/swarm_conn.go
 """
 
 
@@ -42,6 +44,21 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        # Provide back-references/hooks expected by NetStream
+        try:
+            setattr(self.muxed_conn, "swarm", self.swarm)
+
+            # NetStream expects an awaitable remove_stream hook
+            async def _remove_stream_hook(stream: NetStream) -> None:
+                self.remove_stream(stream)
+
+            setattr(self.muxed_conn, "remove_stream", _remove_stream_hook)
+        except Exception as e:
+            logging.warning(
+                f"Failed to set optional conveniences on muxed_conn "
+                f"for peer {muxed_conn.peer_id}: {e}"
+            )
+            # optional conveniences
         if hasattr(muxed_conn, "on_close"):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
@@ -146,6 +163,24 @@ class SwarmConn(INetConn):
 
     def get_streams(self) -> tuple[NetStream, ...]:
         return tuple(self.streams)
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Retrieve the transport addresses used by this connection.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of multiaddresses used by the transport.
+
+        """
+        # Return the addresses from the peerstore for this peer
+        try:
+            peer_id = self.muxed_conn.peer_id
+            return self.swarm.peerstore.addrs(peer_id)
+        except Exception as e:
+            logging.warning(f"Error getting transport addresses: {e}")
+            return []
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:

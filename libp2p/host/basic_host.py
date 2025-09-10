@@ -29,6 +29,7 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 from libp2p.discovery.mdns.mdns import MDNSDiscovery
 from libp2p.discovery.upnp import UpnpManager
 from libp2p.host.defaults import (
@@ -43,6 +44,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -97,6 +99,7 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
@@ -111,6 +114,16 @@ class BasicHost(IHost):
         self.mDNS = None
         if enable_mDNS:
             self.mDNS = MDNSDiscovery(network)
+        if bootstrap:
+            self.bootstrap = BootstrapDiscovery(network, bootstrap)
+
+        # Cache a signed-record if the local-node in the PeerStore
+        envelope = create_signed_peer_record(
+            self.get_id(),
+            self.get_addrs(),
+            self.get_private_key(),
+        )
+        self.get_peerstore().set_local_record(envelope)
 
         self.upnp = None
         if enable_upnp:
@@ -189,6 +202,10 @@ class BasicHost(IHost):
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(port, "TCP")
+                if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                    logger.debug("Starting Bootstrap Discovery")
+                    await self.bootstrap.start()
+
                 try:
                     yield
                 finally:
@@ -200,6 +217,8 @@ class BasicHost(IHost):
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(port, "TCP")
+                    if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                        self.bootstrap.stop()
 
         return _run()
 
@@ -302,10 +321,22 @@ class BasicHost(IHost):
             protocol, handler = await self.multiselect.negotiate(
                 MultiselectCommunicator(net_stream), self.negotiate_timeout
             )
+            if protocol is None:
+                await net_stream.reset()
+                raise StreamFailure(
+                    "Failed to negotiate protocol: no protocol selected"
+                )
         except MultiselectError as error:
             peer_id = net_stream.muxed_conn.peer_id
             logger.debug(
                 "failed to accept a stream from peer %s, error=%s", peer_id, error
+            )
+            await net_stream.reset()
+            return
+        if protocol is None:
+            logger.debug(
+                "no protocol negotiated, closing stream from peer %s",
+                net_stream.muxed_conn.peer_id,
             )
             await net_stream.reset()
             return
@@ -336,7 +367,7 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to check
         :return: True if peer has an active connection, False otherwise
         """
-        return peer_id in self._network.connections
+        return len(self._network.get_connections(peer_id)) > 0
 
     def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
         """
@@ -345,4 +376,4 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to get info for
         :return: Connection object if peer is connected, None otherwise
         """
-        return self._network.connections.get(peer_id)
+        return self._network.get_connection(peer_id)
