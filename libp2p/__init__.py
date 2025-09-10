@@ -316,14 +316,13 @@ def new_host(
     )
 
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt, enable_mDNS)
-    return BasicHost(network=swarm, enable_mDNS=enable_mDNS, negotiate_timeout=negotiate_timeout, enable_upnp=enable_upnp)
         return RoutedHost(swarm, disc_opt, enable_mDNS, bootstrap)
     return BasicHost(
         network=swarm,
         enable_mDNS=enable_mDNS,
         bootstrap=bootstrap,
-        negotitate_timeout=negotiate_timeout
+        negotiate_timeout=negotiate_timeout,
+        enable_upnp=enable_upnp
     )
 
 __version__ = __version("libp2p")
