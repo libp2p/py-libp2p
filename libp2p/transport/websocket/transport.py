@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class WebsocketTransport(ITransport):
     """
     Libp2p WebSocket transport: dial and listen on /ip4/.../tcp/.../ws
-    
+
     Implements production-ready WebSocket transport with:
     - Flow control and buffer management
     - Connection limits and rate limiting
@@ -25,7 +25,9 @@ class WebsocketTransport(ITransport):
     - Support for both WS and WSS protocols
     """
 
-    def __init__(self, upgrader: TransportUpgrader, max_buffered_amount: int = 4 * 1024 * 1024):
+    def __init__(
+        self, upgrader: TransportUpgrader, max_buffered_amount: int = 4 * 1024 * 1024
+    ):
         self._upgrader = upgrader
         self._max_buffered_amount = max_buffered_amount
         self._connection_count = 0
@@ -57,21 +59,21 @@ class WebsocketTransport(ITransport):
 
             # Check connection limits
             if self._connection_count >= self._max_connections:
-                raise OpenConnectionError(f"Maximum connections reached: {self._max_connections}")
+                raise OpenConnectionError(
+                    f"Maximum connections reached: {self._max_connections}"
+                )
 
             # Use the context manager but don't exit it immediately
             # The connection will be closed when the RawConnection is closed
             ws_context = open_websocket_url(ws_url)
             ws = await ws_context.__aenter__()
             conn = P2PWebSocketConnection(
-                ws, 
-                ws_context, 
-                max_buffered_amount=self._max_buffered_amount
+                ws, ws_context, max_buffered_amount=self._max_buffered_amount
             )  # type: ignore[attr-defined]
-            
+
             self._connection_count += 1
-            logger.debug(f"WebSocket connection established. Total connections: {self._connection_count}")
-            
+            logger.debug(f"Total connections: {self._connection_count}")
+
             return RawConnection(conn, initiator=True)
         except Exception as e:
             logger.error(f"Failed to dial WebSocket {maddr}: {e}")
