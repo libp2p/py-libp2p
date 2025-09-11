@@ -1,0 +1,5 @@
+Remove unused upgrade_listener function from transport upgrader
+
+- Remove unused `upgrade_listener` function from `libp2p/transport/upgrader.py` (Issue 2 from #726)
+- Clean up unused imports related to the removed function
+- Improve code maintainability by removing dead code

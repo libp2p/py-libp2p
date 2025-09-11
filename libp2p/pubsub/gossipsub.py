@@ -1,6 +1,3 @@
-from ast import (
-    literal_eval,
-)
 from collections import (
     defaultdict,
 )
@@ -22,6 +19,7 @@ from libp2p.abc import (
     IPubsubRouter,
 )
 from libp2p.custom_types import (
+    MessageID,
     TProtocol,
 )
 from libp2p.peer.id import (
@@ -34,10 +32,12 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import (
     PERMANENT_ADDR_TTL,
+    env_to_send_in_RPC,
 )
 from libp2p.pubsub import (
     floodsub,
 )
+from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
 )
@@ -53,6 +53,10 @@ from .pb import (
 )
 from .pubsub import (
     Pubsub,
+)
+from .utils import (
+    parse_message_id_safe,
+    safe_parse_message_id,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -226,6 +230,12 @@ class GossipSub(IPubsubRouter, Service):
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
         """
+        # Process the senderRecord if sent
+        if isinstance(self.pubsub, Pubsub):
+            if not maybe_consume_signed_record(rpc, self.pubsub.host, sender_peer_id):
+                logger.error("Received an invalid-signed-record, ignoring the message")
+                return
+
         control_message = rpc.control
 
         # Relay each rpc control message to the appropriate handler
@@ -252,6 +262,11 @@ class GossipSub(IPubsubRouter, Service):
             origin=ID(pubsub_msg.from_id),
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
+
+        # Add the senderRecord of the peer in the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
 
@@ -780,8 +795,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
         # seen_seqnos) to list of messages we want to request
-        msg_ids_wanted: list[str] = [
-            msg_id
+        msg_ids_wanted: list[MessageID] = [
+            parse_message_id_safe(msg_id)
             for msg_id in ihave_msg.messageIDs
             if msg_id not in seen_seqnos_and_peers
         ]
@@ -797,9 +812,9 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        # FIXME: Update type of message ID
-        # FIXME: Find a better way to parse the msg ids
-        msg_ids: list[Any] = [literal_eval(msg) for msg in iwant_msg.messageIDs]
+        msg_ids: list[tuple[bytes, bytes]] = [
+            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
+        ]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
@@ -816,6 +831,13 @@ class GossipSub(IPubsubRouter, Service):
         # We should
         # 1) Package these messages into a single packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
+
+        # Here the an RPC message is being created and published in response
+        # to the iwant control msg, so we will send a freshly created senderRecord
+        # with the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
 
         packet.publish.extend(msgs_to_forward)
 
@@ -970,6 +992,12 @@ class GossipSub(IPubsubRouter, Service):
             raise NoPubsubAttached
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
+
+        # Add the sender's peer-record in the RPC msg
+        if isinstance(self.pubsub, Pubsub):
+            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+            packet.senderRecord = envelope_bytes
+
         packet.control.CopyFrom(control_msg)
 
         await self.send_rpc(to_peer, packet, False)
