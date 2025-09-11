@@ -24,6 +24,7 @@ from libp2p.abc import (
     IPeerRouting,
     IPeerStore,
     ISecureTransport,
+    ITransport,
 )
 from libp2p.crypto.keys import (
     KeyPair,
@@ -79,6 +80,10 @@ from libp2p.transport.tcp.tcp import (
 )
 from libp2p.transport.upgrader import (
     TransportUpgrader,
+)
+from libp2p.transport.transport_registry import (
+    create_transport_for_multiaddr,
+    get_supported_transport_protocols,
 )
 from libp2p.utils.logging import (
     setup_logging,
@@ -198,7 +203,7 @@ def new_swarm(
 
     id_opt = generate_peer_id_from(key_pair)
 
-    transport: TCP | QUICTransport
+    transport: TCP | QUICTransport | ITransport
     quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
 
     if listen_addrs is None:
@@ -229,6 +234,54 @@ def new_swarm(
             key_pair, peerstore=peerstore_opt
         ),
     }
+
+    # Use given muxer preference if provided, otherwise use global default
+    if muxer_preference is not None:
+        temp_pref = muxer_preference.upper()
+        if temp_pref not in [MUXER_YAMUX, MUXER_MPLEX]:
+            raise ValueError(
+                f"Unknown muxer: {muxer_preference}. Use 'YAMUX' or 'MPLEX'."
+            )
+        active_preference = temp_pref
+    else:
+        active_preference = DEFAULT_MUXER
+
+    # Use provided muxer options if given, otherwise create based on preference
+    if muxer_opt is not None:
+        muxer_transports_by_protocol = muxer_opt
+    else:
+        if active_preference == MUXER_MPLEX:
+            muxer_transports_by_protocol = create_mplex_muxer_option()
+        else:  # YAMUX is default
+            muxer_transports_by_protocol = create_yamux_muxer_option()
+
+    upgrader = TransportUpgrader(
+        secure_transports_by_protocol=secure_transports_by_protocol,
+        muxer_transports_by_protocol=muxer_transports_by_protocol,
+    )
+
+    # Create transport based on listen_addrs or default to TCP
+    if listen_addrs is None:
+        transport = TCP()
+    else:
+        # Use the first address to determine transport type
+        addr = listen_addrs[0]
+        transport_maybe = create_transport_for_multiaddr(addr, upgrader)
+
+        if transport_maybe is None:
+            # Fallback to TCP if no specific transport found
+            if addr.__contains__("tcp"):
+                transport = TCP()
+            elif addr.__contains__("quic"):
+                transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+            else:
+                supported_protocols = get_supported_transport_protocols()
+                raise ValueError(
+                    f"Unknown transport in listen_addrs: {listen_addrs}. "
+                    f"Supported protocols: {supported_protocols}"
+                )
+        else:
+            transport = transport_maybe
 
     # Use given muxer preference if provided, otherwise use global default
     if muxer_preference is not None:
