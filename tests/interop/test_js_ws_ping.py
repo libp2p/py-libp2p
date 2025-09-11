@@ -16,6 +16,8 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
+from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
@@ -100,26 +102,26 @@ async def test_ping_with_js_node():
 
         print(f"Python trying to connect to: {peer_info}")
 
-        await trio.sleep(1)
+        # Use the host as a context manager
+        async with host.run(listen_addrs=[]):
+            await trio.sleep(1)
 
-        try:
-            await host.connect(peer_info)
-        except SwarmException as e:
-            underlying_error = e.__cause__
-            pytest.fail(
-                "Connection failed with SwarmException.\n"
-                f"THE REAL ERROR IS: {underlying_error!r}\n"
-            )
+            try:
+                await host.connect(peer_info)
+            except SwarmException as e:
+                underlying_error = e.__cause__
+                pytest.fail(
+                    "Connection failed with SwarmException.\n"
+                    f"THE REAL ERROR IS: {underlying_error!r}\n"
+                )
 
-        assert host.get_network().connections.get(peer_id) is not None
+            assert host.get_network().connections.get(peer_id) is not None
 
-        # Ping protocol
-        stream = await host.new_stream(peer_id, [TProtocol("/ipfs/ping/1.0.0")])
-        await stream.write(b"ping")
-        data = await stream.read(4)
-        assert data == b"pong"
-
-        await host.close()
+            # Ping protocol
+            stream = await host.new_stream(peer_id, [TProtocol("/ipfs/ping/1.0.0")])
+            await stream.write(b"ping")
+            data = await stream.read(4)
+            assert data == b"pong"
     finally:
         proc.send_signal(signal.SIGTERM)
         await trio.sleep(0)
