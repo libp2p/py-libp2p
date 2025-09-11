@@ -31,9 +31,6 @@ from libp2p.tools.async_service import (
     Service,
 )
 
-from .config import (
-    DEFAULT_DISCOVERY_INTERVAL as CFG_DISCOVERY_INTERVAL,
-)
 from .pb.circuit_pb2 import (
     HopMessage,
 )
@@ -46,9 +43,9 @@ from .protocol_buffer import (
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
-# Constants (single-source-of-truth)
-DEFAULT_DISCOVERY_INTERVAL = CFG_DISCOVERY_INTERVAL
-MAX_RELAYS_TO_TRACK = 10  # Still discovery-specific
+# Constants
+MAX_RELAYS_TO_TRACK = 10
+DEFAULT_DISCOVERY_INTERVAL = 60  # seconds
 STREAM_TIMEOUT = 10  # seconds
 PEER_PROTOCOL_TIMEOUT = 5  # seconds
 

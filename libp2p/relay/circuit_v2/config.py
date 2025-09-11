@@ -46,18 +46,8 @@ MAX_AUTO_RELAY_ATTEMPTS = 3
 RESERVATION_REFRESH_THRESHOLD = 0.8  # Refresh at 80% of TTL
 MAX_CONCURRENT_RESERVATIONS = 2
 
-# Shared timeout constants (used across modules)
-STREAM_READ_TIMEOUT = 15  # seconds
-STREAM_WRITE_TIMEOUT = 15  # seconds
-STREAM_CLOSE_TIMEOUT = 10  # seconds
-DIAL_TIMEOUT = 10  # seconds
 
-# NAT reachability timeout
-REACHABILITY_TIMEOUT = 10  # seconds
-
-# Relay roles enum -----------------------------------------------------------
-
-
+# Relay roles enum
 class RelayRole(Flag):
     """
     Bit-flag enum that captures the three possible relay capabilities.
@@ -72,6 +62,7 @@ class RelayRole(Flag):
     CLIENT = auto()  # Dial through existing relays ("client")
 
 
+@dataclass
 class RelayConfig:
     """Configuration for Circuit Relay v2."""
 

@@ -97,7 +97,7 @@ class Reservation:
         """Check if the reservation has expired."""
         return time.time() > self.expires_at
 
-    # Expose a friendly status enum --------------------------------------
+    # Expose a friendly status enum
 
     @property
     def status(self) -> ReservationStatus:

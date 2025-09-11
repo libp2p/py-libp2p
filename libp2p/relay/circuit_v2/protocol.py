@@ -43,9 +43,6 @@ from .config import (
     DEFAULT_MAX_CIRCUIT_CONNS,
     DEFAULT_MAX_CIRCUIT_DURATION,
     DEFAULT_MAX_RESERVATIONS,
-    STREAM_CLOSE_TIMEOUT,
-    STREAM_READ_TIMEOUT,
-    STREAM_WRITE_TIMEOUT,
 )
 from .pb.circuit_pb2 import (
     HopMessage,
@@ -75,7 +72,7 @@ class Pipe(Enum):
     DST_TO_SRC = auto()
 
 
-# Default limits for relay resources (single source of truth)
+# Default limits for relay resources
 DEFAULT_RELAY_LIMITS = RelayLimits(
     duration=DEFAULT_MAX_CIRCUIT_DURATION,
     data=DEFAULT_MAX_CIRCUIT_BYTES,
@@ -83,6 +80,10 @@ DEFAULT_RELAY_LIMITS = RelayLimits(
     max_reservations=DEFAULT_MAX_RESERVATIONS,
 )
 
+# Stream operation timeouts
+STREAM_READ_TIMEOUT = 15  # seconds
+STREAM_WRITE_TIMEOUT = 15  # seconds
+STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 5  # Maximum number of read retries
 
 
