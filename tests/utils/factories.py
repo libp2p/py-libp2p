@@ -173,8 +173,7 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
     return NoiseTransport(
         libp2p_keypair=key_pair,
         noise_privkey=noise_static_key_factory(),
-        early_data=None,
-        with_noise_pipes=False,
+        # TODO: add early data
     )
 
 
