@@ -244,7 +244,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -258,6 +258,8 @@ class TestGossipSubScoringIntegration:
 
             # Initially, peer should have low score and be blocked
             peer_id = host1.get_id()
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
             assert not gsub0.scorer.allow_publish(peer_id, [topic])
 
             # Simulate peer joining mesh to increase score
@@ -266,6 +268,7 @@ class TestGossipSubScoringIntegration:
                 gsub0.scorer.on_heartbeat()
 
             # Now peer should be allowed to publish
+            assert gsub0.scorer is not None
             assert gsub0.scorer.allow_publish(peer_id, [topic])
 
     @pytest.mark.trio
@@ -299,17 +302,18 @@ class TestGossipSubScoringIntegration:
             peer2_id = hosts[2].get_id()
 
             # Initially both peers should be filtered out
-            if gsub0.scorer:
-                assert not gsub0.scorer.allow_gossip(peer1_id, [topic])
-                assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            assert not gsub0.scorer.allow_gossip(peer1_id, [topic])
+            assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
 
-                # Increase peer1's score
-                gsub0.scorer.on_join_mesh(peer1_id, topic)
-                gsub0.scorer.on_heartbeat()
+            # Increase peer1's score
+            gsub0.scorer.on_join_mesh(peer1_id, topic)
+            gsub0.scorer.on_heartbeat()
 
-                # Only peer1 should be allowed for gossip
-                assert gsub0.scorer.allow_gossip(peer1_id, [topic])
-                assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+            # Only peer1 should be allowed for gossip
+            assert gsub0.scorer.allow_gossip(peer1_id, [topic])
+            assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
 
     @pytest.mark.trio
     async def test_graylist_gate(self):
@@ -322,7 +326,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -337,15 +341,16 @@ class TestGossipSubScoringIntegration:
             peer_id = host1.get_id()
 
             # Initially peer should not be graylisted
-            if gsub0.scorer:
-                assert not gsub0.scorer.is_graylisted(peer_id, [topic])
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            assert not gsub0.scorer.is_graylisted(peer_id, [topic])
 
-                # Simulate invalid messages to trigger graylist
-                gsub0.scorer.on_invalid_message(peer_id, topic)
-                gsub0.scorer.on_invalid_message(peer_id, topic)
+            # Simulate invalid messages to trigger graylist
+            gsub0.scorer.on_invalid_message(peer_id, topic)
+            gsub0.scorer.on_invalid_message(peer_id, topic)
 
-                # Peer should now be graylisted
-                assert gsub0.scorer.is_graylisted(peer_id, [topic])
+            # Peer should now be graylisted
+            assert gsub0.scorer.is_graylisted(peer_id, [topic])
 
     @pytest.mark.trio
     async def test_px_gate(self):
@@ -358,7 +363,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, do_px=True, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -373,15 +378,16 @@ class TestGossipSubScoringIntegration:
             peer_id = host1.get_id()
 
             # Initially peer should not be allowed for PX
-            if gsub0.scorer:
-                assert not gsub0.scorer.allow_px_from(peer_id, [topic])
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            assert not gsub0.scorer.allow_px_from(peer_id, [topic])
 
-                # Increase peer's score
-                gsub0.scorer.on_join_mesh(peer_id, topic)
-                gsub0.scorer.on_heartbeat()
+            # Increase peer's score
+            gsub0.scorer.on_join_mesh(peer_id, topic)
+            gsub0.scorer.on_heartbeat()
 
-                # Now peer should be allowed for PX
-                assert gsub0.scorer.allow_px_from(peer_id, [topic])
+            # Now peer should be allowed for PX
+            assert gsub0.scorer.allow_px_from(peer_id, [topic])
 
     @pytest.mark.trio
     async def test_opportunistic_grafting(self):
@@ -414,22 +420,23 @@ class TestGossipSubScoringIntegration:
 
             # Manually set up mesh with some peers having higher scores
             gsub0 = gsubs[0]
-            if gsub0.scorer:
-                # Give some peers higher scores
-                for i, host in enumerate(hosts[1:], 1):
-                    peer_id = host.get_id()
-                    gsub0.scorer.on_join_mesh(peer_id, topic)
-                    # Give later peers higher scores
-                    for _ in range(i):
-                        gsub0.scorer.on_heartbeat()
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            # Give some peers higher scores
+            for i, host in enumerate(hosts[1:], 1):
+                peer_id = host.get_id()
+                gsub0.scorer.on_join_mesh(peer_id, topic)
+                # Give later peers higher scores
+                for _ in range(i):
+                    gsub0.scorer.on_heartbeat()
 
-                # Trigger mesh heartbeat to test opportunistic grafting
-                peers_to_graft, peers_to_prune = gsub0.mesh_heartbeat()
+            # Trigger mesh heartbeat to test opportunistic grafting
+            peers_to_graft, peers_to_prune = gsub0.mesh_heartbeat()
 
-                # Should attempt to graft higher-scoring peers
-                assert (
-                    len(peers_to_graft) >= 0
-                )  # May or may not graft depending on current mesh
+            # Should attempt to graft higher-scoring peers
+            assert (
+                len(peers_to_graft) >= 0
+            )  # May or may not graft depending on current mesh
 
     @pytest.mark.trio
     async def test_heartbeat_decay(self):
@@ -447,26 +454,26 @@ class TestGossipSubScoringIntegration:
             topic = "test_heartbeat_decay"
             await pubsubs[0].subscribe(topic)
 
-            if gsub.scorer:
-                peer_id = host.get_id()
-                gsub.scorer.on_join_mesh(peer_id, topic)
+            assert gsub.scorer is not None
+            peer_id = host.get_id()
+            gsub.scorer.on_join_mesh(peer_id, topic)
 
-                # Get initial score before any heartbeats
-                initial_score = gsub.scorer.topic_score(peer_id, topic)
-                assert initial_score == 1.0
+            # Get initial score before any heartbeats
+            initial_score = gsub.scorer.topic_score(peer_id, topic)
+            assert initial_score == 1.0
 
-                # Trigger first heartbeat (decay)
-                gsub.scorer.on_heartbeat()
-                score_after_first_heartbeat = gsub.scorer.topic_score(peer_id, topic)
-                assert score_after_first_heartbeat == 0.9  # 1.0 * 0.9
+            # Trigger first heartbeat (decay)
+            gsub.scorer.on_heartbeat()
+            score_after_first_heartbeat = gsub.scorer.topic_score(peer_id, topic)
+            assert score_after_first_heartbeat == 0.9  # 1.0 * 0.9
 
-                # Wait for more heartbeats to trigger additional decay
-                await trio.sleep(0.2)
+            # Wait for more heartbeats to trigger additional decay
+            await trio.sleep(0.2)
 
-                # Score should have decayed further
-                decayed_score = gsub.scorer.topic_score(peer_id, topic)
-                assert decayed_score < score_after_first_heartbeat
-                assert decayed_score < initial_score
+            # Score should have decayed further
+            decayed_score = gsub.scorer.topic_score(peer_id, topic)
+            assert decayed_score < score_after_first_heartbeat
+            assert decayed_score < initial_score
 
     @pytest.mark.trio
     async def test_mesh_join_leave_hooks(self):
@@ -478,7 +485,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -493,20 +500,21 @@ class TestGossipSubScoringIntegration:
             peer_id = host1.get_id()
 
             # Test join hook
-            if gsub0.scorer:
-                initial_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            initial_score = gsub0.scorer.topic_score(peer_id, topic)
 
-                # Manually trigger join (simulating mesh addition)
-                gsub0.scorer.on_join_mesh(peer_id, topic)
-                gsub0.scorer.on_heartbeat()
+            # Manually trigger join (simulating mesh addition)
+            gsub0.scorer.on_join_mesh(peer_id, topic)
+            gsub0.scorer.on_heartbeat()
 
-                join_score = gsub0.scorer.topic_score(peer_id, topic)
-                assert join_score > initial_score
+            join_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert join_score > initial_score
 
-                # Test leave hook (should not change score immediately)
-                gsub0.scorer.on_leave_mesh(peer_id, topic)
-                leave_score = gsub0.scorer.topic_score(peer_id, topic)
-                assert leave_score == join_score  # No immediate change
+            # Test leave hook (should not change score immediately)
+            gsub0.scorer.on_leave_mesh(peer_id, topic)
+            leave_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert leave_score == join_score  # No immediate change
 
     @pytest.mark.trio
     async def test_message_delivery_hooks(self):
@@ -523,7 +531,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -537,18 +545,19 @@ class TestGossipSubScoringIntegration:
 
             peer_id = host1.get_id()
 
-            if gsub0.scorer:
-                initial_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            initial_score = gsub0.scorer.topic_score(peer_id, topic)
 
-                # Test first delivery hook
-                gsub0.scorer.on_first_delivery(peer_id, topic)
-                first_delivery_score = gsub0.scorer.topic_score(peer_id, topic)
-                assert first_delivery_score > initial_score
+            # Test first delivery hook
+            gsub0.scorer.on_first_delivery(peer_id, topic)
+            first_delivery_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert first_delivery_score > initial_score
 
-                # Test mesh delivery hook
-                gsub0.scorer.on_mesh_delivery(peer_id, topic)
-                mesh_delivery_score = gsub0.scorer.topic_score(peer_id, topic)
-                assert mesh_delivery_score > first_delivery_score
+            # Test mesh delivery hook
+            gsub0.scorer.on_mesh_delivery(peer_id, topic)
+            mesh_delivery_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert mesh_delivery_score > first_delivery_score
 
     @pytest.mark.trio
     async def test_invalid_message_hook(self):
@@ -560,7 +569,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -574,13 +583,14 @@ class TestGossipSubScoringIntegration:
 
             peer_id = host1.get_id()
 
-            if gsub0.scorer:
-                initial_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            initial_score = gsub0.scorer.topic_score(peer_id, topic)
 
-                # Test invalid message hook
-                gsub0.scorer.on_invalid_message(peer_id, topic)
-                invalid_score = gsub0.scorer.topic_score(peer_id, topic)
-                assert invalid_score < initial_score  # Should decrease score
+            # Test invalid message hook
+            gsub0.scorer.on_invalid_message(peer_id, topic)
+            invalid_score = gsub0.scorer.topic_score(peer_id, topic)
+            assert invalid_score < initial_score  # Should decrease score
 
     @pytest.mark.trio
     async def test_behavior_penalty_hook(self):
@@ -594,7 +604,7 @@ class TestGossipSubScoringIntegration:
         async with PubsubFactory.create_batch_with_gossipsub(
             2, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
-            gsub0, gsub1 = pubsubs[0].router, pubsubs[1].router
+            gsub0 = pubsubs[0].router
             host0, host1 = pubsubs[0].host, pubsubs[1].host
 
             # Connect hosts
@@ -609,13 +619,14 @@ class TestGossipSubScoringIntegration:
             peer_id = host1.get_id()
             topics = [topic]
 
-            if gsub0.scorer:
-                initial_score = gsub0.scorer.score(peer_id, topics)
+            assert isinstance(gsub0, GossipSub)
+            assert gsub0.scorer is not None
+            initial_score = gsub0.scorer.score(peer_id, topics)
 
-                # Apply behavior penalty
-                gsub0.scorer.penalize_behavior(peer_id, 1.5)
-                penalty_score = gsub0.scorer.score(peer_id, topics)
+            # Apply behavior penalty
+            gsub0.scorer.penalize_behavior(peer_id, 1.5)
+            penalty_score = gsub0.scorer.score(peer_id, topics)
 
-                # Score should decrease due to penalty
-                expected_penalty = (1.5 - 1.0) * 2.0  # (penalty - threshold) * weight
-                assert penalty_score == initial_score - expected_penalty
+            # Score should decrease due to penalty
+            expected_penalty = (1.5 - 1.0) * 2.0  # (penalty - threshold) * weight
+            assert penalty_score == initial_score - expected_penalty

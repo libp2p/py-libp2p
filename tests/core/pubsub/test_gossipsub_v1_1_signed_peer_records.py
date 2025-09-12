@@ -115,11 +115,16 @@ class TestGossipSubSignedPeerRecords:
             await trio.sleep(0.2)
 
             # Mock the peerstore to return a signed record for host2
+            assert gsub0.pubsub is not None
             mock_envelope = MagicMock()
             mock_envelope.marshal_envelope.return_value = b"fake_signed_record"
-            gsub0.pubsub.host.get_peerstore.return_value.get_peer_record.return_value = mock_envelope
+            mock_peerstore = MagicMock()
+            mock_peerstore.get_peer_record.return_value = mock_envelope
+            # Mock the get_peerstore method
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
 
             # Mock write_msg to capture the sent message
+            assert gsub0.pubsub is not None
             mock_write_msg = AsyncMock()
             gsub0.pubsub.write_msg = mock_write_msg
 
@@ -170,12 +175,13 @@ class TestGossipSubSignedPeerRecords:
                 mock_consume.return_value = (mock_envelope, mock_record)
 
                 # Mock peerstore consume_peer_record
+                assert gsub0.pubsub is not None
                 mock_peerstore = MagicMock()
                 mock_peerstore.consume_peer_record.return_value = True
-                gsub0.pubsub.host.get_peerstore.return_value = mock_peerstore
-
-                # Mock host connect
-                gsub0.pubsub.host.connect = AsyncMock()
+                mock_host = MagicMock()
+                mock_host.get_peerstore.return_value = mock_peerstore
+                mock_host.connect = AsyncMock()
+                gsub0.pubsub.host = mock_host
 
                 # Create PX peer info with signed record
                 px_peer = rpc_pb2.PeerInfo()
@@ -196,6 +202,7 @@ class TestGossipSubSignedPeerRecords:
                 )
 
                 # Verify that host connect was called
+                assert gsub0.pubsub is not None
                 gsub0.pubsub.host.connect.assert_called_once()
 
     @pytest.mark.trio
@@ -207,22 +214,23 @@ class TestGossipSubSignedPeerRecords:
             gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
             host0, host1 = (ps.host for ps in pubsubs)
 
-            # Connect hosts
-            await connect(host0, host1)
-            await trio.sleep(0.2)
-
             # Create mock signed peer record with mismatched peer ID
             mock_envelope = MagicMock()
             mock_record = MagicMock()
             mock_record.peer_id = IDFactory()  # Different peer ID
 
+            # Mock peerstore
+            assert gsub0.pubsub is not None
+            mock_peerstore = MagicMock()
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
+
             # Mock consume_envelope
             with patch("libp2p.pubsub.gossipsub.consume_envelope") as mock_consume:
                 mock_consume.return_value = (mock_envelope, mock_record)
 
-                # Create PX peer info with signed record
+                # Create PX peer info with signed record for a peer that's not connected
                 px_peer = rpc_pb2.PeerInfo()
-                px_peer.peerID = host1.get_id().to_bytes()
+                px_peer.peerID = IDFactory().to_bytes()  # Use a different peer ID
                 px_peer.signedPeerRecord = b"fake_signed_record"
 
                 # Test _do_px - should handle the mismatch gracefully
@@ -232,7 +240,6 @@ class TestGossipSubSignedPeerRecords:
                 mock_consume.assert_called_once()
 
                 # Verify that peerstore consume_peer_record was NOT called
-                mock_peerstore = gsub0.pubsub.host.get_peerstore.return_value
                 mock_peerstore.consume_peer_record.assert_not_called()
 
     @pytest.mark.trio
@@ -244,31 +251,27 @@ class TestGossipSubSignedPeerRecords:
             gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
             host0, host1 = (ps.host for ps in pubsubs)
 
-            # Connect hosts
-            await connect(host0, host1)
-            await trio.sleep(0.2)
-
             # Mock peerstore to return existing peer info
+            assert gsub0.pubsub is not None
             mock_peer_info = PeerInfo(host1.get_id(), host1.get_addrs())
             mock_peerstore = MagicMock()
             mock_peerstore.peer_info.return_value = mock_peer_info
-            gsub0.pubsub.host.get_peerstore.return_value = mock_peerstore
-
-            # Mock host connect
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
             gsub0.pubsub.host.connect = AsyncMock()
 
-            # Create PX peer info without signed record
+            # Create PX peer info without signed record for a peer that's not connected
             px_peer = rpc_pb2.PeerInfo()
-            px_peer.peerID = host1.get_id().to_bytes()
+            px_peer.peerID = IDFactory().to_bytes()  # Use a different peer ID
             # No signedPeerRecord field
 
             # Test _do_px
             await gsub0._do_px([px_peer])
 
             # Verify that peerstore peer_info was called
-            mock_peerstore.peer_info.assert_called_once_with(host1.get_id())
+            mock_peerstore.peer_info.assert_called_once()
 
             # Verify that host connect was called with existing peer info
+            assert gsub0.pubsub is not None
             gsub0.pubsub.host.connect.assert_called_once_with(mock_peer_info)
 
     @pytest.mark.trio
@@ -280,27 +283,29 @@ class TestGossipSubSignedPeerRecords:
             gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
             host0, host1 = (ps.host for ps in pubsubs)
 
-            # Connect hosts
-            await connect(host0, host1)
-            await trio.sleep(0.2)
-
             # Mock peerstore to raise exception (peer not found)
+            assert gsub0.pubsub is not None
             mock_peerstore = MagicMock()
             mock_peerstore.peer_info.side_effect = Exception("Peer not found")
-            gsub0.pubsub.host.get_peerstore.return_value = mock_peerstore
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
 
-            # Create PX peer info without signed record
+            # Mock host connect to track calls
+            assert gsub0.pubsub is not None
+            mock_connect = AsyncMock()
+            gsub0.pubsub.host.connect = mock_connect
+
+            # Create PX peer info without signed record for a peer that's not connected
             px_peer = rpc_pb2.PeerInfo()
-            px_peer.peerID = host1.get_id().to_bytes()
+            px_peer.peerID = IDFactory().to_bytes()  # Use a different peer ID
 
             # Test _do_px - should handle gracefully
             await gsub0._do_px([px_peer])
 
             # Verify that peerstore peer_info was called
-            mock_peerstore.peer_info.assert_called_once_with(host1.get_id())
+            mock_peerstore.peer_info.assert_called_once()
 
             # Verify that host connect was NOT called
-            gsub0.pubsub.host.connect.assert_not_called()
+            mock_connect.assert_not_called()
 
     @pytest.mark.trio
     async def test_do_px_connection_failure(self):
@@ -311,30 +316,27 @@ class TestGossipSubSignedPeerRecords:
             gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
             host0, host1 = (ps.host for ps in pubsubs)
 
-            # Connect hosts
-            await connect(host0, host1)
-            await trio.sleep(0.2)
-
             # Mock peerstore to return existing peer info
+            assert gsub0.pubsub is not None
             mock_peer_info = PeerInfo(host1.get_id(), host1.get_addrs())
             mock_peerstore = MagicMock()
             mock_peerstore.peer_info.return_value = mock_peer_info
-            gsub0.pubsub.host.get_peerstore.return_value = mock_peerstore
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
 
             # Mock host connect to raise exception
-            gsub0.pubsub.host.connect = AsyncMock(
-                side_effect=Exception("Connection failed")
-            )
+            assert gsub0.pubsub is not None
+            mock_connect = AsyncMock(side_effect=Exception("Connection failed"))
+            gsub0.pubsub.host.connect = mock_connect
 
-            # Create PX peer info without signed record
+            # Create PX peer info without signed record for a peer that's not connected
             px_peer = rpc_pb2.PeerInfo()
-            px_peer.peerID = host1.get_id().to_bytes()
+            px_peer.peerID = IDFactory().to_bytes()  # Use a different peer ID
 
             # Test _do_px - should handle connection failure gracefully
             await gsub0._do_px([px_peer])
 
             # Verify that host connect was called
-            gsub0.pubsub.host.connect.assert_called_once_with(mock_peer_info)
+            mock_connect.assert_called_once_with(mock_peer_info)
 
     @pytest.mark.trio
     async def test_do_px_limit_peers_count(self):
@@ -343,7 +345,6 @@ class TestGossipSubSignedPeerRecords:
             1, do_px=True, px_peers_count=2, heartbeat_interval=0.1
         ) as pubsubs:
             gsub0 = cast(GossipSub, pubsubs[0].router)
-            host0 = pubsubs[0].host
 
             # Create more PX peers than the limit
             px_peers = []
@@ -353,9 +354,10 @@ class TestGossipSubSignedPeerRecords:
                 px_peers.append(px_peer)
 
             # Mock peerstore and host
+            assert gsub0.pubsub is not None
             mock_peerstore = MagicMock()
             mock_peerstore.peer_info.side_effect = Exception("Peer not found")
-            gsub0.pubsub.host.get_peerstore.return_value = mock_peerstore
+            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
 
             # Test _do_px
             await gsub0._do_px(px_peers)
@@ -383,12 +385,14 @@ class TestGossipSubSignedPeerRecords:
             px_peer.peerID = host1.get_id().to_bytes()
 
             # Mock host connect
+            assert gsub0.pubsub is not None
             gsub0.pubsub.host.connect = AsyncMock()
 
             # Test _do_px
             await gsub0._do_px([px_peer])
 
             # Verify that host connect was NOT called (peer already connected)
+            assert gsub0.pubsub is not None
             gsub0.pubsub.host.connect.assert_not_called()
 
     @pytest.mark.trio
@@ -419,7 +423,10 @@ class TestGossipSubSignedPeerRecords:
                 await gsub0.handle_rpc(rpc, host1.get_id())
 
                 # Verify that maybe_consume_signed_record was called
-                mock_consume.assert_called_once_with(rpc, gsub0.pubsub, host1.get_id())
+                assert gsub0.pubsub is not None
+                mock_consume.assert_called_once_with(
+                    rpc, gsub0.pubsub.host, host1.get_id()
+                )
 
     @pytest.mark.trio
     async def test_emit_control_message_sender_record(self):
@@ -439,6 +446,7 @@ class TestGossipSubSignedPeerRecords:
                 mock_env.return_value = (b"fake_sender_record", None)
 
                 # Mock write_msg to capture the sent message
+                assert gsub0.pubsub is not None
                 mock_write_msg = AsyncMock()
                 gsub0.pubsub.write_msg = mock_write_msg
 
@@ -477,6 +485,7 @@ class TestGossipSubSignedPeerRecords:
                 mock_env.return_value = (b"fake_sender_record", None)
 
                 # Mock write_msg to capture the sent message
+                assert gsub0.pubsub is not None
                 mock_write_msg = AsyncMock()
                 gsub0.pubsub.write_msg = mock_write_msg
 

@@ -83,7 +83,7 @@ class TestScoreGates:
     async def test_gossip_gate_filters_peers(self):
         """Test that gossip gate filters peers for gossip emission."""
         score_params = ScoreParams(
-            gossip_threshold=0.5,
+            gossip_threshold=0.5,  # Threshold between 0.0 and 1.0
             p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=1.0),
         )
 
@@ -109,16 +109,16 @@ class TestScoreGates:
             peer1_id = hosts[1].get_id()
             peer2_id = hosts[2].get_id()
 
-            # Initially both peers should be filtered out
+            # Initially both peers should have score 0.0 and be filtered out
             if gsub0.scorer:
                 assert not gsub0.scorer.allow_gossip(peer1_id, [topic])
                 assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
 
-                # Increase peer1's score
-                gsub0.scorer.on_join_mesh(peer1_id, topic)
+                # Increase peer1's score by adding time in mesh
+                gsub0.scorer.on_join_mesh(peer1_id, topic)  # Now score = 1.0
                 # Don't call heartbeat to avoid decay
 
-                # Only peer1 should be allowed for gossip
+                # Only peer1 should be allowed for gossip now (score 1.0 >= 0.5)
                 assert gsub0.scorer.allow_gossip(peer1_id, [topic])
                 assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
 
