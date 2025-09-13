@@ -33,7 +33,7 @@ class Record(ABC):
 def register_type(prototype: Record) -> None:
     """
     Register a record type by its codec.
-    Should be called in module init where the Record is defined.
+    Should be called in module init where the Record is defined just like the Go version.
     """
     codec = prototype.codec()
     if not isinstance(codec, (bytes, bytearray)):
@@ -48,7 +48,7 @@ def blank_record_for_payload_type(payload_type: bytes) -> Record:
     cls = _payload_type_registry.get(payload_type)
     if cls is None:
         raise ValueError("payload type is not registered")
-    return cls()  # assumes no-arg constructor
+    return cls()
 
 
 def unmarshal_record_payload(payload_type: bytes, payload_bytes: bytes) -> Record:
