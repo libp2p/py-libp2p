@@ -6,7 +6,7 @@ from typing import ClassVar as _ClassVar, Mapping as _Mapping, Optional as _Opti
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class HopMessage(_message.Message):
-    __slots__ = ("type", "peer", "reservation", "limit", "status", "signedRecord")
+    __slots__ = ("type", "peer", "reservation", "limit", "status", "senderRecord")
     class Type(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = ()
         RESERVE: _ClassVar[HopMessage.Type]
@@ -20,14 +20,14 @@ class HopMessage(_message.Message):
     RESERVATION_FIELD_NUMBER: _ClassVar[int]
     LIMIT_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
-    SIGNEDRECORD_FIELD_NUMBER: _ClassVar[int]
+    SENDERRECORD_FIELD_NUMBER: _ClassVar[int]
     type: HopMessage.Type
     peer: bytes
     reservation: Reservation
     limit: Limit
     status: Status
-    signedRecord: bytes
-    def __init__(self, type: _Optional[_Union[HopMessage.Type, str]] = ..., peer: _Optional[bytes] = ..., reservation: _Optional[_Union[Reservation, _Mapping]] = ..., limit: _Optional[_Union[Limit, _Mapping]] = ..., status: _Optional[_Union[Status, _Mapping]] = ..., signedRecord: _Optional[bytes] = ...) -> None: ... #type:ignore
+    senderRecord: bytes
+    def __init__(self, type: _Optional[_Union[HopMessage.Type, str]] = ..., peer: _Optional[bytes] = ..., reservation: _Optional[_Union[Reservation, _Mapping]] = ..., limit: _Optional[_Union[Limit, _Mapping]] = ..., status: _Optional[_Union[Status, _Mapping]] = ..., senderRecord: _Optional[bytes] = ...) -> None: ... #type: ignore
 
 class StopMessage(_message.Message):
     __slots__ = ("type", "peer", "status", "senderRecord")
@@ -45,7 +45,7 @@ class StopMessage(_message.Message):
     peer: bytes
     status: Status
     senderRecord: bytes
-    def __init__(self, type: _Optional[_Union[StopMessage.Type, str]] = ..., peer: _Optional[bytes] = ..., status: _Optional[_Union[Status, _Mapping]] = ..., senderRecord: _Optional[bytes] = ...) -> None: ... #type:ignore
+    def __init__(self, type: _Optional[_Union[StopMessage.Type, str]] = ..., peer: _Optional[bytes] = ..., status: _Optional[_Union[Status, _Mapping]] = ..., senderRecord: _Optional[bytes] = ...) -> None: ... #type: ignore
 
 class Reservation(_message.Message):
     __slots__ = ("voucher", "signature", "expire")

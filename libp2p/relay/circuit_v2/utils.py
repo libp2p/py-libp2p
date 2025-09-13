@@ -63,12 +63,12 @@ def maybe_consume_signed_record(
                 logger.error("Failed to update the Certified-Addr-Book: %s", e)
                 return False
     elif isinstance(msg, HopMessage):
-        if msg.HasField("signedRecord"):
+        if msg.HasField("senderRecord"):
             try:
                 # Convert the signed-peer-record(Envelope) from
                 # protobuf bytes
                 envelope, _ = consume_envelope(
-                    msg.signedRecord,
+                    msg.senderRecord,
                     "libp2p-peer-record",
                 )
                 # Use the default TTL of 2 hours (7200 seconds)
