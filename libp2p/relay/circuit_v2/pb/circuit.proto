@@ -15,7 +15,7 @@ message HopMessage {
   Reservation reservation = 3;
   Limit limit = 4;
   Status status = 5;
-  optional bytes signedRecord = 6;  // Envelope(PeerRecord)
+  optional bytes senderRecord = 6;  // Envelope(PeerRecord)
 }
 
 message StopMessage {

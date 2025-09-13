@@ -401,7 +401,7 @@ class RelayDiscovery(Service):
                 request = HopMessage(
                     type=HopMessage.RESERVE,
                     peer=self.host.get_id().to_bytes(),
-                    signedRecord=envelope_bytes,
+                    senderRecord=envelope_bytes,
                 )
 
                 with trio.fail_after(self.stream_timeout):
@@ -416,7 +416,18 @@ class RelayDiscovery(Service):
                     # Parse response
                     response = HopMessage()
                     response.ParseFromString(response_bytes)
-                    
+
+                    # Consume the source signed_peer_record if sent
+                    if response.HasField("senderRecord"):
+                        if not maybe_consume_signed_record(
+                            response, self.host, peer_id
+                        ):
+                            logger.error(
+                                "Received invalid-signed-record, dropping the stream"
+                            )
+                            await stream.close()
+                            return False
+
                     # Check if reservation was successful
                     if response.type == HopMessage.RESERVE and response.HasField(
                         "status"
