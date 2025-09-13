@@ -42,6 +42,7 @@ from .io import (
     NoiseTransportReadWriter,
 )
 from .messages import (
+    NoiseExtensions,
     NoiseHandshakePayload,
     make_handshake_payload_sig,
     verify_handshake_payload_sig,
@@ -76,11 +77,53 @@ class BasePattern(IPattern):
             raise NoiseStateError("noise_protocol is not initialized")
         return noise_state
 
-    def make_handshake_payload(self) -> NoiseHandshakePayload:
+    def make_handshake_payload(
+        self, extensions: NoiseExtensions | None = None
+    ) -> NoiseHandshakePayload:
         signature = make_handshake_payload_sig(
             self.libp2p_privkey, self.noise_static_key.get_public_key()
         )
-        return NoiseHandshakePayload(self.libp2p_privkey.get_public_key(), signature)
+
+        # Handle early data through extensions (prioritize extensions early data)
+        if extensions is not None:
+            # Extensions provided - use extensions early data if available
+            if extensions.early_data is not None:
+                # Extensions have early data - use it
+                return NoiseHandshakePayload(
+                    self.libp2p_privkey.get_public_key(),
+                    signature,
+                    early_data=None,  # Early data is in extensions
+                    extensions=extensions,
+                )
+            elif self.early_data is not None:
+                # No extensions early data, but pattern has early data
+                # - embed in extensions
+                extensions_with_early_data = NoiseExtensions(
+                    webtransport_certhashes=extensions.webtransport_certhashes,
+                    early_data=self.early_data,
+                )
+                return NoiseHandshakePayload(
+                    self.libp2p_privkey.get_public_key(),
+                    signature,
+                    early_data=None,  # Early data is now in extensions
+                    extensions=extensions_with_early_data,
+                )
+            else:
+                # No early data anywhere - just extensions
+                return NoiseHandshakePayload(
+                    self.libp2p_privkey.get_public_key(),
+                    signature,
+                    early_data=None,
+                    extensions=extensions,
+                )
+        else:
+            # No extensions, use legacy early data
+            return NoiseHandshakePayload(
+                self.libp2p_privkey.get_public_key(),
+                signature,
+                early_data=self.early_data,
+                extensions=None,
+            )
 
 
 class PatternXX(BasePattern):
