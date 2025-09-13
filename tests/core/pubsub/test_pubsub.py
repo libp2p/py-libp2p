@@ -1239,5 +1239,30 @@ async def test_blacklist_tears_down_existing_connection():
         if TESTING_TOPIC in pubsub0.peer_topics:
             assert pubsub1.my_id not in pubsub0.peer_topics[TESTING_TOPIC]
         else:
-            # It’s also fine if the entire topic entry was pruned
+            # It's also fine if the entire topic entry was pruned
             assert TESTING_TOPIC not in pubsub0.peer_topics
+
+
+async def test_handle_peer_queue_exception_handling():
+    """Test that handle_peer_queue gracefully handles exceptions from _handle_new_peer."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        
+        original_handle_new_peer = pubsub._handle_new_peer
+        
+        async def mock_handle_new_peer(peer_id):
+            raise Exception("Protocol negotiation failed")
+        
+        pubsub._handle_new_peer = mock_handle_new_peer
+        
+        test_peer = IDFactory()
+        
+        await pubsub.peer_receive_channel.send(test_peer)
+        
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(pubsub.handle_peer_queue)
+            
+            await trio.sleep(0.1)
+            assert pubsub.manager.is_running
+        
+        pubsub._handle_new_peer = original_handle_new_peer
