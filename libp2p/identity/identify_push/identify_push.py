@@ -232,6 +232,32 @@ async def push_identify_to_peer(
             raise HostException(f"Failed to push identify to peer {peer_id}: {e}") from e
 
 
+async def _safe_push_identify_to_peer(
+    host: IHost,
+    peer_id: ID,
+    observed_multiaddr: Multiaddr | None = None,
+    limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
+    use_varint_format: bool = True,
+) -> None:
+    """
+    Safely push identify information to a specific peer, catching and logging exceptions.
+    
+    This is a wrapper around push_identify_to_peer that catches exceptions and logs them
+    instead of letting them propagate, which is useful when calling from a nursery.
+    
+    Args:
+        host: The libp2p host.
+        peer_id: The peer ID to push to.
+        observed_multiaddr: The observed multiaddress (optional).
+        limit: Semaphore for concurrency control.
+        use_varint_format: True=length-prefixed, False=raw protobuf.
+    """
+    try:
+        await push_identify_to_peer(host, peer_id, observed_multiaddr, limit, use_varint_format)
+    except Exception as e:
+        logger.debug("Failed to push identify to peer %s: %s", peer_id, e)
+
+
 async def push_identify_to_peers(
     host: IHost,
     peer_ids: set[ID] | None = None,
@@ -262,7 +288,7 @@ async def push_identify_to_peers(
     async with trio.open_nursery() as nursery:
         for peer_id in peer_ids:
             nursery.start_soon(
-                push_identify_to_peer,
+                _safe_push_identify_to_peer,
                 host,
                 peer_id,
                 observed_multiaddr,

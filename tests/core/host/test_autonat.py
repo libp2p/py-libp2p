@@ -10,6 +10,9 @@ from libp2p.host.autonat.autonat import (
     AutoNATService,
     AutoNATStatus,
 )
+from libp2p.host.exceptions import (
+    HostException,
+)
 from libp2p.host.autonat.pb.autonat_pb2 import (
     DialRequest,
     DialResponse,
@@ -108,9 +111,8 @@ async def test_try_dial():
             mock_stream = AsyncMock(spec=NetStream)
             mock_new_stream.return_value = mock_stream
 
-            result = await service._try_dial(peer_id)
-
-            assert result is True
+            # Should not raise an exception for successful dial
+            await service._try_dial(peer_id)
             mock_new_stream.assert_called_once_with(peer_id, [AUTONAT_PROTOCOL_ID])
             mock_stream.close.assert_called_once()
 
@@ -120,9 +122,9 @@ async def test_try_dial():
         ) as mock_new_stream:
             mock_new_stream.side_effect = Exception("Connection failed")
 
-            result = await service._try_dial(peer_id)
-
-            assert result is False
+            # Should raise HostException for failed dial
+            with pytest.raises(HostException, match="Failed to dial peer"):
+                await service._try_dial(peer_id)
             mock_new_stream.assert_called_once_with(peer_id, [AUTONAT_PROTOCOL_ID])
 
 

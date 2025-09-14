@@ -150,13 +150,14 @@ async def test_identify_push_cross_format_compatibility_varint_to_raw(
         host_a.set_stream_handler(ID_PUSH, wrapped_handler)
 
         # Host B pushes with varint format (should fail gracefully)
-        success = await push_identify_to_peer(
-            host_b, host_a.get_id(), use_varint_format=True
-        )
-        # This should fail due to format mismatch
-        # Note: The format detection might be more robust than expected
-        # so we just check that the operation completes
-        assert isinstance(success, bool)
+        try:
+            await push_identify_to_peer(
+                host_b, host_a.get_id(), use_varint_format=True
+            )
+            # If we get here, the operation succeeded (unexpected but acceptable)
+        except Exception:
+            # This is expected due to format mismatch, which is fine
+            pass
 
 
 @pytest.mark.trio
@@ -182,13 +183,14 @@ async def test_identify_push_cross_format_compatibility_raw_to_varint(
         host_a.set_stream_handler(ID_PUSH, wrapped_handler)
 
         # Host B pushes with raw format (should fail gracefully)
-        success = await push_identify_to_peer(
-            host_b, host_a.get_id(), use_varint_format=False
-        )
-        # This should fail due to format mismatch
-        # Note: The format detection might be more robust than expected
-        # so we just check that the operation completes
-        assert isinstance(success, bool)
+        try:
+            await push_identify_to_peer(
+                host_b, host_a.get_id(), use_varint_format=False
+            )
+            # If we get here, the operation succeeded (unexpected but acceptable)
+        except Exception:
+            # This is expected due to format mismatch, which is fine
+            pass
 
 
 @pytest.mark.trio
@@ -280,10 +282,13 @@ async def test_identify_push_large_message_handling(security_protocol):
         )
 
         # Push identify information from host_b to host_a
-        success = await push_identify_to_peer(
-            host_b, host_a.get_id(), use_varint_format=True
-        )
-        assert success
+        try:
+            await push_identify_to_peer(
+                host_b, host_a.get_id(), use_varint_format=True
+            )
+            # If we get here, the push was successful
+        except Exception as e:
+            pytest.fail(f"Identify push should succeed with large message: {e}")
 
         # Wait a bit for the push to complete
         await trio.sleep(0.1)
@@ -359,8 +364,11 @@ async def test_identify_push_concurrent_requests(security_protocol):
         results = []
 
         async def push_identify():
-            result = await push_identify_to_peer(host_b, host_a.get_id())
-            results.append(result)
+            try:
+                await push_identify_to_peer(host_b, host_a.get_id())
+                results.append(True)  # Success
+            except Exception:
+                results.append(False)  # Failure
 
         # Run multiple concurrent pushes using nursery
         async with trio.open_nursery() as nursery:
@@ -400,8 +408,11 @@ async def test_identify_push_stream_handling(security_protocol):
         host_a.set_stream_handler(ID_PUSH, identify_push_handler_for(host_a))
 
         # Push identify information from host_b to host_a
-        success = await push_identify_to_peer(host_b, host_a.get_id())
-        assert success
+        try:
+            await push_identify_to_peer(host_b, host_a.get_id())
+            # If we get here, the push was successful
+        except Exception as e:
+            pytest.fail(f"Identify push should succeed with stream handling: {e}")
 
         # Wait a bit for the push to complete
         await trio.sleep(0.1)
@@ -434,8 +445,11 @@ async def test_identify_push_error_handling(security_protocol):
         host_a.set_stream_handler(ID_PUSH, error_handler)
 
         # Push should complete (message sent) but handler should fail gracefully
-        success = await push_identify_to_peer(host_b, host_a.get_id())
-        assert success  # The push operation itself succeeds (message sent)
+        try:
+            await push_identify_to_peer(host_b, host_a.get_id())
+            # If we get here, the push was successful
+        except Exception as e:
+            pytest.fail(f"Identify push should succeed even with error handler: {e}")
 
         # Wait a bit for the handler to process
         await trio.sleep(0.1)
