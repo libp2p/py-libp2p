@@ -309,33 +309,42 @@ class MplexStream(IMuxedStream):
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
     # TODO deadline not in use
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the stream in seconds
+        :raises MuxedStreamError: if setting the deadline fails
         """
-        self.read_deadline = ttl
-        self.write_deadline = ttl
-        return True
+        try:
+            self.read_deadline = ttl
+            self.write_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set deadline: {e}") from e
 
-    def set_read_deadline(self, ttl: int) -> bool:
+    def set_read_deadline(self, ttl: int) -> None:
         """
         Set read deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the read deadline in seconds
+        :raises MuxedStreamError: if setting the read deadline fails
         """
-        self.read_deadline = ttl
-        return True
+        try:
+            self.read_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set read deadline: {e}") from e
 
-    def set_write_deadline(self, ttl: int) -> bool:
+    def set_write_deadline(self, ttl: int) -> None:
         """
         Set write deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the write deadline in seconds
+        :raises MuxedStreamError: if setting the write deadline fails
         """
-        self.write_deadline = ttl
-        return True
+        try:
+            self.write_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set write deadline: {e}") from e
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""

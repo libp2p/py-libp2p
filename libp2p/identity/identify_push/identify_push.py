@@ -20,6 +20,9 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.host.exceptions import (
+    HostException,
+)
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
@@ -172,7 +175,7 @@ async def push_identify_to_peer(
     observed_multiaddr: Multiaddr | None = None,
     limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
     use_varint_format: bool = True,
-) -> bool:
+) -> None:
     """
     Push an identify message to a specific peer.
 
@@ -186,8 +189,8 @@ async def push_identify_to_peer(
         limit: Semaphore for concurrency control.
         use_varint_format: True=length-prefixed, False=raw protobuf.
 
-    Returns:
-        bool: True if the push was successful, False otherwise.
+    Raises:
+        HostException: If the identify push fails.
 
     """
     async with limit:
@@ -224,10 +227,9 @@ async def push_identify_to_peer(
             await stream.close()
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
-            return True
         except Exception as e:
             logger.error("Error pushing identify to peer %s: %s", peer_id, e)
-            return False
+            raise HostException(f"Failed to push identify to peer {peer_id}: {e}") from e
 
 
 async def push_identify_to_peers(

@@ -253,13 +253,12 @@ class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
         """
 
     @abstractmethod
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set a deadline for the stream.
 
         :param ttl: Time-to-live for the stream in seconds.
-        :return: True if the deadline was set successfully,
-            otherwise False.
+        :raises MuxedStreamError: if setting the deadline fails.
         """
 
     @abstractmethod
