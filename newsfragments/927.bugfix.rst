@@ -1,1 +1,1 @@
-Fix multiaddr dependency to use last py-multiaddr commit hash to resolve installation issues
+Fix multiaddr dependency to use the last py-multiaddr commit hash to resolve installation issues
