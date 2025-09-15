@@ -1,0 +1,1 @@
+Exposed timeout method in muxer multistream and updated all the usage. Added testcases to verify that timeout value is passed correctly
