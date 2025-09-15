@@ -13,24 +13,30 @@ This implementation adds hole punching capability to py-libp2p, allowing peers b
 ## Quick Start
 
 1. Install py-libp2p with hole punching:
+
 ```bash
 pip install -e .[dev]
 ```
+
 2. Run basic example:
+
 ```bash
 # Terminal 1
 python examples/hole_punching/basic_example.py --mode listen
 
-# Terminal 2 (use peer ID from terminal 1)  
+# Terminal 2 (use peer ID from terminal 1)
 python examples/hole_punching/basic_example.py --mode dial --target PEER_ID
 ```
 
 ## Current Status
+
 -Basic DCUtR protocol implementation
+
 - Working example code
 - Basic tests
 
 ## Testing
+
 ```bash
 pytest tests/interop/ -v
 ```

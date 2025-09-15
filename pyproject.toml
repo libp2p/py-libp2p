@@ -110,6 +110,9 @@ libp2p = ["py.typed"]
 
 
 [tool.mypy]
+exclude = [
+    "libp2p/protocols/autonat/pb/autonat_pb2.py"
+]
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
