@@ -237,7 +237,6 @@ class BasicHost(IHost):
         self,
         peer_id: ID,
         protocol_ids: Sequence[TProtocol],
-        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
@@ -251,7 +250,7 @@ class BasicHost(IHost):
             selected_protocol = await self.multiselect_client.select_one_of(
                 list(protocol_ids),
                 MultiselectCommunicator(net_stream),
-                negotitate_timeout,
+                self.negotiate_timeout,
             )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
