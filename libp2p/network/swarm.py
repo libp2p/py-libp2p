@@ -490,6 +490,7 @@ class Swarm(Service, INetworkService):
         for maddr in multiaddrs:
             logger.debug(f"Swarm.listen processing multiaddr: {maddr}")
             if str(maddr) in self.listeners:
+                logger.debug(f"Swarm.listen: listener already exists for {maddr}")
                 success_count += 1
                 continue
 
@@ -555,6 +556,7 @@ class Swarm(Service, INetworkService):
                 #   I/O agnostic, we should change the API.
                 if self.listener_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
+                assert self.listener_nursery is not None  # For type checker
                 logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
                 await listener.listen(maddr, self.listener_nursery)
                 logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")

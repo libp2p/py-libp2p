@@ -1,7 +1,6 @@
 """Libp2p Python implementation."""
 
 import logging
-import ssl
 
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
@@ -180,8 +179,6 @@ def new_swarm(
     enable_quic: bool = False,
     retry_config: Optional["RetryConfig"] = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
-    tls_client_config: ssl.SSLContext | None = None,
-    tls_server_config: ssl.SSLContext | None = None,
 ) -> INetworkService:
     """
     Create a swarm instance based on the parameters.
@@ -193,9 +190,7 @@ def new_swarm(
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
-    :param connection_config: options for transport configuration
-    :param tls_client_config: optional TLS configuration for WebSocket client connections (WSS)
-    :param tls_server_config: optional TLS configuration for WebSocket server connections (WSS)
+    :param quic_transport_opt: options for transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -207,6 +202,24 @@ def new_swarm(
         key_pair = generate_new_rsa_identity()
 
     id_opt = generate_peer_id_from(key_pair)
+
+    transport: TCP | QUICTransport | ITransport
+    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
+
+    if listen_addrs is None:
+        if enable_quic:
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+        else:
+            transport = TCP()
+    else:
+        addr = listen_addrs[0]
+        is_quic = is_quic_multiaddr(addr)
+        if addr.__contains__("tcp"):
+            transport = TCP()
+        elif is_quic:
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+        else:
+            raise ValueError(f"Unknown transport in listen_addrs: {listen_addrs}")
 
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()
@@ -248,24 +261,19 @@ def new_swarm(
     )
 
     # Create transport based on listen_addrs or default to TCP
-    transport: ITransport
     if listen_addrs is None:
         transport = TCP()
     else:
         # Use the first address to determine transport type
         addr = listen_addrs[0]
-        transport_maybe = create_transport_for_multiaddr(
-            addr,
-            upgrader,
-            private_key=key_pair.private_key,
-            tls_client_config=tls_client_config,
-            tls_server_config=tls_server_config
-        )
+        transport_maybe = create_transport_for_multiaddr(addr, upgrader)
 
         if transport_maybe is None:
             # Fallback to TCP if no specific transport found
             if addr.__contains__("tcp"):
                 transport = TCP()
+            elif addr.__contains__("quic"):
+                transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
             else:
                 supported_protocols = get_supported_transport_protocols()
                 raise ValueError(
@@ -274,6 +282,31 @@ def new_swarm(
                 )
         else:
             transport = transport_maybe
+
+    # Use given muxer preference if provided, otherwise use global default
+    if muxer_preference is not None:
+        temp_pref = muxer_preference.upper()
+        if temp_pref not in [MUXER_YAMUX, MUXER_MPLEX]:
+            raise ValueError(
+                f"Unknown muxer: {muxer_preference}. Use 'YAMUX' or 'MPLEX'."
+            )
+        active_preference = temp_pref
+    else:
+        active_preference = DEFAULT_MUXER
+
+    # Use provided muxer options if given, otherwise create based on preference
+    if muxer_opt is not None:
+        muxer_transports_by_protocol = muxer_opt
+    else:
+        if active_preference == MUXER_MPLEX:
+            muxer_transports_by_protocol = create_mplex_muxer_option()
+        else:  # YAMUX is default
+            muxer_transports_by_protocol = create_yamux_muxer_option()
+
+    upgrader = TransportUpgrader(
+        secure_transports_by_protocol=secure_transports_by_protocol,
+        muxer_transports_by_protocol=muxer_transports_by_protocol,
+    )
 
     peerstore = peerstore_opt or PeerStore()
     # Store our key pair in peerstore
@@ -302,8 +335,6 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     quic_transport_opt:  QUICTransportConfig | None = None,
-    tls_client_config: ssl.SSLContext | None = None,
-    tls_server_config: ssl.SSLContext | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -318,9 +349,7 @@ def new_host(
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optinal choice to use QUIC for transport
-    :param quic_transport_opt: optional configuration for quic transport
-    :param tls_client_config: optional TLS configuration for WebSocket client connections (WSS)
-    :param tls_server_config: optional TLS configuration for WebSocket server connections (WSS)
+    :param transport_opt: optional configuration for quic transport
     :return: return a host instance
     """
 
@@ -335,9 +364,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
-        tls_client_config=tls_client_config,
-        tls_server_config=tls_server_config
+        connection_config=quic_transport_opt if enable_quic else None
     )
 
     if disc_opt is not None:
