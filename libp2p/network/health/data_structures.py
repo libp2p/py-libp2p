@@ -14,6 +14,38 @@ logger = logging.getLogger("libp2p.network.health.data_structures")
 
 
 @dataclass
+class HealthMonitorStatus:
+    """Status information for the health monitoring service."""
+
+    # Basic status
+    enabled: bool
+
+    # Service status
+    monitoring_task_started: bool = False
+
+    # Configuration
+    check_interval_seconds: float = 0.0
+
+    # Statistics
+    total_connections: int = 0
+    monitored_connections: int = 0
+    total_peers: int = 0
+    monitored_peers: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for backward compatibility."""
+        return {
+            "enabled": self.enabled,
+            "monitoring_task_started": self.monitoring_task_started,
+            "check_interval_seconds": self.check_interval_seconds,
+            "total_connections": self.total_connections,
+            "monitored_connections": self.monitored_connections,
+            "total_peers": self.total_peers,
+            "monitored_peers": self.monitored_peers,
+        }
+
+
+@dataclass
 class ConnectionHealth:
     """Enhanced connection health tracking."""
 
