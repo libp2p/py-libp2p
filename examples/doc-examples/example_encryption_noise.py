@@ -1,6 +1,5 @@
 import secrets
 
-import multiaddr
 import trio
 
 from libp2p import (
@@ -12,6 +11,10 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
+)
+from libp2p.utils.address_validation import (
+    get_available_interfaces,
+    get_optimal_binding_address,
 )
 
 
@@ -39,14 +42,16 @@ async def main():
     # Create a host with the key pair and Noise security
     host = new_host(key_pair=key_pair, sec_opt=security_options)
 
-    # Configure the listening address
+    # Configure the listening address using the new paradigm
     port = 8000
-    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    listen_addrs = get_available_interfaces(port)
+    optimal_addr = get_optimal_binding_address(port)
 
     # Start the host
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=listen_addrs):
         print("libp2p has started with Noise encryption")
         print("libp2p is listening on:", host.get_addrs())
+        print(f"Optimal address: {optimal_addr}")
         # Keep the host running
         await trio.sleep_forever()
 

@@ -120,7 +120,7 @@ def main() -> None:
     Usage:
         python bootstrap.py -p 8000
         python bootstrap.py -p 8001 --custom-bootstrap \\
-            "/ip4/127.0.0.1/tcp/8000/p2p/QmYourPeerID"
+            "/ip4/[HOST_IP]/tcp/8000/p2p/QmYourPeerID"
     """
 
     parser = argparse.ArgumentParser(

@@ -14,7 +14,7 @@ Usage:
     python identify_push_listener_dialer.py
 
     # Then in another console, run as a dialer (default port 8889):
-    python identify_push_listener_dialer.py -d /ip4/127.0.0.1/tcp/8888/p2p/PEER_ID
+    python identify_push_listener_dialer.py -d /ip4/[HOST_IP]/tcp/8888/p2p/PEER_ID
     (where PEER_ID is the peer ID displayed by the listener)
 """
 
@@ -291,10 +291,12 @@ async def run_dialer(
         identify_push_handler_for(host, use_varint_format=use_varint_format),
     )
 
-    # Start listening on a different port
-    listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    # Start listening on available interfaces
+    from libp2p.utils.address_validation import get_available_interfaces
 
-    async with host.run([listen_addr]):
+    listen_addrs = get_available_interfaces(port)
+
+    async with host.run(listen_addrs):
         logger.info("Dialer host ready!")
         print("Dialer host ready!")
 

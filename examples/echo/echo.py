@@ -125,7 +125,7 @@ def main() -> None:
     where <DESTINATION> is the multiaddress of the previous listener host.
     """
     example_maddr = (
-        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+        "/ip4/[HOST_IP]/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
