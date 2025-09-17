@@ -501,8 +501,10 @@ class Pubsub(Service, IPubsub):
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
-                # Add Peer
-                self.manager.run_task(self._handle_new_peer, peer_id)
+                try:
+                    self.manager.run_task(self._handle_new_peer, peer_id)
+                except Exception as e:
+                    logger.info(f"Protocol negotiation failed for peer {peer_id}: {e}")
 
     async def handle_dead_peer_queue(self) -> None:
         """
