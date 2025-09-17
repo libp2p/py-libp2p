@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def example_host_health_monitoring_enabled():
+async def example_host_health_monitoring_enabled() -> None:
     """Example showing health monitoring enabled through host API."""
     logger.info("=== Health Monitoring Enabled Example ===")
 
@@ -57,7 +57,7 @@ async def example_host_health_monitoring_enabled():
     logger.info("Health monitoring enabled example completed\n")
 
 
-async def example_host_health_monitoring_disabled():
+async def example_host_health_monitoring_disabled() -> None:
     """Example showing health monitoring disabled."""
     logger.info("=== Health Monitoring Disabled Example ===")
 
@@ -82,7 +82,7 @@ async def example_host_health_monitoring_disabled():
     logger.info("Health monitoring disabled example completed\n")
 
 
-async def example_different_load_balancing_strategies():
+async def example_different_load_balancing_strategies() -> None:
     """Example showing different load balancing strategies."""
     logger.info("=== Load Balancing Strategies Example ===")
 
@@ -109,7 +109,7 @@ async def example_different_load_balancing_strategies():
     logger.info("Load balancing strategies example completed\n")
 
 
-async def example_backward_compatibility():
+async def example_backward_compatibility() -> None:
     """Example showing backward compatibility - health monitoring is optional."""
     logger.info("=== Backward Compatibility Example ===")
 
@@ -128,11 +128,17 @@ async def example_backward_compatibility():
     host_new_style = new_host(key_pair=create_new_key_pair(), connection_config=config)
     logger.info("✅ New-style host creation with explicit config")
 
+    # For consistency add some health monitoring logs like:
+    health_summary = host_new_style.get_network_health_summary()
+    logger.info(
+        f"Health summary with config (disabled health monitoring): {health_summary}"
+    )  # Empty
+
     await host_new_style.close()
     logger.info("Backward compatibility example completed\n")
 
 
-async def main():
+async def main() -> None:
     """Run all health monitoring examples."""
     logger.info("🚀 Connection Health Monitoring Examples")
     logger.info("Demonstrating the new host-level API for health monitoring\n")

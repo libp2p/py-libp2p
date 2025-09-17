@@ -1682,6 +1682,26 @@ class INetwork(ABC):
         """
         return "{}" if format == "json" else ""
 
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        return {"enabled": False}
+
 
 class INetworkService(INetwork, ServiceAPI):
     pass
@@ -2101,6 +2121,26 @@ class IHost(ABC):
         str
             The health metrics in the requested format.
             Returns empty string or object if health monitoring is disabled.
+
+        """
+
+    @abstractmethod
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
 
         """
 

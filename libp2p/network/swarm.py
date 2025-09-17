@@ -1263,7 +1263,9 @@ class Swarm(Service, INetworkService):
         if not self._is_health_monitoring_enabled() or self._health_monitor is None:
             return {"enabled": False}
 
-        return await self._health_monitor.get_monitoring_status()
+        status = await self._health_monitor.get_monitoring_status()
+        # Convert to dict for backward compatibility
+        return status.to_dict()
 
     # Backward compatibility properties
     @property

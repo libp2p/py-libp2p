@@ -898,6 +898,15 @@ class BasicHost(IHost):
             return self._network.export_health_metrics(format)
         return "{}" if format == "json" else ""
 
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_health_monitor_status"):
+            return await self._network.get_health_monitor_status()
+        return {"enabled": False}
+
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use

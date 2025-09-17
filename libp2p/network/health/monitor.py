@@ -7,13 +7,15 @@ connection lifecycle management.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import trio
 
 from libp2p.abc import INetConn
 from libp2p.peer.id import ID
 from libp2p.tools.async_service import Service
+
+from .data_structures import HealthMonitorStatus
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
@@ -282,22 +284,22 @@ class ConnectionHealthMonitor(Service):
             and conn in self.swarm.health_data[peer_id]
         )
 
-    async def get_monitoring_status(self) -> dict[str, Any]:
+    async def get_monitoring_status(self) -> HealthMonitorStatus:
         """Get current monitoring status and statistics."""
         if not self._is_health_monitoring_enabled():
-            return {"enabled": False}
+            return HealthMonitorStatus(enabled=False)
 
         total_connections = sum(len(conns) for conns in self.swarm.connections.values())
         monitored_connections = sum(
             len(health_data) for health_data in self.swarm.health_data.values()
         )
 
-        return {
-            "enabled": True,
-            "monitoring_task_started": self._monitoring_task_started.is_set(),
-            "check_interval_seconds": self.config.health_check_interval,
-            "total_connections": total_connections,
-            "monitored_connections": monitored_connections,
-            "total_peers": len(self.swarm.connections),
-            "monitored_peers": len(self.swarm.health_data),
-        }
+        return HealthMonitorStatus(
+            enabled=True,
+            monitoring_task_started=self._monitoring_task_started.is_set(),
+            check_interval_seconds=self.config.health_check_interval,
+            total_connections=total_connections,
+            monitored_connections=monitored_connections,
+            total_peers=len(self.swarm.connections),
+            monitored_peers=len(self.swarm.health_data),
+        )
