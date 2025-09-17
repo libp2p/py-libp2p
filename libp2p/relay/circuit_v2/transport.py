@@ -44,6 +44,7 @@ from .pb.circuit_pb2 import (
 )
 from .protocol import (
     PROTOCOL_ID,
+    STREAM_READ_TIMEOUT,
     CircuitV2Protocol,
 )
 from .protocol_buffer import (
@@ -159,9 +160,21 @@ class CircuitV2Transport(ITransport):
                 raise ConnectionError("No suitable relay found")
 
         # Get a stream to the relay
-        relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
-        if not relay_stream:
-            raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
+        try:
+            logger.debug(
+                "Opening stream to relay %s with protocol %s",
+                relay_peer_id,
+                PROTOCOL_ID,
+            )
+            relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+            if not relay_stream:
+                raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
+            logger.debug("Successfully opened stream to relay %s", relay_peer_id)
+        except Exception as e:
+            logger.error("Failed to open stream to relay %s: %s", relay_peer_id, str(e))
+            raise ConnectionError(
+                f"Could not open stream to relay {relay_peer_id}: {str(e)}"
+            )
 
         try:
             # First try to make a reservation if enabled
@@ -179,10 +192,11 @@ class CircuitV2Transport(ITransport):
             )
             await relay_stream.write(hop_msg.SerializeToString())
 
-            # Read response
-            resp_bytes = await relay_stream.read()
-            resp = HopMessage()
-            resp.ParseFromString(resp_bytes)
+            # Read response with timeout
+            with trio.fail_after(STREAM_READ_TIMEOUT):
+                resp_bytes = await relay_stream.read()
+                resp = HopMessage()
+                resp.ParseFromString(resp_bytes)
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
@@ -256,16 +270,50 @@ class CircuitV2Transport(ITransport):
                 type=HopMessage.RESERVE,
                 peer=self.host.get_id().to_bytes(),
             )
-            await stream.write(reserve_msg.SerializeToString())
+            logger.debug("=== SENDING RESERVATION REQUEST ===")
+            logger.debug("Message type: %s", reserve_msg.type)
+            logger.debug("Peer ID: %s", self.host.get_id())
+            logger.debug("Raw message: %s", reserve_msg)
 
-            # Read response
-            resp_bytes = await stream.read()
-            resp = HopMessage()
-            resp.ParseFromString(resp_bytes)
+            try:
+                await stream.write(reserve_msg.SerializeToString())
+                logger.debug("Successfully sent reservation request")
+            except Exception as e:
+                logger.error("Failed to send reservation request: %s", str(e))
+                raise
+
+            # Read response with timeout
+            logger.debug("=== WAITING FOR RESERVATION RESPONSE ===")
+            with trio.fail_after(STREAM_READ_TIMEOUT):
+                try:
+                    resp_bytes = await stream.read()
+                    logger.debug(
+                        "Received reservation response: %d bytes", len(resp_bytes)
+                    )
+                    resp = HopMessage()
+                    resp.ParseFromString(resp_bytes)
+                    logger.debug("=== PARSED RESERVATION RESPONSE ===")
+                    logger.debug("Message type: %s", resp.type)
+                    logger.debug(
+                        "Status code: %s", getattr(resp.status, "code", "unknown")
+                    )
+                    logger.debug(
+                        "Status message: %s", getattr(resp.status, "message", "unknown")
+                    )
+                    logger.debug("Raw response: %s", resp)
+                except Exception as e:
+                    logger.error(
+                        "Failed to read/parse reservation response: %s", str(e)
+                    )
+                    raise
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
             status_msg = getattr(resp.status, "message", "Unknown error")
+
+            logger.debug(
+                "Reservation response: code=%s, message=%s", status_code, status_msg
+            )
 
             if status_code != StatusCode.OK:
                 logger.warning(
