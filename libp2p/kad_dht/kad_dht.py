@@ -5,6 +5,7 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
+from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
 )
@@ -20,15 +21,19 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
+from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
+from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )
@@ -73,14 +78,27 @@ class KadDHT(Service):
 
     This class provides a DHT implementation that combines routing table management,
     peer discovery, content routing, and value storage.
+
+    Optional Random Walk feature enhances peer discovery by automatically
+    performing periodic random queries to discover new peers and maintain
+    routing table health.
+
+    Example:
+        # Basic DHT without random walk (default)
+        dht = KadDHT(host, DHTMode.SERVER)
+
+        # DHT with random walk enabled for enhanced peer discovery
+        dht = KadDHT(host, DHTMode.SERVER, enable_random_walk=True)
+
     """
 
-    def __init__(self, host: IHost, mode: DHTMode):
+    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
         """
         Initialize a new Kademlia DHT node.
 
         :param host: The libp2p host.
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
+        :param enable_random_walk: Whether to enable automatic random walk
         """
         super().__init__()
 
@@ -92,6 +110,7 @@ class KadDHT(Service):
             raise TypeError(f"mode must be DHTMode enum, got {type(mode)}")
 
         self.mode = mode
+        self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
@@ -108,13 +127,56 @@ class KadDHT(Service):
         # Last time we republished provider records
         self._last_provider_republish = time.time()
 
+        # Initialize RT Refresh Manager (only if random walk is enabled)
+        self.rt_refresh_manager: RTRefreshManager | None = None
+        if self.enable_random_walk:
+            self.rt_refresh_manager = RTRefreshManager(
+                host=self.host,
+                routing_table=self.routing_table,
+                local_peer_id=self.local_peer_id,
+                query_function=self._create_query_function(),
+                enable_auto_refresh=True,
+            )
+
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+
+    def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
+        """
+        Create a query function that wraps peer_routing.find_closest_peers_network.
+
+        This function is used by the RandomWalk module to query for peers without
+        directly importing PeerRouting, avoiding circular import issues.
+
+        Returns:
+            Callable that takes target_key bytes and returns list of peer IDs
+
+        """
+
+        async def query_function(target_key: bytes) -> list[ID]:
+            """Query for closest peers to target key."""
+            return await self.peer_routing.find_closest_peers_network(target_key)
+
+        return query_function
 
     async def run(self) -> None:
         """Run the DHT service."""
         logger.info(f"Starting Kademlia DHT with peer ID {self.local_peer_id}")
 
+        # Start the RT Refresh Manager in parallel with the main DHT service
+        async with trio.open_nursery() as nursery:
+            # Start the RT Refresh Manager only if random walk is enabled
+            if self.rt_refresh_manager is not None:
+                nursery.start_soon(self.rt_refresh_manager.start)
+                logger.info("RT Refresh Manager started - Random Walk is now active")
+            else:
+                logger.info("Random Walk is disabled - RT Refresh Manager not started")
+
+            # Start the main DHT service loop
+            nursery.start_soon(self._run_main_loop)
+
+    async def _run_main_loop(self) -> None:
+        """Run the main DHT service loop."""
         # Main service loop
         while self.manager.is_running:
             # Periodically refresh the routing table
@@ -134,6 +196,17 @@ class KadDHT(Service):
 
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
+
+    async def stop(self) -> None:
+        """Stop the DHT service and cleanup resources."""
+        logger.info("Stopping Kademlia DHT")
+
+        # Stop the RT Refresh Manager only if it was started
+        if self.rt_refresh_manager is not None:
+            await self.rt_refresh_manager.stop()
+            logger.info("RT Refresh Manager stopped")
+        else:
+            logger.info("RT Refresh Manager was not running (Random Walk disabled)")
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -163,6 +236,9 @@ class KadDHT(Service):
         logger.debug(f"Received DHT stream from peer {peer_id}")
         await self.add_peer(peer_id)
         logger.debug(f"Added peer {peer_id} to routing table")
+
+        closer_peer_envelope: Envelope | None = None
+        provider_peer_envelope: Envelope | None = None
 
         try:
             # Read varint-prefixed length for the message
@@ -204,6 +280,14 @@ class KadDHT(Service):
                     )
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     # Build response message with protobuf
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
@@ -228,6 +312,21 @@ class KadDHT(Service):
                         except Exception:
                             pass
 
+                        # Add the signed-peer-record for each peer in the peer-proto
+                        # if cached in the peerstore
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer)
+                        )
+
+                        if closer_peer_envelope is not None:
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
+                            )
+
+                    # Create sender_signed_peer_record
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+
                     # Serialize and send response
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
@@ -241,6 +340,14 @@ class KadDHT(Service):
                     # Process ADD_PROVIDER
                     key = message.key
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
+
+                    # Consume the source signed-peer-record if sent
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
 
                     # Extract provider information
                     for provider_proto in message.providerPeers:
@@ -268,6 +375,17 @@ class KadDHT(Service):
                             logger.debug(
                                 f"Added provider {provider_id} for key {key.hex()}"
                             )
+
+                            # Process the signed-records of provider if sent
+                            if not maybe_consume_signed_record(
+                                provider_proto, self.host
+                            ):
+                                logger.error(
+                                    "Received an invalid-signed-record,"
+                                    "dropping the stream"
+                                )
+                                await stream.close()
+                                return
                         except Exception as e:
                             logger.warning(f"Failed to process provider info: {e}")
 
@@ -275,6 +393,10 @@ class KadDHT(Service):
                     response = Message()
                     response.type = Message.MessageType.ADD_PROVIDER
                     response.key = key
+
+                    # Add sender's signed-peer-record
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
 
                     response_bytes = response.SerializeToString()
                     await stream.write(varint.encode(len(response_bytes)))
@@ -287,6 +409,14 @@ class KadDHT(Service):
                     key = message.key
                     logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
 
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
                     logger.debug(
@@ -298,11 +428,27 @@ class KadDHT(Service):
                     response.type = Message.MessageType.GET_PROVIDERS
                     response.key = key
 
+                    # Create sender_signed_peer_record for the response
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+
                     # Add provider information to response
                     for provider_info in providers:
                         provider_proto = response.providerPeers.add()
                         provider_proto.id = provider_info.peer_id.to_bytes()
                         provider_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add provider signed-records if cached
+                        provider_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(
+                                provider_info.peer_id
+                            )
+                        )
+
+                        if provider_peer_envelope is not None:
+                            provider_proto.signedRecord = (
+                                provider_peer_envelope.marshal_envelope()
+                            )
 
                         # Add addresses if available
                         for addr in provider_info.addrs:
@@ -327,6 +473,16 @@ class KadDHT(Service):
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
 
+                            # Add the signed-records of closest_peers if cached
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
+
                             # Add addresses if available
                             try:
                                 addrs = self.host.get_peerstore().addrs(peer)
@@ -347,6 +503,14 @@ class KadDHT(Service):
                     key = message.key
                     logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
+                    # Consume the sender_signed_peer_record
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     value = self.value_store.get(key)
                     if value:
                         logger.debug(f"Found value for key {key.hex()}")
@@ -361,6 +525,10 @@ class KadDHT(Service):
                         response.record.value = value
                         response.record.timeReceived = str(time.time())
 
+                        # Create sender_signed_peer_record
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
+
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
@@ -373,6 +541,10 @@ class KadDHT(Service):
                         response = Message()
                         response.type = Message.MessageType.GET_VALUE
                         response.key = key
+
+                        # Create sender_signed_peer_record for the response
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
 
                         # Add closest peers to key
                         closest_peers = self.routing_table.find_local_closest_peers(
@@ -391,6 +563,16 @@ class KadDHT(Service):
                             peer_proto = response.closerPeers.add()
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                            # Add signed-records of closer-peers if cached
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
 
                             # Add addresses if available
                             try:
@@ -414,6 +596,15 @@ class KadDHT(Service):
                     key = message.record.key
                     value = message.record.value
                     success = False
+
+                    # Consume the source signed_peer_record if sent
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     try:
                         if not (key and value):
                             raise ValueError(
@@ -434,6 +625,12 @@ class KadDHT(Service):
                         response.type = Message.MessageType.PUT_VALUE
                         if success:
                             response.key = key
+
+                        # Create sender_signed_peer_record for the response
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
+
+                        # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
@@ -614,3 +811,15 @@ class KadDHT(Service):
 
         """
         return self.value_store.size()
+
+    def is_random_walk_enabled(self) -> bool:
+        """
+        Check if random walk peer discovery is enabled.
+
+        Returns
+        -------
+        bool
+            True if random walk is enabled, False otherwise.
+
+        """
+        return self.enable_random_walk

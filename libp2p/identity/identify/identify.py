@@ -15,6 +15,7 @@ from libp2p.custom_types import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.utils import (
     decode_varint_with_size,
     get_agent_version,
@@ -63,6 +64,9 @@ def _mk_identify_protobuf(
     laddrs = host.get_addrs()
     protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
 
+    # Create a signed peer-record for the remote peer
+    envelope_bytes, _ = env_to_send_in_RPC(host)
+
     observed_addr = observed_multiaddr.to_bytes() if observed_multiaddr else b""
     return Identify(
         protocol_version=PROTOCOL_VERSION,
@@ -71,6 +75,7 @@ def _mk_identify_protobuf(
         listen_addrs=map(_multiaddr_to_bytes, laddrs),
         observed_addr=observed_addr,
         protocols=protocols,
+        signedPeerRecord=envelope_bytes,
     )
 
 

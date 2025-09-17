@@ -41,6 +41,7 @@ from libp2p.tools.async_service import (
 from libp2p.tools.utils import (
     info_from_p2p_addr,
 )
+from libp2p.utils.paths import get_script_dir, join_paths
 
 # Configure logging
 logging.basicConfig(
@@ -53,8 +54,8 @@ logger = logging.getLogger("kademlia-example")
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
 # Get the directory where this script is located
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_ADDR_LOG = os.path.join(SCRIPT_DIR, "server_node_addr.txt")
+SCRIPT_DIR = get_script_dir(__file__)
+SERVER_ADDR_LOG = join_paths(SCRIPT_DIR, "server_node_addr.txt")
 
 # Set the level for all child loggers
 for module in [
@@ -151,7 +152,10 @@ async def run_node(
         host = new_host(key_pair=key_pair)
         listen_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
-        async with host.run(listen_addrs=[listen_addr]):
+        async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+            # Start the peer-store cleanup task
+            nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+
             peer_id = host.get_id().pretty()
             addr_str = f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}"
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
@@ -224,7 +228,7 @@ async def run_node(
 
                 # Keep the node running
                 while True:
-                    logger.debug(
+                    logger.info(
                         "Status - Connected peers: %d,"
                         "Peers in store: %d, Values in store: %d",
                         len(dht.host.get_connected_peers()),
