@@ -142,10 +142,10 @@ class WebsocketTransport(ITransport):
 
                 # Create our connection wrapper with both WSS support and flow control
                 conn = P2PWebSocketConnection(
-                    ws, 
-                    None, 
+                    ws,
+                    None,
                     is_secure=parsed.is_wss,
-                    max_buffered_amount=self._max_buffered_amount
+                    max_buffered_amount=self._max_buffered_amount,
                 )
                 logger.debug("WebsocketTransport.dial created P2PWebSocketConnection")
 

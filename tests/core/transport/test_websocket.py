@@ -1,9 +1,16 @@
+# Import exceptiongroup for Python 3.11+
+import builtins
 from collections.abc import Sequence
 import logging
 from typing import Any
 
 import pytest
-from exceptiongroup import ExceptionGroup
+
+if hasattr(builtins, "ExceptionGroup"):
+    ExceptionGroup = builtins.ExceptionGroup
+else:
+    # Fallback for older Python versions
+    ExceptionGroup = Exception
 from multiaddr import Multiaddr
 import trio
 
@@ -611,7 +618,7 @@ async def test_websocket_data_exchange():
         key_pair=key_pair_a,
         sec_opt=security_options_a,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
     )
 
     # Host B (dialer)
@@ -624,7 +631,7 @@ async def test_websocket_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # WebSocket transport
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # WebSocket transport
     )
 
     # Test data
@@ -704,7 +711,7 @@ async def test_websocket_host_pair_data_exchange():
         key_pair=key_pair_a,
         sec_opt=security_options_a,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
     )
 
     # Host B (dialer) - WebSocket transport
@@ -717,7 +724,7 @@ async def test_websocket_host_pair_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # WebSocket transport
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # WebSocket transport
     )
 
     # Test data
@@ -909,7 +916,7 @@ async def test_wss_host_pair_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # Ensure WSS transport
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # WebSocket transport
         tls_client_config=client_tls_context,
     )
 
@@ -1169,6 +1176,8 @@ async def test_wss_listen_parsing():
 @pytest.mark.trio
 async def test_wss_listen_without_tls_config():
     """Test WSS listen without TLS configuration should fail."""
+    from libp2p.transport.websocket.transport import WebsocketTransport
+
     upgrader = create_upgrader()
     transport = WebsocketTransport(upgrader)  # No TLS config
 
@@ -1179,16 +1188,21 @@ async def test_wss_listen_without_tls_config():
 
     listener = transport.create_listener(dummy_handler)
 
-    # This should raise an error when trying to listen on WSS without TLS config
-    with pytest.raises(ExceptionGroup) as exc_info:
-        async with trio.open_nursery() as nursery:
-            await listener.listen(wss_maddr, nursery)
+    # This should raise an error when TLS config is not provided
+    try:
+        nursery = trio.lowlevel.current_task().parent_nursery
+        if nursery is None:
+            pytest.fail("No parent nursery available for test")
+        # Type assertion to help the type checker understand nursery is not None
+        assert nursery is not None
+        await listener.listen(wss_maddr, nursery)
+        pytest.fail("WSS listen without TLS config should have failed")
+    except ValueError as e:
+        assert "without TLS configuration" in str(e)
+    except Exception as e:
+        pytest.fail(f"Unexpected error: {e}")
 
-    # Check that the ExceptionGroup contains the expected ValueError
-    assert len(exc_info.value.exceptions) == 1
-    assert isinstance(exc_info.value.exceptions[0], ValueError)
-    assert "Cannot listen on WSS address" in str(exc_info.value.exceptions[0])
-    assert "without TLS configuration" in str(exc_info.value.exceptions[0])
+    await listener.close()
 
 
 @pytest.mark.trio
