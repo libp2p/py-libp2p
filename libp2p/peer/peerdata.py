@@ -12,6 +12,7 @@ from multiaddr import (
 
 from libp2p.abc import (
     IPeerData,
+    MetadataValue,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -29,7 +30,7 @@ LATENCY_EWMA_SMOOTHING = 0.1
 class PeerData(IPeerData):
     pubkey: PublicKey | None
     privkey: PrivateKey | None
-    metadata: dict[Any, Any]
+    metadata: dict[str, MetadataValue]
     protocols: list[str]
     addrs: list[Multiaddr]
     last_identified: int
@@ -116,14 +117,14 @@ class PeerData(IPeerData):
         self.addrs = []
 
     # -------METADATA-----------
-    def put_metadata(self, key: str, val: Any) -> None:
+    def put_metadata(self, key: str, val: MetadataValue) -> None:
         """
         :param key: key in KV pair
         :param val: val to associate with key
         """
         self.metadata[key] = val
 
-    def get_metadata(self, key: str) -> Any:
+    def get_metadata(self, key: str) -> MetadataValue:
         """
         :param key: key in KV pair
         :return: val for key
