@@ -8,7 +8,7 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, Transport
+from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.utils.address_validation import (
     get_available_interfaces,
     get_optimal_binding_address,
@@ -21,7 +21,7 @@ async def main():
     key_pair = create_new_key_pair(secret)
 
     # Create an insecure transport (not recommended for production)
-    insecure_transport = Transport(
+    insecure_transport = InsecureTransport(
         # local_key_pair: The key pair used for libp2p identity
         local_key_pair=key_pair,
         # secure_bytes_provider: Optional function to generate secure random bytes

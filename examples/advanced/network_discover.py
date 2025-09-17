@@ -19,6 +19,7 @@ try:
 except ImportError:
     # Fallbacks if utilities are missing - use minimal network discovery
     import socket
+
     def get_available_interfaces(port: int, protocol: str = "tcp"):
         # Try to get local network interfaces, fallback to loopback
         addrs = []
@@ -28,7 +29,7 @@ except ImportError:
             local_ip = socket.gethostbyname(hostname)
             if local_ip != "127.0.0.1":
                 addrs.append(Multiaddr(f"/ip4/{local_ip}/{protocol}/{port}"))
-        except exception:
+        except Exception:
             pass
         # Always include loopback as fallback
         addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))

@@ -1,5 +1,6 @@
 import secrets
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import (
@@ -66,7 +67,7 @@ async def main():
 
         for addr in bootstrap_list:
             try:
-                peer_info = info_from_p2p_addr(multiaddr.Multiaddr(addr))
+                peer_info = info_from_p2p_addr(Multiaddr(addr))
                 await host.connect(peer_info)
                 print(f"Connected to {peer_info.peer_id.to_string()}")
             except Exception as e:

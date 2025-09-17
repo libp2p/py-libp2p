@@ -30,6 +30,7 @@ async def main():
     for addr in listen_addrs:
         addr_str = str(addr).replace("/tcp/", "/udp/") + "/quic-v1"
         from multiaddr import Multiaddr
+
         quic_addrs.append(Multiaddr(addr_str))
 
     optimal_addr = get_optimal_binding_address(port, protocol="udp")

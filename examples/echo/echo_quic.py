@@ -93,7 +93,8 @@ async def run_server(port: int, seed: int | None = None) -> None:
             # Use optimal address for the client command
             optimal_tcp = get_optimal_binding_address(port)
             optimal_quic_str = str(optimal_tcp).replace("/tcp/", "/udp/") + "/quic"
-            optimal_quic_with_peer = f"{optimal_quic_str}/p2p/{host.get_id().to_string()}"
+            peer_id = host.get_id().to_string()
+            optimal_quic_with_peer = f"{optimal_quic_str}/p2p/{peer_id}"
             print(
                 f"\nRun this from the same folder in another console:\n\n"
                 f"python3 ./examples/echo/echo_quic.py -d {optimal_quic_with_peer}\n"
