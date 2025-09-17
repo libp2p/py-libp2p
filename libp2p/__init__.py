@@ -97,6 +97,7 @@ DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 logger = logging.getLogger(__name__)
 
+
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     """
     Set the default multiplexer protocol to use.
@@ -164,6 +165,7 @@ def get_default_muxer_options() -> TMuxerOptions:
     else:  # YAMUX is default
         return create_yamux_muxer_option()
 
+
 def new_swarm(
     key_pair: KeyPair | None = None,
     muxer_opt: TMuxerOptions | None = None,
@@ -199,7 +201,11 @@ def new_swarm(
     id_opt = generate_peer_id_from(key_pair)
 
     transport: TCP | QUICTransport
-    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
+    quic_transport_opt = (
+        connection_config
+        if isinstance(connection_config, QUICTransportConfig)
+        else None
+    )
 
     if listen_addrs is None:
         if enable_quic:
@@ -282,6 +288,7 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     quic_transport_opt:  QUICTransportConfig | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -296,12 +303,56 @@ def new_host(
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optinal choice to use QUIC for transport
-    :param transport_opt: optional configuration for quic transport
+    :param quic_transport_opt: optional configuration for quic transport
+    :param connection_config: optional configuration for connection management
+                             and health monitoring. When both connection_config
+                             and quic_transport_opt are provided, health monitoring
+                             settings from connection_config are merged into the
+                             QUIC config (QUICTransportConfig inherits from
+                             ConnectionConfig)
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning(
+            "QUIC config provided but QUIC not enabled, ignoring QUIC config"
+        )
+
+    # Determine which connection config to use
+    effective_connection_config: ConnectionConfig | QUICTransportConfig | None = None
+    if enable_quic and quic_transport_opt is not None:
+        # QUICTransportConfig inherits from ConnectionConfig,
+        # so it can handle health monitoring
+        effective_connection_config = quic_transport_opt
+
+        # If both connection_config and quic_transport_opt are provided,
+        # merge health monitoring settings
+        if connection_config is not None:
+            # Merge health monitoring settings from connection_config
+            # into quic_transport_opt
+            if hasattr(connection_config, "enable_health_monitoring"):
+                quic_transport_opt.enable_health_monitoring = (
+                    connection_config.enable_health_monitoring
+                )
+            if hasattr(connection_config, "health_check_interval"):
+                quic_transport_opt.health_check_interval = (
+                    connection_config.health_check_interval
+                )
+            if hasattr(connection_config, "load_balancing_strategy"):
+                quic_transport_opt.load_balancing_strategy = (
+                    connection_config.load_balancing_strategy
+                )
+            if hasattr(connection_config, "max_connections_per_peer"):
+                quic_transport_opt.max_connections_per_peer = (
+                    connection_config.max_connections_per_peer
+                )
+            logger.info(
+                "Merged health monitoring settings from "
+                "connection_config into QUIC config"
+            )
+    elif connection_config is not None:
+        # Use the provided ConnectionConfig for health monitoring
+        effective_connection_config = connection_config
 
     swarm = new_swarm(
         enable_quic=enable_quic,
@@ -311,7 +362,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None
+        connection_config=effective_connection_config
     )
 
     if disc_opt is not None:
