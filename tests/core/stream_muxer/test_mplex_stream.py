@@ -10,6 +10,9 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamReset,
     MuxedConnUnavailable,
 )
+from libp2p.stream_muxer.exceptions import (
+    MuxedStreamError,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_MESSAGE_CHANNEL_SIZE,
 )
@@ -250,3 +253,129 @@ async def test_mplex_stream_close_mux_unavailable(monkeypatch, mplex_stream_pair
 
     with pytest.raises(RuntimeError, match="Failed to send close message"):
         await stream_0.close()
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_deadline_success(mplex_stream_pair):
+    """Test successful deadline setting."""
+    stream_0, _ = mplex_stream_pair
+    
+    # Test setting deadline
+    stream_0.set_deadline(30)
+    assert stream_0.read_deadline == 30
+    assert stream_0.write_deadline == 30
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_read_deadline_success(mplex_stream_pair):
+    """Test successful read deadline setting."""
+    stream_0, _ = mplex_stream_pair
+    
+    # Test setting read deadline
+    stream_0.set_read_deadline(15)
+    assert stream_0.read_deadline == 15
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_write_deadline_success(mplex_stream_pair):
+    """Test successful write deadline setting."""
+    stream_0, _ = mplex_stream_pair
+    
+    # Test setting write deadline
+    stream_0.set_write_deadline(20)
+    assert stream_0.write_deadline == 20
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+    """Test deadline setting handles exceptions properly."""
+    stream_0, _ = mplex_stream_pair
+    
+    # Mock the deadline setting to raise an exception
+    original_read_deadline = stream_0.read_deadline
+    original_write_deadline = stream_0.write_deadline
+    
+    def mock_set_deadline(ttl):
+        raise RuntimeError("Mock deadline error")
+    
+    # Patch the attribute assignment to raise an exception
+    def mock_setattr(obj, name, value):
+        if name in ('read_deadline', 'write_deadline'):
+            raise RuntimeError("Mock deadline error")
+        return setattr(obj, name, value)
+    
+    monkeypatch.setattr(stream_0, '__setattr__', mock_setattr)
+    
+    with pytest.raises(MuxedStreamError, match="Failed to set deadline"):
+        stream_0.set_deadline(30)
+    
+    # Verify original values are preserved
+    assert stream_0.read_deadline == original_read_deadline
+    assert stream_0.write_deadline == original_write_deadline
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_read_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+    """Test read deadline setting handles exceptions properly."""
+    stream_0, _ = mplex_stream_pair
+    
+    original_read_deadline = stream_0.read_deadline
+    
+    # Patch the attribute assignment to raise an exception
+    def mock_setattr(obj, name, value):
+        if name == 'read_deadline':
+            raise ValueError("Mock read deadline error")
+        return setattr(obj, name, value)
+    
+    monkeypatch.setattr(stream_0, '__setattr__', mock_setattr)
+    
+    with pytest.raises(MuxedStreamError, match="Failed to set read deadline"):
+        stream_0.set_read_deadline(15)
+    
+    # Verify original value is preserved
+    assert stream_0.read_deadline == original_read_deadline
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_write_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+    """Test write deadline setting handles exceptions properly."""
+    stream_0, _ = mplex_stream_pair
+    
+    original_write_deadline = stream_0.write_deadline
+    
+    # Patch the attribute assignment to raise an exception
+    def mock_setattr(obj, name, value):
+        if name == 'write_deadline':
+            raise KeyError("Mock write deadline error")
+        return setattr(obj, name, value)
+    
+    monkeypatch.setattr(stream_0, '__setattr__', mock_setattr)
+    
+    with pytest.raises(MuxedStreamError, match="Failed to set write deadline"):
+        stream_0.set_write_deadline(20)
+    
+    # Verify original value is preserved
+    assert stream_0.write_deadline == original_write_deadline
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_preserves_exception_chain(monkeypatch, mplex_stream_pair):
+    """Test that deadline methods preserve the original exception chain."""
+    stream_0, _ = mplex_stream_pair
+    
+    original_error = RuntimeError("Original deadline error")
+    
+    # Patch the attribute assignment to raise an exception
+    def mock_setattr(obj, name, value):
+        if name in ('read_deadline', 'write_deadline'):
+            raise original_error
+        return setattr(obj, name, value)
+    
+    monkeypatch.setattr(stream_0, '__setattr__', mock_setattr)
+    
+    with pytest.raises(MuxedStreamError) as exc_info:
+        stream_0.set_deadline(30)
+    
+    # Check that the original exception is preserved in the chain
+    assert exc_info.value.__cause__ is original_error
+    assert "Failed to set deadline" in str(exc_info.value)

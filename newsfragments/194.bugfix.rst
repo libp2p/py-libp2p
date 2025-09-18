@@ -1,0 +1,7 @@
+Replaced return True/False pattern with try/catch pattern for better error handling.
+
+- Updated set_stream_handler method in BasicHost to raise HostException instead of returning boolean
+- Enhanced exception handling in mplex stream deadline methods with proper error chaining
+- Improved identify/push protocol error handling with comprehensive exception management
+- Added proper exception documentation and error messages throughout affected methods
+
