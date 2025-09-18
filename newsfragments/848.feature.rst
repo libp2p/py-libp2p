@@ -1,0 +1,1 @@
+Circuit-Relay V2 now include signed-peer-records in protobuf schema for secure peer-relay and peer communication.
