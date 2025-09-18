@@ -95,22 +95,36 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
             # Get all available addresses with peer ID
             all_addrs = host_a.get_addrs()
 
-            format_name = "length-prefixed" if use_varint_format else "raw protobuf"
-            format_flag = "--raw-format" if not use_varint_format else ""
+            if use_varint_format:
+                format_name = "length-prefixed"
+                print(f"First host listening (using {format_name} format).")
+                print("Listener ready, listening on:\n")
+                for addr in all_addrs:
+                    print(f"{addr}")
 
-            print(f"First host listening (using {format_name} format).")
-            print("Listener ready, listening on:\n")
-            for addr in all_addrs:
-                print(f"{addr}")
+                # Use optimal address for the client command
+                optimal_addr = get_optimal_binding_address(port)
+                optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                print(
+                    f"\nRun this from the same folder in another console:\n\n"
+                    f"identify-demo -d {optimal_addr_with_peer}\n"
+                )
+                print("Waiting for incoming identify request...")
+            else:
+                format_name = "raw protobuf"
+                print(f"First host listening (using {format_name} format).")
+                print("Listener ready, listening on:\n")
+                for addr in all_addrs:
+                    print(f"{addr}")
 
-            # Use optimal address for the client command
-            optimal_addr = get_optimal_binding_address(port)
-            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
-            print(
-                f"\nRun this from the same folder in another console:\n\n"
-                f"identify-demo {format_flag} -d {optimal_addr_with_peer}\n"
-            )
-            print("Waiting for incoming identify request...")
+                # Use optimal address for the client command
+                optimal_addr = get_optimal_binding_address(port)
+                optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                print(
+                    f"\nRun this from the same folder in another console:\n\n"
+                    f"identify-demo -d {optimal_addr_with_peer}\n"
+                )
+                print("Waiting for incoming identify request...")
 
             # Add a custom handler to show connection events
             async def custom_identify_handler(stream):
