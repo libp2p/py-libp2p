@@ -300,7 +300,7 @@ def main() -> None:
 
     # Determine format: use varint (length-prefixed) if --raw-format is specified,
     # otherwise use raw protobuf format (old format)
-    use_varint_format = args.raw_format
+    use_varint_format = not args.raw_format
 
     try:
         if args.destination:
