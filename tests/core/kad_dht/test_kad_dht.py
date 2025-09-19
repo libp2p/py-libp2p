@@ -77,23 +77,7 @@ async def dht_pair(security_protocol):
 
             # Wait for peer records to be stored (DHT operations complete)
             # This ensures that FIND_NODE operations have completed and peer records are stored
-            # Use a more conservative approach to avoid CI issues
-            
-            try:
-                # Simple wait without complex polling to avoid resource issues
-                await trio.sleep(0.2)
-                
-                # Check if peer records are available, but don't wait if they're not
-                peer_record_a = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
-                peer_record_b = dht_b.host.get_peerstore().get_peer_record(dht_a.host.get_id())
-                
-                if peer_record_a is not None and peer_record_b is not None:
-                    logger.debug("Peer records are ready")
-                else:
-                    logger.debug("Peer records not yet ready, tests may need to handle this")
-                    
-            except Exception as e:
-                logger.warning("Error while checking peer records: %s, continuing anyway", e)
+            await trio.sleep(0.3)
 
             # Return the DHT pair
             yield (dht_a, dht_b)
