@@ -75,6 +75,10 @@ async def dht_pair(security_protocol):
                 "After bootstrap: Node B peers: %s", dht_b.routing_table.get_peer_ids()
             )
 
+            # Wait for peer records to be stored (DHT operations complete)
+            # This ensures that FIND_NODE operations have completed and peer records are stored
+            await trio.sleep(0.3)
+
             # Return the DHT pair
             yield (dht_a, dht_b)
 

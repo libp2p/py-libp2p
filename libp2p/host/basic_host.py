@@ -35,6 +35,7 @@ from libp2p.host.defaults import (
     get_default_protocols,
 )
 from libp2p.host.exceptions import (
+    HostException,
     StreamFailure,
 )
 from libp2p.peer.id import (
@@ -206,8 +207,19 @@ class BasicHost(IHost):
 
         :param protocol_id: protocol id used on stream
         :param stream_handler: a stream handler function
+        :raises HostException: if setting the stream handler fails
         """
-        self.multiselect.add_handler(protocol_id, stream_handler)
+        try:
+            if not protocol_id:
+                raise HostException("Protocol ID cannot be empty")
+            if not stream_handler:
+                raise HostException("Stream handler cannot be None")
+            
+            self.multiselect.add_handler(protocol_id, stream_handler)
+        except HostException:
+            raise
+        except Exception as e:
+            raise HostException(f"Failed to set stream handler: {e}") from e
 
     async def new_stream(
         self,
