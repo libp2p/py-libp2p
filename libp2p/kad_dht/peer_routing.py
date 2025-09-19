@@ -168,6 +168,19 @@ class PeerRouting(IPeerRouting):
         # Start with closest peers from our routing table
         closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
         logger.debug("Local closest peers: %d found", len(closest_peers))
+        
+        # Fallback to connected peers if routing table has insufficient peers
+        MIN_PEERS_THRESHOLD = 5  # Configurable minimum
+        if len(closest_peers) < MIN_PEERS_THRESHOLD:
+            logger.debug("Routing table has insufficient peers (%d < %d), using connected peers as fallback", 
+                        len(closest_peers), MIN_PEERS_THRESHOLD)
+            connected_peers = self.host.get_connected_peers()
+            if connected_peers:
+                # Sort connected peers by distance to target and use as initial query targets
+                fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:count]
+                closest_peers = fallback_peers
+                logger.debug("Using %d connected peers as fallback", len(closest_peers))
+        
         queried_peers: set[ID] = set()
         rounds = 0
 
@@ -387,6 +400,18 @@ class PeerRouting(IPeerRouting):
                     closest_peers = self.routing_table.find_local_closest_peers(
                         target_key, 20
                     )
+                    
+                    # Fallback to connected peers if routing table has insufficient peers
+                    MIN_PEERS_THRESHOLD = 5  # Configurable minimum
+                    if len(closest_peers) < MIN_PEERS_THRESHOLD:
+                        logger.debug("Routing table has insufficient peers (%d < %d) for FIND_NODE response, using connected peers as fallback", 
+                                    len(closest_peers), MIN_PEERS_THRESHOLD)
+                        connected_peers = self.host.get_connected_peers()
+                        if connected_peers:
+                            # Sort connected peers by distance to target and use as response
+                            fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:20]
+                            closest_peers = fallback_peers
+                            logger.debug("Using %d connected peers as fallback for FIND_NODE response", len(closest_peers))
 
                     # Create protobuf response
                     response = Message()
