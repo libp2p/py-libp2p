@@ -141,8 +141,9 @@ class CircuitV2Protocol(Service):
             if self.allow_hop:
                 logger.debug("Registering stream handlers for relay protocol")
                 self.host.set_stream_handler(PROTOCOL_ID, self._handle_hop_stream)
-                self.host.set_stream_handler(STOP_PROTOCOL_ID, self._handle_stop_stream)
-                logger.debug("Stream handlers registered successfully")
+            
+            self.host.set_stream_handler(STOP_PROTOCOL_ID, self._handle_stop_stream)
+            print("Stream handlers registered successfully")
 
             # Signal that we're ready
             self.event_started.set()
@@ -212,7 +213,7 @@ class CircuitV2Protocol(Service):
         """
         retries = 0
         last_error: Any = None
-        backoff_time = 0.2  # Base backoff time in seconds
+        backoff_time = 0.2
 
         while retries < max_retries:
             try:
@@ -238,7 +239,7 @@ class CircuitV2Protocol(Service):
                     retries,
                     max_retries,
                 )
-                await trio.sleep(backoff_time * retries)  # Increased backoff time
+                await trio.sleep(backoff_time * retries)
                 continue
             except (MplexStreamEOF, MplexStreamReset):
                 # Stream closed/reset - no point retrying
@@ -251,15 +252,14 @@ class CircuitV2Protocol(Service):
                     "Read timeout (attempt %d/%d), retrying...", retries, max_retries
                 )
                 if retries < max_retries:
-                    # Wait longer before retry with increasing backoff
-                    await trio.sleep(backoff_time * retries)  # Increased backoff
+                    await trio.sleep(backoff_time * retries)
                 continue
             except Exception as e:
                 logger.error("Unexpected error reading from stream: %s", str(e))
                 last_error = e
                 retries += 1
                 if retries < max_retries:
-                    await trio.sleep(backoff_time * retries)  # Increased backoff
+                    await trio.sleep(backoff_time * retries)
                     continue
                 raise
 
@@ -330,7 +330,7 @@ class CircuitV2Protocol(Service):
                     )
                     await stream.write(response.SerializeToString())
                     await trio.sleep(0.5)
-                    continue 
+                    break 
                 except Exception as e:
                     print(
                         f"Error reading from hop stream from {remote_id}: {str(e)}"
@@ -345,7 +345,7 @@ class CircuitV2Protocol(Service):
                     )
                     await stream.write(response.SerializeToString())
                     await trio.sleep(0.5)  # Longer wait to ensure the message is sent
-                    continue
+                    break
                 # Parse the message
                 try:
                     hop_msg = HopMessage()
@@ -421,38 +421,11 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(stream)
                 return
 
-            # Get the source stream from active relays
-            # peer_id = ID(stop_msg.peer)
-            # if peer_id not in self._active_relays:
-            #     # Use direct attribute access to create status object for error response
-            #     await self._send_stop_status(
-            #         stream,
-            #         StatusCode.CONNECTION_FAILED,
-            #         "No pending relay connection",
-            #     )
-            #     await self._close_stream(stream)
-            #     return
-
-            # src_stream, _ = self._active_relays[peer_id]
-            # self._active_relays[peer_id] = (src_stream, stream)
-
-            # Send success status to both sides
-            # await self._send_status(
-            #     src_stream,
-            #     StatusCode.OK,
-            #     "Connection established",
-            # )
             await self._send_stop_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
             )
-
-            # Start relaying data
-            # async with trio.open_nursery() as nursery:
-            #     nursery.start_soon(self._relay_data, src_stream, stream, peer_id)
-            #     nursery.start_soon(self._relay_data, stream, src_stream, peer_id)
-
         except trio.TooSlowError:
             logger.error("Timeout reading from stop stream")
             await self._send_stop_status(
@@ -594,7 +567,6 @@ class CircuitV2Protocol(Service):
                 # Send STOP CONNECT message
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
-                    # Cast to extended interface with get_remote_peer_id
                     peer=source_addr.to_bytes()
                 )
                 await dst_stream.write(stop_msg.SerializeToString())
