@@ -57,6 +57,13 @@ from libp2p.peer.peerstore import (
     PeerStore,
     create_signed_peer_record,
 )
+from libp2p.peer.persistent_peerstore_factory import (
+    create_persistent_peerstore,
+    create_sqlite_peerstore,
+    create_memory_peerstore,
+    create_leveldb_peerstore,
+    create_rocksdb_peerstore,
+)
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
