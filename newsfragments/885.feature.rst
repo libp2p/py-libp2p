@@ -1,2 +1,2 @@
-Enhanced security by defaulting to loopback address (127.0.0.1) instead of wildcard binding.
-All examples and core modules now use secure default addresses to prevent unintended public exposure.
+Updated all example scripts and core modules to use secure loopback addresses instead of wildcard addresses for network binding. 
+The `get_wildcard_address` function and related logic now utilize all available interfaces safely, improving security and consistency across the codebase.

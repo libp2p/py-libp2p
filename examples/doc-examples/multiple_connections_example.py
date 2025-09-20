@@ -156,7 +156,7 @@ async def example_production_ready_config() -> None:
     # Production-ready connection configuration
     connection_config = ConnectionConfig(
         max_connections_per_peer=3,  # Balance between performance and resource usage
-        connection_timeout=30.0,  # Reasonable timeouta
+        connection_timeout=30.0,  # Reasonable timeout
         load_balancing_strategy="round_robin",  # Simple, predictable strategy
     )
 

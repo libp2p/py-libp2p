@@ -36,12 +36,14 @@ Create a file named ``relay_node.py`` with the following content:
     from libp2p.relay.circuit_v2.transport import CircuitV2Transport
     from libp2p.relay.circuit_v2.config import RelayConfig
     from libp2p.tools.async_service import background_trio_service
+    from libp2p.utils import get_wildcard_address
 
     logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger("relay_node")
 
     async def run_relay():
-        listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/9000")
+        # Use wildcard address to listen on all interfaces
+        listen_addr = get_wildcard_address(9000)
         host = new_host()
 
         config = RelayConfig(
@@ -107,6 +109,7 @@ Create a file named ``destination_node.py`` with the following content:
     from libp2p.relay.circuit_v2.config import RelayConfig
     from libp2p.peer.peerinfo import info_from_p2p_addr
     from libp2p.tools.async_service import background_trio_service
+    from libp2p.utils import get_wildcard_address
 
     logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger("destination_node")
@@ -139,7 +142,8 @@ Create a file named ``destination_node.py`` with the following content:
         Run a simple destination node that accepts connections.
         This is a simplified version that doesn't use the relay functionality.
         """
-        listen_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/9001")
+        # Create a libp2p host - use wildcard address to listen on all interfaces
+        listen_addr = get_wildcard_address(9001)
         host = new_host()
 
         # Configure as a relay receiver (stop)
@@ -252,14 +256,15 @@ Create a file named ``source_node.py`` with the following content:
     from libp2p.peer.peerinfo import info_from_p2p_addr
     from libp2p.tools.async_service import background_trio_service
     from libp2p.relay.circuit_v2.discovery import RelayInfo
+    from libp2p.utils import get_wildcard_address
 
     # Configure logging
     logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger("source_node")
 
     async def run_source(relay_peer_id=None, destination_peer_id=None):
-        # Create a libp2p host
-        listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/9002")
+        # Create a libp2p host - use wildcard address to listen on all interfaces
+        listen_addr = get_wildcard_address(9002)
         host = new_host()
 
         # Configure as a relay client

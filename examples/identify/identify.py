@@ -104,7 +104,9 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
 
                 # Use optimal address for the client command
                 optimal_addr = get_optimal_binding_address(port)
-                optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                optimal_addr_with_peer = (
+                    f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                )
                 print(
                     f"\nRun this from the same folder in another console:\n\n"
                     f"identify-demo -d {optimal_addr_with_peer}\n"
@@ -119,7 +121,9 @@ async def run(port: int, destination: str, use_varint_format: bool = True) -> No
 
                 # Use optimal address for the client command
                 optimal_addr = get_optimal_binding_address(port)
-                optimal_addr_with_peer = f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                optimal_addr_with_peer = (
+                    f"{optimal_addr}/p2p/{host_a.get_id().to_string()}"
+                )
                 print(
                     f"\nRun this from the same folder in another console:\n\n"
                     f"identify-demo -d {optimal_addr_with_peer}\n"
