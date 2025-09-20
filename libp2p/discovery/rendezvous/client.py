@@ -284,17 +284,16 @@ class RendezvousClient:
                     # Exponential backoff on errors (cap at ~4 hours)
                     if error_count > 7:
                         error_count = 7
-                    backoff_minutes = 2 ** error_count
-                    # Add jitter
-                    jitter = random.randint(0, backoff_minutes * 60)
-                    refresh_delay = 5 * 60 + jitter  # 5 min base + jitter
+                    backoff = 2 << error_count
+                    jitter_ms = random.randint(0, backoff * 60000)
+                    jitter_seconds = jitter_ms / 1000.0
+                    refresh_delay = 5 * 60 + jitter_seconds
                 else:
-                    # Normal refresh: 30 seconds before TTL expires
-                    refresh_delay = max(ttl - 30, 60)
+                    refresh_delay = ttl - 30
                 
                 logger.debug(
                     f"Waiting {refresh_delay}s before refreshing registration "
-                    f"for namespace '{namespace}'"
+                    f"for namespace '{namespace}' (error_count={error_count})"
                 )
                 
                 await trio.sleep(refresh_delay)
