@@ -63,7 +63,6 @@ class RendezvousClient:
         """
         self.host = host
         self.rendezvous_peer = rendezvous_peer
-        self._refresh_nurseries: dict[str, trio.Nursery] = {}
         self._refresh_cancel_scopes: dict[str, trio.CancelScope] = {}
         
     async def register(self, namespace: str, ttl: int = 7200) -> float:
@@ -113,8 +112,8 @@ class RendezvousClient:
         
         actual_ttl = resp.ttl
         
-        # TODO: Start auto-refresh using trio nursery
-        # await self._start_refresh_task(namespace, ttl)
+        # Start auto-refresh
+        await self._start_refresh_task(namespace, actual_ttl)
         
         logger.info(f"Registered in namespace '{namespace}' with TTL {actual_ttl}s")
         return actual_ttl
@@ -126,8 +125,8 @@ class RendezvousClient:
         Args:
             namespace: Namespace to unregister from
         """
-        # TODO: Stop refresh task
-        # await self._stop_refresh_task(namespace)
+        # Stop refresh task
+        await self._stop_refresh_task(namespace)
         
         # Send unregister message
         msg = create_unregister_message(namespace, self.host.get_id())
@@ -249,27 +248,31 @@ class RendezvousClient:
             if stream:
                 await stream.close()
     
-    # TODO: Implement refresh methods using trio
-    """
     async def _start_refresh_task(self, namespace: str, ttl: int) -> None:
-        # Start automatic registration refresh for a namespace.
+        """Start automatic registration refresh for a namespace using trio."""
         await self._stop_refresh_task(namespace)
         
-        task = asyncio.create_task(self._refresh_loop(namespace, ttl))
-        self._refresh_tasks[namespace] = task
-    
+        cancel_scope = trio.CancelScope()
+        
+        async def refresh_task():
+            with cancel_scope:
+                await self._refresh_loop(namespace, ttl)
+        
+        # Store the cancel scope for later cancellation
+        self._refresh_cancel_scopes[namespace] = cancel_scope
+        
+        # Start the refresh task in the trio nursery
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(refresh_task)
+
     async def _stop_refresh_task(self, namespace: str) -> None:
-        # Stop automatic registration refresh for a namespace.
-        if namespace in self._refresh_tasks:
-            task = self._refresh_tasks.pop(namespace)
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        """Stop automatic registration refresh for a namespace using trio."""
+        if namespace in self._refresh_cancel_scopes:
+            cancel_scope = self._refresh_cancel_scopes.pop(namespace)
+            cancel_scope.cancel()
     
     async def _refresh_loop(self, namespace: str, ttl: int) -> None:
-        # Automatic registration refresh loop.
+        """Automatic registration refresh loop using trio."""
         error_count = 0
         
         while True:
@@ -291,7 +294,7 @@ class RendezvousClient:
                     f"for namespace '{namespace}'"
                 )
                 
-                await asyncio.sleep(refresh_delay)
+                await trio.sleep(refresh_delay)
                 
                 # Refresh registration
                 addrs = self.host.get_addrs()
@@ -319,23 +322,15 @@ class RendezvousClient:
                 logger.debug(f"Refreshed registration for namespace '{namespace}'")
                 error_count = 0
                 
-            except asyncio.CancelledError:
+            except trio.Cancelled:
                 logger.debug(f"Refresh task cancelled for namespace '{namespace}'")
                 break
             except Exception as e:
                 logger.error(f"Error refreshing registration for '{namespace}': {e}")
                 error_count += 1
-    """
     
     async def close(self) -> None:
         """Close the client and stop all refresh tasks."""
-        # TODO: Implement with trio
-        pass
-        # tasks = list(self._refresh_tasks.values())
-        # self._refresh_tasks.clear()
-        # 
-        # for task in tasks:
-        #     task.cancel()
-        # 
-        # if tasks:
-        #     await asyncio.gather(*tasks, return_exceptions=True)
+        # Cancel all refresh tasks
+        for namespace in list(self._refresh_cancel_scopes.keys()):
+            await self._stop_refresh_task(namespace)
