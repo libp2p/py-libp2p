@@ -15,7 +15,7 @@ This example demonstrates how to create a chat application using libp2p's PubSub
     2025-04-06 23:59:17,471 - pubsub-demo - INFO - Your selected topic is: pubsub-chat
     2025-04-06 23:59:17,472 - pubsub-demo - INFO - Using random available port: 33269
     2025-04-06 23:59:17,490 - pubsub-demo - INFO - Node started with peer ID: QmcJnocH1d1tz3Zp4MotVDjNfNFawXHw2dpB9tMYGTXJp7
-    2025-04-06 23:59:17,490 - pubsub-demo - INFO - Listening on: /ip4/0.0.0.0/tcp/33269
+    2025-04-06 23:59:17,490 - pubsub-demo - INFO - Listening on: /ip4/127.0.0.1/tcp/33269
     2025-04-06 23:59:17,490 - pubsub-demo - INFO - Initializing PubSub and GossipSub...
     2025-04-06 23:59:17,491 - pubsub-demo - INFO - Pubsub and GossipSub services started.
     2025-04-06 23:59:17,491 - pubsub-demo - INFO - Pubsub ready.
@@ -35,7 +35,7 @@ Copy the line that starts with ``pubsub-demo -d``, open a new terminal and paste
     2025-04-07 00:00:59,846 - pubsub-demo - INFO - Your selected topic is: pubsub-chat
     2025-04-07 00:00:59,846 - pubsub-demo - INFO - Using random available port: 51977
     2025-04-07 00:00:59,864 - pubsub-demo - INFO - Node started with peer ID: QmYQKCm95Ut1aXsjHmWVYqdaVbno1eKTYC8KbEVjqUaKaQ
-    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Listening on: /ip4/0.0.0.0/tcp/51977
+    2025-04-07 00:00:59,864 - pubsub-demo - INFO - Listening on: /ip4/127.0.0.1/tcp/51977
     2025-04-07 00:00:59,864 - pubsub-demo - INFO - Initializing PubSub and GossipSub...
     2025-04-07 00:00:59,864 - pubsub-demo - INFO - Pubsub and GossipSub services started.
     2025-04-07 00:00:59,865 - pubsub-demo - INFO - Pubsub ready.

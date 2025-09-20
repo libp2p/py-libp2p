@@ -65,7 +65,7 @@ async def test_prune_backoff():
 @pytest.mark.trio
 async def test_unsubscribe_backoff():
     async with PubsubFactory.create_batch_with_gossipsub(
-        2, heartbeat_interval=1, prune_back_off=1, unsubscribe_back_off=2
+        2, heartbeat_interval=0.5, prune_back_off=2, unsubscribe_back_off=4
     ) as pubsubs:
         gsub0 = pubsubs[0].router
         gsub1 = pubsubs[1].router
