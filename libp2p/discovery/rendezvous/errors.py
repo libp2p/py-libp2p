@@ -7,7 +7,7 @@ from .pb.rendezvous_pb2 import Message
 
 class RendezvousError(Exception):
     """Base exception for rendezvous protocol errors."""
-    
+
     def __init__(self, status: Message.ResponseStatus, message: str = ""):
         self.status = status
         self.message = message
@@ -16,54 +16,56 @@ class RendezvousError(Exception):
 
 class InvalidNamespaceError(RendezvousError):
     """Raised when namespace is invalid."""
-    
+
     def __init__(self, message: str = "Invalid namespace"):
         super().__init__(Message.E_INVALID_NAMESPACE, message)
 
 
 class InvalidPeerInfoError(RendezvousError):
     """Raised when peer information is invalid."""
-    
+
     def __init__(self, message: str = "Invalid peer info"):
         super().__init__(Message.E_INVALID_PEER_INFO, message)
 
 
 class InvalidTTLError(RendezvousError):
     """Raised when TTL is invalid."""
-    
+
     def __init__(self, message: str = "Invalid TTL"):
         super().__init__(Message.E_INVALID_TTL, message)
 
 
 class InvalidCookieError(RendezvousError):
     """Raised when discovery cookie is invalid."""
-    
+
     def __init__(self, message: str = "Invalid cookie"):
         super().__init__(Message.E_INVALID_COOKIE, message)
 
 
 class NotAuthorizedError(RendezvousError):
     """Raised when operation is not authorized."""
-    
+
     def __init__(self, message: str = "Not authorized"):
         super().__init__(Message.E_NOT_AUTHORIZED, message)
 
 
 class InternalError(RendezvousError):
     """Raised when server encounters internal error."""
-    
+
     def __init__(self, message: str = "Internal server error"):
         super().__init__(Message.E_INTERNAL_ERROR, message)
 
 
 class UnavailableError(RendezvousError):
     """Raised when service is unavailable."""
-    
+
     def __init__(self, message: str = "Service unavailable"):
         super().__init__(Message.E_UNAVAILABLE, message)
 
 
-def status_to_exception(status: Message.ResponseStatus, message: str = "") -> RendezvousError:
+def status_to_exception(
+    status: Message.ResponseStatus, message: str = ""
+) -> RendezvousError:
     """Convert a protobuf status to the appropriate exception."""
     if status == Message.E_INVALID_NAMESPACE:
         return InvalidNamespaceError(message)

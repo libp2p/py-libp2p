@@ -2,40 +2,34 @@
 Message construction helpers for rendezvous protocol.
 """
 
-from typing import List
+from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID as PeerID
-from multiaddr import Multiaddr
 
 from .pb.rendezvous_pb2 import Message
 
 
 def create_register_message(
-    namespace: str, 
-    peer_id: PeerID, 
-    addrs: List[Multiaddr], 
-    ttl: int
+    namespace: str, peer_id: PeerID, addrs: list[Multiaddr], ttl: int
 ) -> Message:
     """Create a REGISTER message."""
     msg = Message()
     msg.type = Message.REGISTER
-    
+
     # Create PeerInfo
     peer_info = msg.register.peer
     peer_info.id = peer_id.to_bytes()
     for addr in addrs:
         peer_info.addrs.append(addr.to_bytes())
-    
+
     msg.register.ns = namespace
     msg.register.ttl = ttl
-    
+
     return msg
 
 
 def create_register_response_message(
-    status: Message.ResponseStatus, 
-    status_text: str = "", 
-    ttl: int = 0
+    status: Message.ResponseStatus, status_text: str = "", ttl: int = 0
 ) -> Message:
     """Create a REGISTER_RESPONSE message."""
     msg = Message()
@@ -56,9 +50,7 @@ def create_unregister_message(namespace: str, peer_id: PeerID) -> Message:
 
 
 def create_discover_message(
-    namespace: str, 
-    limit: int = 0, 
-    cookie: bytes = b""
+    namespace: str, limit: int = 0, cookie: bytes = b""
 ) -> Message:
     """Create a DISCOVER message."""
     msg = Message()
@@ -70,10 +62,10 @@ def create_discover_message(
 
 
 def create_discover_response_message(
-    registrations: List[Message.Register],
+    registrations: list[Message.Register],
     cookie: bytes = b"",
     status: Message.ResponseStatus = Message.OK,
-    status_text: str = ""
+    status_text: str = "",
 ) -> Message:
     """Create a DISCOVER_RESPONSE message."""
     msg = Message()
@@ -85,7 +77,7 @@ def create_discover_response_message(
     return msg
 
 
-def parse_peer_info(peer_info: Message.PeerInfo) -> tuple[PeerID, List[Multiaddr]]:
+def parse_peer_info(peer_info: Message.PeerInfo) -> tuple[PeerID, list[Multiaddr]]:
     """Parse PeerInfo from protobuf message."""
     peer_id = PeerID(peer_info.id)
     addrs = [Multiaddr(addr_bytes) for addr_bytes in peer_info.addrs]

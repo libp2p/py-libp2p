@@ -23,12 +23,12 @@ from .errors import (
 
 __all__ = [
     "RendezvousClient",
-    "RendezvousDiscovery", 
+    "RendezvousDiscovery",
     "RendezvousService",
     "config",
     "RendezvousError",
     "InvalidNamespaceError",
-    "InvalidPeerInfoError", 
+    "InvalidPeerInfoError",
     "InvalidTTLError",
     "InvalidCookieError",
     "NotAuthorizedError",
