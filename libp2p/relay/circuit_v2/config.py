@@ -46,6 +46,35 @@ MAX_AUTO_RELAY_ATTEMPTS = 3
 RESERVATION_REFRESH_THRESHOLD = 0.8  # Refresh at 80% of TTL
 MAX_CONCURRENT_RESERVATIONS = 2
 
+# Timeout constants for different components
+DEFAULT_DISCOVERY_STREAM_TIMEOUT = 10  # seconds
+DEFAULT_PEER_PROTOCOL_TIMEOUT = 5  # seconds
+DEFAULT_PROTOCOL_READ_TIMEOUT = 15  # seconds
+DEFAULT_PROTOCOL_WRITE_TIMEOUT = 15  # seconds
+DEFAULT_PROTOCOL_CLOSE_TIMEOUT = 10  # seconds
+DEFAULT_DCUTR_READ_TIMEOUT = 30  # seconds
+DEFAULT_DCUTR_WRITE_TIMEOUT = 30  # seconds
+DEFAULT_DIAL_TIMEOUT = 10  # seconds
+
+
+@dataclass
+class TimeoutConfig:
+    """Timeout configuration for different Circuit Relay v2 components."""
+
+    # Discovery timeouts
+    discovery_stream_timeout: int = DEFAULT_DISCOVERY_STREAM_TIMEOUT
+    peer_protocol_timeout: int = DEFAULT_PEER_PROTOCOL_TIMEOUT
+
+    # Core protocol timeouts
+    protocol_read_timeout: int = DEFAULT_PROTOCOL_READ_TIMEOUT
+    protocol_write_timeout: int = DEFAULT_PROTOCOL_WRITE_TIMEOUT
+    protocol_close_timeout: int = DEFAULT_PROTOCOL_CLOSE_TIMEOUT
+
+    # DCUtR timeouts
+    dcutr_read_timeout: int = DEFAULT_DCUTR_READ_TIMEOUT
+    dcutr_write_timeout: int = DEFAULT_DCUTR_WRITE_TIMEOUT
+    dial_timeout: int = DEFAULT_DIAL_TIMEOUT
+
 
 # Relay roles enum
 class RelayRole(Flag):
@@ -82,6 +111,9 @@ class RelayConfig:
     reservation_ttl: int = DEFAULT_RESERVATION_TTL
     max_circuit_duration: int = DEFAULT_MAX_CIRCUIT_DURATION
     max_circuit_bytes: int = DEFAULT_MAX_CIRCUIT_BYTES
+
+    # Timeout configuration
+    timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
 
     # ---------------------------------------------------------------------
     # Backwards-compat boolean helpers.  Existing code that still accesses
