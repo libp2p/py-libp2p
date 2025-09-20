@@ -53,16 +53,18 @@ class RendezvousClient:
     a rendezvous point.
     """
     
-    def __init__(self, host: IHost, rendezvous_peer: PeerID):
+    def __init__(self, host: IHost, rendezvous_peer: PeerID, enable_refresh: bool = True):
         """
         Initialize rendezvous client.
         
         Args:
             host: The libp2p host
             rendezvous_peer: Peer ID of the rendezvous server
+            enable_refresh: Whether to enable automatic refresh
         """
         self.host = host
         self.rendezvous_peer = rendezvous_peer
+        self.enable_refresh = enable_refresh
         self._refresh_cancel_scopes: dict[str, trio.CancelScope] = {}
         
     async def register(self, namespace: str, ttl: int = 7200) -> float:
@@ -112,8 +114,9 @@ class RendezvousClient:
         
         actual_ttl = resp.ttl
         
-        # Start auto-refresh
-        await self._start_refresh_task(namespace, actual_ttl)
+        # Start auto-refresh only if enabled
+        if self.enable_refresh:
+            await self._start_refresh_task(namespace, actual_ttl)
         
         logger.info(f"Registered in namespace '{namespace}' with TTL {actual_ttl}s")
         return actual_ttl

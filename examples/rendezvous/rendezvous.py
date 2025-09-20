@@ -11,6 +11,8 @@ This example shows how to:
 import argparse
 import logging
 import sys
+import traceback
+
 from pathlib import Path
 from typing import List
 
@@ -50,7 +52,7 @@ async def run_rendezvous_server(port: int = 0):
         print(f"Listening on: {actual_addrs[0] if actual_addrs else 'no addresses'}")
         print("\nTo connect a client, use:")
         if actual_addrs:
-            print(f"  python rendezvous.py client {actual_addrs[0]}")
+            print(f"  python rendezvous.py --mode client --address {actual_addrs[0]}")
         print("\nPress Ctrl+C to stop...")
         
         try:
@@ -88,19 +90,15 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
             return
         
         # Create rendezvous discovery
-        discovery = RendezvousDiscovery(host, server_info.peer_id)
+        discovery = RendezvousDiscovery(host, server_info.peer_id, enable_refresh=enable_refresh)
 
         try:
             print(f"Client started with peer ID: {host.get_id()}")
             
             # Register under a namespace with optional auto-refresh
             print(f"Registering in namespace '{namespace}'...")
-            if enable_refresh:
-                ttl = await discovery.advertise(namespace, ttl=60, nursery=nursery)
-                print(f"✓ Registered with TTL {ttl}s (auto-refresh enabled)")
-            else:
-                ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
-                print(f"✓ Registered with TTL {ttl}s")
+            ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
+            print(f"✓ Registered with TTL {ttl}s")
             
             # Wait a moment for registration to propagate
             await trio.sleep(1)
@@ -139,7 +137,6 @@ async def run_client_example(server_addr: str, namespace: str = config.DEFAULT_N
             
         except Exception as e:
             print(f"Error: {e}")
-            import traceback
             traceback.print_exc()
         finally:
             await discovery.close()

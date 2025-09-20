@@ -77,16 +77,17 @@ class RendezvousDiscovery:
     handled automatically by the underlying RendezvousClient.
     """
     
-    def __init__(self, host: IHost, rendezvous_peer: PeerID):
+    def __init__(self, host: IHost, rendezvous_peer: PeerID, enable_refresh: bool = True):
         """
         Initialize rendezvous discovery.
         
         Args:
             host: The libp2p host
             rendezvous_peer: Peer ID of the rendezvous server
+            enable_refresh: Whether to enable automatic refresh
         """
         self.host = host
-        self.client = RendezvousClient(host, rendezvous_peer)
+        self.client = RendezvousClient(host, rendezvous_peer, enable_refresh)
         self.caches: Dict[str, PeerCache] = {}
         self._discover_locks: Dict[str, trio.Lock] = {}
         
