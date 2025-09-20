@@ -2,7 +2,6 @@
 Base datastore interface for persistent peer storage.
 
 This module defines the abstract interface that all datastore implementations
-must follow, similar to the go-datastore interface in go-libp2p.
 """
 
 from abc import ABC, abstractmethod
