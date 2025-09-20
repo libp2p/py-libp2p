@@ -18,7 +18,6 @@ from .config import (
     MAX_PEER_ADDRESS_LENGTH,
     MAX_REGISTRATIONS,
     MAX_DISCOVER_LIMIT,
-    CLEANUP_INTERVAL,
 )
 from .errors import (
     InvalidNamespaceError,

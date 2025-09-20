@@ -67,7 +67,7 @@ class RendezvousClient:
         self.enable_refresh = enable_refresh
         self._refresh_cancel_scopes: dict[str, trio.CancelScope] = {}
         
-    async def register(self, namespace: str, ttl: int = 7200) -> float:
+    async def register(self, namespace: str, ttl: int = DEFAULT_TTL) -> float:
         """
         Register this peer under a namespace.
         
@@ -83,6 +83,9 @@ class RendezvousClient:
         """
         if ttl < MIN_TTL:
             raise ValueError(f"TTL too short, minimum is {MIN_TTL} seconds")
+        
+        if ttl > MAX_TTL:
+            raise ValueError(f"TTL too long, maximum is {MAX_TTL} seconds")
         
         if len(namespace) > MAX_NAMESPACE_LENGTH:
             raise ValueError(f"Namespace too long, maximum is {MAX_NAMESPACE_LENGTH}")
@@ -200,11 +203,18 @@ class RendezvousClient:
         """
         stream = None
         try:
-            # Open stream to rendezvous server
-            stream = await self.host.new_stream(
-                self.rendezvous_peer, 
-                [RENDEZVOUS_PROTOCOL]
-            )
+            # Open stream to rendezvous server with timeout
+            with trio.move_on_after(DEFAULT_TIMEOUT) as cancel_scope:
+                stream = await self.host.new_stream(
+                    self.rendezvous_peer, 
+                    [RENDEZVOUS_PROTOCOL]
+                )
+            
+            if cancel_scope.cancelled_caught:
+                raise RendezvousError(
+                    Message.E_INTERNAL_ERROR,
+                    f"Connection timeout after {DEFAULT_TIMEOUT}s"
+                )
             
             # Serialize and send message with varint length prefix
             proto_bytes = message.SerializeToString()
@@ -214,33 +224,41 @@ class RendezvousClient:
             if not expect_response:
                 return None
             
-            # Read response length
-            length_bytes = b""
-            while True:
-                b = await stream.read(1)
-                if not b:
-                    raise RendezvousError(
-                        Message.E_INTERNAL_ERROR,
-                        "Connection closed while reading response length"
-                    )
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
+            # Read response with timeout
+            with trio.move_on_after(DEFAULT_TIMEOUT) as cancel_scope:
+                # Read response length
+                length_bytes = b""
+                while True:
+                    b = await stream.read(1)
+                    if not b:
+                        raise RendezvousError(
+                            Message.E_INTERNAL_ERROR,
+                            "Connection closed while reading response length"
+                        )
+                    length_bytes += b
+                    if b[0] & 0x80 == 0:
+                        break
+                
+                response_length = varint.decode_bytes(length_bytes)
+                
+                # Read response data
+                response_bytes = b""
+                remaining = response_length
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        raise RendezvousError(
+                            Message.E_INTERNAL_ERROR,
+                            "Connection closed while reading response data"
+                        )
+                    response_bytes += chunk
+                    remaining -= len(chunk)
             
-            response_length = varint.decode_bytes(length_bytes)
-            
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    raise RendezvousError(
-                        Message.E_INTERNAL_ERROR,
-                        "Connection closed while reading response data"
-                    )
-                response_bytes += chunk
-                remaining -= len(chunk)
+            if cancel_scope.cancelled_caught:
+                raise RendezvousError(
+                    Message.E_INTERNAL_ERROR,
+                    f"Response timeout after {DEFAULT_TIMEOUT}s"
+                )
             
             # Parse response
             response = Message()

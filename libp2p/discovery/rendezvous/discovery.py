@@ -16,7 +16,6 @@ from libp2p.peer.peerinfo import PeerInfo
 from .client import RendezvousClient
 from .config import (
     DEFAULT_CACHE_TTL,
-    MAX_CACHE_SIZE,
     DEFAULT_DISCOVER_LIMIT,
     MAX_DISCOVER_LIMIT,
     DEFAULT_TTL,
@@ -91,13 +90,13 @@ class RendezvousDiscovery:
         self.caches: Dict[str, PeerCache] = {}
         self._discover_locks: Dict[str, trio.Lock] = {}
         
-    async def advertise(self, namespace: str, ttl: int = 7200) -> float:
+    async def advertise(self, namespace: str, ttl: int = DEFAULT_TTL) -> float:
         """
         Advertise this peer under a namespace.
         
         Args:
             namespace: Namespace to advertise under
-            ttl: Time-to-live in seconds
+            ttl: Time-to-live in seconds (default 2 hours)
             
         Returns:
             Actual TTL granted by the server
@@ -108,7 +107,6 @@ class RendezvousDiscovery:
         self, 
         namespace: str, 
         limit: int = DEFAULT_DISCOVER_LIMIT,
-        timeout: float = 30.0,
         force_refresh: bool = False
     ) -> AsyncIterator[PeerInfo]:
         """
