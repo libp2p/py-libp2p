@@ -1,5 +1,5 @@
 Rendezvous Protocol Demo
-=======================
+========================
 
 This example demonstrates the **rendezvous protocol** for peer discovery in libp2p networks. The rendezvous protocol allows peers to register under namespaces and discover other peers within the same namespace, facilitating peer-to-peer communication without requiring direct connections.
 
@@ -223,5 +223,5 @@ API Reference
 
 For detailed API documentation, see:
 
-- :doc:`libp2p.discovery.rst` - Discovery protocol interfaces
+- :doc:`libp2p.discovery` - Discovery protocol interfaces
 - :doc:`libp2p.discovery.rendezvous` - Rendezvous implementation details
