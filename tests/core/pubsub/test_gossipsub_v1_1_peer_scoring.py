@@ -297,23 +297,34 @@ class TestGossipSubScoringIntegration:
             await trio.sleep(0.2)
 
             # Test gossip filtering
-            gsub0 = gsubs[0]
+            gsub0 = cast(GossipSub, gsubs[0])
             peer1_id = hosts[1].get_id()
             peer2_id = hosts[2].get_id()
+
+            # Remove peers from mesh to reset their scores to 0.0
+            if topic in gsub0.mesh:
+                gsub0.mesh[topic].discard(peer1_id)
+                gsub0.mesh[topic].discard(peer2_id)
+            # Reset their time_in_mesh scores
+            if gsub0.scorer is not None:
+                scorer = cast(PeerScorer, gsub0.scorer)
+                scorer.time_in_mesh[peer1_id][topic] = 0.0
+                scorer.time_in_mesh[peer2_id][topic] = 0.0
 
             # Initially both peers should be filtered out
             assert isinstance(gsub0, GossipSub)
             assert gsub0.scorer is not None
-            assert not gsub0.scorer.allow_gossip(peer1_id, [topic])
-            assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+            scorer = cast(PeerScorer, gsub0.scorer)
+            assert not scorer.allow_gossip(peer1_id, [topic])
+            assert not scorer.allow_gossip(peer2_id, [topic])
 
             # Increase peer1's score
-            gsub0.scorer.on_join_mesh(peer1_id, topic)
-            gsub0.scorer.on_heartbeat()
+            scorer.on_join_mesh(peer1_id, topic)
+            scorer.on_heartbeat()
 
             # Only peer1 should be allowed for gossip
-            assert gsub0.scorer.allow_gossip(peer1_id, [topic])
-            assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+            assert scorer.allow_gossip(peer1_id, [topic])
+            assert not scorer.allow_gossip(peer2_id, [topic])
 
     @pytest.mark.trio
     async def test_graylist_gate(self):
