@@ -12,7 +12,7 @@ import pytest
 import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.score import ScoreParams, TopicScoreParams
+from libp2p.pubsub.score import PeerScorer, ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import IDFactory, PubsubFactory
 
@@ -50,15 +50,16 @@ class TestOpportunisticGrafting:
             await trio.sleep(0.2)
 
             # Set up mesh with some peers having different scores
-            gsub0 = gsubs[0]
+            gsub0 = cast(GossipSub, gsubs[0])
             if gsub0.scorer:
+                scorer = cast(PeerScorer, gsub0.scorer)
                 # Give peers different scores
                 for i, host in enumerate(hosts[1:], 1):
                     peer_id = host.get_id()
                     # Give later peers higher scores
                     for _ in range(i):
-                        gsub0.scorer.on_join_mesh(peer_id, topic)
-                        gsub0.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Manually add some peers to mesh to simulate existing mesh
                 gsub0.mesh[topic] = {hosts[1].get_id(), hosts[2].get_id()}
@@ -82,12 +83,12 @@ class TestOpportunisticGrafting:
             1, score_params=score_params, heartbeat_interval=0.1
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_median_calculation"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs for testing
                 fake_peers = [IDFactory() for _ in range(5)]
 
@@ -97,17 +98,18 @@ class TestOpportunisticGrafting:
                 # Give peers different scores
                 for i, peer_id in enumerate(fake_peers[:3]):
                     for _ in range(i + 1):  # Scores: 1, 2, 3
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Give candidate peers higher scores
                 for i, peer_id in enumerate(fake_peers[3:], 4):  # Scores: 4, 5
                     for _ in range(i):
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Mock peer_topics to include all peers
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
 
                 # Mock peer_protocol
                 for peer_id in fake_peers:
@@ -142,26 +144,28 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_degree_low_condition"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs
                 fake_peers = [IDFactory() for _ in range(5)]
 
-                # Test with mesh size < degree_low (should not do opportunistic grafting)
+                # Test with mesh size < degree_low
+                # (should not do opportunistic grafting)
                 gsub.mesh[topic] = {fake_peers[0]}  # Only 1 peer, degree_low=2
 
                 # Give all peers high scores
                 for peer_id in fake_peers:
                     for _ in range(5):
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 
@@ -210,12 +214,12 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_exception_handling"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs
                 fake_peers = [IDFactory() for _ in range(3)]
 
@@ -223,13 +227,14 @@ class TestOpportunisticGrafting:
                 gsub.mesh[topic] = {fake_peers[0], fake_peers[1]}
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 
                 # Mock scorer.score to raise exception
-                original_score = gsub.scorer.score
-                gsub.scorer.score = MagicMock(
+                original_score = scorer.score
+                scorer.score = MagicMock(
                     side_effect=Exception("Score calculation error")
                 )
 
@@ -241,7 +246,7 @@ class TestOpportunisticGrafting:
                 assert isinstance(peers_to_prune, dict)
 
                 # Restore original score method
-                gsub.scorer.score = original_score
+                scorer.score = original_score
 
     @pytest.mark.trio
     async def test_opportunistic_grafting_limits_candidates(self):
@@ -259,12 +264,12 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_candidate_limits"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create many fake peer IDs
                 fake_peers = [IDFactory() for _ in range(10)]
 
@@ -274,11 +279,12 @@ class TestOpportunisticGrafting:
                 # Give all peers high scores
                 for peer_id in fake_peers:
                     for _ in range(5):
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 
@@ -310,12 +316,12 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_empty_mesh"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs
                 fake_peers = [IDFactory() for _ in range(3)]
 
@@ -325,11 +331,12 @@ class TestOpportunisticGrafting:
                 # Give all peers high scores
                 for peer_id in fake_peers:
                     for _ in range(5):
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 
@@ -362,12 +369,12 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_single_peer_mesh"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs
                 fake_peers = [IDFactory() for _ in range(3)]
 
@@ -375,16 +382,17 @@ class TestOpportunisticGrafting:
                 gsub.mesh[topic] = {fake_peers[0]}
 
                 # Give peers different scores
-                gsub.scorer.on_join_mesh(fake_peers[0], topic)
-                gsub.scorer.on_heartbeat()  # Score = 1.0
+                scorer.on_join_mesh(fake_peers[0], topic)
+                scorer.on_heartbeat()  # Score = 1.0
 
                 for peer_id in fake_peers[1:]:
                     for _ in range(3):  # Higher scores
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 
@@ -431,15 +439,16 @@ class TestOpportunisticGrafting:
             await trio.sleep(0.2)
 
             # Set up different scores for peers
-            gsub0 = gsubs[0]
+            gsub0 = cast(GossipSub, gsubs[0])
             if gsub0.scorer:
+                scorer = cast(PeerScorer, gsub0.scorer)
                 # Give peers different scores
                 for i, host in enumerate(hosts[1:], 1):
                     peer_id = host.get_id()
                     # Give later peers higher scores
                     for _ in range(i):
-                        gsub0.scorer.on_join_mesh(peer_id, topic)
-                        gsub0.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Manually set up mesh
                 gsub0.mesh[topic] = {hosts[1].get_id(), hosts[2].get_id()}
@@ -477,12 +486,12 @@ class TestOpportunisticGrafting:
             heartbeat_interval=0.1,
         ) as pubsubs:
             gsub = cast(GossipSub, pubsubs[0].router)
-            host = pubsubs[0].host
 
             topic = "test_behavior_penalty"
             await pubsubs[0].subscribe(topic)
 
             if gsub.scorer:
+                scorer = cast(PeerScorer, gsub.scorer)
                 # Create fake peer IDs
                 fake_peers = [IDFactory() for _ in range(4)]
 
@@ -492,15 +501,16 @@ class TestOpportunisticGrafting:
                 # Give all peers high base scores
                 for peer_id in fake_peers:
                     for _ in range(3):
-                        gsub.scorer.on_join_mesh(peer_id, topic)
-                        gsub.scorer.on_heartbeat()
+                        scorer.on_join_mesh(peer_id, topic)
+                        scorer.on_heartbeat()
 
                 # Apply behavior penalty to some peers
-                gsub.scorer.penalize_behavior(fake_peers[2], 2.0)  # High penalty
-                gsub.scorer.penalize_behavior(fake_peers[3], 0.5)  # Low penalty
+                scorer.penalize_behavior(fake_peers[2], 2.0)  # High penalty
+                scorer.penalize_behavior(fake_peers[3], 0.5)  # Low penalty
 
                 # Mock peer_topics and peer_protocol
-                gsub.pubsub.peer_topics[topic] = set(fake_peers)
+                if gsub.pubsub is not None:
+                    gsub.pubsub.peer_topics[topic] = set(fake_peers)
                 for peer_id in fake_peers:
                     gsub.peer_protocol[peer_id] = gsub.protocols[0]
 

@@ -46,7 +46,8 @@ class TestScoreGates:
 
             # Mock write_msg to capture sent messages
             mock_write_msg = AsyncMock()
-            gsub0.pubsub.write_msg = mock_write_msg
+            if gsub0.pubsub is not None:
+                gsub0.pubsub.write_msg = mock_write_msg
 
             # Create a message to publish
             msg = rpc_pb2.Message(
@@ -403,7 +404,9 @@ class TestScoreGates:
                 # With negative infinite gossip threshold, all peers should be allowed
                 assert gsub0.scorer.allow_gossip(peer_id, topics)
 
-                # With negative infinite graylist threshold, no peer should be graylisted
+                # With negative infinite graylist threshold
+                # (should never happen in practice)
+                # no peer should be graylisted
                 assert not gsub0.scorer.is_graylisted(peer_id, topics)
 
                 # With infinite PX threshold, no peer should be allowed for PX

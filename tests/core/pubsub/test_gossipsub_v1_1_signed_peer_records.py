@@ -253,11 +253,12 @@ class TestGossipSubSignedPeerRecords:
 
             # Mock peerstore to return existing peer info
             assert gsub0.pubsub is not None
+            pubsub = gsub0.pubsub
             mock_peer_info = PeerInfo(host1.get_id(), host1.get_addrs())
             mock_peerstore = MagicMock()
             mock_peerstore.peer_info.return_value = mock_peer_info
-            gsub0.pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
-            gsub0.pubsub.host.connect = AsyncMock()
+            pubsub.host.get_peerstore = MagicMock(return_value=mock_peerstore)
+            pubsub.host.connect = AsyncMock()
 
             # Create PX peer info without signed record for a peer that's not connected
             px_peer = rpc_pb2.PeerInfo()
@@ -272,7 +273,7 @@ class TestGossipSubSignedPeerRecords:
 
             # Verify that host connect was called with existing peer info
             assert gsub0.pubsub is not None
-            gsub0.pubsub.host.connect.assert_called_once_with(mock_peer_info)
+            pubsub.host.connect.assert_called_once_with(mock_peer_info)
 
     @pytest.mark.trio
     async def test_do_px_no_existing_peer_info(self):

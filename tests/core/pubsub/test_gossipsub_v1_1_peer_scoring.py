@@ -422,13 +422,14 @@ class TestGossipSubScoringIntegration:
             gsub0 = gsubs[0]
             assert isinstance(gsub0, GossipSub)
             assert gsub0.scorer is not None
+            scorer = cast(PeerScorer, gsub0.scorer)
             # Give some peers higher scores
             for i, host in enumerate(hosts[1:], 1):
                 peer_id = host.get_id()
-                gsub0.scorer.on_join_mesh(peer_id, topic)
+                scorer.on_join_mesh(peer_id, topic)
                 # Give later peers higher scores
                 for _ in range(i):
-                    gsub0.scorer.on_heartbeat()
+                    scorer.on_heartbeat()
 
             # Trigger mesh heartbeat to test opportunistic grafting
             peers_to_graft, peers_to_prune = gsub0.mesh_heartbeat()
