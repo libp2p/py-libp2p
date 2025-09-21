@@ -14,6 +14,9 @@ from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
 )
+from libp2p.protocol_muxer.multiselect import (
+    DEFAULT_NEGOTIATE_TIMEOUT,
+)
 from libp2p.security.exceptions import (
     HandshakeFailure,
 )
@@ -37,9 +40,12 @@ class TransportUpgrader:
         self,
         secure_transports_by_protocol: TSecurityOptions,
         muxer_transports_by_protocol: TMuxerOptions,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ):
         self.security_multistream = SecurityMultistream(secure_transports_by_protocol)
-        self.muxer_multistream = MuxerMultistream(muxer_transports_by_protocol)
+        self.muxer_multistream = MuxerMultistream(
+            muxer_transports_by_protocol, negotiate_timeout
+        )
 
     async def upgrade_security(
         self,
