@@ -180,18 +180,22 @@ class TransportRegistry:
             return None
 
 
-# Global transport registry instance
-_global_registry = TransportRegistry()
+# Global transport registry instance (lazy initialization)
+_global_registry: TransportRegistry | None = None
 
 
 def get_transport_registry() -> TransportRegistry:
     """Get the global transport registry instance."""
+    global _global_registry
+    if _global_registry is None:
+        _global_registry = TransportRegistry()
     return _global_registry
 
 
 def register_transport(protocol: str, transport_class: type[ITransport]) -> None:
     """Register a transport class in the global registry."""
-    _global_registry.register_transport(protocol, transport_class)
+    registry = get_transport_registry()
+    registry.register_transport(protocol, transport_class)
 
 
 def create_transport_for_multiaddr(
@@ -219,12 +223,11 @@ def create_transport_for_multiaddr(
             is_quic_multiaddr = _get_quic_validation()
             if is_quic_multiaddr(maddr):
                 # Determine QUIC version
+                registry = get_transport_registry()
                 if "quic-v1" in protocols:
-                    return _global_registry.create_transport(
-                        "quic-v1", upgrader, **kwargs
-                    )
+                    return registry.create_transport("quic-v1", upgrader, **kwargs)
                 else:
-                    return _global_registry.create_transport("quic", upgrader, **kwargs)
+                    return registry.create_transport("quic", upgrader, **kwargs)
         elif "ws" in protocols or "wss" in protocols or "tls" in protocols:
             # For WebSocket, we need a valid structure like:
             # /ip4/127.0.0.1/tcp/8080/ws (insecure)
@@ -233,15 +236,17 @@ def create_transport_for_multiaddr(
             # /ip4/127.0.0.1/tcp/8080/tls/sni/example.com/ws (secure with SNI)
             if is_valid_websocket_multiaddr(maddr):
                 # Determine if this is a secure WebSocket connection
+                registry = get_transport_registry()
                 if "wss" in protocols or "tls" in protocols:
-                    return _global_registry.create_transport("wss", upgrader, **kwargs)
+                    return registry.create_transport("wss", upgrader, **kwargs)
                 else:
-                    return _global_registry.create_transport("ws", upgrader, **kwargs)
+                    return registry.create_transport("ws", upgrader, **kwargs)
         elif "tcp" in protocols:
             # For TCP, we need a valid structure like /ip4/127.0.0.1/tcp/8080
             # Check if the multiaddr has proper TCP structure
             if _is_valid_tcp_multiaddr(maddr):
-                return _global_registry.create_transport("tcp", upgrader)
+                registry = get_transport_registry()
+                return registry.create_transport("tcp", upgrader)
 
         # If no supported transport protocol found or structure is invalid, return None
         logger.warning(
@@ -258,4 +263,5 @@ def create_transport_for_multiaddr(
 
 def get_supported_transport_protocols() -> list[str]:
     """Get list of supported transport protocols from the global registry."""
-    return _global_registry.get_supported_protocols()
+    registry = get_transport_registry()
+    return registry.get_supported_protocols()
