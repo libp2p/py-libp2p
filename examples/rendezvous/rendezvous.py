@@ -68,7 +68,7 @@ async def run_rendezvous_server(port: int = 0):
 async def run_client_example(
     server_addr: str,
     namespace: str = config.DEFAULT_NAMESPACE,
-    enable_refresh: bool = False,
+    enable_refresh: bool = True,
 ):
     """Run a client that registers and discovers peers."""
     listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
@@ -93,57 +93,66 @@ async def run_client_example(
 
         # Create rendezvous discovery
         discovery = RendezvousDiscovery(
-            host, server_info.peer_id, enable_refresh=enable_refresh
+            host, server_info.peer_id, enable_refresh
         )
 
-        try:
-            print(f"Client started with peer ID: {host.get_id()}")
-
-            # Register under a namespace with optional auto-refresh
-            print(f"Registering in namespace '{namespace}'...")
-            ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
-            print(f"✓ Registered with TTL {ttl}s")
-
-            # Wait a moment for registration to propagate
-            await trio.sleep(1)
-
-            # Discover other peers
-            print(f"Discovering peers in namespace '{namespace}'...")
-            peers: list[PeerInfo] = []
-            async for peer in discovery.find_peers(namespace, limit=10):
-                peers.append(peer)
-                if peer.peer_id != host.get_id():
-                    print(f"  Found peer: {peer.peer_id}")
-                else:
-                    print(f"  Found self: {peer.peer_id}")
-
-            print(f"Total peers found: {len(peers)}")
-
-            if len(peers) > 1:
-                print("✓ Successfully discovered other peers!")
-            else:
-                print("No other peers found (only self)")
-
-            # Keep running for demonstration
+        # Run discovery service in background if refresh is enabled
+        async with trio.open_nursery() as nursery:
             if enable_refresh:
-                print("\nRefresh mode: Registration will auto-refresh")
-                print("Running for 2 minutes to demonstrate refresh...")
-                await trio.sleep(120)  # 2 minutes to see refresh in action
-            else:
-                print("\nKeeping registration active for 30 seconds...")
-                print("Start another client instance to see peer discovery in action!")
-                await trio.sleep(30)
+                # Start the discovery service
+                nursery.start_soon(discovery.run)
+                print("🔄 Refresh mode enabled - discovery service running in background")
+            
+            try:
+                print(f"Client started with peer ID: {host.get_id()}")
 
-            # Unregister
-            print(f"Unregistering from namespace '{namespace}'...")
-            await discovery.unregister(namespace)
-            print("✓ Unregistered successfully")
+                # Register under a namespace with optional auto-refresh
+                print(f"Registering in namespace '{namespace}'...")
+                ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
+                print(f"✓ Registered with TTL {ttl}s")
 
-        except Exception as e:
-            print(f"Error: {e}")
-            traceback.print_exc()
-        finally:
-            await discovery.close()
+                # Wait a moment for registration to propagate
+                await trio.sleep(1)
+
+                # Discover other peers
+                print(f"Discovering peers in namespace '{namespace}'...")
+                peers: list[PeerInfo] = []
+                async for peer in discovery.find_peers(namespace, limit=10):
+                    peers.append(peer)
+                    if peer.peer_id != host.get_id():
+                        print(f"  Found peer: {peer.peer_id}")
+                    else:
+                        print(f"  Found self: {peer.peer_id}")
+
+                print(f"Total peers found: {len(peers)}")
+
+                if len(peers) > 1:
+                    print("✓ Successfully discovered other peers!")
+                else:
+                    print("No other peers found (only self)")
+
+                # Keep running for demonstration
+                if enable_refresh:
+                    print("\nRefresh mode: Registration will auto-refresh")
+                    print("Running for 2 minutes to demonstrate refresh...")
+                    await trio.sleep(120)  # 2 minutes to see refresh in action
+                else:
+                    print("\nKeeping registration active for 30 seconds...")
+                    print("Start another client instance to see peer discovery in action!")
+                    await trio.sleep(30)
+
+                # Unregister
+                print(f"Unregistering from namespace '{namespace}'...")
+                await discovery.unregister(namespace)
+                print("✓ Unregistered successfully")
+
+            except Exception as e:
+                print(f"Error: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # Clean up refresh tasks
+                await discovery.close()
 
 
 async def run(

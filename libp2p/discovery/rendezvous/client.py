@@ -5,7 +5,6 @@ Rendezvous client implementation.
 import logging
 import random
 import time
-
 import trio
 import varint
 
@@ -67,6 +66,11 @@ class RendezvousClient:
         self.rendezvous_peer = rendezvous_peer
         self.enable_refresh = enable_refresh
         self._refresh_cancel_scopes: dict[str, trio.CancelScope] = {}
+        self._nursery = None
+
+    def set_nursery(self, nursery: trio.Nursery) -> None:
+        """Set the nursery for background tasks (called by RendezvousDiscovery)."""
+        self._nursery = nursery
 
     async def register(self, namespace: str, ttl: int = DEFAULT_TTL) -> float:
         """
@@ -263,20 +267,23 @@ class RendezvousClient:
 
     async def _start_refresh_task(self, namespace: str, ttl: int) -> None:
         """Start automatic registration refresh for a namespace using trio."""
+        if not self._nursery:
+            logger.warning("No nursery set for refresh tasks - refresh disabled")
+            return
+            
         await self._stop_refresh_task(namespace)
-
+        
         cancel_scope = trio.CancelScope()
-
+        
         async def refresh_task():
             with cancel_scope:
                 await self._refresh_loop(namespace, ttl)
-
+        
         # Store the cancel scope for later cancellation
         self._refresh_cancel_scopes[namespace] = cancel_scope
-
-        # Start the refresh task in the trio nursery
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(refresh_task)
+        
+        # Start the refresh task using nursery.start_soon.
+        self._nursery.start_soon(refresh_task)
 
     async def _stop_refresh_task(self, namespace: str) -> None:
         """Stop automatic registration refresh for a namespace using trio."""

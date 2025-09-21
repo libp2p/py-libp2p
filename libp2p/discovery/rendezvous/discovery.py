@@ -94,6 +94,19 @@ class RendezvousDiscovery:
         self.caches: dict[str, PeerCache] = {}
         self._discover_locks: dict[str, trio.Lock] = {}
 
+    async def run(self) -> None:
+        """Run the rendezvous discovery service."""
+        logger.info("Starting Rendezvous Discovery service")
+        
+        # Start background tasks in parallel
+        async with trio.open_nursery() as nursery:
+            # Set the nursery for the client's refresh tasks
+            self.client.set_nursery(nursery)
+            logger.info("Rendezvous Discovery service started with refresh support")
+            
+            # This will run until the nursery is cancelled
+            await trio.sleep_forever()
+
     async def advertise(self, namespace: str, ttl: int = DEFAULT_TTL) -> float:
         """
         Advertise this peer under a namespace.
