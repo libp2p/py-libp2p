@@ -56,10 +56,14 @@ async def run_rendezvous_server(port: int = 0):
 
         actual_addrs = host.get_addrs()
         logger.info(f"Rendezvous server started with peer ID: {host.get_id()}")
-        logger.info(f"Listening on: {actual_addrs[0] if actual_addrs else 'no addresses'}")
+        logger.info(
+            f"Listening on: {actual_addrs[0] if actual_addrs else 'no addresses'}"
+        )
         logger.info("To connect a client, use:")
         if actual_addrs:
-            logger.info(f"  python rendezvous.py --mode client --address {actual_addrs[0]}")
+            logger.info(
+                f"  python rendezvous.py --mode client --address {actual_addrs[0]}"
+            )
         logger.info("Press Ctrl+C to stop...")
 
         try:
@@ -110,17 +114,17 @@ async def run_client_example(
             return
 
         # Create rendezvous discovery
-        discovery = RendezvousDiscovery(
-            host, server_info.peer_id, enable_refresh
-        )
+        discovery = RendezvousDiscovery(host, server_info.peer_id, enable_refresh)
 
         # Run discovery service in background if refresh is enabled
         async with trio.open_nursery() as nursery:
             if enable_refresh:
                 # Start the discovery service
                 nursery.start_soon(discovery.run)
-                logger.info("🔄 Refresh mode enabled - discovery service running in background")
-            
+                logger.info(
+                    "🔄 Refresh mode enabled - discovery service running in background"
+                )
+
             try:
                 logger.info(f"Client started with peer ID: {host.get_id()}")
 
@@ -156,7 +160,9 @@ async def run_client_example(
                     await trio.sleep(120)  # 2 minutes to see refresh in action
                 else:
                     logger.info("Keeping registration active for 30 seconds...")
-                    logger.info("Start another client instance to see peer discovery in action!")
+                    logger.info(
+                        "Start another client instance to see peer discovery in action!"
+                    )
                     await trio.sleep(30)
 
                 # Unregister
@@ -184,8 +190,11 @@ async def run(
 ):
     """Main run function."""
     logger.debug(f"Starting in {mode} mode")
-    logger.debug(f"Parameters: address={address}, namespace={namespace}, port={port}, refresh={enable_refresh}")
-    
+    logger.debug(
+        f"Parameters: address={address}, namespace={namespace},"
+        f"port={port}, refresh={enable_refresh}"
+    )
+
     if mode == "server":
         logger.debug("Running in server mode")
         await run_rendezvous_server(port)

@@ -5,6 +5,7 @@ Rendezvous client implementation.
 import logging
 import random
 import time
+
 import trio
 import varint
 
@@ -66,7 +67,7 @@ class RendezvousClient:
         self.rendezvous_peer = rendezvous_peer
         self.enable_refresh = enable_refresh
         self._refresh_cancel_scopes: dict[str, trio.CancelScope] = {}
-        self._nursery = None
+        self._nursery: trio.Nursery | None = None
 
     def set_nursery(self, nursery: trio.Nursery) -> None:
         """Set the nursery for background tasks (called by RendezvousDiscovery)."""
@@ -105,6 +106,10 @@ class RendezvousClient:
         msg = create_register_message(namespace, self.host.get_id(), addrs, ttl)
 
         response = await self._send_message(msg)
+        if response is None:
+            raise RendezvousError(
+                Message.E_INTERNAL_ERROR, "No response received from rendezvous server"
+            )
 
         if response.type != Message.REGISTER_RESPONSE:
             raise RendezvousError(
@@ -164,6 +169,10 @@ class RendezvousClient:
 
         msg = create_discover_message(namespace, limit, cookie)
         response = await self._send_message(msg)
+        if response is None:
+            raise RendezvousError(
+                Message.E_INTERNAL_ERROR, "No response received from rendezvous server"
+            )
 
         if response.type != Message.DISCOVER_RESPONSE:
             raise RendezvousError(
@@ -270,18 +279,18 @@ class RendezvousClient:
         if not self._nursery:
             logger.warning("No nursery set for refresh tasks - refresh disabled")
             return
-            
+
         await self._stop_refresh_task(namespace)
-        
+
         cancel_scope = trio.CancelScope()
-        
-        async def refresh_task():
+
+        async def refresh_task() -> None:
             with cancel_scope:
                 await self._refresh_loop(namespace, ttl)
-        
+
         # Store the cancel scope for later cancellation
         self._refresh_cancel_scopes[namespace] = cancel_scope
-        
+
         # Start the refresh task using nursery.start_soon.
         self._nursery.start_soon(refresh_task)
 
@@ -325,6 +334,10 @@ class RendezvousClient:
                 msg = create_register_message(namespace, self.host.get_id(), addrs, ttl)
 
                 response = await self._send_message(msg)
+                if response is None:
+                    logger.error("No response received during refresh")
+                    error_count += 1
+                    continue
 
                 if (
                     response.type != Message.REGISTER_RESPONSE

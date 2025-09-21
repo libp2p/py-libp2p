@@ -101,7 +101,7 @@ Command Line Options
 
 .. code-block:: text
 
-    usage: rendezvous.py [-h] [--mode {server,client}] [--address [ADDRESS]] 
+    usage: rendezvous.py [-h] [--mode {server,client}] [--address [ADDRESS]]
                          [-p PORT] [-n NAMESPACE] [-v] [-r]
 
     optional arguments:
@@ -156,16 +156,16 @@ Default values can be customized:
 .. code-block:: python
 
     from libp2p.discovery.rendezvous import config
-    
+
     # Default namespace for registrations
     config.DEFAULT_NAMESPACE = "rendezvous"
-    
+
     # Default TTL for registrations (2 hours)
     config.DEFAULT_TTL = 2 * 3600
-    
+
     # Maximum number of registrations per namespace
     config.MAX_REGISTRATIONS = 1000
-    
+
     # Maximum TTL allowed
     config.MAX_TTL = 24 * 3600  # 24 hours
 
@@ -186,7 +186,7 @@ Use Cases
 
 - **Distributed Applications**: Services that need to find each other dynamically
 - **Gaming**: Players discovering game sessions or lobbies
-- **Content Sharing**: Nodes advertising available content or services  
+- **Content Sharing**: Nodes advertising available content or services
 - **Mesh Networks**: Peers discovering neighbors in decentralized networks
 - **Service Discovery**: Microservices finding each other in P2P architectures
 
