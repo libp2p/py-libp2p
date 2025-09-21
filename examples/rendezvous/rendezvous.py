@@ -29,10 +29,16 @@ from libp2p.discovery.rendezvous import (
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 
 # Enable logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("libp2p.discovery.rendezvous").setLevel(logging.INFO)
 logging.getLogger("libp2p").propagate = True
+
+# Create logger for this example
 logger = logging.getLogger("rendezvous_example")
 
 
@@ -67,6 +73,9 @@ async def run_rendezvous_server(port: int = 0):
                     logger.info("No active registrations")
         except KeyboardInterrupt:
             logger.info("Shutting down rendezvous server...")
+        except Exception as e:
+            logger.error(f"Unexpected error in server: {e}")
+            raise
 
 
 async def run_client_example(
@@ -80,8 +89,12 @@ async def run_client_example(
     host = new_host()
 
     # Parse server address and extract peer info
-    server_maddr = multiaddr.Multiaddr(server_addr)
-    server_info = info_from_p2p_addr(server_maddr)
+    try:
+        server_maddr = multiaddr.Multiaddr(server_addr)
+        server_info = info_from_p2p_addr(server_maddr)
+    except Exception as e:
+        logger.error(f"Failed to parse server address '{server_addr}': {e}")
+        return
 
     async with host.run([listen_addr]), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
@@ -156,7 +169,10 @@ async def run_client_example(
                 traceback.print_exc()
             finally:
                 # Clean up refresh tasks
-                await discovery.close()
+                try:
+                    await discovery.close()
+                except Exception as e:
+                    logger.error(f"Error closing discovery service: {e}")
 
 
 async def run(
@@ -167,15 +183,22 @@ async def run(
     enable_refresh: bool = True,
 ):
     """Main run function."""
+    logger.debug(f"Starting in {mode} mode")
+    logger.debug(f"Parameters: address={address}, namespace={namespace}, port={port}, refresh={enable_refresh}")
+    
     if mode == "server":
+        logger.debug("Running in server mode")
         await run_rendezvous_server(port)
     elif mode == "client":
         if not address:
             logger.error("Please provide rendezvous server address")
+            logger.error("Use --address flag with server multiaddr")
             return
+        logger.debug("Running in client mode")
         await run_client_example(address, namespace, enable_refresh, port)
     else:
-        logger.error("Unknown mode. Use 'server' or 'client'")
+        logger.error(f"Unknown mode '{mode}'. Use 'server' or 'client'")
+        logger.error("Available modes: server, client")
 
 
 def main():
