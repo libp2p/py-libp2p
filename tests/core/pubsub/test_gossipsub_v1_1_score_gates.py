@@ -13,7 +13,7 @@ import trio
 
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
-from libp2p.pubsub.score import ScoreParams, TopicScoreParams
+from libp2p.pubsub.score import PeerScorer, ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import IDFactory, PubsubFactory
 
@@ -106,22 +106,38 @@ class TestScoreGates:
             await trio.sleep(0.2)
 
             # Test gossip filtering in _get_peers_to_send
-            gsub0 = gsubs[0]
+            gsub0 = cast(GossipSub, gsubs[0])
             peer1_id = hosts[1].get_id()
             peer2_id = hosts[2].get_id()
 
+            # Remove peers from mesh to reset their scores to 0.0
+            if topic in gsub0.mesh:
+                gsub0.mesh[topic].discard(peer1_id)
+                gsub0.mesh[topic].discard(peer2_id)
+            # Reset their time_in_mesh scores
+            if gsub0.scorer is not None:
+                scorer = cast(PeerScorer, gsub0.scorer)
+                scorer.time_in_mesh[peer1_id][topic] = 0.0
+                scorer.time_in_mesh[peer2_id][topic] = 0.0
+
             # Initially both peers should have score 0.0 and be filtered out
             if gsub0.scorer:
-                assert not gsub0.scorer.allow_gossip(peer1_id, [topic])
-                assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+                scorer = cast(PeerScorer, gsub0.scorer)
+                assert not scorer.allow_gossip(peer1_id, [topic])
+                assert not scorer.allow_gossip(peer2_id, [topic])
 
                 # Increase peer1's score by adding time in mesh
-                gsub0.scorer.on_join_mesh(peer1_id, topic)  # Now score = 1.0
+                scorer.on_join_mesh(peer1_id, topic)  # Now score = 1.0
                 # Don't call heartbeat to avoid decay
 
                 # Only peer1 should be allowed for gossip now (score 1.0 >= 0.5)
-                assert gsub0.scorer.allow_gossip(peer1_id, [topic])
-                assert not gsub0.scorer.allow_gossip(peer2_id, [topic])
+                assert scorer.allow_gossip(peer1_id, [topic])
+                assert not scorer.allow_gossip(peer2_id, [topic])
+
+                # Add peer1 back to mesh so it can be selected by _get_peers_to_send
+                if topic not in gsub0.mesh:
+                    gsub0.mesh[topic] = set()
+                gsub0.mesh[topic].add(peer1_id)
 
             # Test that _get_peers_to_send respects gossip gate
             # Use peer2 as msg_forwarder and origin so peer1 doesn't get excluded
