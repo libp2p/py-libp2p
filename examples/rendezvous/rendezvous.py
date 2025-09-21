@@ -30,6 +30,10 @@ from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 
 # Enable logging
 logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger("libp2p.discovery.rendezvous").setLevel(logging.INFO)
+logging.getLogger("libp2p").propagate = True
+logger = logging.getLogger("rendezvous_example")
 
 
 async def run_rendezvous_server(port: int = 0):
@@ -45,12 +49,12 @@ async def run_rendezvous_server(port: int = 0):
         service = RendezvousService(host)
 
         actual_addrs = host.get_addrs()
-        print(f"Rendezvous server started with peer ID: {host.get_id()}")
-        print(f"Listening on: {actual_addrs[0] if actual_addrs else 'no addresses'}")
-        print("\nTo connect a client, use:")
+        logger.info(f"Rendezvous server started with peer ID: {host.get_id()}")
+        logger.info(f"Listening on: {actual_addrs[0] if actual_addrs else 'no addresses'}")
+        logger.info("To connect a client, use:")
         if actual_addrs:
-            print(f"  python rendezvous.py --mode client --address {actual_addrs[0]}")
-        print("\nPress Ctrl+C to stop...")
+            logger.info(f"  python rendezvous.py --mode client --address {actual_addrs[0]}")
+        logger.info("Press Ctrl+C to stop...")
 
         try:
             # Keep server running and print stats periodically
@@ -58,20 +62,21 @@ async def run_rendezvous_server(port: int = 0):
                 await trio.sleep(10)
                 stats = service.get_namespace_stats()
                 if stats:
-                    print(f"Namespace stats: {stats}")
+                    logger.info(f"Namespace stats: {stats}")
                 else:
-                    print("No active registrations")
+                    logger.info("No active registrations")
         except KeyboardInterrupt:
-            print("\nShutting down rendezvous server...")
+            logger.info("Shutting down rendezvous server...")
 
 
 async def run_client_example(
     server_addr: str,
     namespace: str = config.DEFAULT_NAMESPACE,
     enable_refresh: bool = True,
+    port: int = 0,
 ):
     """Run a client that registers and discovers peers."""
-    listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
+    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
     host = new_host()
 
     # Parse server address and extract peer info
@@ -85,10 +90,10 @@ async def run_client_example(
         # Connect to server
         try:
             await host.connect(server_info)
-            print(f"Connected to rendezvous server: {server_info.peer_id}")
-            print("enable refresh:", enable_refresh)
+            logger.info(f"Connected to rendezvous server: {server_info.peer_id}")
+            logger.info(f"Enable refresh: {enable_refresh}")
         except Exception as e:
-            print(f"Failed to connect to server: {e}")
+            logger.error(f"Failed to connect to server: {e}")
             return
 
         # Create rendezvous discovery
@@ -101,54 +106,53 @@ async def run_client_example(
             if enable_refresh:
                 # Start the discovery service
                 nursery.start_soon(discovery.run)
-                print("🔄 Refresh mode enabled - discovery service running in background")
+                logger.info("🔄 Refresh mode enabled - discovery service running in background")
             
             try:
-                print(f"Client started with peer ID: {host.get_id()}")
+                logger.info(f"Client started with peer ID: {host.get_id()}")
 
                 # Register under a namespace with optional auto-refresh
-                print(f"Registering in namespace '{namespace}'...")
+                logger.info(f"Registering in namespace '{namespace}'...")
                 ttl = await discovery.advertise(namespace, ttl=config.DEFAULT_TTL)
-                print(f"✓ Registered with TTL {ttl}s")
+                logger.info(f"✓ Registered with TTL {ttl}s")
 
                 # Wait a moment for registration to propagate
                 await trio.sleep(1)
 
                 # Discover other peers
-                print(f"Discovering peers in namespace '{namespace}'...")
+                logger.info(f"Discovering peers in namespace '{namespace}'...")
                 peers: list[PeerInfo] = []
                 async for peer in discovery.find_peers(namespace, limit=10):
                     peers.append(peer)
                     if peer.peer_id != host.get_id():
-                        print(f"  Found peer: {peer.peer_id}")
+                        logger.info(f"  Found peer: {peer.peer_id}")
                     else:
-                        print(f"  Found self: {peer.peer_id}")
+                        logger.info(f"  Found self: {peer.peer_id}")
 
-                print(f"Total peers found: {len(peers)}")
+                logger.info(f"Total peers found: {len(peers)}")
 
                 if len(peers) > 1:
-                    print("✓ Successfully discovered other peers!")
+                    logger.info("✓ Successfully discovered other peers!")
                 else:
-                    print("No other peers found (only self)")
+                    logger.info("No other peers found (only self)")
 
                 # Keep running for demonstration
                 if enable_refresh:
-                    print("\nRefresh mode: Registration will auto-refresh")
-                    print("Running for 2 minutes to demonstrate refresh...")
+                    logger.info("Refresh mode: Registration will auto-refresh")
+                    logger.info("Running for 2 minutes to demonstrate refresh...")
                     await trio.sleep(120)  # 2 minutes to see refresh in action
                 else:
-                    print("\nKeeping registration active for 30 seconds...")
-                    print("Start another client instance to see peer discovery in action!")
+                    logger.info("Keeping registration active for 30 seconds...")
+                    logger.info("Start another client instance to see peer discovery in action!")
                     await trio.sleep(30)
 
                 # Unregister
-                print(f"Unregistering from namespace '{namespace}'...")
+                logger.info(f"Unregistering from namespace '{namespace}'...")
                 await discovery.unregister(namespace)
-                print("✓ Unregistered successfully")
+                logger.info("✓ Unregistered successfully")
 
             except Exception as e:
-                print(f"Error: {e}")
-                import traceback
+                logger.error(f"Error: {e}")
                 traceback.print_exc()
             finally:
                 # Clean up refresh tasks
@@ -160,18 +164,18 @@ async def run(
     address: str = "",
     namespace: str = config.DEFAULT_NAMESPACE,
     port: int = 0,
-    enable_refresh: bool = False,
+    enable_refresh: bool = True,
 ):
     """Main run function."""
     if mode == "server":
         await run_rendezvous_server(port)
     elif mode == "client":
         if not address:
-            print("Please provide rendezvous server address")
+            logger.error("Please provide rendezvous server address")
             return
-        await run_client_example(address, namespace, enable_refresh)
+        await run_client_example(address, namespace, enable_refresh, port)
     else:
-        print("Unknown mode. Use 'server' or 'client'")
+        logger.error("Unknown mode. Use 'server' or 'client'")
 
 
 def main():
@@ -239,18 +243,20 @@ def main():
         "-r",
         "--refresh",
         action="store_true",
+        default=True,
         help="Enable automatic refresh for registration and discovery cache",
     )
 
     args = parser.parse_args()
 
     if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+        # logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.discovery.rendezvous").setLevel(logging.DEBUG)
 
     try:
         trio.run(run, args.mode, args.address, args.namespace, args.port, args.refresh)
     except KeyboardInterrupt:
-        print("\nExiting...")
+        logger.info("Exiting...")
 
 
 if __name__ == "__main__":
