@@ -315,7 +315,7 @@ class RendezvousClient:
                     jitter_seconds = jitter_ms / 1000.0
                     refresh_delay = 5 * 60 + jitter_seconds
                 else:
-                    refresh_delay = ttl - 30
+                    refresh_delay = (7 * ttl) // 8
 
                 logger.debug(
                     f"Waiting {refresh_delay}s before refreshing registration "
