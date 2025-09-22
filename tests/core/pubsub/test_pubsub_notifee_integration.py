@@ -82,7 +82,7 @@ async def test_duplicate_connection_does_not_duplicate_peer_state():
 async def test_blacklist_blocks_peer_added_by_notifee():
     async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
         # Blacklist before connecting
-        p0.add_to_blacklist(p1.my_id)
+        await p0.add_to_blacklist(p1.my_id)
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         # Give handler a chance to run

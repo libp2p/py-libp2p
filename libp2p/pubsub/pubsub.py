@@ -12,6 +12,7 @@ import hashlib
 import logging
 import time
 from typing import (
+    Any,
     NamedTuple,
     cast,
 )
@@ -231,8 +232,8 @@ class Pubsub(Service, IPubsub):
         self.event_handle_dead_peer_queue_started = trio.Event()
 
         self.maxMessageSize = DefaultMaxMessageSize
-        self._sending_message_tasks = {}
-        #TODO: Handle deleting the values form queue.
+        self._sending_message_tasks: dict[ID, bool] = {}
+        # TODO: Handle deleting the values form queue.
         self.peer_queue = {}
 
     async def run(self) -> None:
@@ -363,7 +364,7 @@ class Pubsub(Service, IPubsub):
             if topic in self.topic_validators
         )
 
-    def add_to_blacklist(self, peer_id: ID) -> None:
+    async def add_to_blacklist(self, peer_id: ID) -> None:
         """
         Add a peer to the blacklist.
         When a peer is blacklisted:
@@ -376,13 +377,13 @@ class Pubsub(Service, IPubsub):
         :param peer_id: the peer ID to blacklist
         """
         self.blacklisted_peers.add(peer_id)
-        logger.debug("Added peer %s to blacklist", peer_id)
+        print("Added peer %s to blacklist", peer_id)
         self.manager.run_task(self._teardown_if_connected, peer_id)
 
         # Close and remove the peer's queue if it exists
         queue = self.peer_queue.get(peer_id)
         if queue is not None:
-            queue.close()
+            await queue.close()
 
     async def _teardown_if_connected(self, peer_id: ID) -> None:
         """Close their stream and remove them if connected"""
@@ -420,7 +421,7 @@ class Pubsub(Service, IPubsub):
         """
         return peer_id in self.blacklisted_peers
 
-    def clear_blacklist(self) -> None:
+    async def clear_blacklist(self) -> None:
         """
         Clear all peers from the blacklist.
         This removes all blacklist restrictions, allowing previously blacklisted
@@ -434,7 +435,7 @@ class Pubsub(Service, IPubsub):
         for peer_id in list(self.blacklisted_peers):
             queue = self.peer_queue.get(peer_id)
             if queue is not None:
-                queue.close()
+                await queue.close()
         self.blacklisted_peers.clear()
         logger.debug("Cleared all peers from blacklist")
 
@@ -468,7 +469,7 @@ class Pubsub(Service, IPubsub):
                 error,
             )
             await stream.reset()
-            self._handle_dead_peer(peer_id)
+            await self._handle_dead_peer(peer_id)
 
     async def wait_until_ready(self) -> None:
         await self.event_handle_peer_queue_started.wait()
@@ -505,12 +506,12 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("added new peer %s", peer_id)
 
-    def _handle_dead_peer(self, peer_id: ID) -> None:
+    async def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
             # Even if not in peers, still close and remove the queue if it exists
             queue = self.peer_queue.get(peer_id)
             if queue is not None:
-                queue.close()
+                await queue.close()
             return
         del self.peers[peer_id]
 
@@ -523,7 +524,7 @@ class Pubsub(Service, IPubsub):
         # Close and remove the peer's queue if it exists
         queue = self.peer_queue.get(peer_id)
         if queue is not None:
-            queue.close()
+            await queue.close()
 
         logger.debug("removed dead peer %s", peer_id)
 
@@ -548,7 +549,7 @@ class Pubsub(Service, IPubsub):
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
                 # Remove Peer
-                self._handle_dead_peer(peer_id)
+                await self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -680,7 +681,7 @@ class Pubsub(Service, IPubsub):
             except StreamClosed:
                 peer_id = stream.muxed_conn.peer_id
                 logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+                await self._handle_dead_peer(peer_id)
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
@@ -893,8 +894,8 @@ class Pubsub(Service, IPubsub):
         except StreamClosed:
             peer_id = stream.muxed_conn.peer_id
             logger.debug("Fail to write message to %s: stream closed", peer_id)
-            self._handle_dead_peer(peer_id)
-
+            await self._handle_dead_peer(peer_id)
+            return False
 
     async def handle_sending_message(self, to_peer: ID, stream: INetStream) -> None:
         if to_peer in self._sending_message_tasks:
@@ -915,8 +916,12 @@ class Pubsub(Service, IPubsub):
                     logger.error("The queue is already closed.")
                     break
                 except Exception as e:
-                    logger.exception("Exception in handle_sending_message \
-                                     for peer %s: %s", to_peer, e)
+                    logger.exception(
+                        "Exception in handle_sending_message \
+                                     for peer %s: %s",
+                        to_peer,
+                        e,
+                    )
                     break
         finally:
             self._sending_message_tasks.pop(to_peer, None)
@@ -925,7 +930,7 @@ class Pubsub(Service, IPubsub):
         def sov_rpc(x: int) -> int:
             if x == 0:
                 return 1
-            return ((x.bit_length() + 6) // 7)
+            return (x.bit_length() + 6) // 7
 
         prefix_size = sov_rpc(msg_size)
         return prefix_size + msg_size
@@ -1035,7 +1040,7 @@ class Pubsub(Service, IPubsub):
 
             # Split control iwant
             iwants = list(ctl.iwant)
-            all_msg_ids = []
+            all_msg_ids: list[Any] = []
             for iwant in iwants:
                 all_msg_ids.extend(iwant.messageIDs)
 

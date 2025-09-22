@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any
 
 import trio
 
@@ -6,19 +6,23 @@ import trio
 class QueueClosed(Exception):
     pass
 
+
 class QueueFull(Exception):
     pass
+
 
 class QueuePushOnClosed(Exception):
     pass
 
+
 class QueueCancelled(Exception):
     pass
 
+
 class PriorityQueue:
     def __init__(self) -> None:
-        self.normal: List[Any] = []
-        self.priority: List[Any] = []
+        self.normal: list[Any] = []
+        self.priority: list[Any] = []
 
     def __len__(self) -> int:
         return len(self.normal) + len(self.priority)
@@ -29,12 +33,13 @@ class PriorityQueue:
     def priority_push(self, rpc: Any) -> None:
         self.priority.append(rpc)
 
-    def pop(self) -> Optional[Any]:
+    def pop(self) -> Any | None:
         if self.priority:
             return self.priority.pop(0)
         elif self.normal:
             return self.normal.pop(0)
         return None
+
 
 class RpcQueue:
     def __init__(self, max_size: int) -> None:
