@@ -1,6 +1,7 @@
 from dataclasses import (
     dataclass,
 )
+import logging
 
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -11,6 +12,8 @@ from libp2p.crypto.serialization import (
 )
 
 from .pb import noise_pb2 as noise_pb
+
+logger = logging.getLogger(__name__)
 
 SIGNED_DATA_PREFIX = "noise-libp2p-static-key:"
 
@@ -48,6 +51,8 @@ def make_handshake_payload_sig(
     id_privkey: PrivateKey, noise_static_pubkey: PublicKey
 ) -> bytes:
     data = make_data_to_be_signed(noise_static_pubkey)
+    logger.debug(f"make_handshake_payload_sig: signing data length: {len(data)}")
+    logger.debug(f"make_handshake_payload_sig: signing data hex: {data.hex()}")
     return id_privkey.sign(data)
 
 
@@ -60,4 +65,27 @@ def verify_handshake_payload_sig(
         2. signed by the private key corresponding to `id_pubkey`
     """
     expected_data = make_data_to_be_signed(noise_static_pubkey)
-    return payload.id_pubkey.verify(expected_data, payload.id_sig)
+    logger.debug(
+        f"verify_handshake_payload_sig: payload.id_pubkey type: "
+        f"{type(payload.id_pubkey)}"
+    )
+    logger.debug(
+        f"verify_handshake_payload_sig: noise_static_pubkey type: "
+        f"{type(noise_static_pubkey)}"
+    )
+    logger.debug(
+        f"verify_handshake_payload_sig: expected_data length: {len(expected_data)}"
+    )
+    logger.debug(
+        f"verify_handshake_payload_sig: expected_data hex: {expected_data.hex()}"
+    )
+    logger.debug(
+        f"verify_handshake_payload_sig: payload.id_sig length: {len(payload.id_sig)}"
+    )
+    try:
+        result = payload.id_pubkey.verify(expected_data, payload.id_sig)
+        logger.debug(f"verify_handshake_payload_sig: verification result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"verify_handshake_payload_sig: verification exception: {e}")
+        return False
