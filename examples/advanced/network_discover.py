@@ -14,11 +14,26 @@ try:
         expand_wildcard_address,
         get_available_interfaces,
         get_optimal_binding_address,
+        get_wildcard_address,
     )
 except ImportError:
-    # Fallbacks if utilities are missing
+    # Fallbacks if utilities are missing - use minimal network discovery
+    import socket
+
     def get_available_interfaces(port: int, protocol: str = "tcp"):
-        return [Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")]
+        # Try to get local network interfaces, fallback to loopback
+        addrs = []
+        try:
+            # Get hostname IP (better than hardcoded localhost)
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            if local_ip != "127.0.0.1":
+                addrs.append(Multiaddr(f"/ip4/{local_ip}/{protocol}/{port}"))
+        except Exception:
+            pass
+        # Always include loopback as fallback
+        addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
+        return addrs
 
     def expand_wildcard_address(addr: Multiaddr, port: int | None = None):
         if port is None:
@@ -27,6 +42,15 @@ except ImportError:
         return [Multiaddr(addr_str + f"/{port}")]
 
     def get_optimal_binding_address(port: int, protocol: str = "tcp"):
+        # Try to get a non-loopback address first
+        interfaces = get_available_interfaces(port, protocol)
+        for addr in interfaces:
+            if "127.0.0.1" not in str(addr):
+                return addr
+        # Fallback to loopback if no other interfaces found
+        return Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}")
+
+    def get_wildcard_address(port: int, protocol: str = "tcp"):
         return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
 
 
@@ -37,7 +61,10 @@ def main() -> None:
     for a in interfaces:
         print(f"  - {a}")
 
-    wildcard_v4 = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    # Demonstrate wildcard address as a feature
+    wildcard_v4 = get_wildcard_address(port)
+    print(f"\nWildcard address (feature): {wildcard_v4}")
+
     expanded_v4 = expand_wildcard_address(wildcard_v4)
     print("\nExpanded IPv4 wildcard:")
     for a in expanded_v4:

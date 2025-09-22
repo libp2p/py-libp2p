@@ -1,0 +1,12 @@
+Added experimental WebSocket transport support with basic WS and WSS functionality. This includes:
+
+- WebSocket transport implementation with trio-websocket backend
+- Support for both WS (WebSocket) and WSS (WebSocket Secure) protocols
+- Basic connection management and stream handling
+- TLS configuration support for WSS connections
+- Multiaddr parsing for WebSocket addresses
+- Integration with libp2p host and peer discovery
+
+**Note**: This is experimental functionality. Advanced features like proxy support,
+interop testing, and production examples are still in development. See
+ https://github.com/libp2p/py-libp2p/discussions/937 for the complete roadmap of missing features.

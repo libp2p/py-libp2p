@@ -65,7 +65,7 @@ async def test_prune_backoff():
 @pytest.mark.trio
 async def test_unsubscribe_backoff():
     async with PubsubFactory.create_batch_with_gossipsub(
-        2, heartbeat_interval=1, prune_back_off=1, unsubscribe_back_off=2
+        2, heartbeat_interval=0.5, prune_back_off=2, unsubscribe_back_off=4
     ) as pubsubs:
         gsub0 = pubsubs[0].router
         gsub1 = pubsubs[1].router
@@ -107,7 +107,8 @@ async def test_unsubscribe_backoff():
         )
 
         # try to graft again (should succeed after backoff)
-        await trio.sleep(1)
+        # Wait longer than unsubscribe_back_off (4 seconds) + some buffer
+        await trio.sleep(4.5)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(1)
         assert host_0.get_id() in gsub1.mesh[topic], (
