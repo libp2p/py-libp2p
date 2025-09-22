@@ -1,3 +1,4 @@
+import logging
 from typing import (
     cast,
 )
@@ -14,6 +15,8 @@ from libp2p.io.abc import (
 from libp2p.io.msgio import (
     FixedSizeLenMsgReadWriter,
 )
+
+logger = logging.getLogger(__name__)
 
 SIZE_NOISE_MESSAGE_LEN = 2
 MAX_NOISE_MESSAGE_LEN = 2 ** (8 * SIZE_NOISE_MESSAGE_LEN) - 1
@@ -50,18 +53,25 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
         self.noise_state = noise_state
 
     async def write_msg(self, msg: bytes, prefix_encoded: bool = False) -> None:
+        logger.debug(f"Noise write_msg: encrypting {len(msg)} bytes")
         data_encrypted = self.encrypt(msg)
         if prefix_encoded:
             # Manually add the prefix if needed
             data_encrypted = self.prefix + data_encrypted
+        logger.debug(f"Noise write_msg: writing {len(data_encrypted)} encrypted bytes")
         await self.read_writer.write_msg(data_encrypted)
+        logger.debug("Noise write_msg: write completed successfully")
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
+        logger.debug("Noise read_msg: reading encrypted message")
         noise_msg_encrypted = await self.read_writer.read_msg()
+        logger.debug(f"Noise read_msg: read {len(noise_msg_encrypted)} encrypted bytes")
         if prefix_encoded:
-            return self.decrypt(noise_msg_encrypted[len(self.prefix) :])
+            result = self.decrypt(noise_msg_encrypted[len(self.prefix) :])
         else:
-            return self.decrypt(noise_msg_encrypted)
+            result = self.decrypt(noise_msg_encrypted)
+        logger.debug(f"Noise read_msg: decrypted to {len(result)} bytes")
+        return result
 
     async def close(self) -> None:
         await self.read_writer.close()
