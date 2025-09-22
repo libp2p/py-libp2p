@@ -1,15 +1,16 @@
 # Import exceptiongroup for Python 3.11+
+import builtins
 from collections.abc import Sequence
 import logging
-import sys
 from typing import Any
 
 import pytest
 
-if sys.version_info >= (3, 11):
-    pass
+if hasattr(builtins, "ExceptionGroup"):
+    ExceptionGroup = builtins.ExceptionGroup
 else:
-    pass
+    # Fallback for older Python versions
+    ExceptionGroup = Exception
 from multiaddr import Multiaddr
 import trio
 
@@ -832,10 +833,9 @@ async def test_wss_host_pair_data_exchange():
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+            .not_valid_before(datetime.datetime.now(datetime.UTC))
             .not_valid_after(
-                datetime.datetime.now(datetime.timezone.utc)
-                + datetime.timedelta(days=1)
+                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
             )
             .add_extension(
                 x509.SubjectAlternativeName(
