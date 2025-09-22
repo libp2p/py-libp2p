@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import secrets
 
@@ -26,7 +27,13 @@ from libp2p.peer.peerinfo import (
 from libp2p.utils.address_validation import (
     find_free_port,
     get_available_interfaces,
+    get_optimal_binding_address,
 )
+
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 MAX_READ_LEN = 2**32 - 1
@@ -76,9 +83,13 @@ async def run(port: int, destination: str, seed: int | None = None) -> None:
             for addr in listen_addr:
                 print(f"{addr}/p2p/{peer_id}")
 
+            # Get optimal address for display
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{peer_id}"
+
             print(
                 "\nRun this from the same folder in another console:\n\n"
-                f"echo-demo -d {host.get_addrs()[0]}\n"
+                f"echo-demo -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming connections...")
             await trio.sleep_forever()
@@ -114,7 +125,7 @@ def main() -> None:
     where <DESTINATION> is the multiaddress of the previous listener host.
     """
     example_maddr = (
-        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+        "/ip4/[HOST_IP]/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
