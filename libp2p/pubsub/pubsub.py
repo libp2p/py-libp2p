@@ -87,8 +87,7 @@ from .validators import (
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
 
-logger = logging.getLogger("libp2p.pubsub")
-
+logger = logging.getLogger(__name__)
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     # NOTE: `string(from, seqno)` in Go
