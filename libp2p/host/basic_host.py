@@ -210,7 +210,7 @@ class BasicHost(IHost):
         :raises HostException: if setting the stream handler fails
         """
         try:
-            if not protocol_id:
+            if not protocol_id or (isinstance(protocol_id, str) and not protocol_id.strip()):
                 raise HostException("Protocol ID cannot be empty")
             if not stream_handler:
                 raise HostException("Stream handler cannot be None")

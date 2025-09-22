@@ -18,6 +18,9 @@ from libp2p.identity.identify_push.identify_push import (
 from libp2p.host.exceptions import (
     HostException,
 )
+from libp2p.peer.peerinfo import (
+    PeerInfo,
+)
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -31,15 +34,10 @@ from tests.utils.utils import (
 async def test_push_identify_to_peer_exception_handling():
     """Test that push_identify_to_peer properly handles exceptions."""
     key_pair = create_new_key_pair()
-    host_a, host_b = host_pair_factory(key_pair)
     
-    # Start both hosts
-    async with run_host_forever(host_a), run_host_forever(host_b):
-        await wait_until_listening(host_a)
-        await wait_until_listening(host_b)
-        
+    async with host_pair_factory() as (host_a, host_b):
         # Connect the hosts
-        peer_info = host_b.get_addrs()[0]
+        peer_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         await host_a.connect(peer_info)
         
         # Mock new_stream to raise an exception
@@ -62,15 +60,10 @@ async def test_push_identify_to_peer_exception_handling():
 async def test_push_identify_to_peer_preserves_exception_chain():
     """Test that push_identify_to_peer preserves the original exception chain."""
     key_pair = create_new_key_pair()
-    host_a, host_b = host_pair_factory(key_pair)
     
-    # Start both hosts
-    async with run_host_forever(host_a), run_host_forever(host_b):
-        await wait_until_listening(host_a)
-        await wait_until_listening(host_b)
-        
+    async with host_pair_factory() as (host_a, host_b):
         # Connect the hosts
-        peer_info = host_b.get_addrs()[0]
+        peer_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         await host_a.connect(peer_info)
         
         original_error = ConnectionError("Original connection error")
@@ -94,52 +87,47 @@ async def test_push_identify_to_peer_preserves_exception_chain():
 async def test_update_peerstore_from_identify_exception_handling():
     """Test that _update_peerstore_from_identify handles exceptions gracefully."""
     key_pair = create_new_key_pair()
-    host_a, host_b = host_pair_factory(key_pair)
     
-    # Create a mock peerstore that raises exceptions
-    class MockPeerstore:
-        def add_protocols(self, peer_id, protocols):
-            raise ValueError("Mock protocol error")
+    async with host_pair_factory() as (host_a, host_b):
+        # Create a mock peerstore that raises exceptions
+        class MockPeerstore:
+            def add_protocols(self, peer_id, protocols):
+                raise ValueError("Mock protocol error")
+            
+            def add_pubkey(self, peer_id, pubkey):
+                raise KeyError("Mock pubkey error")
+            
+            def add_addr(self, peer_id, addr, ttl):
+                raise RuntimeError("Mock addr error")
+            
+            def consume_peer_record(self, envelope, ttl):
+                raise ConnectionError("Mock record error")
         
-        def add_pubkey(self, peer_id, pubkey):
-            raise KeyError("Mock pubkey error")
+        mock_peerstore = MockPeerstore()
         
-        def add_addr(self, peer_id, addr, ttl):
-            raise RuntimeError("Mock addr error")
+        # Create an identify message with various fields
+        identify_msg = Identify()
+        identify_msg.public_key = b"mock_public_key"
+        identify_msg.listen_addrs.extend([b"/ip4/127.0.0.1/tcp/4001"])
+        identify_msg.protocols.extend(["/test/protocol/1.0.0"])
+        identify_msg.observed_addr = b"/ip4/127.0.0.1/tcp/4002"
+        identify_msg.signedPeerRecord = b"mock_signed_record"
         
-        def consume_peer_record(self, envelope, ttl):
-            raise ConnectionError("Mock record error")
-    
-    mock_peerstore = MockPeerstore()
-    
-    # Create an identify message with various fields
-    identify_msg = Identify()
-    identify_msg.public_key = b"mock_public_key"
-    identify_msg.listen_addrs.extend([b"/ip4/127.0.0.1/tcp/4001"])
-    identify_msg.protocols.extend(["/test/protocol/1.0.0"])
-    identify_msg.observed_addr = b"/ip4/127.0.0.1/tcp/4002"
-    identify_msg.signedPeerRecord = b"mock_signed_record"
-    
-    # Test that the function handles exceptions gracefully
-    # It should not raise any exceptions, just log errors
-    await _update_peerstore_from_identify(mock_peerstore, host_b.get_id(), identify_msg)
-    
-    # If we get here without exceptions, the test passes
+        # Test that the function handles exceptions gracefully
+        # It should not raise any exceptions, just log errors
+        await _update_peerstore_from_identify(mock_peerstore, host_b.get_id(), identify_msg)
+        
+        # If we get here without exceptions, the test passes
 
 
 @pytest.mark.trio
 async def test_push_identify_to_peers_exception_handling():
     """Test that push_identify_to_peers handles exceptions gracefully."""
     key_pair = create_new_key_pair()
-    host_a, host_b = host_pair_factory(key_pair)
     
-    # Start both hosts
-    async with run_host_forever(host_a), run_host_forever(host_b):
-        await wait_until_listening(host_a)
-        await wait_until_listening(host_b)
-        
+    async with host_pair_factory() as (host_a, host_b):
         # Connect the hosts
-        peer_info = host_b.get_addrs()[0]
+        peer_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         await host_a.connect(peer_info)
         
         # Mock new_stream to raise an exception for one peer

@@ -14,6 +14,7 @@ from libp2p.abc import (
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
+    MuxedStreamError,
 )
 
 from .constants import (
@@ -317,6 +318,8 @@ class MplexStream(IMuxedStream):
         :raises MuxedStreamError: if setting the deadline fails
         """
         try:
+            if ttl < 0:
+                raise ValueError("Deadline cannot be negative")
             self.read_deadline = ttl
             self.write_deadline = ttl
         except Exception as e:
@@ -330,6 +333,8 @@ class MplexStream(IMuxedStream):
         :raises MuxedStreamError: if setting the read deadline fails
         """
         try:
+            if ttl < 0:
+                raise ValueError("Read deadline cannot be negative")
             self.read_deadline = ttl
         except Exception as e:
             raise MuxedStreamError(f"Failed to set read deadline: {e}") from e
@@ -342,6 +347,8 @@ class MplexStream(IMuxedStream):
         :raises MuxedStreamError: if setting the write deadline fails
         """
         try:
+            if ttl < 0:
+                raise ValueError("Write deadline cannot be negative")
             self.write_deadline = ttl
         except Exception as e:
             raise MuxedStreamError(f"Failed to set write deadline: {e}") from e
