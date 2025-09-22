@@ -213,6 +213,14 @@ class TestScoreGates:
 
             peer_id = host1.get_id()
 
+            # Remove peer from mesh to reset their score to 0.0
+            if topic in gsub0.mesh:
+                gsub0.mesh[topic].discard(peer_id)
+            # Reset their time_in_mesh score
+            if gsub0.scorer is not None:
+                scorer = cast(PeerScorer, gsub0.scorer)
+                scorer.time_in_mesh[peer_id][topic] = 0.0
+
             # Initially peer should not be allowed for PX
             if gsub0.scorer:
                 assert not gsub0.scorer.allow_px_from(peer_id, [topic])
@@ -233,9 +241,9 @@ class TestScoreGates:
 
             # Increase peer's score
             if gsub0.scorer:
-                gsub0.scorer.on_join_mesh(peer_id, topic)
+                scorer.on_join_mesh(peer_id, topic)
                 # Don't call heartbeat to avoid decay
-                assert gsub0.scorer.allow_px_from(peer_id, [topic])
+                assert scorer.allow_px_from(peer_id, [topic])
 
             # Handle prune again - should now trigger PX
             await gsub0.handle_prune(prune_msg, peer_id)
