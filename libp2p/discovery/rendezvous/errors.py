@@ -8,7 +8,7 @@ from .pb.rendezvous_pb2 import Message
 class RendezvousError(Exception):
     """Base exception for rendezvous protocol errors."""
 
-    def __init__(self, status: Message.ResponseStatus, message: str = ""):
+    def __init__(self, status: Message.ResponseStatus.ValueType, message: str = ""):
         self.status = status
         self.message = message
         super().__init__(f"Rendezvous error {status}: {message}")
@@ -64,7 +64,7 @@ class UnavailableError(RendezvousError):
 
 
 def status_to_exception(
-    status: Message.ResponseStatus, message: str = ""
+    status: Message.ResponseStatus.ValueType, message: str = ""
 ) -> RendezvousError:
     """Convert a protobuf status to the appropriate exception."""
     if status == Message.E_INVALID_NAMESPACE:
