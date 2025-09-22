@@ -20,6 +20,11 @@ from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
+
 PROTOCOL_ID = TProtocol("/echo/1.0.0")
 
 
@@ -38,7 +43,22 @@ async def _echo_stream_handler(stream: INetStream) -> None:
 
 async def run_server(port: int, seed: int | None = None) -> None:
     """Run echo server with QUIC transport."""
-    listen_addr = Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic")
+    from libp2p.utils.address_validation import (
+        find_free_port,
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
+
+    if port <= 0:
+        port = find_free_port()
+
+    # For QUIC, we need UDP addresses - use the new address paradigm
+    tcp_addrs = get_available_interfaces(port)
+    # Convert TCP addresses to QUIC addresses
+    quic_addrs = []
+    for addr in tcp_addrs:
+        addr_str = str(addr).replace("/tcp/", "/udp/") + "/quic"
+        quic_addrs.append(Multiaddr(addr_str))
 
     if seed:
         import random
@@ -58,15 +78,26 @@ async def run_server(port: int, seed: int | None = None) -> None:
     )
 
     # Server mode: start listener
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=quic_addrs):
         try:
             print(f"I am {host.get_id().to_string()}")
             host.set_stream_handler(PROTOCOL_ID, _echo_stream_handler)
 
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            print("Listener ready, listening on:")
+            for addr in all_addrs:
+                print(f"{addr}")
+
+            # Use optimal address for the client command
+            optimal_tcp = get_optimal_binding_address(port)
+            optimal_quic_str = str(optimal_tcp).replace("/tcp/", "/udp/") + "/quic"
+            peer_id = host.get_id().to_string()
+            optimal_quic_with_peer = f"{optimal_quic_str}/p2p/{peer_id}"
             print(
-                "Run this from the same folder in another console:\n\n"
-                f"python3 ./examples/echo/echo_quic.py "
-                f"-d {host.get_addrs()[0]}\n"
+                f"\nRun this from the same folder in another console:\n\n"
+                f"python3 ./examples/echo/echo_quic.py -d {optimal_quic_with_peer}\n"
             )
             print("Waiting for incoming QUIC connections...")
             await trio.sleep_forever()
@@ -148,7 +179,7 @@ def main() -> None:
     where <DESTINATION> is the QUIC multiaddress of the previous listener host.
     """
 
-    example_maddr = "/ip4/127.0.0.1/udp/8000/quic/p2p/QmQn4SwGkDZKkUEpBRBv"
+    example_maddr = "/ip4/[HOST_IP]/udp/8000/quic/p2p/QmQn4SwGkDZKkUEpBRBv"
 
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("-p", "--port", default=0, type=int, help="UDP port number")
@@ -173,6 +204,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    logging.getLogger("aioquic").setLevel(logging.DEBUG)
     main()

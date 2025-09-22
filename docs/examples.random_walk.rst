@@ -23,7 +23,7 @@ The Random Walk implementation performs the following key operations:
     2025-08-12 19:51:25,424 - random-walk-example - INFO - Mode: server, Port: 0 Demo interval: 30s
     2025-08-12 19:51:25,426 - random-walk-example - INFO - Starting server node on port 45123
     2025-08-12 19:51:25,426 - random-walk-example - INFO - Node peer ID: 16Uiu2HAm7EsNv5vvjPAehGAVfChjYjD63ZHyWogQRdzntSbAg9ef
-    2025-08-12 19:51:25,426 - random-walk-example - INFO - Node address: /ip4/0.0.0.0/tcp/45123/p2p/16Uiu2HAm7EsNv5vvjPAehGAVfChjYjD63ZHyWogQRdzntSbAg9ef
+    2025-08-12 19:51:25,426 - random-walk-example - INFO - Node address: /ip4/127.0.0.1/tcp/45123/p2p/16Uiu2HAm7EsNv5vvjPAehGAVfChjYjD63ZHyWogQRdzntSbAg9ef
     2025-08-12 19:51:25,427 - random-walk-example - INFO - Initial routing table size: 0
     2025-08-12 19:51:25,427 - random-walk-example - INFO - DHT service started in SERVER mode
     2025-08-12 19:51:25,430 - libp2p.discovery.random_walk.rt_refresh_manager - INFO - RT Refresh Manager started

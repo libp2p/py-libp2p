@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 import multiaddr
 import trio
@@ -15,6 +16,11 @@ from libp2p.network.stream.net_stream import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -55,20 +61,38 @@ async def send_ping(stream: INetStream) -> None:
 
 
 async def run(port: int, destination: str) -> None:
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
-    host = new_host(listen_addrs=[listen_addr])
+    from libp2p.utils.address_validation import (
+        find_free_port,
+        get_available_interfaces,
+        get_optimal_binding_address,
+    )
 
-    async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+    if port <= 0:
+        port = find_free_port()
+
+    listen_addrs = get_available_interfaces(port)
+    host = new_host(listen_addrs=listen_addrs)
+
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
         if not destination:
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+
+            print("Listener ready, listening on:\n")
+            for addr in all_addrs:
+                print(f"{addr}")
+
+            # Use optimal address for the client command
+            optimal_addr = get_optimal_binding_address(port)
+            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
             print(
-                "Run this from the same folder in another console:\n\n"
-                f"ping-demo "
-                f"-d {host.get_addrs()[0]}\n"
+                f"\nRun this from the same folder in another console:\n\n"
+                f"ping-demo -d {optimal_addr_with_peer}\n"
             )
             print("Waiting for incoming connection...")
 
@@ -94,7 +118,7 @@ def main() -> None:
     """
 
     example_maddr = (
-        "/ip4/127.0.0.1/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
+        "/ip4/[HOST_IP]/tcp/8000/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
 
     parser = argparse.ArgumentParser(description=description)

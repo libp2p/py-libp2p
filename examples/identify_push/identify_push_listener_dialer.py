@@ -14,7 +14,7 @@ Usage:
     python identify_push_listener_dialer.py
 
     # Then in another console, run as a dialer (default port 8889):
-    python identify_push_listener_dialer.py -d /ip4/127.0.0.1/tcp/8888/p2p/PEER_ID
+    python identify_push_listener_dialer.py -d /ip4/[HOST_IP]/tcp/8888/p2p/PEER_ID
     (where PEER_ID is the peer ID displayed by the listener)
 """
 
@@ -55,6 +55,11 @@ from libp2p.identity.identify_push import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+
+# Configure minimal logging
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 # Configure logging
 logger = logging.getLogger("libp2p.identity.identify-push-example")
@@ -194,6 +199,11 @@ async def run_listener(
     port: int, use_varint_format: bool = True, raw_format_flag: bool = False
 ) -> None:
     """Run a host in listener mode."""
+    from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+
+    if port <= 0:
+        port = find_free_port()
+
     format_name = "length-prefixed" if use_varint_format else "raw protobuf"
     print(
         f"\n==== Starting Identify-Push Listener on port {port} "
@@ -215,26 +225,33 @@ async def run_listener(
         custom_identify_push_handler_for(host, use_varint_format=use_varint_format),
     )
 
-    # Start listening
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    # Start listening on all available interfaces
+    listen_addrs = get_available_interfaces(port)
 
     try:
-        async with host.run([listen_addr]):
-            addr = host.get_addrs()[0]
+        async with host.run(listen_addrs):
+            all_addrs = host.get_addrs()
             logger.info("Listener host ready!")
             print("Listener host ready!")
 
-            logger.info(f"Listening on: {addr}")
-            print(f"Listening on: {addr}")
+            logger.info("Listener ready, listening on:")
+            print("Listener ready, listening on:")
+            for addr in all_addrs:
+                logger.info(f"{addr}")
+                print(f"{addr}")
 
             logger.info(f"Peer ID: {host.get_id().pretty()}")
             print(f"Peer ID: {host.get_id().pretty()}")
 
-            print("\nRun dialer with command:")
+            # Use the first address as the default for the dialer command
+            default_addr = all_addrs[0]
+            print("\nRun this from the same folder in another console:")
             if raw_format_flag:
-                print(f"identify-push-listener-dialer-demo -d {addr} --raw-format")
+                print(
+                    f"identify-push-listener-dialer-demo -d {default_addr} --raw-format"
+                )
             else:
-                print(f"identify-push-listener-dialer-demo -d {addr}")
+                print(f"identify-push-listener-dialer-demo -d {default_addr}")
             print("\nWaiting for incoming identify/push requests... (Ctrl+C to exit)")
 
             # Keep running until interrupted
@@ -274,10 +291,12 @@ async def run_dialer(
         identify_push_handler_for(host, use_varint_format=use_varint_format),
     )
 
-    # Start listening on a different port
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    # Start listening on available interfaces
+    from libp2p.utils.address_validation import get_available_interfaces
 
-    async with host.run([listen_addr]):
+    listen_addrs = get_available_interfaces(port)
+
+    async with host.run(listen_addrs):
         logger.info("Dialer host ready!")
         print("Dialer host ready!")
 

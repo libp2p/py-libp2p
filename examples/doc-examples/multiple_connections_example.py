@@ -7,6 +7,7 @@ This example shows how to:
 2. Use different load balancing strategies
 3. Access multiple connections through the new API
 4. Maintain backward compatibility
+5. Use the new address paradigm for network configuration
 """
 
 import logging
@@ -15,6 +16,7 @@ import trio
 
 from libp2p import new_swarm
 from libp2p.network.swarm import ConnectionConfig, RetryConfig
+from libp2p.utils import get_available_interfaces, get_optimal_binding_address
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -103,9 +105,44 @@ async def example_backward_compatibility() -> None:
     logger.info("Backward compatibility example completed")
 
 
+async def example_network_address_paradigm() -> None:
+    """Example of using the new address paradigm with multiple connections."""
+    logger.info("Demonstrating network address paradigm...")
+
+    # Get available interfaces using the new paradigm
+    port = 8000  # Example port
+    available_interfaces = get_available_interfaces(port)
+    logger.info(f"Available interfaces: {available_interfaces}")
+
+    # Get optimal binding address
+    optimal_address = get_optimal_binding_address(port)
+    logger.info(f"Optimal binding address: {optimal_address}")
+
+    # Create connection config for multiple connections with network awareness
+    connection_config = ConnectionConfig(
+        max_connections_per_peer=3, load_balancing_strategy="round_robin"
+    )
+
+    # Create swarm with address paradigm
+    swarm = new_swarm(connection_config=connection_config)
+
+    logger.info("Network address paradigm features:")
+    logger.info("  - get_available_interfaces() for interface discovery")
+    logger.info("  - get_optimal_binding_address() for smart address selection")
+    logger.info("  - Multiple connections with proper network binding")
+
+    await swarm.close()
+    logger.info("Network address paradigm example completed")
+
+
 async def example_production_ready_config() -> None:
     """Example of production-ready configuration."""
     logger.info("Creating swarm with production-ready configuration...")
+
+    # Get optimal network configuration using the new paradigm
+    port = 8001  # Example port
+    optimal_address = get_optimal_binding_address(port)
+    logger.info(f"Using optimal binding address: {optimal_address}")
 
     # Production-ready retry configuration
     retry_config = RetryConfig(
@@ -154,6 +191,9 @@ async def main() -> None:
         logger.info("-" * 30)
 
         await example_backward_compatibility()
+        logger.info("-" * 30)
+
+        await example_network_address_paradigm()
         logger.info("-" * 30)
 
         await example_production_ready_config()
