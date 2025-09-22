@@ -1,6 +1,6 @@
 import secrets
 
-import multiaddr
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import (
@@ -15,6 +15,10 @@ from libp2p.peer.peerinfo import (
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
+)
+from libp2p.utils.address_validation import (
+    get_available_interfaces,
+    get_optimal_binding_address,
 )
 
 
@@ -42,14 +46,16 @@ async def main():
     # Create a host with the key pair, Noise security, and mplex multiplexer
     host = new_host(key_pair=key_pair, sec_opt=security_options)
 
-    # Configure the listening address
+    # Configure the listening address using the new paradigm
     port = 8000
-    listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    listen_addrs = get_available_interfaces(port)
+    optimal_addr = get_optimal_binding_address(port)
 
     # Start the host
-    async with host.run(listen_addrs=[listen_addr]):
+    async with host.run(listen_addrs=listen_addrs):
         print("libp2p has started")
         print("libp2p is listening on:", host.get_addrs())
+        print(f"Optimal address: {optimal_addr}")
 
         # Connect to bootstrap peers manually
         bootstrap_list = [
@@ -61,7 +67,7 @@ async def main():
 
         for addr in bootstrap_list:
             try:
-                peer_info = info_from_p2p_addr(multiaddr.Multiaddr(addr))
+                peer_info = info_from_p2p_addr(Multiaddr(addr))
                 await host.connect(peer_info)
                 print(f"Connected to {peer_info.peer_id.to_string()}")
             except Exception as e:
