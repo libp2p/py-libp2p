@@ -109,6 +109,9 @@ class MessageCache:
         :param from_id: Sender's ID as bytes.
         :return: String concatenation of seqno and from_id.
         """
+        if not isinstance(seqno, bytes) or not isinstance(from_id, bytes):
+            raise ValueError("Invalid message format")
+
         seqno_int = int.from_bytes(seqno, "big")
         from_id_str = str(ID(from_id))
         return str(seqno_int) + from_id_str

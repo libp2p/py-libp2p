@@ -56,7 +56,6 @@ from .pubsub import (
 )
 from .utils import (
     parse_message_id_safe,
-    safe_parse_message_id,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -813,9 +812,7 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        msg_ids: list[tuple[bytes, bytes]] = [
-            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
-        ]
+        msg_ids: list[str] = [str(msg) for msg in iwant_msg.messageIDs]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
