@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 import logging
 import socket
 import time
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional
 
 from aioquic.quic import events
 from aioquic.quic.connection import QuicConnection
@@ -871,9 +871,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Process events by type
         for event_type, event_list in events_by_type.items():
             if event_type == type(events.StreamDataReceived).__name__:
-                await self._handle_stream_data_batch(
-                    cast(list[events.StreamDataReceived], event_list)
-                )
+                # Filter to only StreamDataReceived events
+                stream_data_events = [
+                    e for e in event_list if isinstance(e, events.StreamDataReceived)
+                ]
+                await self._handle_stream_data_batch(stream_data_events)
             else:
                 # Process other events individually
                 for event in event_list:
