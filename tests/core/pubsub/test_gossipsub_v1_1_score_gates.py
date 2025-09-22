@@ -531,6 +531,17 @@ class TestScoreGates:
         score_params = ScoreParams(
             publish_threshold=0.5,
             p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=0.8),
+            p2_first_message_deliveries=TopicScoreParams(
+                weight=0.0, cap=0.0, decay=1.0
+            ),
+            p3_mesh_message_deliveries=TopicScoreParams(weight=0.0, cap=0.0, decay=1.0),
+            p4_invalid_messages=TopicScoreParams(weight=0.0, cap=0.0, decay=1.0),
+            p5_behavior_penalty_weight=0.0,
+            p5_behavior_penalty_decay=1.0,
+            p5_behavior_penalty_threshold=0.0,
+            p6_appl_slack_weight=0.0,
+            p6_appl_slack_decay=1.0,
+            p7_ip_colocation_weight=0.0,
         )
 
         async with PubsubFactory.create_batch_with_gossipsub(
@@ -562,12 +573,14 @@ class TestScoreGates:
                 assert gsub0.scorer.allow_publish(peer_id, topics)
 
                 # Apply decay multiple times
-                for _ in range(5):
+                for _ in range(
+                    6
+                ):  # Increase to 6 heartbeats to ensure score drops below threshold
                     gsub0.scorer.on_heartbeat()
 
                 # Score should have decayed below threshold
                 score = gsub0.scorer.score(peer_id, topics)
-                assert score < 0.5
+                assert score < 0.5, f"Score {score} should be below 0.5 after decay"
 
                 # Peer should now be blocked by gates
                 assert not gsub0.scorer.allow_publish(peer_id, topics)
