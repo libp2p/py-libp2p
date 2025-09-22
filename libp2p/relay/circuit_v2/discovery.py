@@ -423,7 +423,7 @@ class RelayDiscovery(Service):
                             response, self.host, peer_id
                         ):
                             logger.error(
-                                "Received invalid-signed-record, dropping the stream"
+                                "Received invalid senderRecord, dropping the stream"
                             )
                             await stream.close()
                             return False
