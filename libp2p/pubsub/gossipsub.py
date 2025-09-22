@@ -310,6 +310,23 @@ class GossipSub(IPubsubRouter, Service):
                     # TODO: add score threshold check when peer scoring is implemented
                     #       if direct peer then skip score check
                     send_to.add(peer)
+            # direct peers
+            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
+            send_to.update(_direct_peers)
+
+            # floodsub peers
+            floodsub_peers: set[ID] = {
+                peer_id
+                for peer_id in self.pubsub.peer_topics[topic]
+                if peer_id in self.peer_protocol
+                and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
+            }
+            send_to.update(floodsub_peers)
+
+            # gossipsub peers
+            gossipsub_peers: set[ID] = set()
+            if topic in self.mesh:
+                gossipsub_peers = self.mesh[topic]
             else:
                 # direct peers
                 direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
