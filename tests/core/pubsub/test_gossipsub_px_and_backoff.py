@@ -107,7 +107,8 @@ async def test_unsubscribe_backoff():
         )
 
         # try to graft again (should succeed after backoff)
-        await trio.sleep(1)
+        # Wait longer than unsubscribe_back_off (4 seconds) + some buffer
+        await trio.sleep(4.5)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(1)
         assert host_0.get_id() in gsub1.mesh[topic], (
