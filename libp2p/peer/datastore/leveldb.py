@@ -32,7 +32,9 @@ class LevelDBBatch(IBatch):
         """Commit all operations in the batch."""
         try:
             # Create a write batch
-            write_batch = self.db.db.WriteBatch()
+            db = self.db.db
+            assert db is not None
+            write_batch = db.WriteBatch()
 
             for operation, key, value in self.operations:
                 if operation == "put":
@@ -41,7 +43,7 @@ class LevelDBBatch(IBatch):
                     write_batch.Delete(key)
 
             # Write the batch atomically
-            self.db.db.Write(write_batch)
+            db.Write(write_batch)
         except Exception as e:
             raise e
 
@@ -76,7 +78,10 @@ class LevelDBDatastore(IBatchingDatastore):
             async with self._lock:
                 if self.db is None:
                     try:
-                        import plyvel
+                        # Lazy import to avoid static import errors under pyrefly
+                        import importlib
+
+                        plyvel = importlib.import_module("plyvel")  # type: ignore
 
                         # Create directory if it doesn't exist
                         self.path.mkdir(parents=True, exist_ok=True)
@@ -92,6 +97,7 @@ class LevelDBDatastore(IBatchingDatastore):
         """Retrieve a value by key."""
         await self._ensure_connection()
         try:
+            assert self.db is not None
             return self.db.get(key)
         except Exception:
             return None
@@ -99,36 +105,51 @@ class LevelDBDatastore(IBatchingDatastore):
     async def put(self, key: bytes, value: bytes) -> None:
         """Store a key-value pair."""
         await self._ensure_connection()
+        assert self.db is not None
         self.db.put(key, value)
 
     async def delete(self, key: bytes) -> None:
         """Delete a key-value pair."""
         await self._ensure_connection()
+        assert self.db is not None
         self.db.delete(key)
 
     async def has(self, key: bytes) -> bool:
         """Check if a key exists."""
         await self._ensure_connection()
+        assert self.db is not None
         return self.db.get(key) is not None
 
-    async def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
+    def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
         """Query key-value pairs with optional prefix."""
-        await self._ensure_connection()
+        # Ensure DB exists synchronously if needed
+        if self.db is None:
+            try:
+                import importlib
 
+                plyvel = importlib.import_module("plyvel")  # type: ignore
+
+                self.path.mkdir(parents=True, exist_ok=True)
+                self.db = plyvel.DB(str(self.path), create_if_missing=True)
+            except Exception:
+                yield from ()
+
+        assert self.db is not None
         if prefix:
-            # Use prefix iterator
             iterator = self.db.iterator(prefix=prefix)
         else:
-            # Use full iterator
             iterator = self.db.iterator()
 
-        for key, value in iterator:
-            yield key, value
+        yield from iterator
 
     async def batch(self) -> IBatch:
         """Create a new batch for atomic operations."""
         await self._ensure_connection()
         return LevelDBBatch(self)
+
+    async def sync(self, prefix: bytes) -> None:
+        """Flush pending writes to disk (no-op for plyvel default)."""
+        await self._ensure_connection()
 
     async def close(self) -> None:
         """Close the datastore connection."""
@@ -136,7 +157,7 @@ class LevelDBDatastore(IBatchingDatastore):
             self.db.close()
             self.db = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup on deletion."""
         if self.db:
             self.db.close()

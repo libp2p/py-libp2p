@@ -2,7 +2,8 @@
 RocksDB datastore implementation for persistent peer storage.
 
 This provides a RocksDB-based datastore for high-performance persistent storage.
-RocksDB is a persistent key-value store for fast storage based on Log-Structured Merge Trees.
+RocksDB is a persistent key-value store for fast storage based
+on Log-Structured Merge Trees.
 """
 
 import asyncio
@@ -32,7 +33,9 @@ class RocksDBBatch(IBatch):
         """Commit all operations in the batch."""
         try:
             # Create a write batch
-            write_batch = self.db.db.WriteBatch()
+            db = self.db.db
+            assert db is not None
+            write_batch = db.WriteBatch()
 
             for operation, key, value in self.operations:
                 if operation == "put":
@@ -41,7 +44,7 @@ class RocksDBBatch(IBatch):
                     write_batch.delete(key)
 
             # Write the batch atomically
-            self.db.db.write(write_batch)
+            db.write(write_batch)
         except Exception as e:
             raise e
 
@@ -76,7 +79,10 @@ class RocksDBDatastore(IBatchingDatastore):
             async with self._lock:
                 if self.db is None:
                     try:
-                        import rocksdb
+                        # Lazy import to avoid static import errors under pyrefly
+                        import importlib
+
+                        rocksdb = importlib.import_module("rocksdb")  # type: ignore
 
                         # Create directory if it doesn't exist
                         self.path.mkdir(parents=True, exist_ok=True)
@@ -100,6 +106,7 @@ class RocksDBDatastore(IBatchingDatastore):
         """Retrieve a value by key."""
         await self._ensure_connection()
         try:
+            assert self.db is not None
             return self.db.get(key)
         except Exception:
             return None
@@ -107,36 +114,60 @@ class RocksDBDatastore(IBatchingDatastore):
     async def put(self, key: bytes, value: bytes) -> None:
         """Store a key-value pair."""
         await self._ensure_connection()
+        assert self.db is not None
         self.db.put(key, value)
 
     async def delete(self, key: bytes) -> None:
         """Delete a key-value pair."""
         await self._ensure_connection()
+        assert self.db is not None
         self.db.delete(key)
 
     async def has(self, key: bytes) -> bool:
         """Check if a key exists."""
         await self._ensure_connection()
+        assert self.db is not None
         return self.db.get(key) is not None
 
-    async def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
+    def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
         """Query key-value pairs with optional prefix."""
-        await self._ensure_connection()
+        # query is synchronous per interface; ensure DB is open sync if needed
+        if self.db is None:
+            # Can't await here; open lazily via importlib
+            try:
+                # Lazy import to avoid hard dependency during static checks
+                import importlib
 
+                rocksdb = importlib.import_module("rocksdb")  # type: ignore
+
+                self.path.mkdir(parents=True, exist_ok=True)
+                opts = rocksdb.Options()
+                opts.create_if_missing = True
+                opts.max_open_files = 300000
+                opts.write_buffer_size = 67108864
+                opts.max_write_buffer_number = 3
+                opts.target_file_size_base = 67108864
+                self.db = rocksdb.DB(str(self.path), opts)
+            except Exception:
+                # If we cannot init synchronously, yield nothing
+                yield from ()
+
+        assert self.db is not None
         if prefix:
-            # Use prefix iterator
             iterator = self.db.iteritems(prefix=prefix)
         else:
-            # Use full iterator
             iterator = self.db.iteritems()
 
-        for key, value in iterator:
-            yield key, value
+        yield from iterator
 
     async def batch(self) -> IBatch:
         """Create a new batch for atomic operations."""
         await self._ensure_connection()
         return RocksDBBatch(self)
+
+    async def sync(self, prefix: bytes) -> None:
+        """Flush pending writes to disk. RocksDB writes are durable; no-op."""
+        await self._ensure_connection()
 
     async def close(self) -> None:
         """Close the datastore connection."""
@@ -144,7 +175,7 @@ class RocksDBDatastore(IBatchingDatastore):
             self.db.close()
             self.db = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup on deletion."""
         if self.db:
             self.db.close()

@@ -90,6 +90,7 @@ class SQLiteDatastore(IBatchingDatastore):
     async def get(self, key: bytes) -> bytes | None:
         """Retrieve a value by key."""
         await self._ensure_connection()
+        assert self.connection is not None
         cursor = self.connection.cursor()
         cursor.execute("SELECT value FROM datastore WHERE key = ?", (key,))
         result = cursor.fetchone()
@@ -98,6 +99,7 @@ class SQLiteDatastore(IBatchingDatastore):
     async def put(self, key: bytes, value: bytes) -> None:
         """Store a key-value pair."""
         await self._ensure_connection()
+        assert self.connection is not None
         cursor = self.connection.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)", (key, value)
@@ -107,6 +109,7 @@ class SQLiteDatastore(IBatchingDatastore):
     async def delete(self, key: bytes) -> None:
         """Delete a key-value pair."""
         await self._ensure_connection()
+        assert self.connection is not None
         cursor = self.connection.cursor()
         cursor.execute("DELETE FROM datastore WHERE key = ?", (key,))
         self.connection.commit()
@@ -114,13 +117,33 @@ class SQLiteDatastore(IBatchingDatastore):
     async def has(self, key: bytes) -> bool:
         """Check if a key exists."""
         await self._ensure_connection()
+        assert self.connection is not None
         cursor = self.connection.cursor()
         cursor.execute("SELECT 1 FROM datastore WHERE key = ?", (key,))
         return cursor.fetchone() is not None
 
-    async def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
-        """Query key-value pairs with optional prefix."""
-        await self._ensure_connection()
+    def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
+        """
+        Query key-value pairs with optional prefix.
+
+        Note: query is synchronous per interface and returns an Iterator.
+        If the connection is missing, we best-effort open it synchronously.
+        """
+        if self.connection is None:
+            # Create directory and open connection synchronously
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.connection = sqlite3.connect(str(self.path), check_same_thread=False)
+            self.connection.execute(
+                """
+                        CREATE TABLE IF NOT EXISTS datastore (
+                            key BLOB PRIMARY KEY,
+                            value BLOB NOT NULL
+                        )
+                    """
+            )
+            self.connection.commit()
+
+        assert self.connection is not None
         cursor = self.connection.cursor()
         if prefix:
             cursor.execute(
@@ -135,7 +158,14 @@ class SQLiteDatastore(IBatchingDatastore):
     async def batch(self) -> IBatch:
         """Create a new batch for atomic operations."""
         await self._ensure_connection()
+        assert self.connection is not None
         return SQLiteBatch(self.connection)
+
+    async def sync(self, prefix: bytes) -> None:
+        """Flush pending writes to disk (commit current transaction)."""
+        await self._ensure_connection()
+        assert self.connection is not None
+        self.connection.commit()
 
     async def close(self) -> None:
         """Close the datastore connection."""
@@ -143,7 +173,7 @@ class SQLiteDatastore(IBatchingDatastore):
             self.connection.close()
             self.connection = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup on deletion."""
         if self.connection:
             self.connection.close()

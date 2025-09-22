@@ -39,13 +39,22 @@ def create_persistent_peerstore(
 
     Examples:
         # Create with SQLite backend
-        peerstore = create_persistent_peerstore(db_path="./peerstore.db", backend="sqlite")
+        peerstore = create_persistent_peerstore(
+            db_path="./peerstore.db",
+            backend="sqlite"
+        )
 
         # Create with LevelDB backend
-        peerstore = create_persistent_peerstore(db_path="./peerstore.ldb", backend="leveldb")
+        peerstore = create_persistent_peerstore(
+            db_path="./peerstore.ldb",
+            backend="leveldb"
+        )
 
         # Create with RocksDB backend
-        peerstore = create_persistent_peerstore(db_path="./peerstore.rdb", backend="rocksdb")
+        peerstore = create_persistent_peerstore(
+            db_path="./peerstore.rdb",
+            backend="rocksdb"
+        )
 
         # Create with custom datastore
         custom_datastore = MyCustomDatastore()
@@ -112,7 +121,8 @@ def create_leveldb_peerstore(
     """
     Create a persistent peerstore with LevelDB backend.
 
-    LevelDB provides high-performance key-value storage with good read/write performance.
+    LevelDB provides high-performance key-value storage with
+    good read/write performance.
 
     Args:
         db_path: Path to the LevelDB database directory

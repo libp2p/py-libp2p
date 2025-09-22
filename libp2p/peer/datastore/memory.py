@@ -29,6 +29,7 @@ class MemoryBatch(IBatch):
         """Commit all operations in the batch."""
         for op_type, key, value in self.operations:
             if op_type == "put":
+                assert value is not None
                 self.datastore._data[key] = value
             elif op_type == "delete":
                 self.datastore._data.pop(key, None)
@@ -43,7 +44,7 @@ class MemoryDatastore(IBatchingDatastore):
     is not required.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._data: dict[bytes, bytes] = {}
         self._lock = asyncio.Lock()
 
