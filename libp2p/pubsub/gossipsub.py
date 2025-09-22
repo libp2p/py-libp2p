@@ -421,8 +421,10 @@ class GossipSub(IPubsubRouter, Service):
             return
         # Notify the peers in mesh[topic] with a PRUNE(topic) message
         for peer in self.mesh[topic]:
-            await self.emit_prune(topic, peer, self.do_px, True)
+            # Add backoff BEFORE emitting PRUNE to avoid races where a GRAFT
+            # could be processed before the backoff is recorded locally.
             self._add_back_off(peer, topic, True)
+            await self.emit_prune(topic, peer, self.do_px, True)
 
         # Forget mesh[topic]
         self.mesh.pop(topic, None)
