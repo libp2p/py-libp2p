@@ -36,6 +36,9 @@ from libp2p.identity.identify_push import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+from libp2p.utils.address_validation import (
+    get_available_interfaces,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -207,13 +210,13 @@ async def main() -> None:
         ID_PUSH, create_custom_identify_push_handler(host_2, "Host 2")
     )
 
-    # Start listening on random ports using the run context manager
-    listen_addr_1 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
-    listen_addr_2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+    # Start listening on available interfaces using random ports
+    listen_addrs_1 = get_available_interfaces(0)  # 0 for random port
+    listen_addrs_2 = get_available_interfaces(0)  # 0 for random port
 
     async with (
-        host_1.run([listen_addr_1]),
-        host_2.run([listen_addr_2]),
+        host_1.run(listen_addrs_1),
+        host_2.run(listen_addrs_2),
         trio.open_nursery() as nursery,
     ):
         # Start the peer-store cleanup task
