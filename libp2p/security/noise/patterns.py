@@ -2,6 +2,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
+import logging
 
 from cryptography.hazmat.primitives import (
     serialization,
@@ -45,6 +46,8 @@ from .messages import (
     make_handshake_payload_sig,
     verify_handshake_payload_sig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class IPattern(ABC):
@@ -95,6 +98,7 @@ class PatternXX(BasePattern):
         self.early_data = early_data
 
     async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
+        logger.debug(f"Noise XX handshake_inbound started for peer {self.local_peer}")
         noise_state = self.create_noise_state()
         noise_state.set_as_responder()
         noise_state.start_handshake()
@@ -107,15 +111,22 @@ class PatternXX(BasePattern):
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
 
         # Consume msg#1.
+        logger.debug("Noise XX handshake_inbound: reading msg#1")
         await read_writer.read_msg()
+        logger.debug("Noise XX handshake_inbound: read msg#1 successfully")
 
         # Send msg#2, which should include our handshake payload.
+        logger.debug("Noise XX handshake_inbound: preparing msg#2")
         our_payload = self.make_handshake_payload()
         msg_2 = our_payload.serialize()
+        logger.debug(f"Noise XX handshake_inbound: sending msg#2 ({len(msg_2)} bytes)")
         await read_writer.write_msg(msg_2)
+        logger.debug("Noise XX handshake_inbound: sent msg#2 successfully")
 
         # Receive and consume msg#3.
+        logger.debug("Noise XX handshake_inbound: reading msg#3")
         msg_3 = await read_writer.read_msg()
+        logger.debug(f"Noise XX handshake_inbound: read msg#3 ({len(msg_3)} bytes)")
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_3)
 
         if handshake_state.rs is None:
@@ -147,6 +158,7 @@ class PatternXX(BasePattern):
     async def handshake_outbound(
         self, conn: IRawConnection, remote_peer: ID
     ) -> ISecureConn:
+        logger.debug(f"Noise XX handshake_outbound started to peer {remote_peer}")
         noise_state = self.create_noise_state()
 
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
@@ -159,11 +171,15 @@ class PatternXX(BasePattern):
             raise NoiseStateError("Handshake state is not initialized")
 
         # Send msg#1, which is *not* encrypted.
+        logger.debug("Noise XX handshake_outbound: sending msg#1")
         msg_1 = b""
         await read_writer.write_msg(msg_1)
+        logger.debug("Noise XX handshake_outbound: sent msg#1 successfully")
 
         # Read msg#2 from the remote, which contains the public key of the peer.
+        logger.debug("Noise XX handshake_outbound: reading msg#2")
         msg_2 = await read_writer.read_msg()
+        logger.debug(f"Noise XX handshake_outbound: read msg#2 ({len(msg_2)} bytes)")
         peer_handshake_payload = NoiseHandshakePayload.deserialize(msg_2)
 
         if handshake_state.rs is None:
@@ -174,8 +190,27 @@ class PatternXX(BasePattern):
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
 
+        logger.debug(
+            f"Noise XX handshake_outbound: verifying signature for peer {remote_peer}"
+        )
+        logger.debug(
+            f"Noise XX handshake_outbound: remote_pubkey type: {type(remote_pubkey)}"
+        )
+        id_pubkey_repr = peer_handshake_payload.id_pubkey.to_bytes().hex()
+        logger.debug(
+            f"Noise XX handshake_outbound: peer_handshake_payload.id_pubkey: "
+            f"{id_pubkey_repr}"
+        )
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
+            logger.error(
+                f"Noise XX handshake_outbound: signature verification failed for peer "
+                f"{remote_peer}"
+            )
             raise InvalidSignature
+        logger.debug(
+            f"Noise XX handshake_outbound: signature verification successful for peer "
+            f"{remote_peer}"
+        )
         remote_peer_id_from_pubkey = ID.from_pubkey(peer_handshake_payload.id_pubkey)
         if remote_peer_id_from_pubkey != remote_peer:
             raise PeerIDMismatchesPubkey(
