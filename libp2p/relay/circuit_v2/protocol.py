@@ -411,7 +411,7 @@ class CircuitV2Protocol(Service):
 
             # Consume sender records if sent
             if hop_msg.HasField("senderRecord"):
-                if not maybe_consume_signed_record(hop_msg, self.host):
+                if not maybe_consume_signed_record(hop_msg, self.host, remote_peer_id):
                     logger.error("Received invalid sender-records. Closing stream")
                     await self._close_stream(stream)
                     return
@@ -472,8 +472,10 @@ class CircuitV2Protocol(Service):
                 stop_msg.ParseFromString(msg_bytes)
 
             if stop_msg.HasField("senderRecord"):
-                if not maybe_consume_signed_record(stop_msg, self.host):
-                    logger.error("Received invalid signed-records. Closing stream")
+                if not maybe_consume_signed_record(
+                    stop_msg, self.host, ID(stop_msg.peer)
+                ):
+                    logger.error("Received invalid senderRecord. Closing stream")
                     await self._close_stream(stream)
                     return
 
@@ -490,8 +492,8 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(stream)
                 return
 
-            # Get the source stream from active relays
             peer_id = ID(stop_msg.peer)
+            # Get the source stream from active relays
             if peer_id not in self._active_relays:
                 # Use direct attribute access to create status object for error response
                 relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -727,7 +729,7 @@ class CircuitV2Protocol(Service):
                 resp.ParseFromString(resp_bytes)
 
                 if resp.HasField("senderRecord"):
-                    if not maybe_consume_signed_record(resp, self.host):
+                    if not maybe_consume_signed_record(resp, self.host, peer_id):
                         logger.error(
                             "Received invalid signed-records from destination. "
                             "Closing stream"

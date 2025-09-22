@@ -892,7 +892,7 @@ async def test_reservation_fails_with_invalid_record_transfer():
                     request = proto.HopMessage(
                         type=proto.HopMessage.RESERVE,
                         peer=client_host.get_id().to_bytes(),
-                        senderRecord=corrupted_env.to_bytes(),  # Invalid SPR
+                        senderRecord=corrupted_env.marshal_envelope(),  # Invalid SPR
                     )
 
                     await stream.write(request.SerializeToString())
