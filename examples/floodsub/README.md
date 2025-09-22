@@ -16,42 +16,48 @@ FloodSub is the simplest pubsub routing algorithm in libp2p. It works by floodin
 ### 1. Simple PubSub (`simple_pubsub.py`)
 
 A basic example showing:
+
 - Creating two libp2p hosts with FloodSub
 - Connecting them together
 - Publishing and subscribing to messages
 - Basic message flow
 
 **Run it:**
+
 ```bash
 python examples/floodsub/simple_pubsub.py
 ```
 
 **What it does:**
+
 1. Creates two libp2p nodes with FloodSub
-2. Connects them
-3. One node subscribes to a topic
-4. The other node publishes messages
-5. Shows received messages
+1. Connects them
+1. One node subscribes to a topic
+1. The other node publishes messages
+1. Shows received messages
 
 ### 2. Multi-Node PubSub (`multi_node_pubsub.py`)
 
 A more advanced example showing:
+
 - Multiple nodes (3) in a network
 - Different nodes subscribing to different topics
 - Publishing from multiple nodes
 - Message flooding across the network
 
 **Run it:**
+
 ```bash
 python examples/floodsub/multi_node_pubsub.py
 ```
 
 **What it does:**
+
 1. Creates 3 libp2p nodes with FloodSub
-2. Connects them in a chain: A -> B -> C
-3. Each node subscribes to different topics
-4. Each node publishes messages to different topics
-5. Shows how messages flood through the network
+1. Connects them in a chain: A -> B -> C
+1. Each node subscribes to different topics
+1. Each node publishes messages to different topics
+1. Shows how messages flood through the network
 
 ## Key Concepts
 
@@ -106,9 +112,9 @@ See the interoperability tests in `tests/interop/` for examples of cross-languag
 FloodSub uses the `/floodsub/1.0.0` protocol and follows the libp2p pubsub specification:
 
 1. **Message Format**: Uses protobuf messages as defined in the libp2p pubsub spec
-2. **Flooding Algorithm**: Forwards messages to all connected peers subscribed to the topic
-3. **Deduplication**: Uses message IDs to prevent duplicate message processing
-4. **Subscription Management**: Handles topic subscriptions and unsubscriptions
+1. **Flooding Algorithm**: Forwards messages to all connected peers subscribed to the topic
+1. **Deduplication**: Uses message IDs to prevent duplicate message processing
+1. **Subscription Management**: Handles topic subscriptions and unsubscriptions
 
 ## Performance Characteristics
 
@@ -120,6 +126,7 @@ FloodSub uses the `/floodsub/1.0.0` protocol and follows the libp2p pubsub speci
 ## Use Cases
 
 FloodSub is suitable for:
+
 - Small networks (< 100 peers)
 - Testing and development
 - Learning pubsub concepts
@@ -136,6 +143,7 @@ FloodSub is suitable for:
 ## Next Steps
 
 After understanding FloodSub, consider exploring:
+
 - **GossipSub**: More efficient pubsub algorithm
 - **Custom Validators**: Message validation and filtering
 - **Message Signing**: Cryptographic message authentication

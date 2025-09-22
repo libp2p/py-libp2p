@@ -7,14 +7,14 @@ This document provides comprehensive implementation details for the FloodSub pub
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Core Implementation](#core-implementation)
-3. [Key Features](#key-features)
-4. [Protocol Details](#protocol-details)
-5. [Usage Examples](#usage-examples)
-6. [Testing Strategy](#testing-strategy)
-7. [Performance Characteristics](#performance-characteristics)
-8. [Interoperability](#interoperability)
-9. [Screencast Demonstrations](#screencast-demonstrations)
+1. [Core Implementation](#core-implementation)
+1. [Key Features](#key-features)
+1. [Protocol Details](#protocol-details)
+1. [Usage Examples](#usage-examples)
+1. [Testing Strategy](#testing-strategy)
+1. [Performance Characteristics](#performance-characteristics)
+1. [Interoperability](#interoperability)
+1. [Screencast Demonstrations](#screencast-demonstrations)
 
 ## Architecture Overview
 
@@ -53,7 +53,7 @@ FloodSub implements the `IPubsubRouter` interface and provides a simple flooding
 class FloodSub(IPubsubRouter):
     protocols: list[TProtocol]
     pubsub: Pubsub | None
-    
+
     def __init__(self, protocols: Sequence[TProtocol]) -> None
     def get_protocols(self) -> list[TProtocol]
     def attach(self, pubsub: Pubsub) -> None
@@ -77,7 +77,7 @@ async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
     """
     Invoked to forward a new message that has been validated. This is where
     the "flooding" part of floodsub happens.
-    
+
     With flooding, routing is almost trivial: for each incoming message,
     forward to all known peers in the topic. There is a bit of logic,
     as the router maintains a timed cache of previous messages,
@@ -93,15 +93,15 @@ async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
             origin=ID(pubsub_msg.from_id),
         )
     )
-    
+
     # Create RPC message
     rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
-    
+
     # Add sender record for peer identification
     if isinstance(self.pubsub, Pubsub):
         envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
         rpc_msg.senderRecord = envelope_bytes
-    
+
     # Send to all eligible peers
     for peer_id in peers_gen:
         if peer_id not in pubsub.peers:
@@ -120,7 +120,7 @@ def _get_peers_to_send(
 ) -> Iterable[ID]:
     """
     Get the eligible peers to send the data to.
-    
+
     Excludes:
     - The peer who forwarded the message to us (msg_forwarder)
     - The peer who originally created the message (origin)
@@ -169,10 +169,10 @@ def _get_peers_to_send(
 ### Message Flow
 
 1. **Subscription**: Peers announce their interest in topics
-2. **Publication**: Messages are published to topics
-3. **Validation**: Messages are validated by the Pubsub service
-4. **Flooding**: Valid messages are flooded to all subscribed peers
-5. **Deduplication**: Duplicate messages are filtered out by the message cache
+1. **Publication**: Messages are published to topics
+1. **Validation**: Messages are validated by the Pubsub service
+1. **Flooding**: Valid messages are flooded to all subscribed peers
+1. **Deduplication**: Duplicate messages are filtered out by the message cache
 
 ### Message Structure
 
@@ -262,18 +262,18 @@ await pubsub.publish(["topic1", "topic2"], b"Multi-topic message")
 The implementation includes comprehensive unit tests covering:
 
 1. **Basic Functionality**: Two-node communication
-2. **Message Deduplication**: Timed cache behavior
-3. **Multi-node Scenarios**: Complex network topologies
-4. **Edge Cases**: Error handling and boundary conditions
+1. **Message Deduplication**: Timed cache behavior
+1. **Multi-node Scenarios**: Complex network topologies
+1. **Edge Cases**: Error handling and boundary conditions
 
 ### Integration Tests
 
 Integration tests validate:
 
 1. **Protocol Compliance**: Interoperability with other libp2p implementations
-2. **Network Topologies**: Various connection patterns
-3. **Message Flow**: End-to-end message delivery
-4. **Performance**: Message throughput and latency
+1. **Network Topologies**: Various connection patterns
+1. **Message Flow**: End-to-end message delivery
+1. **Performance**: Message throughput and latency
 
 ### Test Examples
 
@@ -283,16 +283,16 @@ async def test_simple_two_nodes():
     async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
         topic = "my_topic"
         data = b"some data"
-        
+
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await trio.sleep(0.25)
-        
+
         sub_b = await pubsubs_fsub[1].subscribe(topic)
         await trio.sleep(0.25)
-        
+
         await pubsubs_fsub[0].publish(topic, data)
         res_b = await sub_b.get()
-        
+
         assert ID(res_b.from_id) == pubsubs_fsub[0].host.get_id()
         assert res_b.data == data
         assert res_b.topicIDs == [topic]
@@ -342,9 +342,9 @@ FloodSub in py-libp2p is designed to be compatible with:
 The implementation includes interoperability tests that validate:
 
 1. **Message Format Compatibility**: Protobuf message structure
-2. **Protocol Handshake**: Initial connection and subscription handling
-3. **Message Delivery**: End-to-end message flow between implementations
-4. **Error Handling**: Graceful handling of protocol mismatches
+1. **Protocol Handshake**: Initial connection and subscription handling
+1. **Message Delivery**: End-to-end message flow between implementations
+1. **Error Handling**: Graceful handling of protocol mismatches
 
 ## Screencast Demonstrations
 
@@ -353,19 +353,22 @@ The implementation includes interoperability tests that validate:
 **Duration**: 3-4 minutes
 
 **Content**:
+
 1. **Setup**: Show creating two libp2p hosts with FloodSub
-2. **Connection**: Demonstrate peer connection establishment
-3. **Subscription**: Show subscribing to a topic
-4. **Publishing**: Publish messages and show real-time delivery
-5. **Message Details**: Display message metadata (from_id, topics, data)
+1. **Connection**: Demonstrate peer connection establishment
+1. **Subscription**: Show subscribing to a topic
+1. **Publishing**: Publish messages and show real-time delivery
+1. **Message Details**: Display message metadata (from_id, topics, data)
 
 **Key Points to Highlight**:
+
 - Simple setup process
 - Real-time message delivery
 - Message metadata and routing information
 - Console output showing the flooding behavior
 
 **Script**:
+
 ```bash
 # Terminal 1: Start the basic example
 python examples/floodsub/basic_example.py
@@ -379,19 +382,22 @@ python examples/floodsub/basic_example.py
 **Duration**: 4-5 minutes
 
 **Content**:
+
 1. **Network Setup**: Create 3-node network with chain topology (A->B->C)
-2. **Topic Subscriptions**: Show different nodes subscribing to different topics
-3. **Message Flooding**: Demonstrate how messages flood through the network
-4. **Cross-Topic Communication**: Show messages reaching nodes subscribed to different topics
-5. **Network Visualization**: Use console output to show the message flow
+1. **Topic Subscriptions**: Show different nodes subscribing to different topics
+1. **Message Flooding**: Demonstrate how messages flood through the network
+1. **Cross-Topic Communication**: Show messages reaching nodes subscribed to different topics
+1. **Network Visualization**: Use console output to show the message flow
 
 **Key Points to Highlight**:
+
 - Network topology and connections
 - Message flooding across multiple hops
 - Topic-based message routing
 - Peer discovery and connection management
 
 **Script**:
+
 ```bash
 # Terminal 1: Start the multi-node example
 python examples/floodsub/multi_node_pubsub.py
@@ -406,19 +412,22 @@ python examples/floodsub/multi_node_pubsub.py
 **Duration**: 3-4 minutes
 
 **Content**:
+
 1. **Test Suite**: Run the FloodSub test suite
-2. **Unit Tests**: Show individual test cases and their results
-3. **Integration Tests**: Demonstrate multi-node test scenarios
-4. **Performance Metrics**: Show test timing and performance data
-5. **Error Handling**: Demonstrate error scenarios and recovery
+1. **Unit Tests**: Show individual test cases and their results
+1. **Integration Tests**: Demonstrate multi-node test scenarios
+1. **Performance Metrics**: Show test timing and performance data
+1. **Error Handling**: Demonstrate error scenarios and recovery
 
 **Key Points to Highlight**:
+
 - Comprehensive test coverage
 - Automated validation of functionality
 - Performance characteristics
 - Error handling and edge cases
 
 **Script**:
+
 ```bash
 # Terminal 1: Run FloodSub tests
 pytest tests/core/pubsub/test_floodsub.py -v
@@ -440,10 +449,10 @@ The implementation follows libp2p standards, provides comprehensive testing, and
 Potential areas for future improvement:
 
 1. **Message Compression**: Reduce bandwidth usage for large messages
-2. **Selective Flooding**: Implement topic-based peer filtering
-3. **Load Balancing**: Distribute message processing across multiple threads
-4. **Metrics Collection**: Add detailed performance and usage metrics
-5. **Configuration Options**: Allow tuning of flooding parameters
+1. **Selective Flooding**: Implement topic-based peer filtering
+1. **Load Balancing**: Distribute message processing across multiple threads
+1. **Metrics Collection**: Add detailed performance and usage metrics
+1. **Configuration Options**: Allow tuning of flooding parameters
 
 ## References
 

@@ -19,7 +19,6 @@ The example will:
 5. Show the received messages
 """
 
-import asyncio
 import logging
 import sys
 
@@ -36,30 +35,30 @@ logger = logging.getLogger("floodsub_example")
 async def publisher_node(pubsub, topic: str, messages: list[str]) -> None:
     """Node that publishes messages to a topic."""
     logger.info(f"Publisher node {pubsub.host.get_id()} starting...")
-    
+
     # Wait a bit for connections to establish
     await trio.sleep(1)
-    
+
     # Publish messages
     for i, message in enumerate(messages):
-        logger.info(f"Publishing message {i+1}: {message}")
+        logger.info(f"Publishing message {i + 1}: {message}")
         await pubsub.publish(topic, message.encode())
         await trio.sleep(0.5)  # Small delay between messages
-    
+
     logger.info("Publisher finished sending messages")
 
 
 async def subscriber_node(pubsub, topic: str) -> None:
     """Node that subscribes to a topic and receives messages."""
     logger.info(f"Subscriber node {pubsub.host.get_id()} starting...")
-    
+
     # Subscribe to the topic
     logger.info(f"Subscribing to topic: {topic}")
     subscription = await pubsub.subscribe(topic)
-    
+
     # Wait a bit for subscription to propagate
     await trio.sleep(0.5)
-    
+
     # Receive messages
     received_count = 0
     try:
@@ -71,45 +70,51 @@ async def subscriber_node(pubsub, topic: str) -> None:
             logger.info(f"  Topics: {message.topicIDs}")
     except Exception as e:
         logger.error(f"Error receiving message: {e}")
-    
+
     logger.info("Subscriber finished receiving messages")
 
 
 async def main() -> None:
     """Main function demonstrating FloodSub pubsub."""
     logger.info("Starting FloodSub PubSub example...")
-    
+
     topic = "test-topic"
     messages = [
         "Hello from FloodSub!",
         "This is message number 2",
-        "FloodSub is working great!"
+        "FloodSub is working great!",
     ]
-    
+
     # Create two hosts with FloodSub using the factory
     async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs:
         pubsub1, pubsub2 = pubsubs
-        
+
         # Get the addresses of both hosts
-        addr1 = f"/ip4/127.0.0.1/tcp/{pubsub1.host.get_addrs()[0].split('/')[-1]}/p2p/{pubsub1.host.get_id()}"
-        addr2 = f"/ip4/127.0.0.1/tcp/{pubsub2.host.get_addrs()[0].split('/')[-1]}/p2p/{pubsub2.host.get_id()}"
-        
+        addr1 = (
+            f"/ip4/127.0.0.1/tcp/{pubsub1.host.get_addrs()[0].split('/')[-1]}/"
+            f"p2p/{pubsub1.host.get_id()}"
+        )
+        addr2 = (
+            f"/ip4/127.0.0.1/tcp/{pubsub2.host.get_addrs()[0].split('/')[-1]}/"
+            f"p2p/{pubsub2.host.get_id()}"
+        )
+
         logger.info(f"Host 1 address: {addr1}")
         logger.info(f"Host 2 address: {addr2}")
-        
+
         # Connect the hosts
         logger.info("Connecting hosts...")
         await connect(pubsub1.host, pubsub2.host)
         await trio.sleep(1)  # Wait for connection to establish
-        
+
         # Run publisher and subscriber concurrently
         async with trio.open_nursery() as nursery:
             # Start subscriber first
             nursery.start_soon(subscriber_node, pubsub2, topic)
-            
+
             # Start publisher
             nursery.start_soon(publisher_node, pubsub1, topic, messages)
-    
+
     logger.info("FloodSub example completed successfully!")
 
 

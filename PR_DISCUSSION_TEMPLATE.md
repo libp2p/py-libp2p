@@ -17,12 +17,12 @@ This PR implements a complete FloodSub pubsub router for py-libp2p, providing a 
 
 ### Key Features
 
-✅ **Simple Flooding Algorithm**: Forwards messages to all connected peers subscribed to the topic  
-✅ **Loop Prevention**: Never forwards messages back to source or forwarder  
-✅ **Protocol Compliance**: Uses standard libp2p pubsub protobuf messages  
-✅ **Integration**: Seamlessly integrates with existing Pubsub service  
-✅ **Testing**: Comprehensive unit and integration tests  
-✅ **Examples**: Working examples demonstrating basic and multi-node scenarios  
+✅ **Simple Flooding Algorithm**: Forwards messages to all connected peers subscribed to the topic
+✅ **Loop Prevention**: Never forwards messages back to source or forwarder
+✅ **Protocol Compliance**: Uses standard libp2p pubsub protobuf messages
+✅ **Integration**: Seamlessly integrates with existing Pubsub service
+✅ **Testing**: Comprehensive unit and integration tests
+✅ **Examples**: Working examples demonstrating basic and multi-node scenarios
 
 ## 🏗️ Architecture
 
@@ -47,10 +47,10 @@ This PR implements a complete FloodSub pubsub router for py-libp2p, providing a 
 ### Message Flow
 
 1. **Subscription**: Peers announce interest in topics
-2. **Publication**: Messages published to topics
-3. **Validation**: Messages validated by Pubsub service
-4. **Flooding**: Valid messages flooded to all subscribed peers
-5. **Deduplication**: Duplicates filtered by message cache
+1. **Publication**: Messages published to topics
+1. **Validation**: Messages validated by Pubsub service
+1. **Flooding**: Valid messages flooded to all subscribed peers
+1. **Deduplication**: Duplicates filtered by message cache
 
 ## 💻 Code Examples
 
@@ -120,16 +120,19 @@ pytest tests/core/pubsub/ -v
 ## 📊 Performance Characteristics
 
 ### Strengths
+
 - **Low Latency**: Direct flooding provides minimal delivery delay
 - **High Reliability**: Simple algorithm with predictable behavior
 - **Easy Debugging**: Straightforward logic for troubleshooting
 
 ### Limitations
+
 - **High Bandwidth**: Messages sent to all connected peers
 - **Poor Scalability**: Performance degrades with network size
 - **No Optimization**: No intelligent routing or load balancing
 
 ### Metrics
+
 - **Latency**: ~1-5ms for small networks (< 10 peers)
 - **Memory**: O(n) where n is number of peers
 - **CPU**: Low per-message processing overhead
@@ -138,9 +141,9 @@ pytest tests/core/pubsub/ -v
 
 ### Cross-Language Compatibility
 
-✅ **go-libp2p**: Compatible with Go FloodSub implementation  
-✅ **js-libp2p**: Works with JavaScript libp2p FloodSub  
-✅ **rust-libp2p**: Should work with Rust libp2p FloodSub  
+✅ **go-libp2p**: Compatible with Go FloodSub implementation
+✅ **js-libp2p**: Works with JavaScript libp2p FloodSub
+✅ **rust-libp2p**: Should work with Rust libp2p FloodSub
 
 ### Protocol Details
 
@@ -153,18 +156,21 @@ pytest tests/core/pubsub/ -v
 ### Screencast 1: Basic FloodSub Functionality (3-4 min)
 
 **What to Show**:
+
 1. Creating two libp2p hosts with FloodSub
-2. Establishing peer connections
-3. Subscribing to topics
-4. Publishing messages and real-time delivery
-5. Message metadata display
+1. Establishing peer connections
+1. Subscribing to topics
+1. Publishing messages and real-time delivery
+1. Message metadata display
 
 **Commands**:
+
 ```bash
 python examples/floodsub/basic_example.py
 ```
 
 **Key Highlights**:
+
 - Simple setup process
 - Real-time message delivery
 - Message routing information
@@ -173,18 +179,21 @@ python examples/floodsub/basic_example.py
 ### Screencast 2: Multi-Node Network Topology (4-5 min)
 
 **What to Show**:
+
 1. 3-node network with chain topology (A→B→C)
-2. Different nodes subscribing to different topics
-3. Message flooding through the network
-4. Cross-topic communication
-5. Network visualization through console output
+1. Different nodes subscribing to different topics
+1. Message flooding through the network
+1. Cross-topic communication
+1. Network visualization through console output
 
 **Commands**:
+
 ```bash
 python examples/floodsub/multi_node_pubsub.py
 ```
 
 **Key Highlights**:
+
 - Network topology and connections
 - Message flooding across multiple hops
 - Topic-based message routing
@@ -193,19 +202,22 @@ python examples/floodsub/multi_node_pubsub.py
 ### Screencast 3: Testing and Validation (3-4 min)
 
 **What to Show**:
+
 1. Running the FloodSub test suite
-2. Individual test cases and results
-3. Multi-node test scenarios
-4. Performance metrics and timing
-5. Error handling demonstrations
+1. Individual test cases and results
+1. Multi-node test scenarios
+1. Performance metrics and timing
+1. Error handling demonstrations
 
 **Commands**:
+
 ```bash
 pytest tests/core/pubsub/test_floodsub.py -v
 pytest tests/utils/pubsub/floodsub_integration_test_settings.py -v
 ```
 
 **Key Highlights**:
+
 - Comprehensive test coverage
 - Automated validation
 - Performance characteristics
@@ -214,19 +226,23 @@ pytest tests/utils/pubsub/floodsub_integration_test_settings.py -v
 ## 📁 Files Changed
 
 ### Core Implementation
+
 - `libp2p/pubsub/floodsub.py` - Main FloodSub router implementation
 - `libp2p/tools/constants.py` - Added FloodSub protocol constant
 
 ### Examples
+
 - `examples/floodsub/basic_example.py` - Basic two-node example
 - `examples/floodsub/multi_node_pubsub.py` - Multi-node network example
 - `examples/floodsub/README.md` - Comprehensive usage documentation
 
 ### Tests
+
 - `tests/core/pubsub/test_floodsub.py` - Unit tests for FloodSub
 - `tests/utils/pubsub/floodsub_integration_test_settings.py` - Integration test settings
 
 ### Documentation
+
 - `FLOODSUB_IMPLEMENTATION.md` - Complete implementation documentation
 - `PR_DISCUSSION_TEMPLATE.md` - This PR discussion template
 
@@ -235,21 +251,25 @@ pytest tests/utils/pubsub/floodsub_integration_test_settings.py -v
 ### Quick Start
 
 1. **Install Dependencies**:
+
    ```bash
    pip install -e .
    ```
 
-2. **Run Basic Example**:
+1. **Run Basic Example**:
+
    ```bash
    python examples/floodsub/basic_example.py
    ```
 
-3. **Run Multi-Node Example**:
+1. **Run Multi-Node Example**:
+
    ```bash
    python examples/floodsub/multi_node_pubsub.py
    ```
 
-4. **Run Tests**:
+1. **Run Tests**:
+
    ```bash
    pytest tests/core/pubsub/test_floodsub.py -v
    ```
@@ -268,24 +288,28 @@ pubsub = Pubsub(host=host, router=floodsub, strict_signing=False)
 ## 🔍 Code Review Checklist
 
 ### Implementation Quality
+
 - [ ] Code follows py-libp2p style guidelines
 - [ ] Proper error handling and edge cases
 - [ ] Comprehensive docstrings and comments
 - [ ] Type hints for all public methods
 
 ### Testing
+
 - [ ] Unit tests cover all public methods
 - [ ] Integration tests validate end-to-end functionality
 - [ ] Edge cases and error scenarios tested
 - [ ] Performance characteristics validated
 
 ### Documentation
+
 - [ ] API documentation is complete and accurate
 - [ ] Examples demonstrate key use cases
 - [ ] README provides clear usage instructions
 - [ ] Implementation details documented
 
 ### Interoperability
+
 - [ ] Protocol compliance with libp2p specification
 - [ ] Message format compatibility
 - [ ] Cross-language interoperability validated
@@ -296,34 +320,34 @@ pubsub = Pubsub(host=host, router=floodsub, strict_signing=False)
 ### Design Decisions
 
 1. **Simple Implementation**: Chose simplicity over optimization for reliability
-2. **Protocol Compliance**: Strict adherence to libp2p pubsub specification
-3. **Integration**: Leverages existing Pubsub service rather than reimplementing
-4. **Testing**: Comprehensive test coverage including edge cases
+1. **Protocol Compliance**: Strict adherence to libp2p pubsub specification
+1. **Integration**: Leverages existing Pubsub service rather than reimplementing
+1. **Testing**: Comprehensive test coverage including edge cases
 
 ### Future Considerations
 
 1. **Performance Optimization**: Could add message compression for large payloads
-2. **Configuration**: Could add tunable parameters for flooding behavior
-3. **Metrics**: Could add detailed performance and usage metrics
-4. **Selective Flooding**: Could implement topic-based peer filtering
+1. **Configuration**: Could add tunable parameters for flooding behavior
+1. **Metrics**: Could add detailed performance and usage metrics
+1. **Selective Flooding**: Could implement topic-based peer filtering
 
 ### Questions for Reviewers
 
 1. **API Design**: Are the public methods intuitive and well-designed?
-2. **Error Handling**: Is error handling comprehensive and user-friendly?
-3. **Performance**: Are there any performance concerns with the current implementation?
-4. **Testing**: Is the test coverage sufficient for production use?
-5. **Documentation**: Is the documentation clear and comprehensive?
+1. **Error Handling**: Is error handling comprehensive and user-friendly?
+1. **Performance**: Are there any performance concerns with the current implementation?
+1. **Testing**: Is the test coverage sufficient for production use?
+1. **Documentation**: Is the documentation clear and comprehensive?
 
 ## 📈 Next Steps
 
 After this PR is merged:
 
 1. **Performance Testing**: Conduct larger-scale performance tests
-2. **Interop Testing**: Validate compatibility with other libp2p implementations
-3. **Documentation**: Add to main py-libp2p documentation
-4. **Examples**: Create additional examples for specific use cases
-5. **Optimization**: Consider performance improvements based on usage patterns
+1. **Interop Testing**: Validate compatibility with other libp2p implementations
+1. **Documentation**: Add to main py-libp2p documentation
+1. **Examples**: Create additional examples for specific use cases
+1. **Optimization**: Consider performance improvements based on usage patterns
 
 ## 🙏 Acknowledgments
 
@@ -331,6 +355,6 @@ After this PR is merged:
 - go-libp2p team for reference implementation
 - py-libp2p contributors for the existing infrastructure
 
----
+______________________________________________________________________
 
 **Ready for Review**: This implementation is complete, tested, and ready for code review and integration into py-libp2p.
