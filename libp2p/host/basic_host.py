@@ -227,7 +227,7 @@ class BasicHost(IHost):
             selected_protocol = await self.multiselect_client.select_one_of(
                 list(protocol_ids),
                 MultiselectCommunicator(net_stream),
-                negotiate_timeout,
+                self.negotiate_timeout,
             )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
