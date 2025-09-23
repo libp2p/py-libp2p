@@ -328,27 +328,25 @@ class GossipSub(IPubsubRouter, Service):
             if topic in self.mesh:
                 gossipsub_peers = self.mesh[topic]
             else:
-                    # When we publish to a topic that we have not subscribe to, we
-                    # randomly pick `self.degree` number of peers who have subscribed
-                    #  to the topic and add them as our `fanout` peers.
-                    topic_in_fanout: bool = topic in self.fanout
-                    fanout_peers: set[ID] = (
-                        self.fanout[topic] if topic_in_fanout else set()
-                    )
-                    fanout_size = len(fanout_peers)
-                    if not topic_in_fanout or (
-                        topic_in_fanout and fanout_size < self.degree
-                    ):
-                        if topic in self.pubsub.peer_topics:
-                            # Combine fanout peers with selected peers
-                            fanout_peers.update(
-                                self._get_in_topic_gossipsub_peers_from_minus(
-                                    topic, self.degree - fanout_size, fanout_peers
-                                )
+                # When we publish to a topic that we have not subscribe to, we
+                # randomly pick `self.degree` number of peers who have subscribed
+                #  to the topic and add them as our `fanout` peers.
+                topic_in_fanout: bool = topic in self.fanout
+                fanout_peers: set[ID] = self.fanout[topic] if topic_in_fanout else set()
+                fanout_size = len(fanout_peers)
+                if not topic_in_fanout or (
+                    topic_in_fanout and fanout_size < self.degree
+                ):
+                    if topic in self.pubsub.peer_topics:
+                        # Combine fanout peers with selected peers
+                        fanout_peers.update(
+                            self._get_in_topic_gossipsub_peers_from_minus(
+                                topic, self.degree - fanout_size, fanout_peers
                             )
-                    self.fanout[topic] = fanout_peers
-                    gossipsub_peers = fanout_peers
-                send_to.update(gossipsub_peers)
+                        )
+                self.fanout[topic] = fanout_peers
+                gossipsub_peers = fanout_peers
+            send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
         yield from send_to.difference([msg_forwarder, origin])
 

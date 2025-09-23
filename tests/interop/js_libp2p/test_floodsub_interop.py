@@ -21,10 +21,12 @@ import tempfile
 import time
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
-from libp2p.crypto.secp256k1 import Secp256k1PrivateKey
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.async_service import background_trio_service
@@ -38,7 +40,7 @@ class JSLibp2pNode:
 
     def __init__(self, port: int = 0):
         self.port = port
-        self.process: subprocess.Popen | None = None
+        self.process: subprocess.Popen[str] | None = None
         self.addr: str | None = None
         self.peer_id: str | None = None
 
@@ -121,7 +123,7 @@ main().catch(console.error)
             start_time = time.time()
 
             while time.time() - start_time < timeout:
-                if self.process.poll() is not None:
+                if self.process is not None and self.process.poll() is not None:
                     # Process has exited
                     stdout, stderr = self.process.communicate()
                     raise RuntimeError(
@@ -129,7 +131,10 @@ main().catch(console.error)
                     )
 
                 # Try to read output
-                line = self.process.stdout.readline()
+                if self.process is not None and self.process.stdout is not None:
+                    line = self.process.stdout.readline()
+                else:
+                    break
                 if line:
                     line = line.strip()
                     if line.startswith("ADDR:"):
@@ -185,10 +190,10 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
         await js_node.start()
 
         # Create py-libp2p node
-        private_key = Secp256k1PrivateKey.new()
+        key_pair = create_new_key_pair()
         host = new_host(
-            key_pair=private_key,
-            listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+            key_pair=key_pair,
+            listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
         )
 
         # Create FloodSub
@@ -207,10 +212,14 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             logger.info(f"Connecting to js-libp2p node at {js_addr}")
 
             # Parse the address and connect
-            from multiaddr import Multiaddr
-
             ma = Multiaddr(js_addr)
-            await host.connect(ma)
+            # Extract peer ID from multiaddr
+            peer_id_str = str(ma).split("/p2p/")[1]
+            from libp2p.peer.id import ID
+
+            peer_id = ID.from_base58(peer_id_str)
+            peer_info = PeerInfo(peer_id, [ma])
+            await host.connect(peer_info)
 
             # Wait for connection to establish
             await trio.sleep(2)
@@ -241,17 +250,17 @@ async def test_floodsub_js_compatibility():
     that the FloodSub implementation follows the expected protocol.
     """
     # Create two py-libp2p nodes
-    private_key1 = Secp256k1PrivateKey.new()
-    private_key2 = Secp256k1PrivateKey.new()
+    key_pair1 = create_new_key_pair()
+    key_pair2 = create_new_key_pair()
 
     host1 = new_host(
-        key_pair=private_key1,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        key_pair=key_pair1,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     host2 = new_host(
-        key_pair=private_key2,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        key_pair=key_pair2,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     # Create FloodSub instances
@@ -276,7 +285,8 @@ async def test_floodsub_js_compatibility():
             await pubsub2.wait_until_ready()
 
             # Connect the nodes
-            await host1.connect(host2.get_id(), host2.get_addrs())
+            peer_info = PeerInfo(host2.get_id(), host2.get_addrs())
+            await host1.connect(peer_info)
             await trio.sleep(1)
 
             # Test multiple topics

@@ -19,14 +19,20 @@ The example will:
 5. Show how messages flood through the network
 """
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+import functools
 import logging
 import sys
+from typing import Any
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
 from libp2p.abc import IHost
-from libp2p.crypto.secp256k1 import Secp256k1PrivateKey
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.async_service import background_trio_service
@@ -37,15 +43,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("multi_node_floodsub")
 
 
-async def create_floodsub_host() -> tuple[IHost, Pubsub]:
+@asynccontextmanager
+async def create_floodsub_host() -> AsyncGenerator[tuple[IHost, Pubsub], None]:
     """Create a libp2p host with FloodSub pubsub router."""
     # Generate a private key for the host
-    private_key = Secp256k1PrivateKey.generate()
+    key_pair = create_new_key_pair()
 
     # Create the host
     host = new_host(
-        key_pair=private_key,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        key_pair=key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     # Create FloodSub router
@@ -88,7 +95,7 @@ async def node_worker(
     await trio.sleep(1)
 
     # Start receiving messages in background
-    async def receive_messages():
+    async def receive_messages() -> None:
         for topic, subscription in subscriptions_handles:
             try:
                 while True:
@@ -127,15 +134,15 @@ async def main() -> None:
             async with create_floodsub_host() as (host3, pubsub3):
                 # Get addresses
                 addr1 = (
-                    f"/ip4/127.0.0.1/tcp/{host1.get_addrs()[0].split('/')[-1]}/"
+                    f"/ip4/127.0.0.1/tcp/{str(host1.get_addrs()[0]).split('/')[-1]}/"
                     f"p2p/{host1.get_id()}"
                 )
                 addr2 = (
-                    f"/ip4/127.0.0.1/tcp/{host2.get_addrs()[0].split('/')[-1]}/"
+                    f"/ip4/127.0.0.1/tcp/{str(host2.get_addrs()[0]).split('/')[-1]}/"
                     f"p2p/{host2.get_id()}"
                 )
                 addr3 = (
-                    f"/ip4/127.0.0.1/tcp/{host3.get_addrs()[0].split('/')[-1]}/"
+                    f"/ip4/127.0.0.1/tcp/{str(host3.get_addrs()[0]).split('/')[-1]}/"
                     f"p2p/{host3.get_id()}"
                 )
 
@@ -145,12 +152,14 @@ async def main() -> None:
 
                 # Connect nodes in a chain: A -> B -> C
                 logger.info("Connecting nodes...")
-                await host1.connect(host2.get_id(), host2.get_addrs())
-                await host2.connect(host3.get_id(), host3.get_addrs())
+                peer_info2 = PeerInfo(host2.get_id(), host2.get_addrs())
+                await host1.connect(peer_info2)
+                peer_info3 = PeerInfo(host3.get_id(), host3.get_addrs())
+                await host2.connect(peer_info3)
                 await trio.sleep(2)  # Wait for connections to establish
 
                 # Define node behaviors
-                node_configs = [
+                node_configs: list[dict[str, Any]] = [
                     {
                         "name": "A",
                         "host": host1,
@@ -186,14 +195,15 @@ async def main() -> None:
                 # Run all nodes concurrently
                 async with trio.open_nursery() as nursery:
                     for config in node_configs:
-                        nursery.start_soon(
+                        worker_func = functools.partial(
                             node_worker,
-                            config["host"],
-                            config["pubsub"],
-                            config["name"],
-                            config["subscriptions"],
-                            config["publications"],
+                            config["host"],  # type: ignore[arg-type]
+                            config["pubsub"],  # type: ignore[arg-type]
+                            config["name"],  # type: ignore[arg-type]
+                            config["subscriptions"],  # type: ignore[arg-type]
+                            config["publications"],  # type: ignore[arg-type]
                         )
+                        nursery.start_soon(worker_func)
 
     logger.info("Multi-Node FloodSub example completed successfully!")
 

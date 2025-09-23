@@ -22,6 +22,7 @@ The example will:
 import logging
 import sys
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
@@ -96,12 +97,12 @@ async def main() -> None:
 
     host1 = new_host(
         key_pair=key_pair1,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     host2 = new_host(
         key_pair=key_pair2,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     # Create FloodSub routers
@@ -129,11 +130,11 @@ async def main() -> None:
 
             # Get the addresses of both hosts
             addr1 = (
-                f"/ip4/127.0.0.1/tcp/{host1.get_addrs()[0].split('/')[-1]}/"
+                f"/ip4/127.0.0.1/tcp/{str(host1.get_addrs()[0]).split('/')[-1]}/"
                 f"p2p/{host1.get_id()}"
             )
             addr2 = (
-                f"/ip4/127.0.0.1/tcp/{host2.get_addrs()[0].split('/')[-1]}/"
+                f"/ip4/127.0.0.1/tcp/{str(host2.get_addrs()[0]).split('/')[-1]}/"
                 f"p2p/{host2.get_id()}"
             )
 

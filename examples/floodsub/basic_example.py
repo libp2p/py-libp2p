@@ -12,10 +12,12 @@ Run this example with:
 import logging
 import sys
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.async_service import background_trio_service
@@ -36,12 +38,12 @@ async def main() -> None:
 
     host1 = new_host(
         key_pair=key_pair1,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     host2 = new_host(
         key_pair=key_pair2,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
     )
 
     # Create FloodSub routers
@@ -78,7 +80,8 @@ async def main() -> None:
 
             # Connect the hosts
             logger.info("Connecting hosts...")
-            await host1.connect(host2.get_id(), host2.get_addrs())
+            peer_info = PeerInfo(host2.get_id(), host2.get_addrs())
+            await host1.connect(peer_info)
             await trio.sleep(1)  # Wait for connection
 
             # Subscribe to topic on host2
