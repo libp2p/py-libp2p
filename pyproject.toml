@@ -33,6 +33,7 @@ dependencies = [
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
+    "trio-websocket>=0.11.0",
     "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
