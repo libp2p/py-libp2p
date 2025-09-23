@@ -26,11 +26,11 @@ import trio
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.async_service import background_trio_service
 from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
+from libp2p.tools.utils import connect
 
 logger = logging.getLogger(__name__)
 
@@ -227,12 +227,9 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
 
             # Parse the address and connect
             ma = Multiaddr(go_addr)
-            # Extract peer ID from multiaddr
-            peer_id_str = str(ma).split("/p2p/")[1]
-            from libp2p.peer.id import ID
+            from libp2p.peer.peerinfo import info_from_p2p_addr
 
-            peer_id = ID.from_base58(peer_id_str)
-            peer_info = PeerInfo(peer_id, [ma])
+            peer_info = info_from_p2p_addr(ma)
             await host.connect(peer_info)
 
             # Wait for connection to establish
@@ -298,9 +295,13 @@ async def test_floodsub_basic_functionality():
             await pubsub1.wait_until_ready()
             await pubsub2.wait_until_ready()
 
+            # Start network listening for both hosts
+            await host1.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await host2.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+            await trio.sleep(0.1)  # Wait for listeners to start
+
             # Connect the nodes
-            peer_info = PeerInfo(host2.get_id(), host2.get_addrs())
-            await host1.connect(peer_info)
+            await connect(host1, host2)
             await trio.sleep(1)
 
             # Subscribe to topic on host2
