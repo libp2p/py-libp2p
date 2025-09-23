@@ -514,6 +514,7 @@ class Pubsub(Service, IPubsub):
             async for peer_id in self.peer_receive_channel:
                 # Add Peer - wrap in exception handler to prevent service crash
                 self.manager.run_task(self._handle_new_peer_safe, peer_id)
+
     async def handle_dead_peer_queue(self) -> None:
         """
         Continuously read from dead peer channel and close the stream
