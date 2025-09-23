@@ -90,7 +90,7 @@ class CircuitV2Transport(ITransport):
             discovery_interval=config.discovery_interval,
             max_relays=config.max_relays,
         )
-        self.relay_counter = 0 # for round robin load balancing
+        self.relay_counter = 0  # for round robin load balancing
 
     async def dial(
         self,
@@ -235,10 +235,10 @@ class CircuitV2Transport(ITransport):
                 self.relay_counter += 1
                 if relays_with_reservations:
                     return relays_with_reservations[
-                        (self.relay_counter-1) % len(relays_with_reservations)
+                        (self.relay_counter - 1) % len(relays_with_reservations)
                     ]
                 elif other_relays:
-                    return other_relays[(self.relay_counter-1) % len(other_relays)]
+                    return other_relays[(self.relay_counter - 1) % len(other_relays)]
             await trio.sleep(1)
             attempts += 1
 
