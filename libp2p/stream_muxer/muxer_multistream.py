@@ -17,7 +17,11 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.protocol_muxer.exceptions import (
+    MultiselectError,
+)
 from libp2p.protocol_muxer.multiselect import (
+    DEFAULT_NEGOTIATE_TIMEOUT,
     Multiselect,
 )
 from libp2p.protocol_muxer.multiselect_client import (
@@ -43,11 +47,17 @@ class MuxerMultistream:
     transports: "OrderedDict[TProtocol, TMuxerClass]"
     multiselect: Multiselect
     multiselect_client: MultiselectClient
+    negotiate_timeout: int
 
-    def __init__(self, muxer_transports_by_protocol: TMuxerOptions) -> None:
+    def __init__(
+        self,
+        muxer_transports_by_protocol: TMuxerOptions,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+    ) -> None:
         self.transports = OrderedDict()
         self.multiselect = Multiselect()
         self.multistream_client = MultiselectClient()
+        self.negotiate_timeout = negotiate_timeout
         for protocol, transport in muxer_transports_by_protocol.items():
             self.add_transport(protocol, transport)
 
@@ -73,20 +83,26 @@ class MuxerMultistream:
         :param conn: conn to choose a transport over
         :return: selected muxer transport
         """
-        protocol: TProtocol
+        protocol: TProtocol | None
         communicator = MultiselectCommunicator(conn)
         if conn.is_initiator:
             protocol = await self.multiselect_client.select_one_of(
-                tuple(self.transports.keys()), communicator
+                tuple(self.transports.keys()), communicator, self.negotiate_timeout
             )
         else:
-            protocol, _ = await self.multiselect.negotiate(communicator)
+            protocol, _ = await self.multiselect.negotiate(
+                communicator, self.negotiate_timeout
+            )
+        if protocol is None:
+            raise MultiselectError(
+                "Fail to negotiate a stream muxer protocol: no protocol selected"
+            )
         return self.transports[protocol]
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         communicator = MultiselectCommunicator(conn)
         protocol = await self.multistream_client.select_one_of(
-            tuple(self.transports.keys()), communicator
+            tuple(self.transports.keys()), communicator, self.negotiate_timeout
         )
         transport_class = self.transports[protocol]
         if protocol == PROTOCOL_ID:

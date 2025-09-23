@@ -9,8 +9,11 @@ Examples
    examples.identify_push
    examples.chat
    examples.echo
+   examples.echo_quic
    examples.ping
    examples.pubsub
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
+   examples.random_walk
+   examples.multiple_connections
