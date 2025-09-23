@@ -85,7 +85,7 @@ async def run_rendezvous_server(port: int = 0):
 async def run_client_example(
     server_addr: str,
     namespace: str = config.DEFAULT_NAMESPACE,
-    enable_refresh: bool = True,
+    enable_refresh: bool = False,
     port: int = 0,
 ):
     """Run a client that registers and discovers peers."""
@@ -186,7 +186,7 @@ async def run(
     address: str = "",
     namespace: str = config.DEFAULT_NAMESPACE,
     port: int = 0,
-    enable_refresh: bool = True,
+    enable_refresh: bool = False,
 ):
     """Main run function."""
     logger.debug(f"Starting in {mode} mode")
@@ -275,7 +275,7 @@ def main():
         "-r",
         "--refresh",
         action="store_true",
-        default=True,
+        default=False,
         help="Enable automatic refresh for registration and discovery cache",
     )
 

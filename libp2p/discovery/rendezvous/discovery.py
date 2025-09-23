@@ -78,7 +78,7 @@ class RendezvousDiscovery:
     """
 
     def __init__(
-        self, host: IHost, rendezvous_peer: PeerID, enable_refresh: bool = True
+        self, host: IHost, rendezvous_peer: PeerID, enable_refresh: bool = False
     ):
         """
         Initialize rendezvous discovery.
