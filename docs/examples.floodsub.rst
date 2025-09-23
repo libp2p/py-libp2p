@@ -6,10 +6,6 @@ This section contains examples demonstrating the FloodSub pubsub implementation.
 .. toctree::
    :maxdepth: 1
 
-   examples.floodsub.simple_pubsub
-   examples.floodsub.basic_example
-   examples.floodsub.multi_node_pubsub
-
 Simple PubSub Example
 ---------------------
 
