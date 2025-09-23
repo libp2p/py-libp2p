@@ -24,8 +24,13 @@ import sys
 
 import trio
 
+from libp2p import new_host
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.pubsub.floodsub import FloodSub
+from libp2p.pubsub.pubsub import Pubsub
+from libp2p.tools.async_service import background_trio_service
+from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
 from libp2p.tools.utils import connect
-from tests.utils.factories import PubsubFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,35 +90,68 @@ async def main() -> None:
         "FloodSub is working great!",
     ]
 
-    # Create two hosts with FloodSub using the factory
-    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs:
-        pubsub1, pubsub2 = pubsubs
+    # Create two hosts with FloodSub manually
+    key_pair1 = create_new_key_pair()
+    key_pair2 = create_new_key_pair()
 
-        # Get the addresses of both hosts
-        addr1 = (
-            f"/ip4/127.0.0.1/tcp/{pubsub1.host.get_addrs()[0].split('/')[-1]}/"
-            f"p2p/{pubsub1.host.get_id()}"
-        )
-        addr2 = (
-            f"/ip4/127.0.0.1/tcp/{pubsub2.host.get_addrs()[0].split('/')[-1]}/"
-            f"p2p/{pubsub2.host.get_id()}"
-        )
+    host1 = new_host(
+        key_pair=key_pair1,
+        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+    )
 
-        logger.info(f"Host 1 address: {addr1}")
-        logger.info(f"Host 2 address: {addr2}")
+    host2 = new_host(
+        key_pair=key_pair2,
+        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+    )
 
-        # Connect the hosts
-        logger.info("Connecting hosts...")
-        await connect(pubsub1.host, pubsub2.host)
-        await trio.sleep(1)  # Wait for connection to establish
+    # Create FloodSub routers
+    floodsub1 = FloodSub(protocols=[FLOODSUB_PROTOCOL_ID])
+    floodsub2 = FloodSub(protocols=[FLOODSUB_PROTOCOL_ID])
 
-        # Run publisher and subscriber concurrently
-        async with trio.open_nursery() as nursery:
-            # Start subscriber first
-            nursery.start_soon(subscriber_node, pubsub2, topic)
+    # Create Pubsub instances
+    pubsub1 = Pubsub(
+        host=host1,
+        router=floodsub1,
+        strict_signing=False,  # Disable for simplicity
+    )
 
-            # Start publisher
-            nursery.start_soon(publisher_node, pubsub1, topic, messages)
+    pubsub2 = Pubsub(
+        host=host2,
+        router=floodsub2,
+        strict_signing=False,  # Disable for simplicity
+    )
+
+    # Start both pubsub services
+    async with background_trio_service(pubsub1):
+        async with background_trio_service(pubsub2):
+            await pubsub1.wait_until_ready()
+            await pubsub2.wait_until_ready()
+
+            # Get the addresses of both hosts
+            addr1 = (
+                f"/ip4/127.0.0.1/tcp/{host1.get_addrs()[0].split('/')[-1]}/"
+                f"p2p/{host1.get_id()}"
+            )
+            addr2 = (
+                f"/ip4/127.0.0.1/tcp/{host2.get_addrs()[0].split('/')[-1]}/"
+                f"p2p/{host2.get_id()}"
+            )
+
+            logger.info(f"Host 1 address: {addr1}")
+            logger.info(f"Host 2 address: {addr2}")
+
+            # Connect the hosts
+            logger.info("Connecting hosts...")
+            await connect(host1, host2)
+            await trio.sleep(1)  # Wait for connection to establish
+
+            # Run publisher and subscriber concurrently
+            async with trio.open_nursery() as nursery:
+                # Start subscriber first
+                nursery.start_soon(subscriber_node, pubsub2, topic)
+
+                # Start publisher
+                nursery.start_soon(publisher_node, pubsub1, topic, messages)
 
     logger.info("FloodSub example completed successfully!")
 
