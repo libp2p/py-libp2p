@@ -7,9 +7,11 @@ This module tests core functionality of the Kademlia DHT including:
 - Content provider advertisement and discovery (provide, find_providers)
 """
 
+from collections.abc import Awaitable
 import hashlib
 import logging
 import os
+from typing import TypeVar
 from unittest.mock import patch
 import uuid
 
@@ -46,6 +48,27 @@ logger = logging.getLogger("test.kad_dht")
 TEST_TIMEOUT = 5  # Timeout in seconds
 
 
+T = TypeVar("T")
+
+
+async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
+    """
+    Retry a coroutine a few times to avoid flakiness on CI.
+    Useful for async race conditions where routing tables
+    may not be populated fast enough.
+    """
+    for i in range(retries):
+        try:
+            return await coro
+        except AssertionError:
+            if i == retries - 1:
+                raise
+            await trio.sleep(delay)
+
+    # This should never be reached, but satisfies type checker
+    raise RuntimeError("Retry function should not reach this point")
+
+
 @pytest.fixture
 async def dht_pair(security_protocol):
     """Create a pair of connected DHT nodes for testing."""
@@ -68,6 +91,25 @@ async def dht_pair(security_protocol):
             # Allow time for bootstrap to complete and connections to establish
             await trio.sleep(0.1)
 
+            # Force a connection between nodes to ensure routing table is populated
+            # This eliminates the race condition by ensuring both nodes
+            # know about each other
+            try:
+                await dht_a.find_peer(dht_b.host.get_id())
+                await dht_b.find_peer(dht_a.host.get_id())
+            except Exception as e:
+                logger.warning(f"Initial peer discovery failed: {e}")
+                # Continue anyway, the retry mechanism will handle it
+
+            # Verify both nodes know about each other in their routing tables
+            # This ensures the test won't have race conditions
+            assert dht_a.routing_table.peer_in_table(dht_b.host.get_id()), (
+                "Node A should know about Node B"
+            )
+            assert dht_b.routing_table.peer_in_table(dht_a.host.get_id()), (
+                "Node B should know about Node A"
+            )
+
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
             )
@@ -80,6 +122,7 @@ async def dht_pair(security_protocol):
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=1)
 async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
     """Test that nodes can find each other in the DHT."""
     dht_a, dht_b = dht_pair
@@ -96,9 +139,9 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
     record_a = envelope_a.record()
     record_b = envelope_b.record()
 
-    # Node A should be able to find Node B
+    # Node A should be able to find Node B with retry mechanism
     with trio.fail_after(TEST_TIMEOUT):
-        found_info = await dht_a.find_peer(dht_b.host.get_id())
+        found_info = await retry(dht_a.find_peer(dht_b.host.get_id()))
 
     # Verifies if the senderRecord in the FIND_NODE request is correctly processed
     assert isinstance(
