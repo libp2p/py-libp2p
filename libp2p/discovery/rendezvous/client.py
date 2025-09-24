@@ -4,7 +4,6 @@ Rendezvous client implementation.
 
 import logging
 import random
-import time
 
 import trio
 import varint
@@ -33,16 +32,6 @@ from .messages import (
 from .pb.rendezvous_pb2 import Message
 
 logger = logging.getLogger(__name__)
-
-
-class Registration:
-    """Represents a peer registration."""
-
-    def __init__(self, peer: PeerInfo, namespace: str, ttl: int):
-        self.peer = peer
-        self.namespace = namespace
-        self.ttl = ttl
-        self.expire_time = time.time() + ttl
 
 
 class RendezvousClient:

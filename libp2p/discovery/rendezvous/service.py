@@ -139,8 +139,17 @@ class RendezvousService:
         self, peer_id: PeerID, register_msg: Message.Register
     ) -> Message:
         """Handle REGISTER message."""
+        target_peer_id = PeerID(register_msg.peer.id)
         namespace = register_msg.ns
         ttl = register_msg.ttl
+
+        # Only allow peers to register themselves
+        if peer_id != target_peer_id:
+            logger.warning(
+                f"Peer {peer_id} tried to register {target_peer_id} "
+                f"in namespace '{namespace}'"
+            )
+            return
 
         # Validate namespace
         if not namespace or len(namespace) > MAX_NAMESPACE_LENGTH:
