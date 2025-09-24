@@ -40,7 +40,10 @@ tests/security/attack_simulation/
 │   ├── malicious_peer.py               # Malicious peer behavior implementation
 │   ├── metrics_collector.py            # Collects attack metrics during simulation
 │   ├── attack_scenarios.py             # Defines Eclipse attack scenarios
-│   └── network_builder.py              # Builds test networks with honest/malicious nodes
+│   ├── network_builder.py              # Builds test networks with honest/malicious nodes
+│   ├── real_network_builder.py         # Real libp2p host integration
+│   ├── real_metrics_collector.py       # Real network performance metrics
+│   └── test_real_eclipse_simulation.py # Integration tests with actual DHTs
 ├── utils/
 │   ├── attack_metrics.py               # Metrics calculation utilities
 │   ├── peer_behavior_simulator.py      # Simulates peer behaviors (honest and malicious)
@@ -61,45 +64,100 @@ ______________________________________________________________________
 source .venv/bin/activate
 ```
 
-2. **Run the test suite (pytest + trio) in one command**:
+2. **Run the simulation framework tests**:
 
 ```bash
-pytest -v tests/security/attack_simulation
+pytest -v tests/security/attack_simulation/eclipse_attack/test_eclipse_simulation.py
 ```
 
-> All tests validate network setup, malicious peer behavior, and metrics collection.
+3. **Run the REAL integration tests** (🆕 **Actual libp2p network attacks**):
+
+```bash
+pytest -v tests/security/attack_simulation/eclipse_attack/test_real_eclipse_simulation.py
+```
+
+4. **Run individual attack demo**:
+
+```bash
+python tests/security/attack_simulation/eclipse_attack/test_real_eclipse_simulation.py demo
+```
+
+> Tests validate both simulated and real network attack scenarios.
 
 ______________________________________________________________________
 
 ## Testing
 
-The module uses **pytest** integrated with **trio**. Test coverage includes:
+The module provides **two levels** of testing:
 
+### **Level 1: Simulation Framework** (Original Implementation)
 - Eclipse attack tests (`eclipse_attack/test_eclipse_simulation.py`)
 - Utilities: metrics, network monitoring, peer behavior
+- **Fast execution**, **conceptual validation**
+
+### **Level 2: Real Integration Tests** 🆕 (New Enhancement)
+- Real libp2p host creation using `HostFactory`
+- Actual DHT manipulation with `KadDHT` instances  
+- Real network performance measurement
+- **Slower execution**, **actual security testing**
 
 Passing tests confirm:
 
-- Initial network setup works
-- Malicious peer behaviors execute correctly
-- Metrics collection framework operates properly
+- ✅ **Simulation Framework**: Network setup, malicious behaviors, metrics collection  
+- ✅ **Real Integration**: Actual libp2p attacks, DHT poisoning, performance degradation
 
 ______________________________________________________________________
 
 ## Implementation Details
 
-### Malicious Peer
+### **Simulation Layer** (Original)
 
+#### Malicious Peer
 ```python
 class MaliciousPeer:
     """Simulates malicious peer behavior"""
 ```
 
-### Network Builder
-
+#### Network Builder
 ```python
 class AttackNetworkBuilder:
     """Constructs configurable test networks for attack simulations"""
+```
+
+### **Real Integration Layer** 🆕 (New Enhancement)
+
+#### Real Malicious Peer
+```python
+class RealMaliciousPeer(MaliciousPeer):
+    """Real malicious peer that manipulates actual DHT instances"""
+    
+    async def poison_real_dht_entries(self, target_dht: KadDHT):
+        # Actually poison real DHT routing tables
+        
+    async def flood_real_peer_table(self, target_dht: KadDHT):  
+        # Flood real DHT with malicious entries
+```
+
+#### Real Network Builder
+```python  
+class RealNetworkBuilder(AttackNetworkBuilder):
+    """Builds networks with real libp2p hosts and DHT instances"""
+    
+    async def create_real_eclipse_test_network(self):
+        # Uses HostFactory to create actual libp2p hosts
+        # Creates real KadDHT instances
+        # Forms realistic network topologies
+```
+
+#### Real Metrics Collector
+```python
+class RealAttackMetrics(AttackMetrics):
+    """Collects actual performance metrics from real libp2p networks"""
+    
+    async def measure_complete_attack_cycle(self):
+        # Measures real DHT lookup degradation
+        # Tracks actual network connectivity loss
+        # Calculates genuine recovery metrics
 ```
 
 ______________________________________________________________________
