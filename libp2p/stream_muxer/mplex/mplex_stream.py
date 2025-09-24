@@ -91,8 +91,13 @@ class MplexStream(IMuxedStream):
         return self.stream_id.is_initiator
 
     async def _read_until_eof(self) -> bytes:
-        async for data in self.incoming_data_channel:
-            self._buf.extend(data)
+        if self.read_deadline is not None:
+            with trio.fail_after(self.read_deadline):
+                async for data in self.incoming_data_channel:
+                    self._buf.extend(data)
+        else:
+            async for data in self.incoming_data_channel:
+                self._buf.extend(data)
         payload = self._buf
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
@@ -139,8 +144,16 @@ class MplexStream(IMuxedStream):
                     # We know `receive` will be blocked here. Wait for data here with
                     # `receive` and catch all kinds of errors here.
                     try:
-                        data = await self.incoming_data_channel.receive()
-                        self._buf.extend(data)
+                        # Apply read deadline if set
+                        if self.read_deadline is not None:
+                            with trio.fail_after(self.read_deadline):
+                                data = await self.incoming_data_channel.receive()
+                                self._buf.extend(data)
+                        else:
+                            data = await self.incoming_data_channel.receive()
+                            self._buf.extend(data)
+                    except trio.TooSlowError:
+                        raise MuxedStreamError("Read operation timed out")
                     except trio.EndOfChannel:
                         if self.event_reset.is_set():
                             raise MplexStreamReset
@@ -174,7 +187,15 @@ class MplexStream(IMuxedStream):
                 if self.is_initiator
                 else HeaderTags.MessageReceiver
             )
-            await self.muxed_conn.send_message(flag, data, self.stream_id)
+            try:
+                # Apply write deadline if set
+                if self.write_deadline is not None:
+                    with trio.fail_after(self.write_deadline):
+                        await self.muxed_conn.send_message(flag, data, self.stream_id)
+                else:
+                    await self.muxed_conn.send_message(flag, data, self.stream_id)
+            except trio.TooSlowError:
+                raise MuxedStreamError("Write operation timed out")
 
     async def close(self) -> None:
         """
@@ -242,7 +263,6 @@ class MplexStream(IMuxedStream):
             if self.muxed_conn.streams is not None:
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
-    # TODO deadline not in use
     def set_deadline(self, ttl: int) -> None:
         """
         Set deadline for muxed stream.
