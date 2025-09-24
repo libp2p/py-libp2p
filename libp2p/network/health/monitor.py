@@ -56,7 +56,12 @@ class ConnectionHealthMonitor(Service):
         try:
             # Start the periodic monitoring task
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._monitor_connections_task)
+                # Delay the first check to avoid interfering with initial setup
+                initial_delay = getattr(self.config, "health_initial_delay", 0.0)
+                if initial_delay and initial_delay > 0:
+                    nursery.start_soon(self._sleep_then_start, initial_delay)
+                else:
+                    nursery.start_soon(self._monitor_connections_task)
                 self._monitoring_task_started.set()
 
                 # Wait until cancelled
@@ -66,6 +71,13 @@ class ConnectionHealthMonitor(Service):
             logger.info("ConnectionHealthMonitor service cancelled")
             self._stop_monitoring.set()
             raise
+
+    async def _sleep_then_start(self, delay: float) -> None:
+        try:
+            await trio.sleep(delay)
+        finally:
+            # Start monitoring after delay; nursery cancellation handles shutdown
+            await self._monitor_connections_task()
 
     async def _monitor_connections_task(self) -> None:
         """Main monitoring loop that runs periodic health checks."""
@@ -114,6 +126,19 @@ class ConnectionHealthMonitor(Service):
     async def _check_connection_health(self, peer_id: ID, conn: INetConn) -> None:
         """Check health of a specific connection."""
         try:
+            # Skip checks during connection warmup window
+            warmup = getattr(self.config, "health_warmup_window", 0.0)
+            if warmup and hasattr(conn, "established_at"):
+                # Fallback to event_started if established_at not present
+                try:
+                    import time
+
+                    established_at = getattr(conn, "established_at")
+                    if established_at and (time.time() - established_at) < warmup:
+                        return
+                except Exception:
+                    pass
+
             # Ensure health tracking is initialized
             if not self._has_health_data(peer_id, conn):
                 self.swarm.initialize_connection_health(peer_id, conn)
@@ -162,11 +187,23 @@ class ConnectionHealthMonitor(Service):
         In a production implementation, this could use a dedicated ping protocol.
         """
         try:
+            # If there are active streams, avoid intrusive ping; assume healthy
+            if len(conn.get_streams()) > 0:
+                return True
+
             # Use a timeout for the ping
             with trio.move_on_after(self.config.ping_timeout):
-                # Simple health check: try to create and immediately close a stream
+                # Create a throwaway stream and immediately reset it to avoid
+                # affecting muxer stream accounting in tests
                 stream = await conn.new_stream()
-                await stream.close()
+                try:
+                    await stream.reset()
+                finally:
+                    # Best-effort close in case reset was a no-op
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
                 return True
 
         except Exception as e:
@@ -198,11 +235,29 @@ class ConnectionHealthMonitor(Service):
             unhealthy_reasons.append(f"too_many_failed_streams={health.failed_streams}")
 
         if unhealthy_reasons:
-            logger.info(
-                f"Connection to {peer_id} marked for replacement: "
-                f"{', '.join(unhealthy_reasons)}"
-            )
-            return True
+            # If connection is in active use (streams open), do not replace
+            try:
+                if len(conn.get_streams()) > 0:
+                    return False
+            except Exception:
+                pass
+
+            # Require N consecutive unhealthy evaluations before replacement
+            health.consecutive_unhealthy += 1
+            if health.consecutive_unhealthy >= getattr(
+                config, "unhealthy_grace_period", 1
+            ):
+                logger.info(
+                    f"Connection to {peer_id} marked for replacement: "
+                    f"{', '.join(unhealthy_reasons)}"
+                )
+                health.consecutive_unhealthy = 0
+                return True
+            return False
+        else:
+            # Reset counter when healthy again
+            if hasattr(health, "consecutive_unhealthy"):
+                health.consecutive_unhealthy = 0
 
         return False
 

@@ -80,6 +80,8 @@ class ConnectionHealth:
     last_bandwidth_check: float
     peak_bandwidth: float
     average_bandwidth: float
+    # Count consecutive unhealthy evaluations to apply grace period
+    consecutive_unhealthy: int = 0
 
     def __post_init__(self) -> None:
         """Initialize default values and validate data."""
