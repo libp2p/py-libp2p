@@ -75,6 +75,11 @@ class ConnectionConfig:
 
     # Health monitoring configuration
     enable_health_monitoring: bool = False
+    # Delay before the first health check runs to avoid interfering with
+    # connection establishment (seconds)
+    health_initial_delay: float = 60.0
+    # Skip health checks for very new connections during this warmup window
+    health_warmup_window: float = 5.0
     health_check_interval: float = 60.0  # seconds
     ping_timeout: float = 5.0  # seconds
     min_health_threshold: float = 0.3  # 0.0 to 1.0
@@ -89,6 +94,8 @@ class ConnectionConfig:
     max_ping_latency: float = 1000.0  # milliseconds
     min_ping_success_rate: float = 0.7  # 70%
     max_failed_streams: int = 5
+    # Require N consecutive unhealthy evaluations before replacement
+    unhealthy_grace_period: int = 3
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
