@@ -3,6 +3,9 @@ import logging
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.host.exceptions import (
+    HostException,
+)
 from libp2p.host.autonat.pb.autonat_pb2 import (
     DialResponse,
     Message,
@@ -154,7 +157,11 @@ class AutoNATService:
             if peer_id in self.dial_results:
                 success = self.dial_results[peer_id]
             else:
-                success = await self._try_dial(peer_id)
+                try:
+                    await self._try_dial(peer_id)
+                    success = True
+                except HostException:
+                    success = False
                 self.dial_results[peer_id] = success
 
             peer_info = PeerInfo()
@@ -166,7 +173,7 @@ class AutoNATService:
         response.dial_response.CopyFrom(dial_response)
         return response
 
-    async def _try_dial(self, peer_id: ID) -> bool:
+    async def _try_dial(self, peer_id: ID) -> None:
         """
         Attempt to establish a connection with a peer.
 
@@ -175,19 +182,17 @@ class AutoNATService:
         peer_id : ID
             The identifier of the peer to attempt to dial.
 
-        Returns
-        -------
-        bool
-            True if the connection was successfully established,
-            False if the connection attempt failed.
+        Raises
+        ------
+        HostException
+            If the connection attempt failed.
 
         """
         try:
             stream = await self.host.new_stream(peer_id, [AUTONAT_PROTOCOL_ID])
             await stream.close()
-            return True
-        except Exception:
-            return False
+        except Exception as e:
+            raise HostException(f"Failed to dial peer {peer_id}: {e}") from e
 
     def get_status(self) -> int:
         """
