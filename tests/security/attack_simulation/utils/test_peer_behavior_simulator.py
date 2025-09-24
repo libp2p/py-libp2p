@@ -1,6 +1,7 @@
 import pytest
-import trio
+
 from .peer_behavior_simulator import simulate_peer_behavior
+
 
 @pytest.mark.trio
 async def test_peer_simulation():

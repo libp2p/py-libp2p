@@ -2,34 +2,34 @@
 
 This module provides a **network attack simulation framework** for py-libp2p, focused on testing **P2P network security**. It is implemented as a **submodule** inside py-libp2p to simulate attacks, measure metrics, and analyze network resilience.
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
 1. [Module Overview](#module-overview)
-2. [Module Structure](#module-structure)
-3. [Setup and Usage](#setup-and-usage)
-4. [Testing](#testing)
-5. [Implementation Details](#implementation-details)
-6. [Metrics and Analysis](#metrics-and-analysis)
-7. [Roadmap](#roadmap)
-8. [Eclipse Attack Flow](#eclipse-attack-flow)
-9. [Contributing](#contributing)
+1. [Module Structure](#module-structure)
+1. [Setup and Usage](#setup-and-usage)
+1. [Testing](#testing)
+1. [Implementation Details](#implementation-details)
+1. [Metrics and Analysis](#metrics-and-analysis)
+1. [Roadmap](#roadmap)
+1. [Eclipse Attack Flow](#eclipse-attack-flow)
+1. [Contributing](#contributing)
 
----
+______________________________________________________________________
 
 ## Module Overview
 
 This module simulates network attacks in a controlled py-libp2p environment. Current focus:
 
-* **Eclipse attacks** by poisoning DHTs
-* Metrics collection for network health and attack effectiveness
-* Configurable attack scenarios and network topologies
-* Foundation for future attack types (Sybil, flooding, protocol exploits)
+- **Eclipse attacks** by poisoning DHTs
+- Metrics collection for network health and attack effectiveness
+- Configurable attack scenarios and network topologies
+- Foundation for future attack types (Sybil, flooding, protocol exploits)
 
 All work is **local in py-libp2p** with a planned migration path to `libp2p/interop`.
 
----
+______________________________________________________________________
 
 ## Module Structure
 
@@ -51,7 +51,7 @@ tests/security/attack_simulation/
 └── README.md                           # Module documentation and usage guide
 ```
 
----
+______________________________________________________________________
 
 ## Setup and Usage
 
@@ -69,22 +69,22 @@ pytest -v tests/security/attack_simulation
 
 > All tests validate network setup, malicious peer behavior, and metrics collection.
 
----
+______________________________________________________________________
 
 ## Testing
 
 The module uses **pytest** integrated with **trio**. Test coverage includes:
 
-* Eclipse attack tests (`eclipse_attack/test_eclipse_simulation.py`)
-* Utilities: metrics, network monitoring, peer behavior
+- Eclipse attack tests (`eclipse_attack/test_eclipse_simulation.py`)
+- Utilities: metrics, network monitoring, peer behavior
 
 Passing tests confirm:
 
-* Initial network setup works
-* Malicious peer behaviors execute correctly
-* Metrics collection framework operates properly
+- Initial network setup works
+- Malicious peer behaviors execute correctly
+- Metrics collection framework operates properly
 
----
+______________________________________________________________________
 
 ## Implementation Details
 
@@ -102,23 +102,23 @@ class AttackNetworkBuilder:
     """Constructs configurable test networks for attack simulations"""
 ```
 
----
+______________________________________________________________________
 
 ## Metrics and Analysis
 
 Tracked metrics:
 
-* DHT lookup success/failure rates
-* Peer table contamination
-* Network connectivity
-* Attack effectiveness and recovery metrics
+- DHT lookup success/failure rates
+- Peer table contamination
+- Network connectivity
+- Attack effectiveness and recovery metrics
 
 ```python
 class AttackMetrics:
     """Metrics collection and analysis framework"""
 ```
 
----
+______________________________________________________________________
 
 ## Roadmap
 
@@ -128,7 +128,7 @@ class AttackMetrics:
 
 **Phase 3**: Cross-implementation testing in `libp2p/interop`
 
----
+______________________________________________________________________
 
 ## Eclipse Attack Flow
 
@@ -147,13 +147,11 @@ flowchart TD
 
 > This flow illustrates the lifecycle of an Eclipse attack: the network is built, malicious peers poison the DHT and flood peer tables, honest peers perform lookups, and metrics are collected and analyzed.
 
----
+______________________________________________________________________
 
 ## Contributing
 
 1. Add new Eclipse attack scenarios under eclipse_attack, and shared utilities for any attack under utils.
-2. Implement new metrics or monitoring tools
-3. Write corresponding pytest tests
-4. Submit PR to py-libp2p for review
-
-
+1. Implement new metrics or monitoring tools
+1. Write corresponding pytest tests
+1. Submit PR to py-libp2p for review
