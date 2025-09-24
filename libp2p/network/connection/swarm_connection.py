@@ -64,15 +64,13 @@ class SwarmConn(INetConn):
                 f"for peer {muxed_conn.peer_id}: {e}"
             )
             # optional conveniences
-        if hasattr(muxed_conn, "on_close"):
+        # Attach close hook if possible; tolerate implementations without it
+        try:
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
-        else:
-            # If on_close doesn't exist, create it. This ensures compatibility
-            # with muxer implementations that don't have on_close support.
-            logging.debug(
-                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute, "
-                "creating it"
+        except Exception as e:
+            logging.warning(
+                f"Could not attach on_close hook for peer {muxed_conn.peer_id}: {e}"
             )
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
 
