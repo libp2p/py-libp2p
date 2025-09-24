@@ -29,6 +29,11 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.relay.circuit_v2.config import (
+    DEFAULT_DCUTR_READ_TIMEOUT,
+    DEFAULT_DCUTR_WRITE_TIMEOUT,
+    DEFAULT_DIAL_TIMEOUT,
+)
 from libp2p.relay.circuit_v2.nat import (
     ReachabilityChecker,
 )
@@ -47,11 +52,7 @@ PROTOCOL_ID = TProtocol("/libp2p/dcutr")
 # Maximum message size for DCUtR (4KiB as per spec)
 MAX_MESSAGE_SIZE = 4 * 1024
 
-# Timeouts
-STREAM_READ_TIMEOUT = 30  # seconds
-STREAM_WRITE_TIMEOUT = 30  # seconds
-DIAL_TIMEOUT = 10  # seconds
-
+# DCUtR protocol constants
 # Maximum number of hole punch attempts per peer
 MAX_HOLE_PUNCH_ATTEMPTS = 5
 
@@ -70,7 +71,13 @@ class DCUtRProtocol(Service):
     hole punching, after they have established an initial connection through a relay.
     """
 
-    def __init__(self, host: IHost):
+    def __init__(
+        self,
+        host: IHost,
+        read_timeout: int = DEFAULT_DCUTR_READ_TIMEOUT,
+        write_timeout: int = DEFAULT_DCUTR_WRITE_TIMEOUT,
+        dial_timeout: int = DEFAULT_DIAL_TIMEOUT,
+    ):
         """
         Initialize the DCUtR protocol.
 
@@ -78,10 +85,19 @@ class DCUtRProtocol(Service):
         ----------
         host : IHost
             The libp2p host this protocol is running on
+        read_timeout : int
+            Timeout for stream read operations, in seconds
+        write_timeout : int
+            Timeout for stream write operations, in seconds
+        dial_timeout : int
+            Timeout for dial operations, in seconds
 
         """
         super().__init__()
         self.host = host
+        self.read_timeout = read_timeout
+        self.write_timeout = write_timeout
+        self.dial_timeout = dial_timeout
         self.event_started = trio.Event()
         self._hole_punch_attempts: dict[ID, int] = {}
         self._direct_connections: set[ID] = set()
@@ -161,7 +177,7 @@ class DCUtRProtocol(Service):
 
             try:
                 # Read the CONNECT message
-                with trio.fail_after(STREAM_READ_TIMEOUT):
+                with trio.fail_after(self.read_timeout):
                     msg_bytes = await stream.read(MAX_MESSAGE_SIZE)
 
                 # Parse the message
@@ -196,7 +212,7 @@ class DCUtRProtocol(Service):
                 response.type = HolePunch.CONNECT
                 response.ObsAddrs.extend(our_addrs)
 
-                with trio.fail_after(STREAM_WRITE_TIMEOUT):
+                with trio.fail_after(self.write_timeout):
                     await stream.write(response.SerializeToString())
 
                 logger.debug(
@@ -206,7 +222,7 @@ class DCUtRProtocol(Service):
                 )
 
                 # Wait for SYNC message
-                with trio.fail_after(STREAM_READ_TIMEOUT):
+                with trio.fail_after(self.read_timeout):
                     sync_bytes = await stream.read(MAX_MESSAGE_SIZE)
 
                 # Parse the SYNC message
@@ -300,7 +316,7 @@ class DCUtRProtocol(Service):
                 connect_msg.ObsAddrs.extend(our_addrs)
 
                 start_time = time.time()
-                with trio.fail_after(STREAM_WRITE_TIMEOUT):
+                with trio.fail_after(self.write_timeout):
                     await stream.write(connect_msg.SerializeToString())
 
                 logger.debug(
@@ -310,7 +326,7 @@ class DCUtRProtocol(Service):
                 )
 
                 # Receive the peer's CONNECT message
-                with trio.fail_after(STREAM_READ_TIMEOUT):
+                with trio.fail_after(self.read_timeout):
                     resp_bytes = await stream.read(MAX_MESSAGE_SIZE)
 
                 # Calculate RTT
@@ -349,7 +365,7 @@ class DCUtRProtocol(Service):
                 sync_msg = HolePunch()
                 sync_msg.type = HolePunch.SYNC
 
-                with trio.fail_after(STREAM_WRITE_TIMEOUT):
+                with trio.fail_after(self.write_timeout):
                     await stream.write(sync_msg.SerializeToString())
 
                 logger.debug("Sent SYNC message to %s", peer_id)
@@ -468,7 +484,7 @@ class DCUtRProtocol(Service):
             peer_info = PeerInfo(peer_id, [addr])
 
             # Try to connect with timeout
-            with trio.fail_after(DIAL_TIMEOUT):
+            with trio.fail_after(self.dial_timeout):
                 await self.host.connect(peer_info)
 
             logger.info("Successfully connected to %s at %s", peer_id, addr)
