@@ -89,6 +89,8 @@ class CircuitV2Transport(ITransport):
             auto_reserve=config.enable_client,
             discovery_interval=config.discovery_interval,
             max_relays=config.max_relays,
+            stream_timeout=config.timeouts.discovery_stream_timeout,
+            peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
 
     async def dial(
