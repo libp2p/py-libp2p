@@ -80,6 +80,7 @@ dev = [
     "pytest-xdist>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-timeout>=2.4.0",
+    "pytest-rerunfailures>=12.0",
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
