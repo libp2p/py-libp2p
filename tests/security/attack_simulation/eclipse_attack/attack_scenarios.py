@@ -22,6 +22,9 @@ class EclipseScenario:
                     nursery.start_soon(
                         mp.flood_peer_table, self.honest_peer_tables[target]
                     )
-        # Measure fake metrics
-        self.metrics.measure_lookup_failures(1.0, 0.5, 0.9)
+
+        # Calculate realistic metrics based on attack parameters
+        attack_intensity = self.malicious_peers[0].intensity if self.malicious_peers else 0.5
+        self.metrics.calculate_metrics(self.honest_peers, self.malicious_peers, attack_intensity)
+
         return self.metrics
