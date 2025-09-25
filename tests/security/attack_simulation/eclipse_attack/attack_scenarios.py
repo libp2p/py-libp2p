@@ -10,7 +10,7 @@ class EclipseScenario:
     def __init__(self, honest_peers: list[str], malicious_peers: list[MaliciousPeer]):
         self.honest_peers = honest_peers
         self.malicious_peers = malicious_peers
-        self.metrics = AttackMetrics()
+        self.metrics: AttackMetrics = AttackMetrics()
         self.honest_peer_tables = {p: [] for p in honest_peers}
 
     async def execute(self):

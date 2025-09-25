@@ -6,7 +6,7 @@ during eclipse attacks, measuring genuine network degradation and recovery.
 """
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import trio
 
@@ -111,7 +111,7 @@ class RealAttackMetrics(AttackMetrics):
 
     async def measure_routing_table_contamination(
         self, honest_dhts: list[KadDHT], malicious_peer_ids: list[str]
-    ) -> dict[str, float | list[float] | int]:
+    ) -> dict[str, Any]:
         """Measure how much malicious content is in routing tables"""
         total_contamination = 0
         total_entries = 0
@@ -154,7 +154,7 @@ class RealAttackMetrics(AttackMetrics):
         honest_dhts: list[KadDHT],
         malicious_peers: list,
         attack_duration: float = 30.0,
-    ) -> dict[str, dict[str, Any] | Any]:
+    ) -> dict[str, Any]:
         """Measure complete attack cycle: before, during, after"""
         results = {
             "before_attack": {},
@@ -235,7 +235,9 @@ class RealAttackMetrics(AttackMetrics):
         )
 
         # Calculate recovery metrics
-        results["recovery_metrics"] = self._calculate_recovery_metrics(results)
+        results["recovery_metrics"] = cast(
+            Any, self._calculate_recovery_metrics(results)
+        )
 
         return results
 
