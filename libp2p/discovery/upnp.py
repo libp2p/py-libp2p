@@ -81,8 +81,13 @@ class UpnpManager:
         :param protocol: the protocol to map (TCP or UDP)
         :return: True on success, False otherwise
         """
-        if not 0 < port < 65536:
-            logger.error(f"Invalid port number for mapping: {port}")
+        try:
+            port = int(port)
+            if not 0 < port < 65536:
+                logger.error(f"Invalid port number for mapping: {port}")
+                return False
+        except (ValueError, TypeError):
+            logger.error(f"Invalid port value: {port}")
             return False
         if port < 1024:
             logger.warning(
@@ -120,8 +125,13 @@ class UpnpManager:
         :param protocol: the protocol (TCP or UDP)
         :return: True on success, False otherwise
         """
-        if not 0 < port < 65536:
-            logger.error(f"Invalid port number for removal: {port}")
+        try:
+            port = int(port)
+            if not 0 < port < 65536:
+                logger.error(f"Invalid port number for removal: {port}")
+                return False
+        except (ValueError, TypeError):
+            logger.error(f"Invalid port value: {port}")
             return False
 
         logger.debug(f"Removing UPnP mapping for {protocol} port {port}...")
