@@ -6,15 +6,15 @@ ______________________________________________________________________
 
 ## Table of Contents
 
-1. [Module Overview](#module-overview)
-1. [Module Structure](#module-structure)
-1. [Setup and Usage](#setup-and-usage)
-1. [Testing](#testing)
-1. [Implementation Details](#implementation-details)
-1. [Metrics and Analysis](#metrics-and-analysis)
-1. [Roadmap](#roadmap)
-1. [Eclipse Attack Flow](#eclipse-attack-flow)
-1. [Contributing](#contributing)
+[Module Overview](#module-overview)
+[Module Structure](#module-structure)
+[Setup and Usage](#setup-and-usage)
+[Testing](#testing)
+[Implementation Details](#implementation-details)
+[Metrics and Analysis](#metrics-and-analysis)
+[Roadmap](#roadmap)
+[Eclipse Attack Flow](#eclipse-attack-flow)
+[Contributing](#contributing)
 
 ______________________________________________________________________
 
@@ -91,19 +91,21 @@ ______________________________________________________________________
 The module provides **two levels** of testing:
 
 ### **Level 1: Simulation Framework** (Original Implementation)
+
 - Eclipse attack tests (`eclipse_attack/test_eclipse_simulation.py`)
 - Utilities: metrics, network monitoring, peer behavior
 - **Fast execution**, **conceptual validation**
 
 ### **Level 2: Real Integration Tests** 🆕 (New Enhancement)
+
 - Real libp2p host creation using `HostFactory`
-- Actual DHT manipulation with `KadDHT` instances  
+- Actual DHT manipulation with `KadDHT` instances
 - Real network performance measurement
 - **Slower execution**, **actual security testing**
 
 Passing tests confirm:
 
-- ✅ **Simulation Framework**: Network setup, malicious behaviors, metrics collection  
+- ✅ **Simulation Framework**: Network setup, malicious behaviors, metrics collection
 - ✅ **Real Integration**: Actual libp2p attacks, DHT poisoning, performance degradation
 
 ______________________________________________________________________
@@ -113,12 +115,14 @@ ______________________________________________________________________
 ### **Simulation Layer** (Original)
 
 #### Malicious Peer
+
 ```python
 class MaliciousPeer:
     """Simulates malicious peer behavior"""
 ```
 
 #### Network Builder
+
 ```python
 class AttackNetworkBuilder:
     """Constructs configurable test networks for attack simulations"""
@@ -127,22 +131,24 @@ class AttackNetworkBuilder:
 ### **Real Integration Layer** 🆕 (New Enhancement)
 
 #### Real Malicious Peer
+
 ```python
 class RealMaliciousPeer(MaliciousPeer):
     """Real malicious peer that manipulates actual DHT instances"""
-    
+
     async def poison_real_dht_entries(self, target_dht: KadDHT):
         # Actually poison real DHT routing tables
-        
-    async def flood_real_peer_table(self, target_dht: KadDHT):  
+
+    async def flood_real_peer_table(self, target_dht: KadDHT):
         # Flood real DHT with malicious entries
 ```
 
 #### Real Network Builder
-```python  
+
+```python
 class RealNetworkBuilder(AttackNetworkBuilder):
     """Builds networks with real libp2p hosts and DHT instances"""
-    
+
     async def create_real_eclipse_test_network(self):
         # Uses HostFactory to create actual libp2p hosts
         # Creates real KadDHT instances
@@ -150,10 +156,11 @@ class RealNetworkBuilder(AttackNetworkBuilder):
 ```
 
 #### Real Metrics Collector
+
 ```python
 class RealAttackMetrics(AttackMetrics):
     """Collects actual performance metrics from real libp2p networks"""
-    
+
     async def measure_complete_attack_cycle(self):
         # Measures real DHT lookup degradation
         # Tracks actual network connectivity loss
