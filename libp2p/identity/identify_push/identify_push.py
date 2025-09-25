@@ -112,10 +112,7 @@ async def _update_peerstore_from_identify(
     # Update public key if present
     if identify_msg.HasField("public_key"):
         try:
-            # Note: This assumes the peerstore has a method to update the public key
-            # You may need to adjust this based on your actual peerstore implementation
             peerstore.add_protocols(peer_id, [])
-            # The actual public key update would go here
             pubkey = deserialize_public_key(identify_msg.public_key)
             peerstore.add_pubkey(peer_id, pubkey)
         except Exception as e:
@@ -124,46 +121,46 @@ async def _update_peerstore_from_identify(
     # Update listen addresses if present
     if identify_msg.listen_addrs:
         try:
-            # Convert bytes to Multiaddr objects
             addrs = [Multiaddr(addr) for addr in identify_msg.listen_addrs]
-            # Add the addresses to the peerstore
             for addr in addrs:
-                # Use a default TTL of 2 hours (7200 seconds)
-                peerstore.add_addr(peer_id, addr, 7200)
+                peerstore.add_addr(peer_id, addr, 7200)  # 2 hours TTL
         except Exception as e:
             logger.error("Error updating listen addresses for peer %s: %s", peer_id, e)
 
     # Update protocols if present
     if identify_msg.protocols:
         try:
-            # Add the protocols to the peerstore
             peerstore.add_protocols(peer_id, identify_msg.protocols)
         except Exception as e:
             logger.error("Error updating protocols for peer %s: %s", peer_id, e)
 
+    # Update from signed peer record if present
     if identify_msg.HasField("signedPeerRecord"):
         try:
-            # Convert the signed-peer-record(Envelope) from prtobuf bytes
-            envelope, _ = consume_envelope(
+            envelope, record = consume_envelope(
                 identify_msg.signedPeerRecord, "libp2p-peer-record"
             )
-            # Use a default TTL of 2 hours (7200 seconds)
+            # Cross-check peer-id consistency
+            if str(record.peer_id) != str(peer_id):
+                logger.warning(
+                    "SignedPeerRecord peer-id mismatch: record=%s, sender=%s. Ignoring.",
+                    record.peer_id, peer_id,
+                )
+                return  # 🚨 reject forged record
+
             if not peerstore.consume_peer_record(envelope, 7200):
-                logger.error("Updating Certified-Addr-Book was unsuccessful")
+                logger.error("Updating Certified-Addr-Book was unsuccessful for %s", peer_id)
         except Exception as e:
-            logger.error(
-                "Error updating the certified addr book for peer %s: %s", peer_id, e
-            )
+            logger.error("Error updating the certified addr book for peer %s: %s", peer_id, e)
+
     # Update observed address if present
     if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
         try:
-            # Convert bytes to Multiaddr object
             observed_addr = Multiaddr(identify_msg.observed_addr)
-            # Add the observed address to the peerstore
-            # Use a default TTL of 2 hours (7200 seconds)
             peerstore.add_addr(peer_id, observed_addr, 7200)
         except Exception as e:
             logger.error("Error updating observed address for peer %s: %s", peer_id, e)
+
 
 
 async def push_identify_to_peer(
