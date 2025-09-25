@@ -19,14 +19,19 @@ class RealEclipseScenario(EclipseScenario):
     """Real Eclipse attack scenario using actual libp2p components"""
 
     def __init__(self, honest_hosts, honest_dhts, malicious_peers):
-        # Override parent initialization
+        # Convert honest hosts to peer IDs for parent compatibility
+        honest_peer_ids = [host.get_id().to_string() for host in honest_hosts]
+
+        # Initialize parent with proper types
+        super().__init__(honest_peer_ids, malicious_peers)
+
+        # Store real libp2p components
         self.honest_hosts = honest_hosts
         self.honest_dhts = honest_dhts
         self.malicious_peers = malicious_peers
-        self.metrics = RealAttackMetrics()
 
-        # Track honest peer IDs for compatibility
-        self.honest_peers = [host.get_id().to_string() for host in honest_hosts]
+        # Override with real metrics collector
+        self.metrics = RealAttackMetrics()
 
     async def execute_real_attack(self, attack_duration: float = 30.0):
         """Execute a real eclipse attack against actual libp2p network"""

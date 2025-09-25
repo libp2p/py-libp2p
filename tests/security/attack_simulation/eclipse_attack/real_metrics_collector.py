@@ -24,8 +24,8 @@ class RealAttackMetrics(AttackMetrics):
     def __init__(self):
         super().__init__()
         self.test_keys = []  # Keys used for testing lookups
-        self.attack_start_time = 0
-        self.attack_end_time = 0
+        self.attack_start_time = 0.0
+        self.attack_end_time = 0.0
         self.detailed_results = {}
 
     async def measure_real_lookup_performance(
@@ -111,7 +111,7 @@ class RealAttackMetrics(AttackMetrics):
 
     async def measure_routing_table_contamination(
         self, honest_dhts: list[KadDHT], malicious_peer_ids: list[str]
-    ) -> dict[str, float]:
+    ) -> dict[str, float | list[float] | int]:
         """Measure how much malicious content is in routing tables"""
         total_contamination = 0
         total_entries = 0
@@ -154,7 +154,7 @@ class RealAttackMetrics(AttackMetrics):
         honest_dhts: list[KadDHT],
         malicious_peers: list,
         attack_duration: float = 30.0,
-    ) -> dict[str, Any]:
+    ) -> dict[str, dict[str, Any] | Any]:
         """Measure complete attack cycle: before, during, after"""
         results = {
             "before_attack": {},
