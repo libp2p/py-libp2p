@@ -15,11 +15,12 @@ import multiaddr
 def test_default_bind_address_secure():
     """Test that default binding is secure (127.0.0.1)."""
     # Clear any existing environment variable
-    if 'LIBP2P_BIND' in os.environ:
-        del os.environ['LIBP2P_BIND']
+    if "LIBP2P_BIND" in os.environ:
+        del os.environ["LIBP2P_BIND"]
 
     # Reload the constants module to get fresh configuration
     import libp2p.tools.constants
+
     importlib.reload(libp2p.tools.constants)
 
     # Verify default is secure
@@ -30,10 +31,11 @@ def test_default_bind_address_secure():
 def test_environment_variable_override():
     """Test that LIBP2P_BIND environment variable overrides default."""
     # Set environment variable
-    os.environ['LIBP2P_BIND'] = '0.0.0.0'
+    os.environ["LIBP2P_BIND"] = "0.0.0.0"
 
     # Reload the constants module to pick up new environment
     import libp2p.tools.constants
+
     importlib.reload(libp2p.tools.constants)
 
     # Verify override works
@@ -41,16 +43,17 @@ def test_environment_variable_override():
     assert str(libp2p.tools.constants.LISTEN_MADDR) == "/ip4/0.0.0.0/tcp/0"
 
     # Clean up
-    del os.environ['LIBP2P_BIND']
+    del os.environ["LIBP2P_BIND"]
 
 
 def test_custom_ip_address_override():
     """Test that custom IP addresses work via environment variable."""
     custom_ip = "192.168.1.100"
-    os.environ['LIBP2P_BIND'] = custom_ip
+    os.environ["LIBP2P_BIND"] = custom_ip
 
     # Reload the constants module
     import libp2p.tools.constants
+
     importlib.reload(libp2p.tools.constants)
 
     # Verify custom IP works
@@ -58,15 +61,16 @@ def test_custom_ip_address_override():
     assert str(libp2p.tools.constants.LISTEN_MADDR) == f"/ip4/{custom_ip}/tcp/0"
 
     # Clean up
-    del os.environ['LIBP2P_BIND']
+    del os.environ["LIBP2P_BIND"]
 
 
 def test_multiaddr_construction():
     """Test that the constructed multiaddr is valid."""
-    os.environ['LIBP2P_BIND'] = '0.0.0.0'
+    os.environ["LIBP2P_BIND"] = "0.0.0.0"
 
     # Reload the constants module
     import libp2p.tools.constants
+
     importlib.reload(libp2p.tools.constants)
 
     # Verify multiaddr is properly constructed and valid
@@ -74,7 +78,7 @@ def test_multiaddr_construction():
     assert isinstance(maddr, multiaddr.Multiaddr)
 
     # Verify it has the expected components
-    protocols = maddr.protocols()
+    protocols = list(maddr.protocols())
     assert len(protocols) == 2
     assert protocols[0].name == "ip4"
     assert protocols[1].name == "tcp"
@@ -84,7 +88,7 @@ def test_multiaddr_construction():
     assert maddr.value_for_protocol("tcp") == "0"
 
     # Clean up
-    del os.environ['LIBP2P_BIND']
+    del os.environ["LIBP2P_BIND"]
 
 
 @pytest.fixture(autouse=True)
@@ -92,9 +96,10 @@ def cleanup_environment():
     """Ensure clean environment after each test."""
     yield
     # Clean up after each test
-    if 'LIBP2P_BIND' in os.environ:
-        del os.environ['LIBP2P_BIND']
+    if "LIBP2P_BIND" in os.environ:
+        del os.environ["LIBP2P_BIND"]
 
     # Reload with clean environment
     import libp2p.tools.constants
+
     importlib.reload(libp2p.tools.constants)
