@@ -109,7 +109,9 @@ class RendezvousClient:
 
         resp = response.registerResponse
         if resp.status != Message.ResponseStatus.OK:
-            raise status_to_exception(resp.status, resp.statusText)
+            error = status_to_exception(resp.status, resp.statusText)
+            if error is not None:
+                raise error
 
         actual_ttl = resp.ttl
 
@@ -174,7 +176,9 @@ class RendezvousClient:
 
         resp = response.discoverResponse
         if resp.status != Message.ResponseStatus.OK:
-            raise status_to_exception(resp.status, resp.statusText)
+            error = status_to_exception(resp.status, resp.statusText)
+            if error is not None:
+                raise error
 
         # Parse registrations into PeerInfo objects
         peers = []

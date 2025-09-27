@@ -65,9 +65,11 @@ class UnavailableError(RendezvousError):
 
 def status_to_exception(
     status: Message.ResponseStatus.ValueType, message: str = ""
-) -> RendezvousError:
+) -> RendezvousError | None:
     """Convert a protobuf status to the appropriate exception."""
-    if status == Message.ResponseStatus.E_INVALID_NAMESPACE:
+    if status == Message.ResponseStatus.OK:
+        return None
+    elif status == Message.ResponseStatus.E_INVALID_NAMESPACE:
         return InvalidNamespaceError(message)
     elif status == Message.ResponseStatus.E_INVALID_PEER_INFO:
         return InvalidPeerInfoError(message)
