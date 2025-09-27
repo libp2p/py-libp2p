@@ -16,6 +16,7 @@ from libp2p.custom_types import (
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
+    MuxedStreamError,
     MuxedStreamReset,
 )
 from libp2p.transport.quic.exceptions import QUICStreamClosedError, QUICStreamResetError
@@ -130,7 +131,7 @@ class NetStream(INetStream):
             elif self.state == StreamState.OPEN:
                 self.set_state(StreamState.CLOSE_WRITE)
             raise StreamClosed() from error
-        except MuxedStreamReset as error:
+        except (MuxedStreamReset, MuxedStreamError) as error:
             self.set_state(StreamState.RESET)
             raise StreamReset() from error
 
