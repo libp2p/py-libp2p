@@ -69,17 +69,7 @@ ECLIPSE_ATTACK_CONFIGS = [
 ]
 
 # Additional attack types for future expansion
-ATTACK_TYPES = [
-    "eclipse",
-    "sybil",
-    "flooding",
-    "protocol_exploit"
-]
+ATTACK_TYPES = ["eclipse", "sybil", "flooding", "protocol_exploit"]
 
 # Network topologies for different testing scenarios
-NETWORK_TOPOLOGIES = [
-    "random",
-    "structured",
-    "clustered",
-    "mesh"
-]
+NETWORK_TOPOLOGIES = ["random", "structured", "clustered", "mesh"]

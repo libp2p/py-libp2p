@@ -1,12 +1,17 @@
 import pytest
 
-from .connection_exhaustion_attack import ConnectionExhaustionAttacker, ConnectionExhaustionScenario
+from .connection_exhaustion_attack import (
+    ConnectionExhaustionAttacker,
+    ConnectionExhaustionScenario,
+)
 
 
 @pytest.mark.trio
 async def test_connection_exhaustion_basic():
     """Test basic connection exhaustion attack"""
-    attacker = ConnectionExhaustionAttacker("exhaust_1", intensity=0.6, max_connections_per_target=50)
+    attacker = ConnectionExhaustionAttacker(
+        "exhaust_1", intensity=0.6, max_connections_per_target=50
+    )
     targets = ["peer_1", "peer_2"]
 
     await attacker.exhaust_connections(targets, duration=2.0)
@@ -16,14 +21,18 @@ async def test_connection_exhaustion_basic():
     assert len(attacker.active_connections) > 0
 
     # Check that connections were attempted
-    total_connections = sum(len(conns) for conns in attacker.active_connections.values())
+    total_connections = sum(
+        len(conns) for conns in attacker.active_connections.values()
+    )
     assert total_connections > 0
 
 
 @pytest.mark.trio
 async def test_connection_exhaustion_limit():
     """Test that connection limits are respected"""
-    attacker = ConnectionExhaustionAttacker("exhaust_1", intensity=1.0, max_connections_per_target=10)
+    attacker = ConnectionExhaustionAttacker(
+        "exhaust_1", intensity=1.0, max_connections_per_target=10
+    )
     targets = ["peer_1"]
 
     await attacker.exhaust_connections(targets, duration=5.0)
@@ -36,7 +45,9 @@ async def test_connection_exhaustion_limit():
 @pytest.mark.trio
 async def test_maintain_exhaustion():
     """Test maintaining connection exhaustion"""
-    attacker = ConnectionExhaustionAttacker("exhaust_1", intensity=0.5, max_connections_per_target=20)
+    attacker = ConnectionExhaustionAttacker(
+        "exhaust_1", intensity=0.5, max_connections_per_target=20
+    )
 
     # First establish some connections
     await attacker.exhaust_connections(["peer_1"], duration=1.0)
@@ -57,8 +68,12 @@ async def test_connection_exhaustion_scenario():
     """Test complete connection exhaustion scenario"""
     honest_peers = ["h1", "h2", "h3"]
 
-    attacker1 = ConnectionExhaustionAttacker("exhaust1", 0.7, max_connections_per_target=30)
-    attacker2 = ConnectionExhaustionAttacker("exhaust2", 0.5, max_connections_per_target=25)
+    attacker1 = ConnectionExhaustionAttacker(
+        "exhaust1", 0.7, max_connections_per_target=30
+    )
+    attacker2 = ConnectionExhaustionAttacker(
+        "exhaust2", 0.5, max_connections_per_target=25
+    )
 
     scenario = ConnectionExhaustionScenario(honest_peers, [attacker1, attacker2])
 
@@ -83,10 +98,15 @@ def test_exhaustion_metrics_calculation():
     scenario = ConnectionExhaustionScenario(honest_peers, [attacker])
 
     # Simulate exhaustion results
-    attacker.active_connections = {"h1": [f"conn_{i}" for i in range(40)], "h2": [f"conn_{i}" for i in range(35)]}
+    attacker.active_connections = {
+        "h1": [f"conn_{i}" for i in range(40)],
+        "h2": [f"conn_{i}" for i in range(35)],
+    }
     attacker.exhausted_targets = ["h1"]  # Assume h1 was exhausted
 
-    scenario._calculate_exhaustion_metrics(75, 1, 10.0)  # 75 connections over 10s, 1 target exhausted
+    scenario._calculate_exhaustion_metrics(
+        75, 1, 10.0
+    )  # 75 connections over 10s, 1 target exhausted
 
     assert len(scenario.metrics.lookup_success_rate) == 3
     assert scenario.metrics.affected_nodes_percentage == 50.0  # 1/2 targets exhausted
@@ -99,17 +119,24 @@ async def test_exhaustion_intensity_impact():
     honest_peers = ["h1", "h2"]
 
     # Low intensity
-    low_attacker = ConnectionExhaustionAttacker("low_exhaust", 0.3, max_connections_per_target=20)
+    low_attacker = ConnectionExhaustionAttacker(
+        "low_exhaust", 0.3, max_connections_per_target=20
+    )
     low_scenario = ConnectionExhaustionScenario(honest_peers, [low_attacker])
     low_results = await low_scenario.execute_connection_exhaustion_attack(2.0)
 
     # High intensity
-    high_attacker = ConnectionExhaustionAttacker("high_exhaust", 0.8, max_connections_per_target=50)
+    high_attacker = ConnectionExhaustionAttacker(
+        "high_exhaust", 0.8, max_connections_per_target=50
+    )
     high_scenario = ConnectionExhaustionScenario(honest_peers, [high_attacker])
     high_results = await high_scenario.execute_connection_exhaustion_attack(2.0)
 
     # Higher intensity should establish more connections
-    assert high_results["total_connections_established"] >= low_results["total_connections_established"]
+    assert (
+        high_results["total_connections_established"]
+        >= low_results["total_connections_established"]
+    )
 
 
 @pytest.mark.trio
@@ -120,7 +147,7 @@ async def test_multiple_attackers_exhaustion():
     attackers = [
         ConnectionExhaustionAttacker("exhaust1", 0.6, 25),
         ConnectionExhaustionAttacker("exhaust2", 0.7, 30),
-        ConnectionExhaustionAttacker("exhaust3", 0.5, 20)
+        ConnectionExhaustionAttacker("exhaust3", 0.5, 20),
     ]
 
     scenario = ConnectionExhaustionScenario(honest_peers, attackers)

@@ -1,6 +1,6 @@
 import pytest
 
-from .sybil_attack import SybilMaliciousPeer, SybilAttackScenario
+from .sybil_attack import SybilAttackScenario, SybilMaliciousPeer
 
 
 @pytest.mark.trio
@@ -43,7 +43,10 @@ async def test_sybil_influence_amplification():
     # Should have actions for each fake identity targeting each honest peer
     expected_actions = 2 * 2  # 2 fake ids * 2 honest peers
     assert len(influence_actions) == expected_actions
-    assert all("attacker_1_sybil_" in action and "_influences_" in action for action in influence_actions)
+    assert all(
+        "attacker_1_sybil_" in action and "_influences_" in action
+        for action in influence_actions
+    )
 
 
 @pytest.mark.trio
@@ -88,7 +91,9 @@ def test_sybil_metrics_calculation():
     # Sybil ratio: 4 fake / (2 honest + 4 fake) = 4/6 ≈ 0.667
     expected_sybil_ratio = 4 / 6
 
-    assert abs(scenario.metrics.peer_table_contamination[1] - expected_sybil_ratio) < 0.01
+    assert (
+        abs(scenario.metrics.peer_table_contamination[1] - expected_sybil_ratio) < 0.01
+    )
     assert scenario.metrics.affected_nodes_percentage == expected_sybil_ratio * 100
     assert len(scenario.metrics.lookup_success_rate) == 3
     assert len(scenario.metrics.network_connectivity) == 3
@@ -113,4 +118,6 @@ async def test_sybil_attack_with_different_intensities():
     assert high_results["total_fake_identities"] > low_results["total_fake_identities"]
 
     # High intensity should have more influence actions
-    assert high_results["total_influence_actions"] > low_results["total_influence_actions"]
+    assert (
+        high_results["total_influence_actions"] > low_results["total_influence_actions"]
+    )

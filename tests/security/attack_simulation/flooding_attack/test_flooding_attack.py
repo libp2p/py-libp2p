@@ -1,6 +1,6 @@
 import pytest
 
-from .flooding_attack import FloodingMaliciousPeer, FloodingAttackScenario
+from .flooding_attack import FloodingAttackScenario, FloodingMaliciousPeer
 
 
 @pytest.mark.trio
@@ -10,7 +10,7 @@ async def test_pubsub_flooding():
     topics = ["topic_1", "topic_2"]
 
     # Short duration for testing
-    messages_sent = await attacker.initiate_pubsub_flood(topics, duration=2.0)
+    await attacker.initiate_pubsub_flood(topics, duration=2.0)
 
     assert len(attacker.messages_sent) > 0
     assert attacker.flood_start_time is not None
@@ -24,7 +24,7 @@ async def test_connection_flooding():
     attacker = FloodingMaliciousPeer("flood_1", "connection", intensity=0.7)
     targets = ["peer_1", "peer_2", "peer_3"]
 
-    connections = await attacker.initiate_connection_flood(targets, duration=1.5)
+    await attacker.initiate_connection_flood(targets, duration=1.5)
 
     assert len(attacker.connections_attempted) > 0
     assert all("conn_flood" in conn for conn in attacker.connections_attempted)
@@ -36,7 +36,7 @@ async def test_message_flooding():
     attacker = FloodingMaliciousPeer("flood_1", "message", intensity=0.6)
     targets = ["peer_1", "peer_2"]
 
-    messages = await attacker.initiate_message_flood(targets, duration=1.0)
+    await attacker.initiate_message_flood(targets, duration=1.0)
 
     assert len(attacker.messages_sent) > 0
     assert all("msg_flood" in msg for msg in attacker.messages_sent)
@@ -118,7 +118,7 @@ async def test_mixed_flooding_types():
     attackers = [
         FloodingMaliciousPeer("pubsub_flood", "pubsub", 0.5),
         FloodingMaliciousPeer("conn_flood", "connection", 0.6),
-        FloodingMaliciousPeer("msg_flood", "message", 0.4)
+        FloodingMaliciousPeer("msg_flood", "message", 0.4),
     ]
 
     scenario = FloodingAttackScenario(honest_peers, attackers)

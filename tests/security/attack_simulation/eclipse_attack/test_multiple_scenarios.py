@@ -1,6 +1,7 @@
-import pytest
 import json
 from pathlib import Path
+
+import pytest
 
 from ..config.attack_configs import ECLIPSE_ATTACK_CONFIGS
 from .attack_scenarios import EclipseScenario
@@ -18,7 +19,9 @@ async def test_multiple_eclipse_scenarios():
 
         # Create network for this scenario
         honest, malicious = await builder.create_eclipse_test_network(
-            config["honest_nodes"], config["malicious_nodes"], config["attack_intensity"]
+            int(config["honest_nodes"]),
+            int(config["malicious_nodes"]),
+            float(config["attack_intensity"]),
         )
 
         # Execute scenario
@@ -48,7 +51,7 @@ async def test_multiple_eclipse_scenarios():
                 "peer_table_flooding_rate": metrics.peer_table_flooding_rate,
                 "routing_disruption_level": metrics.routing_disruption_level,
             },
-            "analysis": report
+            "analysis": report,
         }
         results.append(result)
 
@@ -60,17 +63,21 @@ async def test_multiple_eclipse_scenarios():
         print(f"  - Resilience Score: {report['network_resilience_score']:.1f}/100")
 
     # Save detailed results to file
-    results_file = Path(__file__).parent.parent / "results" / "comprehensive_attack_results.json"
+    results_file = (
+        Path(__file__).parent.parent / "results" / "comprehensive_attack_results.json"
+    )
     results_file.parent.mkdir(exist_ok=True)
 
-    with open(results_file, 'w') as f:
+    with open(results_file, "w") as f:
         json.dump(results, f, indent=2)
 
     # Save summary report
-    summary_file = Path(__file__).parent.parent / "results" / "attack_summary_report.json"
+    summary_file = (
+        Path(__file__).parent.parent / "results" / "attack_summary_report.json"
+    )
     summary = generate_attack_summary(results)
 
-    with open(summary_file, 'w') as f:
+    with open(summary_file, "w") as f:
         json.dump(summary, f, indent=2)
 
     print(f"\nDetailed results saved to: {results_file}")
@@ -81,7 +88,10 @@ async def test_multiple_eclipse_scenarios():
     for result in results:
         assert "scenario_name" in result
         assert "analysis" in result
-        assert "network_resilience_score" in result["analysis"]
+        assert isinstance(result["analysis"], dict)
+        assert isinstance(
+            result["analysis"].get("network_resilience_score"), (int, float)
+        )
 
 
 def generate_attack_summary(results: list) -> dict:
@@ -92,7 +102,7 @@ def generate_attack_summary(results: list) -> dict:
         "vulnerability_patterns": {},
         "mitigation_insights": {},
         "network_resilience_overview": {},
-        "recommendations": []
+        "recommendations": [],
     }
 
     # Analyze attack effectiveness
@@ -106,16 +116,22 @@ def generate_attack_summary(results: list) -> dict:
         "max_resilience_score": max(resilience_scores),
         "average_affected_nodes": sum(affected_percentages) / len(affected_percentages),
         "average_recovery_time": sum(recovery_times) / len(recovery_times),
-        "most_vulnerable_scenario": results[resilience_scores.index(min(resilience_scores))]["scenario_name"],
-        "most_resilient_scenario": results[resilience_scores.index(max(resilience_scores))]["scenario_name"]
+        "most_vulnerable_scenario": results[
+            resilience_scores.index(min(resilience_scores))
+        ]["scenario_name"],
+        "most_resilient_scenario": results[
+            resilience_scores.index(max(resilience_scores))
+        ]["scenario_name"],
     }
 
     # Identify vulnerability patterns
-    high_impact_scenarios = [r for r in results if r["analysis"]["network_resilience_score"] < 50]
+    high_impact_scenarios = [
+        r for r in results if r["analysis"]["network_resilience_score"] < 50
+    ]
     summary["vulnerability_patterns"] = {
         "high_impact_scenarios": [s["scenario_name"] for s in high_impact_scenarios],
         "common_vulnerabilities": identify_common_vulnerabilities(results),
-        "scale_impact": analyze_scale_impact(results)
+        "scale_impact": analyze_scale_impact(results),
     }
 
     # Collect mitigation recommendations
@@ -129,8 +145,10 @@ def generate_attack_summary(results: list) -> dict:
         recommendation_counts[rec] = recommendation_counts.get(rec, 0) + 1
 
     summary["mitigation_insights"] = {
-        "top_recommendations": sorted(recommendation_counts.items(), key=lambda x: x[1], reverse=True)[:5],
-        "unique_recommendations": len(set(all_recommendations))
+        "top_recommendations": sorted(
+            recommendation_counts.items(), key=lambda x: x[1], reverse=True
+        )[:5],
+        "unique_recommendations": len(set(all_recommendations)),
     }
 
     # Network resilience overview
@@ -139,9 +157,9 @@ def generate_attack_summary(results: list) -> dict:
             "excellent": len([s for s in resilience_scores if s >= 80]),
             "good": len([s for s in resilience_scores if 60 <= s < 80]),
             "moderate": len([s for s in resilience_scores if 40 <= s < 60]),
-            "poor": len([s for s in resilience_scores if s < 40])
+            "poor": len([s for s in resilience_scores if s < 40]),
         },
-        "correlation_analysis": analyze_correlations(results)
+        "correlation_analysis": analyze_correlations(results),
     }
 
     # Generate final recommendations
@@ -155,7 +173,9 @@ def identify_common_vulnerabilities(results: list) -> list[str]:
     vulnerabilities = []
 
     # Check for scenarios with high contamination
-    high_contamination = [r for r in results if max(r["metrics"]["peer_table_contamination"]) > 0.5]
+    high_contamination = [
+        r for r in results if max(r["metrics"]["peer_table_contamination"]) > 0.5
+    ]
     if high_contamination:
         vulnerabilities.append("High peer table contamination vulnerability")
 
@@ -165,7 +185,9 @@ def identify_common_vulnerabilities(results: list) -> list[str]:
         vulnerabilities.append("DHT lookup disruption vulnerability")
 
     # Check for scenarios with poor connectivity
-    poor_connectivity = [r for r in results if min(r["metrics"]["network_connectivity"]) < 0.5]
+    poor_connectivity = [
+        r for r in results if min(r["metrics"]["network_connectivity"]) < 0.5
+    ]
     if poor_connectivity:
         vulnerabilities.append("Network connectivity fragmentation vulnerability")
 
@@ -181,13 +203,16 @@ def analyze_scale_impact(results: list) -> dict:
     def avg_resilience(networks):
         if not networks:
             return 0
-        return sum(n["analysis"]["network_resilience_score"] for n in networks) / len(networks)
+        return sum(n["analysis"]["network_resilience_score"] for n in networks) / len(
+            networks
+        )
 
     return {
         "small_networks_avg_resilience": avg_resilience(small_networks),
         "medium_networks_avg_resilience": avg_resilience(medium_networks),
         "large_networks_avg_resilience": avg_resilience(large_networks),
-        "scale_benefit": avg_resilience(large_networks) > avg_resilience(small_networks)
+        "scale_benefit": avg_resilience(large_networks)
+        > avg_resilience(small_networks),
     }
 
 
@@ -204,7 +229,9 @@ def analyze_correlations(results: list) -> dict:
     correlations["intensity_vs_resilience"] = intensity_resilience_corr
 
     # Correlation between malicious ratio and impact
-    malicious_ratios = [r["config"]["malicious_nodes"] / r["config"]["honest_nodes"] for r in results]
+    malicious_ratios = [
+        r["config"]["malicious_nodes"] / r["config"]["honest_nodes"] for r in results
+    ]
     impacts = [100 - r["analysis"]["network_resilience_score"] for r in results]
 
     malicious_impact_corr = calculate_correlation(malicious_ratios, impacts)
@@ -222,11 +249,11 @@ def calculate_correlation(x: list, y: list) -> float:
     sum_x = sum(x)
     sum_y = sum(y)
     sum_xy = sum(xi * yi for xi, yi in zip(x, y))
-    sum_x2 = sum(xi ** 2 for xi in x)
-    sum_y2 = sum(yi ** 2 for yi in y)
+    sum_x2 = sum(xi**2 for xi in x)
+    sum_y2 = sum(yi**2 for yi in y)
 
     numerator = n * sum_xy - sum_x * sum_y
-    denominator = ((n * sum_x2 - sum_x ** 2) * (n * sum_y2 - sum_y ** 2)) ** 0.5
+    denominator = ((n * sum_x2 - sum_x**2) * (n * sum_y2 - sum_y**2)) ** 0.5
 
     return numerator / denominator if denominator != 0 else 0.0
 
@@ -242,8 +269,14 @@ async def test_stress_test_multiple_runs():
         print(f"\n=== Stress Test Run {run_number + 1}/{total_runs} ===")
 
         for config in ECLIPSE_ATTACK_CONFIGS[:3]:  # Test first 3 scenarios for speed
+            honest_nodes = int(config["honest_nodes"])
+            malicious_nodes = int(config["malicious_nodes"])
+            attack_intensity = float(config["attack_intensity"])
+
             honest, malicious = await builder.create_eclipse_test_network(
-                config["honest_nodes"], config["malicious_nodes"], config["attack_intensity"]
+                int(honest_nodes),
+                int(malicious_nodes),
+                float(attack_intensity),
             )
 
             scenario = EclipseScenario(honest, malicious)
@@ -255,14 +288,14 @@ async def test_stress_test_multiple_runs():
                 "scenario_name": config["name"],
                 "resilience_score": report["network_resilience_score"],
                 "recovery_time": metrics.recovery_time,
-                "affected_nodes": metrics.affected_nodes_percentage
+                "affected_nodes": metrics.affected_nodes_percentage,
             }
             all_results.append(result)
 
             # Basic consistency check - resilience should be reasonable
-            assert 0 <= result["resilience_score"] <= 100
-            assert result["recovery_time"] > 0
-            assert 0 <= result["affected_nodes"] <= 100
+            assert 0 <= float(result["resilience_score"]) <= 100
+            assert float(result["recovery_time"]) > 0
+            assert 0 <= float(result["affected_nodes"]) <= 100
 
     # Analyze consistency across runs
     scenario_groups = {}
@@ -277,14 +310,16 @@ async def test_stress_test_multiple_runs():
         if len(scores) > 1:
             mean_score = sum(scores) / len(scores)
             variance = sum((score - mean_score) ** 2 for score in scores) / len(scores)
-            std_dev = variance ** 0.5
+            std_dev = variance**0.5
             consistency_ratio = std_dev / mean_score if mean_score > 0 else 0
 
             print(".2f")
             # Allow up to 15% variation for simulation consistency
-            assert consistency_ratio < 0.15, f"Scenario {scenario} shows inconsistent results: {consistency_ratio:.3f} variation"
+            assert consistency_ratio < 0.15, (
+                f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
+            )
 
-    print(f"\n✅ Stress test completed successfully: {len(all_results)} total scenario runs")
+    print(f"\n✅ Stress test complete: {len(all_results)} scenarios run")
     print("All scenarios show consistent behavior across multiple runs")
 
 
@@ -293,20 +328,32 @@ def generate_final_recommendations(summary: dict) -> list[str]:
     recommendations = []
 
     # Based on resilience scores
-    avg_resilience = summary["attack_effectiveness_analysis"]["average_resilience_score"]
+    avg_resilience = summary["attack_effectiveness_analysis"][
+        "average_resilience_score"
+    ]
     if avg_resilience < 60:
-        recommendations.append("CRITICAL: Implement comprehensive peer validation and reputation systems")
+        recommendations.append(
+            "CRITICAL: Implement comprehensive peer validation and reputation systems"
+        )
     elif avg_resilience < 80:
-        recommendations.append("HIGH: Strengthen DHT security and monitoring capabilities")
+        recommendations.append(
+            "HIGH: Strengthen DHT security and monitoring capabilities"
+        )
 
     # Based on vulnerability patterns
     if summary["vulnerability_patterns"]["scale_impact"]["scale_benefit"]:
-        recommendations.append("Leverage network scale for improved resilience in large deployments")
+        recommendations.append(
+            "Leverage network scale for improved resilience in large deployments"
+        )
 
     # Based on correlations
-    intensity_corr = summary["network_resilience_overview"]["correlation_analysis"]["intensity_vs_resilience"]
+    intensity_corr = summary["network_resilience_overview"]["correlation_analysis"][
+        "intensity_vs_resilience"
+    ]
     if abs(intensity_corr) > 0.7:
-        recommendations.append("Attack intensity is a primary vulnerability factor - focus mitigation efforts here")
+        recommendations.append(
+            "Attack intensity is critical - prioritize intensity-based mitigations"
+        )
 
     # Based on top recommendations
     top_recs = summary["mitigation_insights"]["top_recommendations"]

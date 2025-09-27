@@ -24,7 +24,11 @@ class EclipseScenario:
                     )
 
         # Calculate realistic metrics based on attack parameters
-        attack_intensity = self.malicious_peers[0].intensity if self.malicious_peers else 0.5
-        self.metrics.calculate_metrics(self.honest_peers, self.malicious_peers, attack_intensity)
+        attack_intensity = (
+            self.malicious_peers[0].intensity if self.malicious_peers else 0.5
+        )
+        self.metrics.calculate_metrics(
+            self.honest_peers, self.malicious_peers, attack_intensity
+        )
 
         return self.metrics

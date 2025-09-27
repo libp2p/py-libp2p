@@ -1,10 +1,8 @@
 """
 Attack Metrics Collection Framework
 
-This module provides comprehensive metrics collection and analysis for network attack simulations.
+Provides metrics collection and analysis for network attack simulations.
 """
-
-from typing import List
 
 
 class AttackMetrics:
@@ -12,10 +10,10 @@ class AttackMetrics:
 
     def __init__(self):
         # Network Health Metrics
-        self.lookup_success_rate: List[float] = []
-        self.peer_table_contamination: List[float] = []
-        self.network_connectivity: List[float] = []
-        self.message_delivery_rate: List[float] = []
+        self.lookup_success_rate: list[float] = []
+        self.peer_table_contamination: list[float] = []
+        self.network_connectivity: list[float] = []
+        self.message_delivery_rate: list[float] = []
 
         # Attack Effectiveness Metrics
         self.time_to_partitioning: float = 0.0
@@ -28,9 +26,9 @@ class AttackMetrics:
         self.mitigation_effectiveness: float = 0.0
 
         # Resource Impact Metrics
-        self.memory_usage: List[float] = []
-        self.cpu_utilization: List[float] = []
-        self.bandwidth_consumption: List[float] = []
+        self.memory_usage: list[float] = []
+        self.cpu_utilization: list[float] = []
+        self.bandwidth_consumption: list[float] = []
 
         # Attack-specific Metrics
         self.dht_poisoning_rate: float = 0.0
@@ -47,14 +45,18 @@ class AttackMetrics:
         malicious_peers = sum(len(p.get("malicious_peers", [])) for p in honest_peers)
         return malicious_peers / total_peers if total_peers > 0 else 0
 
-    def calculate_metrics(self, honest_peers: List[str], malicious_peers: List, attack_intensity: float):
+    def calculate_metrics(
+        self, honest_peers: list[str], malicious_peers: list, attack_intensity: float
+    ):
         """Calculate realistic metrics based on attack parameters"""
         num_honest = len(honest_peers)
         num_malicious = len(malicious_peers)
 
         # Network Health Metrics
         base_success = 0.95  # Normal success rate
-        attack_impact = min(attack_intensity * (num_malicious / (num_honest + num_malicious)), 0.9)
+        attack_impact = min(
+            attack_intensity * (num_malicious / (num_honest + num_malicious)), 0.9
+        )
         during_attack = max(base_success - attack_impact, 0.1)
         after_attack = min(during_attack + 0.3, base_success)  # Partial recovery
 
@@ -62,14 +64,22 @@ class AttackMetrics:
 
         # Peer table contamination
         contamination = min(attack_intensity * (num_malicious / num_honest), 1.0)
-        self.peer_table_contamination = [0.0, contamination, contamination * 0.7]  # Some cleanup
+        self.peer_table_contamination = [
+            0.0,
+            contamination,
+            contamination * 0.7,
+        ]  # Some cleanup
 
         # Network connectivity impact
         connectivity_impact = attack_impact * 0.8
         self.network_connectivity = [1.0, max(1.0 - connectivity_impact, 0.2), 0.8]
 
         # Message delivery rate (correlated with connectivity)
-        self.message_delivery_rate = [0.98, max(0.98 - connectivity_impact * 1.2, 0.1), 0.85]
+        self.message_delivery_rate = [
+            0.98,
+            max(0.98 - connectivity_impact * 1.2, 0.1),
+            0.85,
+        ]
 
         # Attack Effectiveness Metrics
         self.time_to_partitioning = attack_intensity * 30 + num_malicious * 5  # seconds
@@ -79,7 +89,9 @@ class AttackMetrics:
         # Recovery Metrics
         self.recovery_time = attack_intensity * 10 + num_malicious * 2
         self.detection_time = attack_intensity * 5 + num_malicious * 1
-        self.mitigation_effectiveness = 1.0 - (contamination * 0.5)  # Effectiveness of defenses
+        self.mitigation_effectiveness = 1.0 - (
+            contamination * 0.5
+        )  # Effectiveness of defenses
 
         # Resource Impact Metrics (simulated)
         base_memory = 100  # MB
@@ -92,7 +104,11 @@ class AttackMetrics:
 
         self.memory_usage = [base_memory, attack_memory, base_memory * 1.1]
         self.cpu_utilization = [base_cpu, attack_cpu, base_cpu * 1.2]
-        self.bandwidth_consumption = [base_bandwidth, attack_bandwidth, base_bandwidth * 1.3]
+        self.bandwidth_consumption = [
+            base_bandwidth,
+            attack_bandwidth,
+            base_bandwidth * 1.3,
+        ]
 
         # Attack-specific Metrics
         self.dht_poisoning_rate = attack_intensity * (num_malicious / num_honest)
@@ -107,13 +123,15 @@ class AttackMetrics:
                 "affected_nodes_percentage": self.affected_nodes_percentage,
                 "attack_persistence": self.attack_persistence,
                 "dht_poisoning_rate": self.dht_poisoning_rate,
-                "routing_disruption_level": self.routing_disruption_level
+                "routing_disruption_level": self.routing_disruption_level,
             },
             "vulnerability_assessment": {
-                "lookup_success_degradation": self.lookup_success_rate[0] - self.lookup_success_rate[1],
+                "lookup_success_degradation": self.lookup_success_rate[0]
+                - self.lookup_success_rate[1],
                 "max_contamination": max(self.peer_table_contamination),
-                "connectivity_impact": self.network_connectivity[0] - self.network_connectivity[1],
-                "resource_stress": max(self.cpu_utilization) / self.cpu_utilization[0]
+                "connectivity_impact": self.network_connectivity[0]
+                - self.network_connectivity[1],
+                "resource_stress": max(self.cpu_utilization) / self.cpu_utilization[0],
             },
             "mitigation_recommendations": self._generate_mitigation_recommendations(),
             "network_resilience_score": self._calculate_resilience_score(),
@@ -121,11 +139,12 @@ class AttackMetrics:
                 "recovery_time": self.recovery_time,
                 "detection_time": self.detection_time,
                 "mitigation_effectiveness": self.mitigation_effectiveness,
-                "full_recovery_achieved": self.lookup_success_rate[2] >= self.lookup_success_rate[0] * 0.95
-            }
+                "full_recovery_achieved": self.lookup_success_rate[2]
+                >= self.lookup_success_rate[0] * 0.95,
+            },
         }
 
-    def _generate_mitigation_recommendations(self) -> List[str]:
+    def _generate_mitigation_recommendations(self) -> list[str]:
         """Generate specific mitigation recommendations based on metrics"""
         recommendations = []
 
@@ -147,11 +166,17 @@ class AttackMetrics:
         base_score = 100.0
 
         # Penalize for various attack impacts
-        lookup_penalty = (self.lookup_success_rate[0] - self.lookup_success_rate[1]) * 50
+        lookup_penalty = (
+            self.lookup_success_rate[0] - self.lookup_success_rate[1]
+        ) * 50
         contamination_penalty = max(self.peer_table_contamination) * 30
-        connectivity_penalty = (self.network_connectivity[0] - self.network_connectivity[1]) * 20
+        connectivity_penalty = (
+            self.network_connectivity[0] - self.network_connectivity[1]
+        ) * 20
 
-        resilience_score = base_score - lookup_penalty - contamination_penalty - connectivity_penalty
+        resilience_score = (
+            base_score - lookup_penalty - contamination_penalty - connectivity_penalty
+        )
         return max(0.0, min(100.0, resilience_score))
 
 

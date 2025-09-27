@@ -1,6 +1,7 @@
 import pytest
 
 from tests.security.attack_simulation.utils.attack_metrics import AttackMetrics
+
 from .attack_analysis import AttackAnalysis
 
 
@@ -102,7 +103,9 @@ def test_assess_vulnerabilities(sample_metrics):
     analysis = AttackAnalysis()
     vulnerabilities = analysis.assess_vulnerabilities(sample_metrics)
 
-    assert vulnerabilities["lookup_success_degradation"] == pytest.approx(0.35)  # 0.95 - 0.60
+    assert vulnerabilities["lookup_success_degradation"] == pytest.approx(
+        0.35
+    )  # 0.95 - 0.60
     assert vulnerabilities["max_contamination"] == pytest.approx(0.40)
     assert vulnerabilities["connectivity_impact"] == pytest.approx(0.30)  # 1.0 - 0.70
     assert "vulnerability_severity" in vulnerabilities

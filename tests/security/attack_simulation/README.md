@@ -265,10 +265,10 @@ class AttackNetworkBuilder:
 ```python
 class SybilMaliciousPeer:
     """Malicious peer that creates multiple fake identities"""
-    
+
     async def create_fake_identities(self) -> List[str]:
         # Create multiple fake peer identities
-        
+
     async def amplify_influence(self, honest_peers: List[str]):
         # Amplify influence through fake identities
 ```
@@ -278,10 +278,10 @@ class SybilMaliciousPeer:
 ```python
 class FloodingMaliciousPeer:
     """Malicious peer that performs flooding attacks"""
-    
+
     async def initiate_pubsub_flood(self, target_topics: List[str], duration: float):
         # Flood pubsub topics with spam messages
-        
+
     async def initiate_connection_flood(self, target_peers: List[str], duration: float):
         # Flood with connection attempts
 ```
@@ -291,10 +291,10 @@ class FloodingMaliciousPeer:
 ```python
 class ConnectionExhaustionAttacker:
     """Malicious peer that exhausts connection limits"""
-    
+
     async def exhaust_connections(self, target_peers: List[str], duration: float):
         # Attempt to exhaust connection limits
-        
+
     async def maintain_exhaustion(self, target_peers: List[str], maintenance_duration: float):
         # Maintain connection exhaustion
 ```
@@ -304,10 +304,10 @@ class ConnectionExhaustionAttacker:
 ```python
 class ProtocolExploitAttacker:
     """Malicious peer that exploits protocol weaknesses"""
-    
+
     async def execute_malformed_message_attack(self, target_peers: List[str], duration: float):
         # Send malformed messages to exploit parsing
-        
+
     async def execute_protocol_violation_attack(self, target_peers: List[str], duration: float):
         # Violate protocol rules to cause crashes
 ```
@@ -368,7 +368,7 @@ ______________________________________________________________________
 ```python
 class AttackAnalysis:
     """Comprehensive framework for analyzing attack simulation results"""
-    
+
     def generate_attack_report(self, metrics: AttackMetrics) -> Dict[str, Any]:
         """Generate detailed attack analysis report"""
         return {
@@ -435,16 +435,19 @@ ______________________________________________________________________
 ### **Eclipse Attack Mitigations**
 
 1. **Peer Table Diversification**
+
    - Implement multiple DHT routing tables
    - Use different peer selection algorithms
    - Maintain backup routing information
 
-2. **Peer Validation**
+1. **Peer Validation**
+
    - Verify peer identities through cryptographic proofs
    - Implement peer reputation systems
    - Use multi-path routing for lookups
 
-3. **Network Monitoring**
+1. **Network Monitoring**
+
    - Monitor DHT lookup success rates
    - Detect unusual peer table distributions
    - Implement anomaly detection systems
@@ -452,11 +455,13 @@ ______________________________________________________________________
 ### **Sybil Attack Defenses**
 
 1. **Identity Verification**
+
    - Require proof-of-work for peer registration
    - Implement stake-based identity systems
    - Use trusted third-party validators
 
-2. **Resource Requirements**
+1. **Resource Requirements**
+
    - Enforce computational costs for participation
    - Require memory/storage commitments
    - Implement rate limiting per identity
@@ -464,11 +469,13 @@ ______________________________________________________________________
 ### **Flooding Attack Protections**
 
 1. **Rate Limiting**
+
    - Implement per-peer message rate limits
    - Use token bucket algorithms
    - Apply exponential backoff for violations
 
-2. **Message Validation**
+1. **Message Validation**
+
    - Validate message authenticity
    - Filter duplicate/spam messages
    - Implement content-based filtering
@@ -476,11 +483,13 @@ ______________________________________________________________________
 ### **Connection Exhaustion Safeguards**
 
 1. **Connection Limits**
+
    - Set maximum connections per peer
    - Implement connection timeouts
    - Use connection pooling efficiently
 
-2. **Resource Management**
+1. **Resource Management**
+
    - Monitor system resource usage
    - Implement graceful degradation
    - Use circuit breakers for overload protection
@@ -488,11 +497,13 @@ ______________________________________________________________________
 ### **Protocol Attack Prevention**
 
 1. **Input Validation**
+
    - Strictly validate all protocol messages
    - Implement bounds checking
    - Use safe parsing libraries
 
-2. **Protocol Hardening**
+1. **Protocol Hardening**
+
    - Implement protocol versioning
    - Add backward compatibility checks
    - Use formal verification where possible
@@ -500,16 +511,19 @@ ______________________________________________________________________
 ### **General Security Best Practices**
 
 1. **Monitoring and Alerting**
+
    - Implement comprehensive logging
    - Set up real-time monitoring dashboards
    - Configure automated alerts for anomalies
 
-2. **Regular Security Audits**
+1. **Regular Security Audits**
+
    - Conduct periodic security assessments
    - Test attack simulations regularly
    - Update dependencies and patches
 
-3. **Incident Response**
+1. **Incident Response**
+
    - Develop incident response plans
    - Implement backup and recovery procedures
    - Maintain communication channels for security issues
@@ -521,17 +535,17 @@ ______________________________________________________________________
 ### **Adding New Attack Types**
 
 1. **Create Attack Directory**: Add new directory under `attack_simulation/` (e.g., `new_attack/`)
-2. **Implement Attack Class**: Create attack implementation with malicious peer behavior
-3. **Add Tests**: Write comprehensive unit tests following existing patterns
-4. **Update Documentation**: Add attack type to this README and implementation details
-5. **Integration**: Ensure attack works with the analysis framework and metrics collection
+1. **Implement Attack Class**: Create attack implementation with malicious peer behavior
+1. **Add Tests**: Write comprehensive unit tests following existing patterns
+1. **Update Documentation**: Add attack type to this README and implementation details
+1. **Integration**: Ensure attack works with the analysis framework and metrics collection
 
 ### **Enhancing the Framework**
 
 1. **Extend Metrics**: Add new metrics to `AttackMetrics` class for better analysis
-2. **Improve Analysis**: Enhance `AttackAnalysis` with new assessment methods
-3. **Add Configurations**: Extend `config/` with new attack parameters and topologies
-4. **Real Integration**: Enhance real libp2p component integration for more accurate testing
+1. **Improve Analysis**: Enhance `AttackAnalysis` with new assessment methods
+1. **Add Configurations**: Extend `config/` with new attack parameters and topologies
+1. **Real Integration**: Enhance real libp2p component integration for more accurate testing
 
 ### **Code Standards**
 

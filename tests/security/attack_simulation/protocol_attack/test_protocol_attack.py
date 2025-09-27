@@ -1,6 +1,6 @@
 import pytest
 
-from .protocol_attack import ProtocolExploitAttacker, ProtocolAttackScenario
+from .protocol_attack import ProtocolAttackScenario, ProtocolExploitAttacker
 
 
 @pytest.mark.trio
@@ -12,20 +12,28 @@ async def test_malformed_message_attack():
     await attacker.execute_malformed_message_attack(targets, duration=2.0)
 
     assert len(attacker.exploits_attempted) > 0
-    assert all(exploit["type"] == "malformed_message" for exploit in attacker.exploits_attempted)
+    assert all(
+        exploit["type"] == "malformed_message"
+        for exploit in attacker.exploits_attempted
+    )
     assert len(attacker.successful_exploits) >= 0  # May be 0 due to randomness
 
 
 @pytest.mark.trio
 async def test_protocol_violation_attack():
     """Test protocol violation attack"""
-    attacker = ProtocolExploitAttacker("protocol_1", "protocol_violation", intensity=0.7)
+    attacker = ProtocolExploitAttacker(
+        "protocol_1", "protocol_violation", intensity=0.7
+    )
     targets = ["peer_1"]
 
     await attacker.execute_protocol_violation_attack(targets, duration=1.5)
 
     assert len(attacker.exploits_attempted) > 0
-    assert all(exploit["type"] == "protocol_violation" for exploit in attacker.exploits_attempted)
+    assert all(
+        exploit["type"] == "protocol_violation"
+        for exploit in attacker.exploits_attempted
+    )
 
 
 @pytest.mark.trio
@@ -37,7 +45,10 @@ async def test_handshake_exploit_attack():
     await attacker.execute_handshake_exploit(targets, duration=1.0)
 
     assert len(attacker.exploits_attempted) > 0
-    assert all(exploit["type"] == "handshake_exploit" for exploit in attacker.exploits_attempted)
+    assert all(
+        exploit["type"] == "handshake_exploit"
+        for exploit in attacker.exploits_attempted
+    )
 
 
 @pytest.mark.trio
@@ -75,7 +86,9 @@ def test_protocol_metrics_calculation():
 
     # Simulate exploit results
     attacker.exploits_attempted = [{"type": "test"} for _ in range(50)]
-    attacker.successful_exploits = [{"type": "test", "success": True} for _ in range(30)]
+    attacker.successful_exploits = [
+        {"type": "test", "success": True} for _ in range(30)
+    ]
     attacker.victims_affected = ["h1"]  # 1 out of 2 victims
 
     scenario._calculate_protocol_metrics(50, 30, 1, 10.0)
@@ -101,7 +114,10 @@ async def test_protocol_intensity_impact():
     high_results = await high_scenario.execute_protocol_attack(1.0)
 
     # Higher intensity should attempt more exploits
-    assert high_results["total_exploits_attempted"] >= low_results["total_exploits_attempted"]
+    assert (
+        high_results["total_exploits_attempted"]
+        >= low_results["total_exploits_attempted"]
+    )
 
 
 @pytest.mark.trio
@@ -112,7 +128,7 @@ async def test_mixed_protocol_attack_types():
     attackers = [
         ProtocolExploitAttacker("malformed", "malformed_msg", 0.6),
         ProtocolExploitAttacker("violation", "protocol_violation", 0.7),
-        ProtocolExploitAttacker("handshake", "handshake_exploit", 0.5)
+        ProtocolExploitAttacker("handshake", "handshake_exploit", 0.5),
     ]
 
     scenario = ProtocolAttackScenario(honest_peers, attackers)
@@ -153,7 +169,7 @@ def test_random_violation_types():
         "wrong_protocol_version",
         "missing_required_field",
         "invalid_peer_id",
-        "malformed_multiaddr"
+        "malformed_multiaddr",
     ]
 
     assert violation1 in valid_violations
@@ -172,7 +188,7 @@ def test_random_handshake_exploits():
         "wrong_crypto_suite",
         "invalid_certificate",
         "timing_attack",
-        "replay_attack"
+        "replay_attack",
     ]
 
     assert exploit1 in valid_exploits

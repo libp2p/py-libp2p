@@ -58,7 +58,7 @@
   },
   "recommendations": [
     "Leverage network scale for improved resilience in large deployments",
-    "Attack intensity is a primary vulnerability factor - focus mitigation efforts here",
+    "Attack intensity is critical - prioritize intensity-based mitigations",
     "Priority: Implement faster attack detection algorithms (mentioned in 7 scenarios)",
     "Priority: Enable peer table monitoring and cleanup (mentioned in 3 scenarios)",
     "Priority: Implement strict peer validation mechanisms (mentioned in 2 scenarios)"
