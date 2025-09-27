@@ -18,6 +18,7 @@ from libp2p.stream_muxer.exceptions import (
     MuxedStreamEOF,
     MuxedStreamReset,
 )
+from libp2p.transport.quic.exceptions import QUICStreamClosedError, QUICStreamResetError
 
 if TYPE_CHECKING:
     from libp2p.network.connection.swarm_connection import SwarmConn
@@ -102,7 +103,8 @@ class NetStream(INetStream):
             elif self.state == StreamState.OPEN:
                 self.set_state(StreamState.CLOSE_READ)
             raise StreamEOF() from error
-        except MuxedStreamReset as error:
+        except (MuxedStreamReset, QUICStreamClosedError, QUICStreamResetError) as error:
+            self.set_state(StreamState.RESET)
             raise StreamReset() from error
 
     async def write(self, data: bytes) -> None:
@@ -118,7 +120,11 @@ class NetStream(INetStream):
                 raise StreamClosed("Cannot write to stream; closed for writing")
             else:
                 await self.muxed_stream.write(data)
-        except MuxedStreamClosed as error:
+        except (
+            MuxedStreamClosed,
+            QUICStreamClosedError,
+            QUICStreamResetError,
+        ) as error:
             if self.state == StreamState.CLOSE_READ:
                 self.set_state(StreamState.CLOSE_BOTH)
             elif self.state == StreamState.OPEN:
