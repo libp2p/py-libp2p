@@ -1,6 +1,7 @@
 from collections.abc import (
     Sequence,
 )
+import os
 from typing import (
     NamedTuple,
 )
@@ -21,7 +22,11 @@ from libp2p.pubsub import (
 MAX_READ_LEN = 65535
 
 
-LISTEN_MADDR = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+# Default bind address configuration with environment variable override
+# DEFAULT_BIND_ADDRESS defaults to "127.0.0.1" (secure) but can be overridden
+# via LIBP2P_BIND environment variable (e.g., "0.0.0.0" for tests)
+DEFAULT_BIND_ADDRESS = os.getenv("LIBP2P_BIND", "127.0.0.1")
+LISTEN_MADDR = multiaddr.Multiaddr(f"/ip4/{DEFAULT_BIND_ADDRESS}/tcp/0")
 
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
