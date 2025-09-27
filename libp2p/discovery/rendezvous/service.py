@@ -149,31 +149,34 @@ class RendezvousService:
                 f"Peer {peer_id} tried to register {target_peer_id} "
                 f"in namespace '{namespace}'"
             )
-            return
+            return create_register_response_message(
+                Message.ResponseStatus.E_NOT_AUTHORIZED, "Peer can only register itself"
+            )
 
         # Validate namespace
         if not namespace or len(namespace) > MAX_NAMESPACE_LENGTH:
             return create_register_response_message(
-                Message.E_INVALID_NAMESPACE, "Invalid namespace"
+                Message.ResponseStatus.E_INVALID_NAMESPACE, "Invalid namespace"
             )
 
         # Validate TTL
         if ttl <= 0 or ttl > MAX_TTL:
             return create_register_response_message(
-                Message.E_INVALID_TTL, f"TTL must be between 1 and {MAX_TTL} seconds"
+                Message.ResponseStatus.E_INVALID_TTL,
+                f"TTL must be between 1 and {MAX_TTL} seconds",
             )
 
         # Validate peer info
         if not register_msg.peer.id:
             return create_register_response_message(
-                Message.E_INVALID_PEER_INFO, "Missing peer ID"
+                Message.ResponseStatus.E_INVALID_PEER_INFO, "Missing peer ID"
             )
 
         # Check address lengths
         for addr in register_msg.peer.addrs:
             if len(addr) > MAX_PEER_ADDRESS_LENGTH:
                 return create_register_response_message(
-                    Message.E_INVALID_PEER_INFO, "Address too long"
+                    Message.ResponseStatus.E_INVALID_PEER_INFO, "Address too long"
                 )
 
         # Ensure namespace exists in registrations
@@ -187,7 +190,7 @@ class RendezvousService:
 
             if len(self.registrations[namespace]) >= MAX_REGISTRATIONS:
                 return create_register_response_message(
-                    Message.E_UNAVAILABLE, "Registration limit reached"
+                    Message.ResponseStatus.E_UNAVAILABLE, "Registration limit reached"
                 )
 
         # Create registration record
@@ -195,7 +198,7 @@ class RendezvousService:
             reg_peer_id, _ = parse_peer_info(register_msg.peer)
         except Exception:
             return create_register_response_message(
-                Message.E_INVALID_PEER_INFO, "Invalid peer info"
+                Message.ResponseStatus.E_INVALID_PEER_INFO, "Invalid peer info"
             )
 
         record = RegistrationRecord(
@@ -209,7 +212,7 @@ class RendezvousService:
             f"Registered peer {reg_peer_id} in namespace '{namespace}' with TTL {ttl}s"
         )
 
-        return create_register_response_message(Message.OK, "OK", ttl)
+        return create_register_response_message(Message.ResponseStatus.OK, "OK", ttl)
 
     def _handle_unregister(
         self, peer_id: PeerID, unregister_msg: Message.Unregister
@@ -244,7 +247,7 @@ class RendezvousService:
         # Validate namespace
         if not namespace or len(namespace) > MAX_NAMESPACE_LENGTH:
             return create_discover_response_message(
-                [], b"", Message.E_INVALID_NAMESPACE, "Invalid namespace"
+                [], b"", Message.ResponseStatus.E_INVALID_NAMESPACE, "Invalid namespace"
             )
 
         # Validate limit
@@ -267,7 +270,7 @@ class RendezvousService:
                 offset = int.from_bytes(cookie, "big")
             except (ValueError, OverflowError):
                 return create_discover_response_message(
-                    [], b"", Message.E_INVALID_COOKIE, "Invalid cookie"
+                    [], b"", Message.ResponseStatus.E_INVALID_COOKIE, "Invalid cookie"
                 )
 
         # Get slice of registrations
@@ -288,7 +291,7 @@ class RendezvousService:
         )
 
         return create_discover_response_message(
-            pb_registrations, new_cookie, Message.OK, "OK"
+            pb_registrations, new_cookie, Message.ResponseStatus.OK, "OK"
         )
 
     def _cleanup_expired_registrations(self, namespace: str) -> None:

@@ -64,7 +64,7 @@ def create_discover_message(
 def create_discover_response_message(
     registrations: list[Message.Register],
     cookie: bytes = b"",
-    status: Message.ResponseStatus.ValueType = Message.OK,
+    status: Message.ResponseStatus.ValueType = Message.ResponseStatus.OK,
     status_text: str = "",
 ) -> Message:
     """Create a DISCOVER_RESPONSE message."""

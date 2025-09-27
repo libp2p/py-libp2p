@@ -97,16 +97,18 @@ class RendezvousClient:
         response = await self._send_message(msg)
         if response is None:
             raise RendezvousError(
-                Message.E_INTERNAL_ERROR, "No response received from rendezvous server"
+                Message.ResponseStatus.E_INTERNAL_ERROR,
+                "No response received from rendezvous server",
             )
 
         if response.type != Message.REGISTER_RESPONSE:
             raise RendezvousError(
-                Message.E_INTERNAL_ERROR, f"Unexpected response type: {response.type}"
+                Message.ResponseStatus.E_INTERNAL_ERROR,
+                f"Unexpected response type: {response.type}",
             )
 
         resp = response.registerResponse
-        if resp.status != Message.OK:
+        if resp.status != Message.ResponseStatus.OK:
             raise status_to_exception(resp.status, resp.statusText)
 
         actual_ttl = resp.ttl
@@ -160,16 +162,18 @@ class RendezvousClient:
         response = await self._send_message(msg)
         if response is None:
             raise RendezvousError(
-                Message.E_INTERNAL_ERROR, "No response received from rendezvous server"
+                Message.ResponseStatus.E_INTERNAL_ERROR,
+                "No response received from rendezvous server",
             )
 
         if response.type != Message.DISCOVER_RESPONSE:
             raise RendezvousError(
-                Message.E_INTERNAL_ERROR, f"Unexpected response type: {response.type}"
+                Message.ResponseStatus.E_INTERNAL_ERROR,
+                f"Unexpected response type: {response.type}",
             )
 
         resp = response.discoverResponse
-        if resp.status != Message.OK:
+        if resp.status != Message.ResponseStatus.OK:
             raise status_to_exception(resp.status, resp.statusText)
 
         # Parse registrations into PeerInfo objects
@@ -206,7 +210,7 @@ class RendezvousClient:
 
             if cancel_scope.cancelled_caught:
                 raise RendezvousError(
-                    Message.E_INTERNAL_ERROR,
+                    Message.ResponseStatus.E_INTERNAL_ERROR,
                     f"Connection timeout after {DEFAULT_TIMEOUT}s",
                 )
 
@@ -226,7 +230,7 @@ class RendezvousClient:
                     b = await stream.read(1)
                     if not b:
                         raise RendezvousError(
-                            Message.E_INTERNAL_ERROR,
+                            Message.ResponseStatus.E_INTERNAL_ERROR,
                             "Connection closed while reading response length",
                         )
                     length_bytes += b
@@ -242,7 +246,7 @@ class RendezvousClient:
                     chunk = await stream.read(remaining)
                     if not chunk:
                         raise RendezvousError(
-                            Message.E_INTERNAL_ERROR,
+                            Message.ResponseStatus.E_INTERNAL_ERROR,
                             "Connection closed while reading response data",
                         )
                     response_bytes += chunk
@@ -250,7 +254,7 @@ class RendezvousClient:
 
             if cancel_scope.cancelled_caught:
                 raise RendezvousError(
-                    Message.E_INTERNAL_ERROR,
+                    Message.ResponseStatus.E_INTERNAL_ERROR,
                     f"Response timeout after {DEFAULT_TIMEOUT}s",
                 )
 
@@ -330,7 +334,7 @@ class RendezvousClient:
 
                 if (
                     response.type != Message.REGISTER_RESPONSE
-                    or response.registerResponse.status != Message.OK
+                    or response.registerResponse.status != Message.ResponseStatus.OK
                 ):
                     raise RendezvousError(
                         response.registerResponse.status,
