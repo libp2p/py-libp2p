@@ -8,6 +8,7 @@ similar to how noise handles encrypted communication.
 import ssl
 
 from cryptography import x509
+import trio
 
 from libp2p.abc import IRawConnection
 from libp2p.io.abc import EncryptedMsgReadWriter
@@ -79,9 +80,6 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._in_bio = in_bio
         self._out_bio = out_bio
 
-        import trio
-        from trio import TooSlowError
-
         # Drive the handshake with timeout
         MAX_HANDSHAKE_TIME = 30  # 30 seconds max for handshake
         handshake_attempts = 0
@@ -110,7 +108,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                                 in_bio.write(incoming)
                             elif incoming == b"":  # Connection closed
                                 raise RuntimeError("Connection closed during handshake")
-                    except TooSlowError:
+                    except trio.TooSlowError:
                         raise RuntimeError("Handshake read timeout")
                 except ssl.SSLWantWriteError:
                     data = out_bio.read()
