@@ -127,8 +127,8 @@ async def test_cert_loading_security():
         transport._trusted_peer_certs_pem.append("cert;&|.pem")
         transport.create_ssl_context()
 
-    # Verify legitimate cert path still works
-    valid_cert = keypair.public_key.to_pem()
+    # Verify legitimate cert still works
+    valid_cert = transport.get_certificate_pem()
     transport._trusted_peer_certs_pem = [valid_cert]
     context = transport.create_ssl_context()
     assert context is not None
