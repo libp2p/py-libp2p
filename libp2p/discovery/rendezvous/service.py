@@ -49,7 +49,7 @@ class RegistrationRecord:
         register.ns = self.namespace
         register.peer.id = self.peer_id.to_bytes()
         register.peer.addrs.extend(self.addrs)
-        register.ttl = self.ttl
+        register.ttl = max(0, int(self.expires_at - time.time()))
         return register
 
 
