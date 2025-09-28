@@ -1,6 +1,0 @@
-Fix flaky test_find_node in kad_dht by eliminating race conditions and adding retry mechanism
-
-- Enhanced dht_pair fixture to force peer discovery during setup, eliminating async race conditions
-- Added retry mechanism with proper type annotations for additional resilience
-- Added pytest-rerunfailures dependency and flaky test marker
-- Resolves intermittent CI failures in tests/core/kad_dht/test_kad_dht.py::test_find_node
