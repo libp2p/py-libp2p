@@ -120,7 +120,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                         except trio.TooSlowError:
                             raise RuntimeError("Handshake write timeout")
                 except ssl.SSLCertVerificationError:
-                    # Ignore built-in verification errors; we verify manually afterwards.
+        # Ignore built-in verification errors; we verify manually afterwards.
                     break
                 except ssl.SSLError as e:
                     raise RuntimeError(f"SSL error during handshake: {e}")
