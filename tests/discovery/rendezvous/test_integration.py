@@ -83,7 +83,7 @@ async def test_full_rendezvous_workflow():
     """Test complete rendezvous workflow: service, registration, and discovery."""
     # Create rendezvous server
     server_host = create_test_host(port=9000)
-    # NOTE: service creation for testing - not used directly
+    # Create rendezvous service - this registers the protocol handler
     RendezvousService(server_host)
 
     # Create client hosts
@@ -95,59 +95,59 @@ async def test_full_rendezvous_workflow():
 
     try:
         # Start all hosts
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(server_host.run)
-            nursery.start_soon(client1_host.run)
-            nursery.start_soon(client2_host.run)
+        server_listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/9000")
+        client1_listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/9001")
+        client2_listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/9002")
 
-            # Give hosts time to start
-            await trio.sleep(0.1)
+        async with server_host.run([server_listen_addr]):
+            async with client1_host.run([client1_listen_addr]):
+                async with client2_host.run([client2_listen_addr]):
+                    # Give hosts time to start
+                    await trio.sleep(0.1)
 
-            # Create client connections to server
-            client1 = RendezvousClient(client1_host, server_peer_id)
-            client2 = RendezvousClient(client2_host, server_peer_id)
+                    # Create client connections to server
+                    client1 = RendezvousClient(client1_host, server_peer_id)
+                    client2 = RendezvousClient(client2_host, server_peer_id)
 
-            # Add server to client peerstores with address
-            server_addrs = server_host.get_addrs()
-            if server_addrs:
-                client1_host.get_peerstore().add_addrs(
-                    server_peer_id, server_addrs, ttl=3600
-                )
-                client2_host.get_peerstore().add_addrs(
-                    server_peer_id, server_addrs, ttl=3600
-                )
+                    # Add server to client peerstores with address
+                    server_addrs = server_host.get_addrs()
+                    if server_addrs:
+                        client1_host.get_peerstore().add_addrs(
+                            server_peer_id, server_addrs, ttl=3600
+                        )
+                        client2_host.get_peerstore().add_addrs(
+                            server_peer_id, server_addrs, ttl=3600
+                        )
 
-            namespace = "test-integration"
+                    namespace = "test-integration"
 
-            try:
-                # Client1 registers under namespace
-                ttl1 = await client1.register(namespace, DEFAULT_TTL)
-                assert ttl1 > 0
+                    try:
+                        # Client1 registers under namespace
+                        ttl1 = await client1.register(namespace, DEFAULT_TTL)
+                        assert ttl1 > 0
 
-                # Give registration time to process
-                await trio.sleep(0.1)
+                        # Give registration time to process
+                        await trio.sleep(0.1)
 
-                # Client2 discovers peers in namespace
-                discovered_peers, _ = await client2.discover(namespace)
+                        # Client2 discovers peers in namespace
+                        discoveredPeers, _ = await client2.discover(namespace)
 
-                # Should find client1
-                assert len(discovered_peers) >= 1
-                client1_peer_id = client1_host.get_id()
-                discovered_peer_ids = [peer.peer_id for peer in discovered_peers]
-                assert client1_peer_id in discovered_peer_ids
+                        # Should find client1
+                        assert len(discoveredPeers) >= 1
+                        client1_peer_id = client1_host.get_id()
+                        discovered_peer_ids = [peer.peer_id for peer in discoveredPeers]
+                        assert client1_peer_id in discovered_peer_ids
 
-            except Exception as e:
-                # Log the error for debugging
-                print(f"Integration test error: {e}")
-                # Don't fail the test for connection issues in unit tests
-                pass
-
-            # Cancel nursery to stop hosts
-            nursery.cancel_scope.cancel()
+                    except Exception as e:
+                        # Log the error for debugging
+                        print(f"Integration test error: {e}")
+                        # Don't fail the test for connection issues in unit tests
+                        raise
 
     except Exception as e:
         # Handle any startup/shutdown errors gracefully
         print(f"Host management error: {e}")
+        raise
 
 
 @pytest.mark.trio

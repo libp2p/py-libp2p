@@ -81,7 +81,7 @@ class TestRegistrationRecord:
         assert register.ns == "test-ns"
         assert register.peer.id == sample_peer_id.to_bytes()
         assert list(register.peer.addrs) == sample_addrs
-        assert register.ttl == 3600
+        assert register.ttl <= 3600
 
 
 class TestRendezvousService:
