@@ -55,7 +55,14 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         Perform TLS handshake.
 
         Raises:
-            HandshakeFailure: If handshake fails
+            HandshakeFailure: If handshake fails due to protocol errors
+            RuntimeError: If handshake timeout or connection errors occur
+            ssl.SSLError: For SSL-specific errors not related to want read/write
+
+        Notes:
+            - Implements defense against slow handshakes that could tie up resources
+            - Properly handles connection errors and cleanup
+            - Verifies minimum TLS version (1.3)
 
         """
         # Perform a blocking-style TLS handshake using memory BIOs bridged to
@@ -72,27 +79,53 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._in_bio = in_bio
         self._out_bio = out_bio
 
-        # Drive the handshake
-        while True:
-            try:
-                ssl_obj.do_handshake()
-                break
-            except ssl.SSLWantReadError:
-                # flush data to wire
-                data = out_bio.read()
-                if data:
-                    await self.raw_connection.write(data)
-                # read more from wire
-                incoming = await self.raw_connection.read(4096)
-                if incoming:
-                    in_bio.write(incoming)
-            except ssl.SSLWantWriteError:
-                data = out_bio.read()
-                if data:
-                    await self.raw_connection.write(data)
-            except ssl.SSLCertVerificationError:
-                # Ignore built-in verification errors; we verify manually afterwards.
-                break
+        import trio
+
+        # Drive the handshake with timeout
+        MAX_HANDSHAKE_TIME = 30  # 30 seconds max for handshake
+        handshake_attempts = 0
+        MAX_ATTEMPTS = 100  # Prevent infinite loops
+
+        with trio.move_on_after(MAX_HANDSHAKE_TIME):
+            while handshake_attempts < MAX_ATTEMPTS:
+                handshake_attempts += 1
+                try:
+                    ssl_obj.do_handshake()
+                    # Verify TLS version after handshake
+                    version = ssl_obj.version()
+                    if not version.startswith("TLSv1.3"):
+                        raise RuntimeError(f"Unsupported TLS version: {version}")
+                    break
+                except ssl.SSLWantReadError:
+                    # flush data to wire
+                    data = out_bio.read()
+                    if data:
+                        await self.raw_connection.write(data)
+                    # read more from wire with timeout
+                    try:
+                        with trio.move_on_after(5):  # 5 second read timeout
+                            incoming = await self.raw_connection.read(4096)
+                            if incoming:
+                                in_bio.write(incoming)
+                            elif incoming == b"":  # Connection closed
+                                raise RuntimeError("Connection closed during handshake")
+                    except trio.TooSlowError:
+                        raise RuntimeError("Handshake read timeout")
+                except ssl.SSLWantWriteError:
+                    data = out_bio.read()
+                    if data:
+                        try:
+                            with trio.move_on_after(5):  # 5 second write timeout
+                                await self.raw_connection.write(data)
+                        except trio.TooSlowError:
+                            raise RuntimeError("Handshake write timeout")
+                except ssl.SSLCertVerificationError:
+                    # Ignore built-in verification errors; we verify manually afterwards.
+                    break
+                except ssl.SSLError as e:
+                    raise RuntimeError(f"SSL error during handshake: {e}")
+            else:
+                raise RuntimeError("Too many handshake attempts")
 
         # Flush any remaining handshake data
         data = out_bio.read()

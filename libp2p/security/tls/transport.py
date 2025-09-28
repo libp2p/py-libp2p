@@ -100,13 +100,20 @@ class TLSTransport(ISecureTransport):
         # Load our cached self-signed certificate bound to libp2p identity
         import tempfile
 
-        with tempfile.NamedTemporaryFile("w", delete=False) as cert_file:
+        # Use temporary files with automatic deletion
+        cert_file = tempfile.NamedTemporaryFile("w", delete=True)
+        key_file = tempfile.NamedTemporaryFile("w", delete=True)
+
+        try:
             cert_file.write(self._cert_pem)
-            cert_path = cert_file.name
-        with tempfile.NamedTemporaryFile("w", delete=False) as key_file:
+            cert_file.flush()
             key_file.write(self._key_pem)
-            key_path = key_file.name
-        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            key_file.flush()
+            ctx.load_cert_chain(certfile=cert_file.name, keyfile=key_file.name)
+        finally:
+            # Ensure files are closed and deleted
+            cert_file.close()
+            key_file.close()
 
         # If we have trusted peer certs, configure verification to accept those
         if server_side and self._trusted_peer_certs_pem:

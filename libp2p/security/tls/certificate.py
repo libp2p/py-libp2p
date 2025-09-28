@@ -48,7 +48,24 @@ def encode_signed_key(public_key_bytes: bytes, signature: bytes) -> bytes:
     Returns:
         DER-encoded bytes representing the SignedKey sequence
 
+    Raises:
+        ValueError: If inputs are empty or exceed maximum allowed sizes
+
     """
+    # Input validation
+    if not public_key_bytes:
+        raise ValueError("public_key_bytes cannot be empty")
+    if not signature:
+        raise ValueError("signature cannot be empty")
+
+    # Reasonable size limits to prevent DoS
+    MAX_KEY_SIZE = 1024 * 10  # 10KB
+    MAX_SIG_SIZE = 1024 * 2  # 2KB
+
+    if len(public_key_bytes) > MAX_KEY_SIZE:
+        raise ValueError(f"public_key_bytes too large (max {MAX_KEY_SIZE} bytes)")
+    if len(signature) > MAX_SIG_SIZE:
+        raise ValueError(f"signature too large (max {MAX_SIG_SIZE} bytes)")
 
     # DER encoding helpers
     def _encode_len(n: int) -> bytes:
@@ -127,8 +144,15 @@ def create_cert_template() -> x509.CertificateBuilder:
     """
     Create a certificate template for libp2p TLS certificates.
 
+    Uses secure defaults:
+    - Random 64-bit serial number
+    - 1 hour backdating for not_before to handle clock skew
+    - 100 year validity (since these are ephemeral, self-signed certs)
+    - Basic Constraints: not a CA
+    - Key Usage: digital signature only
+
     Returns:
-        Certificate builder template
+        Certificate builder template with secure defaults
 
     """
     # Serial: random 64-bit value
@@ -153,6 +177,27 @@ def create_cert_template() -> x509.CertificateBuilder:
         .not_valid_after(not_after)
         .subject_name(subject_name)
         .issuer_name(issuer_name)
+    )
+
+    # Add Basic Constraints extension - not a CA
+    builder = builder.add_extension(
+        x509.BasicConstraints(ca=False, path_length=None), critical=True
+    )
+
+    # Add Key Usage - digital signature only
+    builder = builder.add_extension(
+        x509.KeyUsage(
+            digital_signature=True,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=False,
+            crl_sign=False,
+            encipher_only=False,
+            decipher_only=False,
+        ),
+        critical=True,
     )
     return builder
 
@@ -230,7 +275,8 @@ def verify_certificate_chain(cert_chain: list[x509.Certificate]) -> PublicKey:
         Public key from libp2p extension
 
     Raises:
-        SecurityError: If verification fails
+        ValueError: If verification fails, such as expired certificate,
+                   missing extension, invalid signature, or unsupported key type.
 
     """
     if len(cert_chain) != 1:
