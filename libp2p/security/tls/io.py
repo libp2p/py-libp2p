@@ -80,6 +80,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._out_bio = out_bio
 
         import trio
+        from trio import TooSlowError
 
         # Drive the handshake with timeout
         MAX_HANDSHAKE_TIME = 30  # 30 seconds max for handshake
@@ -93,7 +94,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                     ssl_obj.do_handshake()
                     # Verify TLS version after handshake
                     version = ssl_obj.version()
-                    if not version.startswith("TLSv1.3"):
+                    if version is None or not version.startswith("TLSv1.3"):
                         raise RuntimeError(f"Unsupported TLS version: {version}")
                     break
                 except ssl.SSLWantReadError:
@@ -109,7 +110,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                                 in_bio.write(incoming)
                             elif incoming == b"":  # Connection closed
                                 raise RuntimeError("Connection closed during handshake")
-                    except trio.TooSlowError:
+                    except TooSlowError:
                         raise RuntimeError("Handshake read timeout")
                 except ssl.SSLWantWriteError:
                     data = out_bio.read()
@@ -120,7 +121,8 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                         except trio.TooSlowError:
                             raise RuntimeError("Handshake write timeout")
                 except ssl.SSLCertVerificationError:
-        # Ignore built-in verification errors; we verify manually afterwards.
+                    # Ignore built-in verification errors;
+                    # we verify manually afterwards.
                     break
                 except ssl.SSLError as e:
                     raise RuntimeError(f"SSL error during handshake: {e}")

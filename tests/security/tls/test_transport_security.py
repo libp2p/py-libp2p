@@ -35,9 +35,6 @@ def test_temp_files_cleanup():
 @pytest.mark.trio
 async def test_sensitive_data_handling(nursery):
     """Test that sensitive data is properly handled and cleaned up."""
-    import os
-    import time
-    
     keypair_a = generate_new_rsa_identity()
     keypair_b = generate_new_rsa_identity()
 
@@ -49,11 +46,8 @@ async def test_sensitive_data_handling(nursery):
     initial_files = {f.absolute() for f in tmp_dir.iterdir() if f.is_file()}
 
     # Create test connection factory with transports
-    conn_args = {
-        "client_transport": transport_a,
-        "server_transport": transport_b
-    }
-    
+    conn_args = {"client_transport": transport_a, "server_transport": transport_b}
+
     # Perform the connection test
     async with tls_conn_factory(nursery, **conn_args) as (client_conn, server_conn):
         # Perform some data transfer
@@ -64,11 +58,11 @@ async def test_sensitive_data_handling(nursery):
 
     # Allow time for file cleanup
     await trio.sleep(0.1)  # Small delay to ensure cleanup completes
-    
+
     # Check temp files after connection is closed
     final_files = {f.absolute() for f in tmp_dir.iterdir() if f.is_file()}
     new_files = final_files - initial_files
-    
+
     # If we find temp files, wait a bit longer and check again
     attempts = 0
     while attempts < 3 and any(f.name.startswith("tmp") for f in new_files):
@@ -76,7 +70,7 @@ async def test_sensitive_data_handling(nursery):
         final_files = {f.absolute() for f in tmp_dir.iterdir() if f.is_file()}
         new_files = final_files - initial_files
         attempts += 1
-    
+
     # Force cleanup any remaining temp files that match our pattern
     for f in new_files:
         if f.name.startswith("tmp") and f.exists():
@@ -84,13 +78,17 @@ async def test_sensitive_data_handling(nursery):
                 f.unlink()  # Delete the file
             except (OSError, PermissionError):
                 pass  # Ignore errors if file is already gone
-    
+
     # Final verification
     final_files = {f.absolute() for f in tmp_dir.iterdir() if f.is_file()}
-    remaining_files = {f for f in final_files - initial_files if f.name.startswith("tmp")}
-    
-    assert not remaining_files, f"Temporary files remained after cleanup: {[f.name for f in remaining_files]}"
-    
+    remaining_files = {
+        f for f in final_files - initial_files if f.name.startswith("tmp")
+    }
+
+    assert not remaining_files, (
+        f"Temporary files remained after cleanup: {[f.name for f in remaining_files]}"
+    )
+
     # Verify no sensitive data in any new files
     for f in final_files - initial_files:
         if f.exists():  # Check if file still exists
@@ -144,10 +142,7 @@ async def test_connection_cleanup(nursery):
     transport_b = TLSTransport(keypair_b)
 
     # Create test connection factory with transports
-    conn_args = {
-        "client_transport": transport_a,
-        "server_transport": transport_b
-    }
+    conn_args = {"client_transport": transport_a, "server_transport": transport_b}
     async with tls_conn_factory(nursery, **conn_args) as (client_conn, server_conn):
         # Force close the connection
         await client_conn.close()

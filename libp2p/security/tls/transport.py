@@ -83,20 +83,24 @@ class TLSTransport(ISecureTransport):
 
         Raises:
             ValueError: If any trusted certificate contains dangerous content
+
         """
         # Validate trusted peer certificates for security vulnerabilities
         for cert_pem in self._trusted_peer_certs_pem:
             # Check for path traversal attempts and dangerous characters
-            dangerous_patterns = ['..', '\x00', '&', '|', ';', '$']
+            dangerous_patterns = ["..", "\x00", "&", "|", ";", "$"]
             if any(pattern in cert_pem for pattern in dangerous_patterns):
-                raise ValueError("Certificate contains dangerous characters or path traversal attempt")
-            
+                raise ValueError(
+                    "Certificate contains dangerous characters "
+                    "Or path traversal attempt"
+                )
+
             # Check for reasonable certificate size
             if len(cert_pem) > 10000:  # 10KB max for a reasonable cert
                 raise ValueError("Certificate exceeds maximum allowed size")
-            
+
             # Check for very long lines that could indicate path injection
-            if any(len(line) > 1000 for line in cert_pem.split('\n')):
+            if any(len(line) > 1000 for line in cert_pem.split("\n")):
                 raise ValueError("Certificate contains suspiciously long lines")
 
         # Placeholder for SSL context creation following libp2p TLS 1.3 profile.
@@ -289,30 +293,34 @@ class TLSTransport(ISecureTransport):
     def trust_peer_cert_pem(self, pem: str) -> None:
         """
         Add a trusted peer certificate PEM.
-        
+
         Args:
             pem: The PEM-encoded certificate to trust
-            
+
         Raises:
             ValueError: If the certificate contains invalid characters or format
+
         """
         # Security validation
         if not pem:
             raise ValueError("Empty certificate PEM")
-            
+
         # Check for path traversal attempts and dangerous characters
-        dangerous_patterns = ['..', '\x00', '&', '|', ';', '$']
+        dangerous_patterns = ["..", "\x00", "&", "|", ";", "$"]
         if any(pattern in pem for pattern in dangerous_patterns):
-            raise ValueError("Certificate PEM contains dangerous characters or path traversal attempt")
-            
+            raise ValueError(
+                "Certificate PEM contains dangerous characters "
+                "or path traversal attempt"
+            )
+
         # Check for reasonable PEM size
         if len(pem) > 10000:  # 10KB max for a reasonable cert
             raise ValueError("Certificate PEM exceeds maximum allowed size")
-            
+
         # Basic PEM format validation for legitimate certificates
-        if not pem.strip().startswith('-----BEGIN'):
+        if not pem.strip().startswith("-----BEGIN"):
             raise ValueError("Invalid PEM format - must start with BEGIN marker")
-            
+
         self._trusted_peer_certs_pem.append(pem)
 
 
