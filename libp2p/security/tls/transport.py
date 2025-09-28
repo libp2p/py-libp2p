@@ -117,14 +117,16 @@ class TLSTransport(ISecureTransport):
 
         # If we have trusted peer certs, configure verification to accept those
         if server_side and self._trusted_peer_certs_pem:
-            with tempfile.NamedTemporaryFile("w", delete=False) as cafile:
-                cafile.write("".join(self._trusted_peer_certs_pem))
-                ca_path = cafile.name
+            ca_file = tempfile.NamedTemporaryFile("w", delete=True)
             try:
-                ctx.load_verify_locations(cafile=ca_path)
+                ca_file.write("".join(self._trusted_peer_certs_pem))
+                ca_file.flush()
+                ctx.load_verify_locations(cafile=ca_file.name)
                 ctx.verify_mode = ssl.CERT_OPTIONAL
             except Exception:
                 pass
+            finally:
+                ca_file.close()
 
         # ALPN: provide list; without a select-callback we accept server preference.
         alpn_list = list(self._preferred_muxers) + [ALPN_PROTOCOL]
