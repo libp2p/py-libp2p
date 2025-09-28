@@ -1,6 +1,0 @@
-enhancement: Add write lock to `YamuxStream` to prevent concurrent write race conditions
-
-- Implements ReadWriteLock for `YamuxStream` write operations
-- Prevents data corruption from concurrent write operations
-- Read operations remain lock-free due to existing `Yamux` architecture
-- Resolves race conditions identified in Issue #793

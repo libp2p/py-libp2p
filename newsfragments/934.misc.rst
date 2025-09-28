@@ -1,1 +1,0 @@
-Updated multiaddr dependency from git repository to pip package version 0.0.11.
