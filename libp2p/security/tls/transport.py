@@ -120,34 +120,59 @@ class TLSTransport(ISecureTransport):
 
         # Load our cached self-signed certificate bound to libp2p identity
         import tempfile
+        import os
 
-        # Use temporary files with automatic deletion
-        cert_file = tempfile.NamedTemporaryFile("w", delete=True)
-        key_file = tempfile.NamedTemporaryFile("w", delete=True)
-
+        # On Windows, we need to close the file before SSL can access it
+        # Use delete=False and manual cleanup for cross-platform compatibility
+        cert_file = tempfile.NamedTemporaryFile("w", delete=False)
+        key_file = tempfile.NamedTemporaryFile("w", delete=False)
+        
+        cert_path = cert_file.name
+        key_path = key_file.name
+        
         try:
             cert_file.write(self._cert_pem)
             cert_file.flush()
+            cert_file.close()
+            
             key_file.write(self._key_pem)
             key_file.flush()
-            ctx.load_cert_chain(certfile=cert_file.name, keyfile=key_file.name)
-        finally:
-            # Ensure files are closed and deleted
-            cert_file.close()
             key_file.close()
+            
+            # Now load the certificates - files are closed so Windows can access them
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        finally:
+            # Manual cleanup - remove temp files
+            try:
+                if os.path.exists(cert_path):
+                    os.unlink(cert_path)
+            except (OSError, PermissionError):
+                pass  # Best effort cleanup
+            try:
+                if os.path.exists(key_path):
+                    os.unlink(key_path)
+            except (OSError, PermissionError):
+                pass  # Best effort cleanup
 
         # If we have trusted peer certs, configure verification to accept those
         if server_side and self._trusted_peer_certs_pem:
-            ca_file = tempfile.NamedTemporaryFile("w", delete=True)
+            ca_file = tempfile.NamedTemporaryFile("w", delete=False)
+            ca_path = ca_file.name
             try:
                 ca_file.write("".join(self._trusted_peer_certs_pem))
                 ca_file.flush()
-                ctx.load_verify_locations(cafile=ca_file.name)
+                ca_file.close()
+                ctx.load_verify_locations(cafile=ca_path)
                 ctx.verify_mode = ssl.CERT_OPTIONAL
             except Exception:
                 pass
             finally:
-                ca_file.close()
+                # Manual cleanup
+                try:
+                    if os.path.exists(ca_path):
+                        os.unlink(ca_path)
+                except (OSError, PermissionError):
+                    pass  # Best effort cleanup
 
         # ALPN: provide list; without a select-callback we accept server preference.
         alpn_list = list(self._preferred_muxers) + [ALPN_PROTOCOL]
