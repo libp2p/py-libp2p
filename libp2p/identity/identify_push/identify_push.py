@@ -143,15 +143,21 @@ async def _update_peerstore_from_identify(
             # Cross-check peer-id consistency
             if str(record.peer_id) != str(peer_id):
                 logger.warning(
-                    "SignedPeerRecord peer-id mismatch: record=%s, sender=%s. Ignoring.",
-                    record.peer_id, peer_id,
+                    "SignedPeerRecord peer-id mismatch: record=%s, sender=%s. "
+                    "Ignoring.",
+                    record.peer_id,
+                    peer_id,
                 )
                 return  # 🚨 reject forged record
 
             if not peerstore.consume_peer_record(envelope, 7200):
-                logger.error("Updating Certified-Addr-Book was unsuccessful for %s", peer_id)
+                logger.error(
+                    "Updating Certified-Addr-Book was unsuccessful for %s", peer_id
+                )
         except Exception as e:
-            logger.error("Error updating the certified addr book for peer %s: %s", peer_id, e)
+            logger.error(
+                "Error updating the certified addr book for peer %s: %s", peer_id, e
+            )
 
     # Update observed address if present
     if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
@@ -160,7 +166,6 @@ async def _update_peerstore_from_identify(
             peerstore.add_addr(peer_id, observed_addr, 7200)
         except Exception as e:
             logger.error("Error updating observed address for peer %s: %s", peer_id, e)
-
 
 
 async def push_identify_to_peer(
