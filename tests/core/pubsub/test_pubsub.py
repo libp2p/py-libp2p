@@ -893,11 +893,9 @@ async def test_blacklist_basic_operations():
         assert not pubsub.is_peer_blacklisted(peer1)
         assert not pubsub.is_peer_blacklisted(peer2)
         assert not pubsub.is_peer_blacklisted(peer3)
-
         # Add peers to blacklist
-        pubsub.add_to_blacklist(peer1)
-        pubsub.add_to_blacklist(peer2)
-
+        await pubsub.add_to_blacklist(peer1)
+        await pubsub.add_to_blacklist(peer2)
         # Check blacklist state
         assert len(pubsub.get_blacklisted_peers()) == 2
         assert pubsub.is_peer_blacklisted(peer1)
@@ -914,18 +912,18 @@ async def test_blacklist_basic_operations():
         assert not pubsub.is_peer_blacklisted(peer3)
 
         # Add peer3 and then clear all
-        pubsub.add_to_blacklist(peer3)
+        await pubsub.add_to_blacklist(peer3)
         assert len(pubsub.get_blacklisted_peers()) == 2
 
-        pubsub.clear_blacklist()
+        await pubsub.clear_blacklist()
         assert len(pubsub.get_blacklisted_peers()) == 0
         assert not pubsub.is_peer_blacklisted(peer1)
         assert not pubsub.is_peer_blacklisted(peer2)
         assert not pubsub.is_peer_blacklisted(peer3)
 
         # Test duplicate additions (should not increase size)
-        pubsub.add_to_blacklist(peer1)
-        pubsub.add_to_blacklist(peer1)
+        await pubsub.add_to_blacklist(peer1)
+        await pubsub.add_to_blacklist(peer1)
         assert len(pubsub.get_blacklisted_peers()) == 1
 
         # Test removing non-blacklisted peer (should not cause errors)
@@ -943,7 +941,7 @@ async def test_blacklist_blocks_new_peer_connections(monkeypatch):
         blacklisted_peer = IDFactory()
 
         # Add peer to blacklist
-        pubsub.add_to_blacklist(blacklisted_peer)
+        await pubsub.add_to_blacklist(blacklisted_peer)
 
         new_stream_called = False
 
@@ -995,7 +993,7 @@ async def test_blacklist_blocks_messages_from_blacklisted_originator():
         blacklisted_originator = pubsubs_fsub[1].my_id  # Use existing peer ID
 
         # Add the originator to blacklist
-        pubsub.add_to_blacklist(blacklisted_originator)
+        await pubsub.add_to_blacklist(blacklisted_originator)
 
         # Create a message with blacklisted originator
         msg = make_pubsub_msg(
@@ -1044,7 +1042,7 @@ async def test_blacklist_allows_non_blacklisted_peers():
         blacklisted_peer = pubsubs_fsub[2].my_id
 
         # Blacklist one peer but not the other
-        pubsub.add_to_blacklist(blacklisted_peer)
+        await pubsub.add_to_blacklist(blacklisted_peer)
 
         # Create messages from both peers
         msg_from_allowed = make_pubsub_msg(
@@ -1108,7 +1106,7 @@ async def test_blacklist_integration_with_existing_functionality():
         other_peer = pubsubs_fsub[1].my_id
 
         # Test that seen messages cache still works with blacklisting
-        pubsub.add_to_blacklist(other_peer)
+        await pubsub.add_to_blacklist(other_peer)
 
         msg = make_pubsub_msg(
             origin_id=other_peer,
@@ -1158,7 +1156,7 @@ async def test_blacklist_blocks_messages_from_blacklisted_source():
         blacklisted_forwarder = pubsubs_fsub[1].my_id
 
         # Add the forwarder to blacklist
-        pubsub.add_to_blacklist(blacklisted_forwarder)
+        await pubsub.add_to_blacklist(blacklisted_forwarder)
 
         # Create a message
         msg = make_pubsub_msg(
@@ -1226,7 +1224,7 @@ async def test_blacklist_tears_down_existing_connection():
         assert pubsub1.my_id in pubsub0.peer_topics[TESTING_TOPIC]
 
         # 3) Now blacklist peer1
-        pubsub0.add_to_blacklist(pubsub1.my_id)
+        await pubsub0.add_to_blacklist(pubsub1.my_id)
 
         # Allow the asynchronous teardown task (_teardown_if_connected) to run
         await trio.sleep(0.1)
