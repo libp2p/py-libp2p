@@ -1034,6 +1034,9 @@ class Swarm(Service, INetworkService):
         """
         peer_id = swarm_conn.muxed_conn.peer_id
 
+        # Clean up health tracking before removing the connection
+        self.cleanup_connection_health(peer_id, swarm_conn)
+
         if peer_id in self.connections:
             self.connections[peer_id] = [
                 conn for conn in self.connections[peer_id] if conn != swarm_conn
@@ -1108,7 +1111,14 @@ class Swarm(Service, INetworkService):
         if peer_id not in self.health_data:
             self.health_data[peer_id] = {}
 
-        self.health_data[peer_id][connection] = create_default_connection_health()
+        # Pass user-defined weights from connection config
+        # Type narrowed to ConnectionConfig by _is_health_monitoring_enabled()
+        assert isinstance(self.connection_config, ConnectionConfig)
+        self.health_data[peer_id][connection] = create_default_connection_health(
+            latency_weight=self.connection_config.latency_weight,
+            success_rate_weight=self.connection_config.success_rate_weight,
+            stability_weight=self.connection_config.stability_weight,
+        )
         logger.debug(f"Initialized health tracking for connection to peer {peer_id}")
 
     def cleanup_connection_health(self, peer_id: ID, connection: INetConn) -> None:
