@@ -98,8 +98,6 @@ class GossipSub(IPubsubRouter, Service):
     prune_back_off: int
     unsubscribe_back_off: int
 
-    flood_publish: bool
-
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -118,7 +116,6 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
-        flood_publish: bool = False,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -158,8 +155,6 @@ class GossipSub(IPubsubRouter, Service):
         self.back_off = dict()
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
-
-        self.flood_publish = flood_publish
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -305,50 +300,43 @@ class GossipSub(IPubsubRouter, Service):
             if topic not in self.pubsub.peer_topics:
                 continue
 
-            if self.flood_publish and msg_forwarder == self.pubsub.my_id:
-                for peer in self.pubsub.peer_topics[topic]:
-                    # TODO: add score threshold check when peer scoring is implemented
-                    #       if direct peer then skip score check
-                    send_to.add(peer)
+            # direct peers
+            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
+            send_to.update(_direct_peers)
+
+            # floodsub peers
+            floodsub_peers: set[ID] = {
+                peer_id
+                for peer_id in self.pubsub.peer_topics[topic]
+                if peer_id in self.peer_protocol
+                and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
+            }
+            send_to.update(floodsub_peers)
+
+            # gossipsub peers
+            gossipsub_peers: set[ID] = set()
+            if topic in self.mesh:
+                gossipsub_peers = self.mesh[topic]
             else:
-                # direct peers
-                direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
-                send_to.update(direct_peers)
-
-                # floodsub peers
-                floodsub_peers: set[ID] = {
-                    peer_id
-                    for peer_id in self.pubsub.peer_topics[topic]
-                    if self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
-                }
-                send_to.update(floodsub_peers)
-
-                # gossipsub peers
-                gossipsub_peers: set[ID] = set()
-                if topic in self.mesh:
-                    gossipsub_peers = self.mesh[topic]
-                else:
-                    # When we publish to a topic that we have not subscribe to, we
-                    # randomly pick `self.degree` number of peers who have subscribed
-                    #  to the topic and add them as our `fanout` peers.
-                    topic_in_fanout: bool = topic in self.fanout
-                    fanout_peers: set[ID] = (
-                        self.fanout[topic] if topic_in_fanout else set()
-                    )
-                    fanout_size = len(fanout_peers)
-                    if not topic_in_fanout or (
-                        topic_in_fanout and fanout_size < self.degree
-                    ):
-                        if topic in self.pubsub.peer_topics:
-                            # Combine fanout peers with selected peers
-                            fanout_peers.update(
-                                self._get_in_topic_gossipsub_peers_from_minus(
-                                    topic, self.degree - fanout_size, fanout_peers
-                                )
+                # When we publish to a topic that we have not subscribe to, we randomly
+                # pick `self.degree` number of peers who have subscribed to the topic
+                # and add them as our `fanout` peers.
+                topic_in_fanout: bool = topic in self.fanout
+                fanout_peers: set[ID] = self.fanout[topic] if topic_in_fanout else set()
+                fanout_size = len(fanout_peers)
+                if not topic_in_fanout or (
+                    topic_in_fanout and fanout_size < self.degree
+                ):
+                    if topic in self.pubsub.peer_topics:
+                        # Combine fanout peers with selected peers
+                        fanout_peers.update(
+                            self._get_in_topic_gossipsub_peers_from_minus(
+                                topic, self.degree - fanout_size, fanout_peers
                             )
-                    self.fanout[topic] = fanout_peers
-                    gossipsub_peers = fanout_peers
-                send_to.update(gossipsub_peers)
+                        )
+                self.fanout[topic] = fanout_peers
+                gossipsub_peers = fanout_peers
+            send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
         yield from send_to.difference([msg_forwarder, origin])
 

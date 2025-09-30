@@ -16,7 +16,6 @@ import random
 import secrets
 import sys
 
-from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
@@ -130,16 +129,24 @@ async def run_node(port: int, mode: str, demo_interval: int = 30) -> None:
         # Create host and DHT
         key_pair = create_new_key_pair(secrets.token_bytes(32))
         host = new_host(key_pair=key_pair, bootstrap=DEFAULT_BOOTSTRAP_NODES)
-        listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-        async with host.run(listen_addrs=[listen_addr]), trio.open_nursery() as nursery:
+        from libp2p.utils.address_validation import get_available_interfaces
+
+        listen_addrs = get_available_interfaces(port)
+
+        async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
             # Start maintenance tasks
             nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
             nursery.start_soon(maintain_connections, host)
 
             peer_id = host.get_id().pretty()
             logger.info(f"Node peer ID: {peer_id}")
-            logger.info(f"Node address: /ip4/0.0.0.0/tcp/{port}/p2p/{peer_id}")
+
+            # Get all available addresses with peer ID
+            all_addrs = host.get_addrs()
+            logger.info("Listener ready, listening on:")
+            for addr in all_addrs:
+                logger.info(f"{addr}")
 
             # Create and start DHT with Random Walk enabled
             dht = KadDHT(host, dht_mode, enable_random_walk=True)
