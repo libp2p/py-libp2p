@@ -83,6 +83,11 @@ class ConnectionHealth:
     # Count consecutive unhealthy evaluations to apply grace period
     consecutive_unhealthy: int = 0
 
+    # Health scoring weights (configurable)
+    latency_weight: float = 0.4
+    success_rate_weight: float = 0.4
+    stability_weight: float = 0.2
+
     def __post_init__(self) -> None:
         """Initialize default values and validate data."""
         current_time = time.time()
@@ -103,14 +108,16 @@ class ConnectionHealth:
         self.connection_stability = max(0.0, min(1.0, float(self.connection_stability)))
 
     def update_health_score(self) -> None:
-        """Calculate overall health score based on metrics."""
+        """Calculate overall health score based on metrics with configurable weights."""
         # Weighted scoring algorithm
         latency_score = max(0.0, 1.0 - (self.ping_latency / 1000.0))  # Normalize to 1s
         success_score = self.ping_success_rate
         stability_score = self.connection_stability
 
         self.health_score = (
-            latency_score * 0.4 + success_score * 0.4 + stability_score * 0.2
+            latency_score * self.latency_weight
+            + success_score * self.success_rate_weight
+            + stability_score * self.stability_weight
         )
 
     def update_ping_metrics(self, latency: float, success: bool) -> None:
@@ -257,8 +264,30 @@ class ConnectionHealth:
 
 def create_default_connection_health(
     established_at: float | None = None,
+    latency_weight: float = 0.4,
+    success_rate_weight: float = 0.4,
+    stability_weight: float = 0.2,
 ) -> ConnectionHealth:
-    """Create a new ConnectionHealth instance with default values."""
+    """
+    Create a new ConnectionHealth instance with default values.
+
+    Parameters
+    ----------
+    established_at : float | None
+        Timestamp when the connection was established. Defaults to current time.
+    latency_weight : float
+        Weight for latency in health scoring. Defaults to 0.4.
+    success_rate_weight : float
+        Weight for success rate in health scoring. Defaults to 0.4.
+    stability_weight : float
+        Weight for stability in health scoring. Defaults to 0.2.
+
+    Returns
+    -------
+    ConnectionHealth
+        New ConnectionHealth instance with provided or default values.
+
+    """
     current_time = time.time()
     established_at = established_at or current_time
 
@@ -283,4 +312,7 @@ def create_default_connection_health(
         last_bandwidth_check=current_time,
         peak_bandwidth=0.0,
         average_bandwidth=0.0,
+        latency_weight=latency_weight,
+        success_rate_weight=success_rate_weight,
+        stability_weight=stability_weight,
     )
