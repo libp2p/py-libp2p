@@ -80,30 +80,26 @@ class RealNetworkBuilder(AttackNetworkBuilder):
         Note: This is a simplified version that creates DHT instances
         but doesn't fully manage their lifecycle for testing purposes.
         """
-        # For this initial version, we'll create a simplified test setup
-        # that demonstrates the concept without full DHT service management
-
         honest_hosts = []
         honest_dhts = []
         malicious_peers = []
 
-        # Create a simple test setup that works
-        # In a real implementation, this would need proper lifecycle management
+        # Create honest hosts based on the parameter
+        for i in range(honest_nodes):
+            honest_host = new_host()
+            honest_hosts.append(honest_host)
 
-        # Create single honest host for testing
-        honest_host = new_host()
-        honest_hosts.append(honest_host)
+            # Create DHT instance (don't start service for this test)
+            honest_dht = KadDHT(honest_host, DHTMode.SERVER, enable_random_walk=False)
+            honest_dhts.append(honest_dht)
 
-        # Create DHT instance (don't start service for this test)
-        honest_dht = KadDHT(honest_host, DHTMode.SERVER, enable_random_walk=False)
-        honest_dhts.append(honest_dht)
+        # Create malicious hosts based on the parameter
+        for i in range(malicious_nodes):
+            mal_host = new_host()
+            mal_dht = KadDHT(mal_host, DHTMode.SERVER, enable_random_walk=False)
 
-        # Create single malicious host
-        mal_host = new_host()
-        mal_dht = KadDHT(mal_host, DHTMode.SERVER, enable_random_walk=False)
-
-        mal_peer = RealMaliciousPeer(mal_host, mal_dht, "eclipse", 0.1)
-        malicious_peers.append(mal_peer)
+            mal_peer = RealMaliciousPeer(mal_host, mal_dht, "eclipse", 0.1)
+            malicious_peers.append(mal_peer)
 
         return honest_hosts, honest_dhts, malicious_peers
 
