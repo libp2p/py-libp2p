@@ -180,7 +180,7 @@ class Swarm(Service, INetworkService):
     # Health monitoring infrastructure
     health_data: dict[ID, dict[INetConn, ConnectionHealth]]
     health_config: HealthConfig
-    _health_monitoring_task: Any | None
+    _health_monitoring_active: bool
     _health_metrics_collector: Any | None
 
     def __init__(
@@ -214,7 +214,7 @@ class Swarm(Service, INetworkService):
                 min_health_threshold=self.connection_config.min_health_threshold,
                 min_connections_per_peer=self.connection_config.min_connections_per_peer,
             )
-            self._health_monitoring_task = None
+            self._health_monitoring_active = False
             self._health_metrics_collector = None
         # Create Notifee array
         self.notifees = []
@@ -239,9 +239,8 @@ class Swarm(Service, INetworkService):
 
             # Start health monitoring if enabled
             if self.connection_config.enable_health_monitoring:
-                self._health_monitoring_task = nursery.start_soon(
-                    self._monitor_connections_health
-                )
+                self._health_monitoring_active = True
+                nursery.start_soon(self._monitor_connections_health)
 
             try:
                 await self.manager.wait_finished()
@@ -252,8 +251,9 @@ class Swarm(Service, INetworkService):
                 self.listener_nursery = None
 
                 # Cancel health monitoring task
-                if self._health_monitoring_task:
-                    self._health_monitoring_task.cancel()
+                if self._health_monitoring_active:
+                    # Health monitoring task cancelled by nursery cleanup
+                    self._health_monitoring_active = False
 
     def get_peer_id(self) -> ID:
         return self.self_id
