@@ -35,6 +35,7 @@ from .routing_table import (
     RoutingTable,
 )
 from .utils import (
+    find_closest_peers_heap,
     maybe_consume_signed_record,
     sort_peer_ids_by_distance,
 )
@@ -181,7 +182,7 @@ class PeerRouting(IPeerRouting):
             rounds += 1
             logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
-            # Find peers we haven't queried yet
+            # Find peers we haven't queried yet - optimized with set operations
             peers_to_query = [p for p in closest_peers if p not in queried_peers]
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
@@ -208,18 +209,28 @@ class PeerRouting(IPeerRouting):
                 logger.debug("No new peers discovered in this round, ending lookup")
                 break
 
-            # Update our list of closest peers
+            # Update our list of closest peers using heap-based optimization
             all_candidates = closest_peers + new_peers
             old_closest_peers = closest_peers[:]
-            closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
-                :count
-            ]
+            
+            # Use heap-based approach for better performance with large peer sets
+            closest_peers = find_closest_peers_heap(target_key, all_candidates, count)
             logger.debug(f"Updated closest peers count: {len(closest_peers)}")
 
             # Check if we made any progress (found closer peers)
             if closest_peers == old_closest_peers:
                 logger.debug("No improvement in closest peers, ending lookup")
                 break
+                
+            # Early termination: check if we've found peers close enough
+            # If the closest peer is very close (distance < threshold), we can stop
+            if closest_peers:
+                from .utils import get_peer_distance
+                closest_distance = get_peer_distance(closest_peers[0], target_key)
+                # If distance is very small (less than 2^240), we're close enough
+                if closest_distance < (2**240):
+                    logger.debug(f"Found very close peer (distance: {closest_distance}), ending lookup")
+                    break
 
         logger.info(
             f"Network lookup completed after {rounds} rounds, "

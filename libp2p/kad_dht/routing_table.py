@@ -15,6 +15,7 @@ from libp2p.abc import (
     IHost,
 )
 from libp2p.kad_dht.utils import (
+    find_closest_peers_heap,
     xor_distance,
 )
 from libp2p.peer.id import (
@@ -561,7 +562,7 @@ class RoutingTable:
 
     def find_local_closest_peers(self, key: bytes, count: int = 20) -> list[ID]:
         """
-        Find the closest peers to a given key.
+        Find the closest peers to a given key using optimized heap-based approach.
 
         :param key: The key to find closest peers to (bytes)
         :param count: Maximum number of peers to return
@@ -576,14 +577,8 @@ class RoutingTable:
         for bucket in self.buckets:
             all_peers.extend(bucket.peer_ids())
 
-        # Sort by XOR distance to the key
-        def distance_to_key(peer_id: ID) -> int:
-            peer_key = peer_id_to_key(peer_id)
-            return xor_distance(peer_key, key)
-
-        all_peers.sort(key=distance_to_key)
-
-        return all_peers[:count]
+        # Use heap-based approach for better performance with large peer sets
+        return find_closest_peers_heap(key, all_peers, count)
 
     def get_peer_ids(self) -> list[ID]:
         """
