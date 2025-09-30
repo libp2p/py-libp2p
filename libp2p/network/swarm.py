@@ -938,9 +938,10 @@ class Swarm(Service, INetworkService):
     async def _ping_connection(self, conn: INetConn) -> bool:
         """Ping a connection to check health."""
         try:
-            # Use a simple stream creation test as ping
-            stream = await conn.new_stream()
-            await stream.close()
+            # Use a simple stream creation test as ping with timeout
+            with trio.fail_after(self.connection_config.ping_timeout):
+                stream = await conn.new_stream()
+                await stream.close()
             return True
         except Exception:
             return False
