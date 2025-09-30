@@ -231,6 +231,36 @@ This library uses type hints, which are enforced by the ``mypy`` tool (part of t
 ``pre-commit`` checks). All new code is required to land with type hints, with the
 exception of code within the ``tests`` directory.
 
+Cross-Platform Path Handling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To ensure compatibility across Windows, macOS, and Linux, we use standardized path
+utilities from ``libp2p.utils.paths`` instead of direct ``os.path`` operations.
+
+**Required practices:**
+
+- Use ``join_paths()`` instead of ``os.path.join()``
+- Use ``get_script_dir()`` instead of ``os.path.dirname(os.path.abspath(__file__))``
+- Use ``get_temp_dir()`` or ``create_temp_file()`` instead of hard-coded temp paths
+- Use ``Path`` objects for path manipulation instead of string concatenation
+
+**Examples:**
+
+.. code:: python
+
+    # ❌ Don't do this
+    import os
+    config_path = os.path.join(os.path.dirname(__file__), "config", "settings.json")
+    temp_file = "/tmp/my_app.log"
+
+    # ✅ Do this instead
+    from libp2p.utils.paths import join_paths, get_script_dir, create_temp_file
+    config_path = join_paths(get_script_dir(__file__), "config", "settings.json")
+    temp_file = create_temp_file(prefix="my_app_", suffix=".log")
+
+The pre-commit hooks include a path audit that will catch non-cross-platform path
+handling patterns. Run ``python scripts/audit_paths.py`` to check for issues.
+
 Documentation
 ~~~~~~~~~~~~~
 
