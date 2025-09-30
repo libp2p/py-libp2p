@@ -65,7 +65,7 @@ Listener node:
    from libp2p.security.tls.transport import TLSTransport
 
    async def main():
-       host = await new_host(security_transports=[TLSTransport()])
+       host = new_host(security_transports=[TLSTransport()])
        await host.listen("/ip4/0.0.0.0/tcp/8000")
        print("TLS-enabled listener at:", host.get_addrs())
 
@@ -84,7 +84,7 @@ Dialer node:
    from libp2p.peer.peerinfo import info_from_p2p_addr
 
    async def main():
-       host = await new_host(security_transports=[TLSTransport()])
+       host = new_host(security_transports=[TLSTransport()])
 
        addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
        peer_info = info_from_p2p_addr(addr)
