@@ -136,6 +136,7 @@ class NetStream(INetStream):
                     StreamEOF,
                     StreamReset,
                     StreamClosed,
+                    ValueError,  # QUIC stream errors
                 ),
             ):
                 self.set_state(StreamState.ERROR)
@@ -184,6 +185,7 @@ class NetStream(INetStream):
                     QUICStreamResetError,
                     StreamClosed,
                     StreamReset,
+                    ValueError,  # QUIC stream errors
                 ),
             ):
                 self.set_state(StreamState.ERROR)
@@ -220,9 +222,13 @@ class NetStream(INetStream):
 
     async def reset(self) -> None:
         """Reset stream."""
-        if self.state == StreamState.ERROR:
-            raise StreamError("Cannot reset stream; stream is in error state")
-        await self.muxed_stream.reset()
+        # Allow reset even from ERROR state for cleanup purposes
+        try:
+            await self.muxed_stream.reset()
+        except Exception:
+            # If reset fails, we still want to mark the stream as reset
+            # This allows cleanup to proceed even if the underlying stream is broken
+            pass
         self.set_state(StreamState.RESET)
         await self.remove()
 

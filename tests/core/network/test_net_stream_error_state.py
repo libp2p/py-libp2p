@@ -126,16 +126,16 @@ async def test_error_state_prevents_close_write(mock_stream):
 
 
 @pytest.mark.trio
-async def test_error_state_prevents_reset(mock_stream):
-    """Test that ERROR state prevents reset operations."""
+async def test_error_state_allows_reset_for_cleanup(mock_stream):
+    """Test that ERROR state allows reset operations for cleanup."""
     # Set stream to ERROR state
     mock_stream.set_state(StreamState.ERROR)
 
-    # Attempting to reset should raise StreamError
-    with pytest.raises(
-        StreamError, match="Cannot reset stream; stream is in error state"
-    ):
-        await mock_stream.reset()
+    # Reset should be allowed from ERROR state for cleanup purposes
+    await mock_stream.reset()
+
+    # Stream should be in RESET state after reset
+    assert mock_stream.state == StreamState.RESET
 
 
 @pytest.mark.trio
