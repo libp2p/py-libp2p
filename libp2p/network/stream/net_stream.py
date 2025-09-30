@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 from .exceptions import (
     StreamClosed,
     StreamEOF,
+    StreamError,
     StreamReset,
 )
 
@@ -89,7 +90,9 @@ class NetStream(INetStream):
         :param n: number of bytes to read
         :return: Bytes read from the stream
         """
-        if self.state == StreamState.RESET:
+        if self.state == StreamState.ERROR:
+            raise StreamError("Cannot read from stream; stream is in error state")
+        elif self.state == StreamState.RESET:
             raise StreamReset("Cannot read from stream; stream is reset")
         elif self.state == StreamState.CLOSE_READ:
             raise StreamClosed("Cannot read from stream; closed for reading")
@@ -107,6 +110,26 @@ class NetStream(INetStream):
         except (MuxedStreamReset, QUICStreamClosedError, QUICStreamResetError) as error:
             self.set_state(StreamState.RESET)
             raise StreamReset() from error
+        except Exception as error:
+            # Only set ERROR state for truly unexpected errors
+            # Known exceptions (MuxedStreamEOF, MuxedStreamReset, etc.)
+            # are handled above
+            if not isinstance(
+                error,
+                (
+                    MuxedStreamEOF,
+                    MuxedStreamReset,
+                    QUICStreamClosedError,
+                    QUICStreamResetError,
+                    StreamEOF,
+                    StreamReset,
+                    StreamClosed,
+                ),
+            ):
+                self.set_state(StreamState.ERROR)
+                raise StreamError(f"Read operation failed: {error}") from error
+            # Re-raise known exceptions as-is
+            raise
 
     async def write(self, data: bytes) -> None:
         """
@@ -115,7 +138,9 @@ class NetStream(INetStream):
         :param data: bytes to write
         """
         try:
-            if self.state == StreamState.RESET:
+            if self.state == StreamState.ERROR:
+                raise StreamError("Cannot write to stream; stream is in error state")
+            elif self.state == StreamState.RESET:
                 raise StreamReset("Cannot write to stream; stream is reset")
             elif self.state in [StreamState.CLOSE_WRITE, StreamState.CLOSE_BOTH]:
                 raise StreamClosed("Cannot write to stream; closed for writing")
@@ -134,6 +159,25 @@ class NetStream(INetStream):
         except (MuxedStreamReset, MuxedStreamError) as error:
             self.set_state(StreamState.RESET)
             raise StreamReset() from error
+        except Exception as error:
+            # Only set ERROR state for truly unexpected errors
+            # Known exceptions are handled above
+            if not isinstance(
+                error,
+                (
+                    MuxedStreamClosed,
+                    MuxedStreamReset,
+                    MuxedStreamError,
+                    QUICStreamClosedError,
+                    QUICStreamResetError,
+                    StreamClosed,
+                    StreamReset,
+                ),
+            ):
+                self.set_state(StreamState.ERROR)
+                raise StreamError(f"Write operation failed: {error}") from error
+            # Re-raise known exceptions as-is
+            raise
 
     async def close(self) -> None:
         """Close stream completely and clean up resources."""
@@ -143,7 +187,9 @@ class NetStream(INetStream):
 
     async def close_read(self) -> None:
         """Close the stream for reading only."""
-        if self.state == StreamState.OPEN:
+        if self.state == StreamState.ERROR:
+            raise StreamError("Cannot close read on stream; stream is in error state")
+        elif self.state == StreamState.OPEN:
             self.set_state(StreamState.CLOSE_READ)
         elif self.state == StreamState.CLOSE_WRITE:
             self.set_state(StreamState.CLOSE_BOTH)
@@ -151,6 +197,8 @@ class NetStream(INetStream):
 
     async def close_write(self) -> None:
         """Close the stream for writing only."""
+        if self.state == StreamState.ERROR:
+            raise StreamError("Cannot close write on stream; stream is in error state")
         await self.muxed_stream.close()
         if self.state == StreamState.OPEN:
             self.set_state(StreamState.CLOSE_WRITE)
@@ -160,6 +208,8 @@ class NetStream(INetStream):
 
     async def reset(self) -> None:
         """Reset stream."""
+        if self.state == StreamState.ERROR:
+            raise StreamError("Cannot reset stream; stream is in error state")
         await self.muxed_stream.reset()
         self.set_state(StreamState.RESET)
         await self.remove()
@@ -175,3 +225,34 @@ class NetStream(INetStream):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying muxed stream."""
         return self.muxed_stream.get_remote_address()
+
+    def is_operational(self) -> bool:
+        """
+        Check if stream is in an operational state.
+
+        :return: True if stream can perform I/O operations
+        """
+        return self.state not in [
+            StreamState.ERROR,
+            StreamState.RESET,
+            StreamState.CLOSE_BOTH,
+        ]
+
+    async def recover_from_error(self) -> None:
+        """
+        Attempt to recover from error state.
+
+        This method attempts to reset the underlying muxed stream
+        and transition back to OPEN state if successful.
+        """
+        if self.state != StreamState.ERROR:
+            return
+
+        try:
+            # Attempt to reset the underlying muxed stream
+            await self.muxed_stream.reset()
+            self.set_state(StreamState.OPEN)
+        except Exception:
+            # If recovery fails, keep ERROR state
+            # The stream remains in ERROR state
+            pass
