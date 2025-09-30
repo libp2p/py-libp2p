@@ -9,13 +9,9 @@ load balancing.
 from dataclasses import dataclass
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-# These imports are used for type checking only
-if TYPE_CHECKING:
-    pass
-
-logger = logging.getLogger("libp2p.network.connection_health")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
