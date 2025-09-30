@@ -27,9 +27,6 @@ from libp2p.identity.identify_push.identify_push import (
     push_identify_to_peer,
     push_identify_to_peers,
 )
-from libp2p.host.exceptions import (
-    HostException,
-)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )

@@ -3,9 +3,6 @@ import logging
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.host.exceptions import (
-    HostException,
-)
 from libp2p.host.autonat.pb.autonat_pb2 import (
     DialResponse,
     Message,
@@ -15,6 +12,9 @@ from libp2p.host.autonat.pb.autonat_pb2 import (
 )
 from libp2p.host.basic_host import (
     BasicHost,
+)
+from libp2p.host.exceptions import (
+    HostException,
 )
 from libp2p.network.stream.net_stream import (
     NetStream,

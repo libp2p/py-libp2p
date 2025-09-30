@@ -4,14 +4,14 @@ from trio.testing import (
     wait_all_tasks_blocked,
 )
 
+from libp2p.stream_muxer.exceptions import (
+    MuxedStreamError,
+)
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamClosed,
     MplexStreamEOF,
     MplexStreamReset,
     MuxedConnUnavailable,
-)
-from libp2p.stream_muxer.exceptions import (
-    MuxedStreamError,
 )
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_MESSAGE_CHANNEL_SIZE,
@@ -259,7 +259,7 @@ async def test_mplex_stream_close_mux_unavailable(monkeypatch, mplex_stream_pair
 async def test_mplex_stream_set_deadline_success(mplex_stream_pair):
     """Test successful deadline setting."""
     stream_0, _ = mplex_stream_pair
-    
+
     # Test setting deadline
     stream_0.set_deadline(30)
     assert stream_0.read_deadline == 30
@@ -270,7 +270,7 @@ async def test_mplex_stream_set_deadline_success(mplex_stream_pair):
 async def test_mplex_stream_set_read_deadline_success(mplex_stream_pair):
     """Test successful read deadline setting."""
     stream_0, _ = mplex_stream_pair
-    
+
     # Test setting read deadline
     stream_0.set_read_deadline(15)
     assert stream_0.read_deadline == 15
@@ -280,68 +280,76 @@ async def test_mplex_stream_set_read_deadline_success(mplex_stream_pair):
 async def test_mplex_stream_set_write_deadline_success(mplex_stream_pair):
     """Test successful write deadline setting."""
     stream_0, _ = mplex_stream_pair
-    
+
     # Test setting write deadline
     stream_0.set_write_deadline(20)
     assert stream_0.write_deadline == 20
 
 
 @pytest.mark.trio
-async def test_mplex_stream_set_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+async def test_mplex_stream_set_deadline_exception_handling(
+    monkeypatch, mplex_stream_pair
+):
     """Test deadline setting handles exceptions properly."""
     stream_0, _ = mplex_stream_pair
-    
+
     # Test with negative deadline value to trigger validation error
     original_read_deadline = stream_0.read_deadline
     original_write_deadline = stream_0.write_deadline
-    
+
     with pytest.raises(MuxedStreamError, match="Failed to set deadline"):
         stream_0.set_deadline(-1)
-    
+
     # Verify original values are preserved
     assert stream_0.read_deadline == original_read_deadline
     assert stream_0.write_deadline == original_write_deadline
 
 
 @pytest.mark.trio
-async def test_mplex_stream_set_read_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+async def test_mplex_stream_set_read_deadline_exception_handling(
+    monkeypatch, mplex_stream_pair
+):
     """Test read deadline setting handles exceptions properly."""
     stream_0, _ = mplex_stream_pair
-    
+
     original_read_deadline = stream_0.read_deadline
-    
+
     # Test with negative deadline value to trigger validation error
     with pytest.raises(MuxedStreamError, match="Failed to set read deadline"):
         stream_0.set_read_deadline(-1)
-    
+
     # Verify original value is preserved
     assert stream_0.read_deadline == original_read_deadline
 
 
 @pytest.mark.trio
-async def test_mplex_stream_set_write_deadline_exception_handling(monkeypatch, mplex_stream_pair):
+async def test_mplex_stream_set_write_deadline_exception_handling(
+    monkeypatch, mplex_stream_pair
+):
     """Test write deadline setting handles exceptions properly."""
     stream_0, _ = mplex_stream_pair
-    
+
     original_write_deadline = stream_0.write_deadline
-    
+
     # Test with negative deadline value to trigger validation error
     with pytest.raises(MuxedStreamError, match="Failed to set write deadline"):
         stream_0.set_write_deadline(-1)
-    
+
     # Verify original value is preserved
     assert stream_0.write_deadline == original_write_deadline
 
 
 @pytest.mark.trio
-async def test_mplex_stream_deadline_preserves_exception_chain(monkeypatch, mplex_stream_pair):
+async def test_mplex_stream_deadline_preserves_exception_chain(
+    monkeypatch, mplex_stream_pair
+):
     """Test that deadline methods preserve the original exception chain."""
     stream_0, _ = mplex_stream_pair
-    
+
     # Test with negative deadline value to trigger validation error
     with pytest.raises(MuxedStreamError) as exc_info:
         stream_0.set_deadline(-1)
-    
+
     # Check that the original exception is preserved in the chain
     assert isinstance(exc_info.value.__cause__, ValueError)
     assert "Deadline cannot be negative" in str(exc_info.value.__cause__)

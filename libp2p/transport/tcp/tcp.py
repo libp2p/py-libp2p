@@ -42,7 +42,7 @@ class TCPListener(IListener):
         self.handler = handler_function
 
     # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
         Put listener in listening mode and wait for incoming connections.
 
@@ -114,6 +114,7 @@ class TCPListener(IListener):
             raise OpenConnectionError(error_msg)
 
         self.listeners.extend(started_listeners)
+        return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """

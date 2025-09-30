@@ -151,9 +151,7 @@ async def test_identify_push_cross_format_compatibility_varint_to_raw(
 
         # Host B pushes with varint format (should fail gracefully)
         try:
-            await push_identify_to_peer(
-                host_b, host_a.get_id(), use_varint_format=True
-            )
+            await push_identify_to_peer(host_b, host_a.get_id(), use_varint_format=True)
             # If we get here, the operation succeeded (unexpected but acceptable)
         except Exception:
             # This is expected due to format mismatch, which is fine
@@ -283,9 +281,7 @@ async def test_identify_push_large_message_handling(security_protocol):
 
         # Push identify information from host_b to host_a
         try:
-            await push_identify_to_peer(
-                host_b, host_a.get_id(), use_varint_format=True
-            )
+            await push_identify_to_peer(host_b, host_a.get_id(), use_varint_format=True)
             # If we get here, the push was successful
         except Exception as e:
             pytest.fail(f"Identify push should succeed with large message: {e}")
