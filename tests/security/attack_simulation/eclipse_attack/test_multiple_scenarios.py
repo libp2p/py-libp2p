@@ -1,11 +1,21 @@
 import json
+import os
 from pathlib import Path
+import tempfile
 
 import pytest
 
 from ..config.attack_configs import ECLIPSE_ATTACK_CONFIGS
 from .attack_scenarios import EclipseScenario
 from .network_builder import AttackNetworkBuilder
+
+
+def get_results_directory() -> Path:
+    """Get results directory, defaulting to temp if TEST_TEMP_RESULTS is set"""
+    if os.getenv("TEST_TEMP_RESULTS"):
+        return Path(tempfile.gettempdir()) / "attack_simulation_results"
+    else:
+        return Path(__file__).parent.parent / "results"
 
 
 @pytest.mark.trio
@@ -63,18 +73,15 @@ async def test_multiple_eclipse_scenarios():
         print(f"  - Resilience Score: {report['network_resilience_score']:.1f}/100")
 
     # Save detailed results to file
-    results_file = (
-        Path(__file__).parent.parent / "results" / "comprehensive_attack_results.json"
-    )
-    results_file.parent.mkdir(exist_ok=True)
+    results_dir = get_results_directory()
+    results_file = results_dir / "comprehensive_attack_results.json"
+    results_file.parent.mkdir(parents=True, exist_ok=True)
 
     with open(results_file, "w") as f:
         json.dump(results, f, indent=2)
 
     # Save summary report
-    summary_file = (
-        Path(__file__).parent.parent / "results" / "attack_summary_report.json"
-    )
+    summary_file = results_dir / "attack_summary_report.json"
     summary = generate_attack_summary(results)
 
     with open(summary_file, "w") as f:
