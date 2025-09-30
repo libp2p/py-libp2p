@@ -2,6 +2,7 @@ from enum import (
     Enum,
     auto,
 )
+import logging
 from typing import (
     TYPE_CHECKING,
 )
@@ -55,6 +56,7 @@ class NetStream(INetStream):
         self.protocol_id = None
         self._state = StreamState.INIT
         self.swarm_conn = swarm_conn
+        self.logger = logging.getLogger(__name__)
 
     def get_protocol(self) -> TProtocol | None:
         """
@@ -81,7 +83,17 @@ class NetStream(INetStream):
 
         :param state: new state of the stream
         """
+        old_state = self._state
         self._state = state
+
+        # Log state transition for debugging and monitoring
+        self.logger.debug(f"Stream state transition: {old_state.name} → {state.name}")
+
+        # Log important state changes at info level
+        if state in [StreamState.ERROR, StreamState.RESET, StreamState.CLOSE_BOTH]:
+            self.logger.info(
+                f"Stream entered {state.name} state (from {old_state.name})"
+            )
 
     async def read(self, n: int | None = None) -> bytes:
         """
@@ -256,3 +268,70 @@ class NetStream(INetStream):
             # If recovery fails, keep ERROR state
             # The stream remains in ERROR state
             pass
+
+    def get_state_transition_summary(self) -> str:
+        """
+        Get a summary of the stream's current state and operational status.
+
+        :return: Human-readable summary of stream state
+        """
+        if self.is_operational():
+            return f"Stream is operational in {self.state.name} state"
+        else:
+            return f"Stream is non-operational in {self.state.name} state"
+
+    def get_valid_transitions(self) -> list[StreamState]:
+        """
+        Get valid next states from the current state.
+
+        :return: List of valid next states
+        """
+        valid_transitions = {
+            StreamState.INIT: [StreamState.OPEN, StreamState.ERROR],
+            StreamState.OPEN: [
+                StreamState.CLOSE_READ,
+                StreamState.CLOSE_WRITE,
+                StreamState.RESET,
+                StreamState.ERROR,
+            ],
+            StreamState.CLOSE_READ: [StreamState.CLOSE_BOTH, StreamState.ERROR],
+            StreamState.CLOSE_WRITE: [StreamState.CLOSE_BOTH, StreamState.ERROR],
+            StreamState.RESET: [StreamState.ERROR],  # RESET is terminal
+            StreamState.CLOSE_BOTH: [StreamState.ERROR],  # CLOSE_BOTH is terminal
+            StreamState.ERROR: [],  # ERROR is terminal
+        }
+        return valid_transitions.get(self.state, [])
+
+    def get_state_transition_documentation(self) -> str:
+        """
+        Get comprehensive documentation about stream state transitions.
+
+        :return: Documentation string explaining state transitions
+        """
+        return """
+Stream State Lifecycle Documentation:
+
+INIT: Stream is created but not yet established
+OPEN: Stream is established and ready for I/O operations
+CLOSE_READ: Read side is closed, write side may still be open
+CLOSE_WRITE: Write side is closed, read side may still be open
+CLOSE_BOTH: Both sides are closed, stream is terminated
+RESET: Stream was reset by remote peer or locally
+ERROR: Stream encountered an unrecoverable error
+
+State Transitions:
+- INIT → OPEN: Stream establishment
+- OPEN → CLOSE_READ/CLOSE_WRITE: Partial closure
+- OPEN → RESET: Stream reset
+- OPEN → ERROR: Error condition
+- CLOSE_READ/CLOSE_WRITE → CLOSE_BOTH: Complete closure
+- Any → ERROR: Unrecoverable error
+
+Current State: {current_state}
+Valid Next States: {valid_states}
+Operational Status: {operational}
+        """.format(
+            current_state=self.state.name,
+            valid_states=", ".join([s.name for s in self.get_valid_transitions()]),
+            operational="Yes" if self.is_operational() else "No",
+        ).strip()
