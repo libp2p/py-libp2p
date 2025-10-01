@@ -1,2 +1,0 @@
-Updated all example scripts and core modules to use secure loopback addresses instead of wildcard addresses for network binding.
-The `get_wildcard_address` function and related logic now utilize all available interfaces safely, improving security and consistency across the codebase.

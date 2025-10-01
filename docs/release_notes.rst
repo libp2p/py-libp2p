@@ -3,6 +3,153 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.3.0 (2025-09-25)
+-----------------------------
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- identify protocol use now prefix-length messages by default. use use_varint_format param for old raw messages (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+
+
+Bugfixes
+~~~~~~~~
+
+- Improved type safety in `get_mux()` and `get_protocols()` by returning properly typed values instead
+  of `Any`. Also updated `identify.py` and `discovery.py` to handle `None` values safely and
+  compare protocols correctly. (`#746 <https://github.com/libp2p/py-libp2p/issues/746>`__)
+- fixed malformed PeerId in test_peerinfo (`#757 <https://github.com/libp2p/py-libp2p/issues/757>`__)
+- Fixed incorrect handling of raw protobuf format in identify protocol. The identify example now properly handles both raw and length-prefixed (varint) message formats, provides better error messages, and displays connection status with peer IDs. Replaced mock-based tests with comprehensive real network integration tests for both formats. (`#778 <https://github.com/libp2p/py-libp2p/issues/778>`__)
+- Fixed incorrect handling of raw protobuf format in identify push protocol. The identify push example now properly handles both raw and length-prefixed (varint) message formats, provides better error messages, and displays connection status with peer IDs. Replaced mock-based tests with comprehensive real network integration tests for both formats. (`#784 <https://github.com/libp2p/py-libp2p/issues/784>`__)
+- Recompiled protobufs that were out of date and added a `make` rule so that protobufs are always up to date. (`#818 <https://github.com/libp2p/py-libp2p/issues/818>`__)
+- Added multiselect type consistency in negotiate method. Updates all the usages of the method. (`#837 <https://github.com/libp2p/py-libp2p/issues/837>`__)
+- Fixed message id type inconsistency in handle ihave and message id parsing improvement in handle iwant in pubsub module. (`#843 <https://github.com/libp2p/py-libp2p/issues/843>`__)
+- Fix kbucket splitting in routing table when full. Routing table now maintains multiple kbuckets and properly distributes peers as specified by the Kademlia DHT protocol. (`#846 <https://github.com/libp2p/py-libp2p/issues/846>`__)
+- Fix multi-address listening bug in swarm.listen()
+
+  - Fix early return in swarm.listen() that prevented listening on all addresses
+  - Add comprehensive tests for multi-address listening functionality
+  - Ensure all available interfaces are properly bound and connectable (`#863 <https://github.com/libp2p/py-libp2p/issues/863>`__)
+- Fixed cross-platform path handling by replacing hardcoded OS-specific
+  paths with standardized utilities in core modules and examples. (`#886 <https://github.com/libp2p/py-libp2p/issues/886>`__)
+- Exposed timeout method in muxer multistream and updated all the usage. Added testcases to verify that timeout value is passed correctly (`#896 <https://github.com/libp2p/py-libp2p/issues/896>`__)
+- enhancement: Add write lock to `YamuxStream` to prevent concurrent write race conditions
+
+  - Implements ReadWriteLock for `YamuxStream` write operations
+  - Prevents data corruption from concurrent write operations
+  - Read operations remain lock-free due to existing `Yamux` architecture
+  - Resolves race conditions identified in Issue #793 (`#897 <https://github.com/libp2p/py-libp2p/issues/897>`__)
+- Fix multiaddr dependency to use the last py-multiaddr commit hash to resolve installation issues (`#927 <https://github.com/libp2p/py-libp2p/issues/927>`__)
+- Fixed Windows CI/CD tests to use correct Python version instead of hardcoded Python 3.11. test 2 (`#952 <https://github.com/libp2p/py-libp2p/issues/952>`__)
+- Fix flaky test_find_node in kad_dht by eliminating race conditions and adding retry mechanism
+
+  - Enhanced dht_pair fixture to force peer discovery during setup, eliminating async race conditions
+  - Added retry mechanism with proper type annotations for additional resilience
+  - Added pytest-rerunfailures dependency and flaky test marker
+  - Resolves intermittent CI failures in tests/core/kad_dht/test_kad_dht.py::test_find_node (`#956 <https://github.com/libp2p/py-libp2p/issues/956>`__)
+
+
+Improved Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Improve error message under the function decode_uvarint_from_stream in libp2p/utils/varint.py file (`#760 <https://github.com/libp2p/py-libp2p/issues/760>`__)
+- Clarified the requirement for a trailing newline in newsfragments to pass lint checks. (`#775 <https://github.com/libp2p/py-libp2p/issues/775>`__)
+
+
+Features
+~~~~~~~~
+
+- Added experimental WebSocket transport support with basic WS and WSS functionality. This includes:
+
+  - WebSocket transport implementation with trio-websocket backend
+  - Support for both WS (WebSocket) and WSS (WebSocket Secure) protocols
+  - Basic connection management and stream handling
+  - TLS configuration support for WSS connections
+  - Multiaddr parsing for WebSocket addresses
+  - Integration with libp2p host and peer discovery
+
+  **Note**: This is experimental functionality. Advanced features like proxy support,
+  interop testing, and production examples are still in development. See
+  https://github.com/libp2p/py-libp2p/discussions/937 for the complete roadmap of missing features. (`#585 <https://github.com/libp2p/py-libp2p/issues/585>`__)
+- Added `Bootstrap` peer discovery module that allows nodes to connect to predefined bootstrap peers for network discovery. (`#711 <https://github.com/libp2p/py-libp2p/issues/711>`__)
+- Add lock for read/write to avoid interleaving receiving messages in mplex_stream.py (`#748 <https://github.com/libp2p/py-libp2p/issues/748>`__)
+- Add logic to clear_peerdata method in peerstore (`#750 <https://github.com/libp2p/py-libp2p/issues/750>`__)
+- Added the `Certified Addr-Book` interface supported by `Envelope` and `PeerRecord` class.
+  Integrated the signed-peer-record transfer in the identify/push protocols. (`#753 <https://github.com/libp2p/py-libp2p/issues/753>`__)
+- add length-prefixed support to identify protocol (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+- Add QUIC transport support for faster, more efficient peer-to-peer connections with native stream multiplexing. (`#763 <https://github.com/libp2p/py-libp2p/issues/763>`__)
+- Added Thin Waist address validation utilities (with support for interface enumeration, optimal binding, and wildcard expansion). (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
+- KAD-DHT now include signed-peer-records in its protobuf message schema, for more secure peer-discovery. (`#815 <https://github.com/libp2p/py-libp2p/issues/815>`__)
+- Added `Random Walk` peer discovery module that enables random peer exploration for improved peer discovery. (`#822 <https://github.com/libp2p/py-libp2p/issues/822>`__)
+- Implement closed_stream notification in MyNotifee
+
+  - Add notify_closed_stream method to swarm notification system for proper stream lifecycle management
+  - Integrate remove_stream hook in SwarmConn to enable stream closure notifications
+  - Add comprehensive tests for closed_stream functionality in test_notify.py
+  - Enable stream lifecycle integration for proper cleanup and resource management (`#826 <https://github.com/libp2p/py-libp2p/issues/826>`__)
+- Add automatic peer dialing in bootstrap module using trio.Nursery. (`#849 <https://github.com/libp2p/py-libp2p/issues/849>`__)
+- Fix type for gossipsub_message_id for consistency and security (`#859 <https://github.com/libp2p/py-libp2p/issues/859>`__)
+- Enhanced Swarm networking with retry logic, exponential backoff, and multi-connection support. Added configurable retry mechanisms that automatically recover from transient connection failures using exponential backoff with jitter to prevent thundering herd problems. Introduced connection pooling that allows multiple concurrent connections per peer for improved performance and fault tolerance. Added load balancing across connections and automatic connection health management. All enhancements are fully backward compatible and can be configured through new RetryConfig and ConnectionConfig classes. (`#874 <https://github.com/libp2p/py-libp2p/issues/874>`__)
+- Updated all example scripts and core modules to use secure loopback addresses instead of wildcard addresses for network binding.
+  The `get_wildcard_address` function and related logic now utilize all available interfaces safely, improving security and consistency across the codebase. (`#885 <https://github.com/libp2p/py-libp2p/issues/885>`__)
+- PubSub routers now include signed-peer-records in RPC messages for secure peer-info exchange. (`#889 <https://github.com/libp2p/py-libp2p/issues/889>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- remove FIXME comment since it's obsolete and 32-byte prefix support is there but not enabled by default (`#592 <https://github.com/libp2p/py-libp2p/issues/592>`__)
+- Add comprehensive tests for relay_discovery method in circuit_relay_v2 (`#749 <https://github.com/libp2p/py-libp2p/issues/749>`__)
+- [mplex] Add timeout and error handling during stream close (`#752 <https://github.com/libp2p/py-libp2p/issues/752>`__)
+- fixed a typecheck error using cast in peerinfo.py (`#757 <https://github.com/libp2p/py-libp2p/issues/757>`__)
+- Fix raw format reading in identify/push protocol and add comprehensive test coverage for both varint and raw formats (`#761 <https://github.com/libp2p/py-libp2p/issues/761>`__)
+- Pin py-multiaddr dependency to specific git commit db8124e2321f316d3b7d2733c7df11d6ad9c03e6 (`#766 <https://github.com/libp2p/py-libp2p/issues/766>`__)
+- Make TProtocol as Optional[TProtocol] to keep types consistent in py-libp2p/libp2p/protocol_muxer/multiselect.py (`#770 <https://github.com/libp2p/py-libp2p/issues/770>`__)
+- Replace the libp2p.peer.ID cache attributes with functools.cached_property functional decorator. (`#772 <https://github.com/libp2p/py-libp2p/issues/772>`__)
+- Yamux RawConnError Logging Refactor - Improved error handling and debug logging (`#784 <https://github.com/libp2p/py-libp2p/issues/784>`__)
+- Add Thin Waist address validation utilities and integrate into echo example
+
+  - Add ``libp2p/utils/address_validation.py`` with dynamic interface discovery
+  - Implement ``get_available_interfaces()``, ``get_optimal_binding_address()``, and ``expand_wildcard_address()``
+  - Update echo example to use dynamic address discovery instead of hardcoded wildcard
+  - Add safe fallbacks for environments lacking Thin Waist support
+  - Temporarily disable IPv6 support due to libp2p handshake issues (TODO: re-enable when resolved) (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
+- The TODO IK patterns in Noise has been deprecated in specs: https://github.com/libp2p/specs/tree/master/noise#handshake-pattern (`#816 <https://github.com/libp2p/py-libp2p/issues/816>`__)
+- Remove the already completed TODO tasks in Peerstore:
+  TODO: Set up an async task for periodic peer-store cleanup for expired addresses and records.
+  TODO: Make proper use of this function (`#819 <https://github.com/libp2p/py-libp2p/issues/819>`__)
+- Improved PubsubNotifee integration tests and added failure scenario coverage. (`#855 <https://github.com/libp2p/py-libp2p/issues/855>`__)
+- Remove unused upgrade_listener function from transport upgrader
+
+  - Remove unused `upgrade_listener` function from `libp2p/transport/upgrader.py` (Issue 2 from #726)
+  - Clean up unused imports related to the removed function
+  - Improve code maintainability by removing dead code (`#883 <https://github.com/libp2p/py-libp2p/issues/883>`__)
+- Replace magic numbers with named constants and enums for clarity and maintainability
+
+  **Key Changes:**
+  - **Introduced type-safe enums** for better code clarity:
+  - `RelayRole(Flag)` enum with HOP, STOP, CLIENT roles supporting bitwise combinations (e.g., `RelayRole.HOP | RelayRole.STOP`)
+  - `ReservationStatus(Enum)` for reservation lifecycle management (ACTIVE, EXPIRED, REJECTED)
+  - **Replaced magic numbers with named constants** throughout the codebase, improving code maintainability and eliminating hardcoded timeout values (15s, 30s, 10s) with descriptive constant names
+  - **Added comprehensive timeout configuration system** with new `TimeoutConfig` dataclass supporting component-specific timeouts (discovery, protocol, DCUtR)
+  - **Enhanced configurability** of `RelayDiscovery`, `CircuitV2Protocol`, and `DCUtRProtocol` constructors with optional timeout parameters
+  - **Improved architecture consistency** with clean configuration flow across all circuit relay components
+  - **Backward Compatibility:** All changes maintain full backward compatibility. Existing code continues to work unchanged while new timeout configuration options are available for users who need them. (`#917 <https://github.com/libp2p/py-libp2p/issues/917>`__)
+
+
+Miscellaneous Changes
+~~~~~~~~~~~~~~~~~~~~~
+
+- `#934 <https://github.com/libp2p/py-libp2p/issues/934>`__
+
+
+Performance Improvements
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Added throttling for async topic validators in validate_msg, enforcing a
+  concurrency limit to prevent resource exhaustion under heavy load. (`#755 <https://github.com/libp2p/py-libp2p/issues/755>`__)
+
+
 py-libp2p v0.2.9 (2025-07-09)
 -----------------------------
 
