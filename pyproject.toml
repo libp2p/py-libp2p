@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.2.9"
+version = "0.3.0"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -80,6 +80,7 @@ dev = [
     "pytest-xdist>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-timeout>=2.4.0",
+    "pytest-rerunfailures>=12.0",
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
@@ -198,7 +199,7 @@ name = "Removals"
 showcontent = true
 
 [tool.bumpversion]
-current_version = "0.2.9"
+current_version = "0.3.0"
 parse = """
     (?P<major>\\d+)
     \\.(?P<minor>\\d+)
