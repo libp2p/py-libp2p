@@ -16,10 +16,7 @@ class TestNoiseExtensionsEarlyData:
         early_data = b"test_early_data"
         certhashes = [b"cert1", b"cert2"]
 
-        ext = NoiseExtensions(
-            webtransport_certhashes=certhashes,
-            early_data=early_data
-        )
+        ext = NoiseExtensions(webtransport_certhashes=certhashes, early_data=early_data)
 
         assert ext.early_data == early_data
         assert ext.webtransport_certhashes == certhashes
@@ -38,10 +35,7 @@ class TestNoiseExtensionsEarlyData:
         early_data = b"test_early_data"
         certhashes = [b"cert1", b"cert2"]
 
-        ext = NoiseExtensions(
-            webtransport_certhashes=certhashes,
-            early_data=early_data
-        )
+        ext = NoiseExtensions(webtransport_certhashes=certhashes, early_data=early_data)
 
         # Convert to protobuf and back
         pb_ext = ext.to_protobuf()
@@ -77,16 +71,13 @@ class TestNoiseHandshakePayloadEarlyData:
         early_data = b"test_early_data"
         certhashes = [b"cert1", b"cert2"]
 
-        ext = NoiseExtensions(
-            webtransport_certhashes=certhashes,
-            early_data=early_data
-        )
+        ext = NoiseExtensions(webtransport_certhashes=certhashes, early_data=early_data)
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
             early_data=None,  # No legacy early data
-            extensions=ext
+            extensions=ext,
         )
 
         # Serialize and deserialize
@@ -108,7 +99,7 @@ class TestNoiseHandshakePayloadEarlyData:
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
             early_data=early_data,
-            extensions=None
+            extensions=None,
         )
 
         # Serialize and deserialize
@@ -130,7 +121,7 @@ class TestNoiseHandshakePayloadEarlyData:
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
             early_data=legacy_early_data,
-            extensions=ext
+            extensions=ext,
         )
 
         # Serialize and deserialize
@@ -150,15 +141,14 @@ class TestNoiseHandshakePayloadEarlyData:
         certhashes = [b"cert1", b"cert2"]
 
         ext = NoiseExtensions(
-            webtransport_certhashes=certhashes,
-            early_data=extension_early_data
+            webtransport_certhashes=certhashes, early_data=extension_early_data
         )
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
             early_data=legacy_early_data,  # This should be ignored
-            extensions=ext
+            extensions=ext,
         )
 
         # Serialize and deserialize
@@ -185,7 +175,7 @@ class TestPatternEarlyDataIntegration:
             local_peer,
             libp2p_keypair.private_key,
             noise_keypair.private_key,
-            early_data=b"pattern_early_data"
+            early_data=b"pattern_early_data",
         )
 
         return pattern, libp2p_keypair, noise_keypair
@@ -219,7 +209,7 @@ class TestPatternEarlyDataIntegration:
             local_peer2,
             libp2p_keypair2.private_key,
             noise_keypair2.private_key,
-            early_data=None
+            early_data=None,
         )
 
         certhashes = [b"cert1", b"cert2"]
@@ -277,9 +267,7 @@ class TestBackwardCompatibility:
 
         # Create payload the old way
         payload = NoiseHandshakePayload(
-            id_pubkey=key_pair.public_key,
-            id_sig=b"test_sig",
-            early_data=early_data
+            id_pubkey=key_pair.public_key, id_sig=b"test_sig", early_data=early_data
         )
 
         # Serialize and deserialize
@@ -300,7 +288,7 @@ class TestBackwardCompatibility:
             local_peer,
             libp2p_keypair.private_key,
             noise_keypair.private_key,
-            early_data=b"legacy_early_data"
+            early_data=b"legacy_early_data",
         )
 
         # Create payload without extensions (legacy way)
@@ -322,7 +310,7 @@ class TestBackwardCompatibility:
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
             early_data=early_data,
-            extensions=ext
+            extensions=ext,
         )
 
         # Serialize and deserialize

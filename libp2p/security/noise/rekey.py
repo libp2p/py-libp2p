@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 import time
-from typing import Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -114,7 +114,7 @@ class CompositeRekeyPolicy(RekeyPolicy):
 class RekeyManager:
     """Manager for rekey operations in Noise sessions."""
 
-    def __init__(self, policy: Optional[RekeyPolicy] = None):
+    def __init__(self, policy: RekeyPolicy | None = None):
         """
         Initialize with an optional rekey policy.
 
@@ -122,10 +122,12 @@ class RekeyManager:
             policy: Rekey policy to use
 
         """
-        self.policy = policy or CompositeRekeyPolicy([
-            TimeBasedRekeyPolicy(max_time_seconds=3600),  # 1 hour
-            ByteCountRekeyPolicy(max_bytes=1024 * 1024 * 1024),  # 1GB
-        ])
+        self.policy = policy or CompositeRekeyPolicy(
+            [
+                TimeBasedRekeyPolicy(max_time_seconds=3600),  # 1 hour
+                ByteCountRekeyPolicy(max_bytes=1024 * 1024 * 1024),  # 1GB
+            ]
+        )
 
         self._last_rekey_time = time.time()
         self._bytes_since_rekey = 0
@@ -200,7 +202,7 @@ class RekeyHandler:
     """Handler for managing rekey operations in Noise sessions."""
 
     def __init__(
-        self, session: RekeyableSession, rekey_manager: Optional[RekeyManager] = None
+        self, session: RekeyableSession, rekey_manager: RekeyManager | None = None
     ):
         """
         Initialize with a rekeyable session and optional rekey manager.

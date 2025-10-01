@@ -6,7 +6,6 @@ from libp2p.abc import (
 from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
-    PublicKey,
 )
 from libp2p.custom_types import (
     TProtocol,
@@ -20,7 +19,6 @@ from .patterns import (
     IPattern,
     PatternXX,
 )
-from .patterns_ik import PatternIK
 from .rekey import RekeyManager, RekeyPolicy
 from .webtransport import WebTransportSupport
 
@@ -38,7 +36,6 @@ class Transport(ISecureTransport):
     webtransport_support: WebTransportSupport
     early_data_manager: EarlyDataManager
     rekey_manager: RekeyManager
-    _static_key_cache: dict[ID, PublicKey]  # Cache for IK pattern
 
     def __init__(
         self,
@@ -71,71 +68,22 @@ class Transport(ISecureTransport):
         self.webtransport_support = WebTransportSupport()
         self.early_data_manager = EarlyDataManager(early_data_handler)
         self.rekey_manager = RekeyManager(rekey_policy)
-        self._static_key_cache = {}
 
-        if self.with_noise_pipes:
-            # Noise pipes are now supported with IK pattern
-            pass
-
-    def get_pattern(self, remote_peer: ID | None = None) -> IPattern:
+    def get_pattern(self) -> IPattern:
         """
-        Get the appropriate handshake pattern for the connection.
-
-        Args:
-            remote_peer: Remote peer ID (used for IK pattern selection)
+        Get the handshake pattern for the connection.
 
         Returns:
-            IPattern: The handshake pattern to use
+            IPattern: The XX handshake pattern
 
         """
-        if self.with_noise_pipes and remote_peer is not None:
-            # Check if we have a cached static key for IK pattern
-            if remote_peer in self._static_key_cache:
-                remote_static_key = self._static_key_cache[remote_peer]
-                return PatternIK(
-                    self.local_peer,
-                    self.libp2p_privkey,
-                    self.noise_privkey,
-                    self.early_data,
-                    remote_peer,
-                    remote_static_key,
-                )
-
-        # Default to XX pattern
+        # Always use XX pattern (IK pattern has been deprecated)
         return PatternXX(
             self.local_peer,
             self.libp2p_privkey,
             self.noise_privkey,
             self.early_data,
         )
-
-    def cache_static_key(self, peer_id: ID, static_key: PublicKey) -> None:
-        """
-        Cache a static key for IK pattern optimization.
-
-        Args:
-            peer_id: Peer ID
-            static_key: Static public key
-
-        """
-        self._static_key_cache[peer_id] = static_key
-
-    def get_cached_static_key(self, peer_id: ID) -> PublicKey | None:
-        """
-        Get a cached static key for a peer.
-
-        Args:
-            peer_id: Peer ID
-
-        Returns:
-            Optional[PublicKey]: Cached static key if available
-
-        """
-        return self._static_key_cache.get(peer_id)
-
-    def clear_static_key_cache(self) -> None:
-        """Clear the static key cache."""
-        self._static_key_cache.clear()
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """
@@ -169,17 +117,11 @@ class Transport(ISecureTransport):
             ISecureConn: Secure connection
 
         """
-        pattern = self.get_pattern(peer_id)
+        pattern = self.get_pattern()
         secure_conn = await pattern.handshake_outbound(conn, peer_id)
 
         # Handle early data if present
         if hasattr(pattern, "early_data") and pattern.early_data is not None:
             await self.early_data_manager.handle_early_data(pattern.early_data)
-
-        # Cache static key if we learned it during handshake
-        if isinstance(pattern, PatternXX) and hasattr(
-            secure_conn, "remote_permanent_pubkey"
-        ):
-            self.cache_static_key(peer_id, secure_conn.remote_permanent_pubkey)
 
         return secure_conn

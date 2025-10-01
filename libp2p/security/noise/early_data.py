@@ -1,8 +1,13 @@
 """Early data handlers for Noise protocol."""
 
-from abc import ABC, abstractmethod
-import asyncio
-from typing import Optional, Protocol, runtime_checkable
+from abc import (
+    ABC,
+    abstractmethod,
+)
+from typing import (
+    Protocol,
+    runtime_checkable,
+)
 
 
 @runtime_checkable
@@ -74,6 +79,7 @@ class LoggingEarlyDataHandler(AsyncEarlyDataHandler):
 
         """
         import logging
+
         logger = logging.getLogger(self.logger_name)
         logger.info(f"Received early data: {len(data)} bytes")
         logger.debug(f"Early data content: {data}")
@@ -156,9 +162,11 @@ class CallbackEarlyDataHandler(AsyncEarlyDataHandler):
             Exception: If the callback raises an exception
 
         """
-        if asyncio.iscoroutinefunction(self.callback):
+        # Try to call as async, fall back to sync if needed
+        try:
             await self.callback(data)
-        else:
+        except TypeError:
+            # Handler is sync, call directly
             self.callback(data)
 
 
@@ -187,9 +195,11 @@ class CompositeEarlyDataHandler(AsyncEarlyDataHandler):
 
         """
         for handler in self.handlers:
-            if asyncio.iscoroutinefunction(handler.handle_early_data):
+            # Try to call as async, fall back to sync if needed
+            try:
                 await handler.handle_early_data(data)
-            else:
+            except TypeError:
+                # Handler is sync, call directly
                 handler.handle_early_data(data)
 
     def add_handler(self, handler: EarlyDataHandler) -> None:
@@ -217,7 +227,7 @@ class CompositeEarlyDataHandler(AsyncEarlyDataHandler):
 class EarlyDataManager:
     """Manager for early data handling in Noise protocol."""
 
-    def __init__(self, handler: Optional[EarlyDataHandler] = None):
+    def __init__(self, handler: EarlyDataHandler | None = None):
         """
         Initialize with an optional early data handler.
 
@@ -227,7 +237,7 @@ class EarlyDataManager:
         """
         self.handler = handler
         self._early_data_received = False
-        self._early_data_buffer: Optional[bytes] = None
+        self._early_data_buffer: bytes | None = None
 
     async def handle_early_data(self, data: bytes) -> None:
         """
@@ -241,9 +251,11 @@ class EarlyDataManager:
         self._early_data_buffer = data
 
         if self.handler is not None:
-            if asyncio.iscoroutinefunction(self.handler.handle_early_data):
+            # Try to call as async, fall back to sync if needed
+            try:
                 await self.handler.handle_early_data(data)
-            else:
+            except TypeError:
+                # Handler is sync, call directly
                 self.handler.handle_early_data(data)
 
     def has_early_data(self) -> bool:
@@ -256,7 +268,7 @@ class EarlyDataManager:
         """
         return self._early_data_received
 
-    def get_early_data(self) -> Optional[bytes]:
+    def get_early_data(self) -> bytes | None:
         """
         Get the received early data.
 
