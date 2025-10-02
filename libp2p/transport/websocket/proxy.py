@@ -4,10 +4,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 try:
-    import aiohttp
-    import socks
-    from websockets.client import connect as ws_connect
-    from websockets.exceptions import WebSocketException
+    import aiohttp  # type: ignore
+    import socks  # type: ignore
+    from websockets.client import connect as ws_connect  # type: ignore
+    from websockets.exceptions import WebSocketException  # type: ignore
 except ImportError:
     # Optional dependencies - aiohttp, socks, websockets packages not installed
     aiohttp = None  # type: ignore
@@ -132,6 +132,8 @@ class SOCKSConnectionManager:
 
         # Type guard to ensure socks is not None
         assert socks is not None
+        # Additional type guard for the constants
+        assert hasattr(socks, "SOCKS4") and hasattr(socks, "SOCKS5")
         return {
             "type": {socks.SOCKS4: "SOCKS4", socks.SOCKS5: "SOCKS5"}[self.proxy_type],
             "host": self.proxy_host,
