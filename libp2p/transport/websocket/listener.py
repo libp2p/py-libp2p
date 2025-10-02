@@ -7,8 +7,13 @@ from typing import Any
 from multiaddr import Multiaddr
 import trio
 from trio_websocket import WebSocketConnection, serve_websocket
-from websockets.legacy.server import WebSocketRequest
-from websockets.server import WebSocketServer
+try:
+    from websockets.legacy.server import WebSocketRequest
+    from websockets.server import WebSocketServer
+except ImportError:
+    # Optional dependency - websockets package not installed
+    WebSocketRequest = None  # type: ignore
+    WebSocketServer = None  # type: ignore
 
 from libp2p.abc import IListener
 from libp2p.transport.exceptions import OpenConnectionError
