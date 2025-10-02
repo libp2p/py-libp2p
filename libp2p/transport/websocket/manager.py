@@ -2,7 +2,7 @@
 
 from datetime import datetime
 import logging
-from typing import Dict, Optional, Set
+from typing import Any
 
 import trio
 
@@ -24,40 +24,39 @@ class WebSocketConnectionManager:
         self,
         max_connections: int = 1000,
         inactive_timeout: float = 300.0,  # 5 minutes
-        cleanup_interval: float = 60.0,   # 1 minute
+        cleanup_interval: float = 60.0,  # 1 minute
     ):
         self.max_connections = max_connections
         self.inactive_timeout = inactive_timeout
         self.cleanup_interval = cleanup_interval
 
-        self._connections: Dict[str, P2PWebSocketConnection] = {}
-        self._nursery = None
+        self._connections: dict[str, P2PWebSocketConnection] = {}
+        self._nursery: trio.Nursery | None = None
         self._lock = trio.Lock()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "WebSocketConnectionManager":
         """Context manager entry."""
-        self._nursery = trio.open_nursery()
-        await self._nursery.start(self._cleanup_loop)
+        async with trio.open_nursery() as nursery:
+            self._nursery = nursery
+            nursery.start_soon(self._cleanup_loop)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         if self._nursery:
             self._nursery.cancel_scope.cancel()
             self._nursery = None
 
     async def add_connection(
-        self,
-        conn_id: str,
-        connection: P2PWebSocketConnection
+        self, conn_id: str, connection: P2PWebSocketConnection
     ) -> None:
         """
         Add a new connection to the manager.
-        
+
         Args:
             conn_id: Unique connection identifier
             connection: WebSocket connection instance
-            
+
         Raises:
             RuntimeError: If maximum connections reached
 
@@ -69,12 +68,14 @@ class WebSocketConnectionManager:
                 )
 
             self._connections[conn_id] = connection
-            logger.info("Added connection %s, total: %d", conn_id, len(self._connections))
+            logger.info(
+                "Added connection %s, total: %d", conn_id, len(self._connections)
+            )
 
     async def remove_connection(self, conn_id: str) -> None:
         """
         Remove a connection from the manager.
-        
+
         Args:
             conn_id: Connection identifier to remove
 
@@ -86,56 +87,54 @@ class WebSocketConnectionManager:
                 logger.info(
                     "Removed connection %s, remaining: %d",
                     conn_id,
-                    len(self._connections)
+                    len(self._connections),
                 )
 
-    async def get_connection(self, conn_id: str) -> Optional[P2PWebSocketConnection]:
+    async def get_connection(self, conn_id: str) -> P2PWebSocketConnection | None:
         """
         Get a connection by ID.
-        
+
         Args:
             conn_id: Connection identifier
-            
+
         Returns:
             Optional[P2PWebSocketConnection]: Connection if found, None otherwise
 
         """
         return self._connections.get(conn_id)
 
-    def get_active_connections(self) -> Set[str]:
+    def get_active_connections(self) -> set[str]:
         """
         Get IDs of all active (non-closed) connections.
-        
+
         Returns:
             Set[str]: Set of active connection IDs
 
         """
         return {
-            conn_id
-            for conn_id, conn in self._connections.items()
-            if not conn._closed
+            conn_id for conn_id, conn in self._connections.items() if not conn._closed
         }
 
-    def get_connection_stats(self) -> Dict[str, Dict]:
+    def get_connection_stats(self) -> dict[str, dict[str, Any]]:
         """
         Get statistics for all connections.
-        
+
         Returns:
             Dict[str, Dict]: Connection statistics by connection ID
 
         """
         return {
             conn_id: {
-                "stats": conn.stats.__dict__,
+                "stats": conn._stats.__dict__,
                 "active": not conn._closed,
             }
             for conn_id, conn in self._connections.items()
         }
 
-    def get_manager_stats(self) -> Dict:
+    def get_manager_stats(self) -> dict[str, Any]:
         """
         Get overall connection manager statistics.
-        
+
         Returns:
             Dict: Manager statistics
 
@@ -145,24 +144,19 @@ class WebSocketConnectionManager:
             "total_connections": len(self._connections),
             "active_connections": len(active_connections),
             "total_bytes_sent": sum(
-                conn.stats.bytes_sent
-                for conn in self._connections.values()
+                conn._bytes_written for conn in self._connections.values()
             ),
             "total_bytes_received": sum(
-                conn.stats.bytes_received
-                for conn in self._connections.values()
+                conn._bytes_read for conn in self._connections.values()
             ),
             "total_messages_sent": sum(
-                conn.stats.messages_sent
-                for conn in self._connections.values()
+                conn._stats.messages_sent for conn in self._connections.values()
             ),
             "total_messages_received": sum(
-                conn.stats.messages_received
-                for conn in self._connections.values()
+                conn._stats.messages_received for conn in self._connections.values()
             ),
             "total_errors": sum(
-                conn.stats.errors
-                for conn in self._connections.values()
+                conn._stats.errors for conn in self._connections.values()
             ),
         }
 
@@ -194,8 +188,11 @@ class WebSocketConnectionManager:
 
         async with self._lock:
             for conn_id, conn in self._connections.items():
-                if (conn.stats.last_activity and
-                    (now - conn.stats.last_activity).total_seconds() > self.inactive_timeout):
+                if (
+                    conn._stats.last_activity
+                    and (now - conn._stats.last_activity).total_seconds()
+                    > self.inactive_timeout
+                ):
                     to_remove.append(conn_id)
 
             for conn_id in to_remove:

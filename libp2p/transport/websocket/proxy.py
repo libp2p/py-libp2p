@@ -1,6 +1,5 @@
 import logging
-import socket
-from typing import Optional, Tuple, Union
+from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
@@ -18,14 +17,11 @@ class SOCKSConnectionManager:
     """
 
     def __init__(
-        self,
-        proxy_url: str,
-        auth: Optional[Tuple[str, str]] = None,
-        timeout: float = 10.0
+        self, proxy_url: str, auth: tuple[str, str] | None = None, timeout: float = 10.0
     ):
         """
         Initialize SOCKS proxy manager.
-        
+
         Args:
             proxy_url: SOCKS proxy URL (socks5://host:port)
             auth: Optional (username, password) tuple
@@ -51,26 +47,26 @@ class SOCKSConnectionManager:
             "socks4": socks.SOCKS4,
             "socks4a": socks.SOCKS4,
             "socks5": socks.SOCKS5,
-            "socks5h": socks.SOCKS5
+            "socks5h": socks.SOCKS5,
         }[scheme]
 
     async def create_connection(
         self,
         host: str,
         port: int,
-        ssl_context: Optional[Union[bool, aiohttp.ClientSSLContext]] = None
+        ssl_context: bool | aiohttp.ClientSSLContext | None = None,
     ) -> aiohttp.ClientWebSocketResponse:
         """
         Create a WebSocket connection through SOCKS proxy.
-        
+
         Args:
             host: Target WebSocket host
             port: Target WebSocket port
             ssl_context: Optional SSL context for WSS
-            
+
         Returns:
             WebSocket connection
-            
+
         Raises:
             WebSocketException: If connection fails
 
@@ -85,7 +81,7 @@ class SOCKSConnectionManager:
                 addr=self.proxy_host,
                 port=self.proxy_port,
                 username=self.auth[0] if self.auth else None,
-                password=self.auth[1] if self.auth else None
+                password=self.auth[1] if self.auth else None,
             )
 
             # Connect with timeout
@@ -97,24 +93,21 @@ class SOCKSConnectionManager:
                 f"{'wss' if ssl_context else 'ws'}://{host}:{port}",
                 sock=sock,
                 ssl=ssl_context,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
 
             return ws
 
-        except (socket.error, socks.ProxyConnectionError) as e:
+        except (OSError, socks.ProxyConnectionError) as e:
             raise WebSocketException(f"SOCKS proxy connection failed: {str(e)}")
         except Exception as e:
             raise WebSocketException(f"WebSocket connection failed: {str(e)}")
 
-    def get_proxy_info(self) -> dict:
+    def get_proxy_info(self) -> dict[str, Any]:
         """Get proxy configuration information."""
         return {
-            "type": {
-                socks.SOCKS4: "SOCKS4",
-                socks.SOCKS5: "SOCKS5"
-            }[self.proxy_type],
+            "type": {socks.SOCKS4: "SOCKS4", socks.SOCKS5: "SOCKS5"}[self.proxy_type],
             "host": self.proxy_host,
             "port": self.proxy_port,
-            "has_auth": bool(self.auth)
+            "has_auth": bool(self.auth),
         }
