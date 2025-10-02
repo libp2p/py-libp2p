@@ -200,10 +200,10 @@ async def run_server(port: int):
             logger.info("🔧 Protocol: /echo/1.0.0")
             logger.info("🚀 Transport: WebSocket Secure (WSS)")
             logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info()
+            logger.info("")
             logger.info("📋 To test the connection, run this in another terminal:")
             logger.info(f"   python wss_demo.py -d {client_addr}")
-            logger.info()
+            logger.info("")
             logger.info("⏳ Waiting for incoming WSS connections...")
             logger.info("─" * 50)
 
@@ -237,7 +237,7 @@ async def run_client(destination: str):
             logger.info(f"🎯 Target Peer: {info.peer_id}")
             logger.info(f"📍 Target Address: {destination}")
             logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info()
+            logger.info("")
 
             try:
                 logger.info("🔗 Connecting to WSS server...")
@@ -291,13 +291,13 @@ async def run_client(destination: str):
                 except Exception:
                     pass
 
-                logger.info()
+                logger.info("")
                 logger.info("🎉 WSS Demo Completed Successfully!")
                 logger.info("=" * 50)
                 logger.info("✅ WSS transport is working perfectly!")
                 logger.info("✅ Echo protocol communication successful!")
                 logger.info("✅ libp2p integration verified!")
-                logger.info()
+                logger.info("")
                 logger.info("🚀 Your WSS transport is ready for production use!")
 
     except KeyboardInterrupt:

@@ -177,8 +177,8 @@ async def chat_handler(stream):
 
 def create_websocket_host(
     use_wss=False,
-    proxy_url=None,
-    proxy_auth=None,
+    proxy_url: str | None = None,
+    proxy_auth: tuple | None = None,
     server_context=None,
     client_context=None,
 ):
@@ -282,7 +282,7 @@ async def run_server(port: int, use_wss: bool = False, proxy_url: str = None):
             else:
                 logger.info("🔒 Proxy: None (Direct connection)")
             logger.info(f"👤 Server Peer ID: {host.get_id()}")
-            logger.info()
+            logger.info("")
             logger.info("📋 To test the connection, run:")
             if use_wss:
                 logger.info(
@@ -297,7 +297,7 @@ async def run_server(port: int, use_wss: bool = False, proxy_url: str = None):
                     f"   python websocket_comprehensive_demo.py -c {client_addr} "
                     f"--proxy {proxy_url}"
                 )
-            logger.info()
+            logger.info("")
             logger.info("⏳ Waiting for connections...")
             logger.info("─" * 60)
 
@@ -314,8 +314,8 @@ async def run_server(port: int, use_wss: bool = False, proxy_url: str = None):
 async def run_client(
     destination: str,
     use_wss: bool = False,
-    proxy_url: str = None,
-    proxy_auth: tuple = None,
+    proxy_url: str | None = None,
+    proxy_auth: tuple | None = None,
 ):
     """Run WebSocket client with advanced features."""
     logger.info("🔌 Starting Comprehensive WebSocket Client...")
@@ -360,7 +360,7 @@ async def run_client(
                     logger.info(f"🔐 Proxy Auth: {proxy_auth[0]}:***")
             else:
                 logger.info("🔒 Proxy: None (Direct connection)")
-            logger.info()
+            logger.info("")
 
             try:
                 logger.info("🔗 Connecting to WebSocket server...")
@@ -409,14 +409,14 @@ async def run_client(
             except Exception as e:
                 logger.error(f"❌ Chat protocol error: {e}")
 
-            logger.info()
+            logger.info("")
             logger.info("🎉 Comprehensive WebSocket Demo Completed Successfully!")
             logger.info("=" * 60)
             logger.info("✅ All WebSocket transport features working!")
             logger.info("✅ Echo protocol communication successful!")
             logger.info("✅ Chat protocol communication successful!")
             logger.info("✅ Advanced features verified!")
-            logger.info()
+            logger.info("")
             logger.info(
                 "🚀 Your comprehensive WebSocket transport is ready for production!"
             )

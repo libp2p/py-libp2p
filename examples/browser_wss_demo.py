@@ -421,10 +421,10 @@ async def run_server(port: int, web_port: int):
             logger.info("🚀 Transport: WebSocket Secure (WSS)")
             logger.info("🔐 Security: TLS with self-signed certificate")
             logger.info(f"👤 Peer ID: {peer_id}")
-            logger.info()
+            logger.info("")
             logger.info("📋 Open your browser and go to:")
             logger.info(f"   http://localhost:{web_port}")
-            logger.info()
+            logger.info("")
             logger.info("⏳ Waiting for browser connections...")
             logger.info("─" * 60)
 

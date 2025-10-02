@@ -19,6 +19,7 @@ import trio
 from libp2p import create_yamux_muxer_option, new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -36,7 +37,7 @@ CHAT_PROTOCOL_ID = TProtocol("/chat/1.0.0")
 class ChatMessage:
     """Represents a chat message."""
 
-    def __init__(self, sender: str, content: str, timestamp: float = None):
+    def __init__(self, sender: str, content: str, timestamp: float | None = None):
         self.sender = sender
         self.content = content
         self.timestamp = timestamp or time.time()
@@ -135,7 +136,11 @@ class ChatServer:
 
             await stream.close()
 
-    async def broadcast_message(self, message: ChatMessage, exclude_peer: str = None):
+    async def broadcast_message(
+        self,
+        message: ChatMessage,
+        exclude_peer: str | None = None,
+    ):
         """Broadcast message to all connected peers."""
         # In a real implementation, you'd maintain a list of active streams
         # For this demo, we'll just log the broadcast
@@ -149,7 +154,7 @@ class ChatClient:
     def __init__(self, host, server_address: str):
         self.host = host
         self.server_address = server_address
-        self.server_peer_id = None
+        self.server_peer_id: ID | None = None
 
     async def connect_to_server(self):
         """Connect to the chat server."""
@@ -238,10 +243,10 @@ async def run_server(port: int):
         logger.info("🔧 Protocol: /chat/1.0.0")
         logger.info("🚀 Transport: WebSocket (/ws)")
         logger.info(f"👤 Server Peer ID: {host.get_id()}")
-        logger.info()
+        logger.info("")
         logger.info("📋 To connect clients, run:")
         logger.info(f"   python main.py -c {client_addr}")
-        logger.info()
+        logger.info("")
         logger.info("⏳ Waiting for chat connections...")
         logger.info("─" * 50)
 
