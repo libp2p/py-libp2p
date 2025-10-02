@@ -1,4 +1,5 @@
 import logging
+import ssl
 from typing import Any
 from urllib.parse import urlparse
 
@@ -52,6 +53,8 @@ class SOCKSConnectionManager:
         """Get SOCKS type from scheme."""
         if socks is None:
             raise ImportError("SOCKS proxy support requires PySocks package")
+        # Type guard to ensure socks is not None
+        assert socks is not None
         return {
             "socks4": socks.SOCKS4,
             "socks4a": socks.SOCKS4,
@@ -63,8 +66,8 @@ class SOCKSConnectionManager:
         self,
         host: str,
         port: int,
-        ssl_context: bool | aiohttp.ClientSSLContext | None = None,
-    ) -> aiohttp.ClientWebSocketResponse:
+        ssl_context: bool | ssl.SSLContext | None = None,
+    ) -> Any:
         """
         Create a WebSocket connection through SOCKS proxy.
 
@@ -119,6 +122,16 @@ class SOCKSConnectionManager:
 
     def get_proxy_info(self) -> dict[str, Any]:
         """Get proxy configuration information."""
+        if socks is None:
+            return {
+                "type": "Unknown (SOCKS not available)",
+                "host": self.proxy_host,
+                "port": self.proxy_port,
+                "has_auth": bool(self.auth),
+            }
+
+        # Type guard to ensure socks is not None
+        assert socks is not None
         return {
             "type": {socks.SOCKS4: "SOCKS4", socks.SOCKS5: "SOCKS5"}[self.proxy_type],
             "host": self.proxy_host,
