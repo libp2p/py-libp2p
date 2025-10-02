@@ -180,7 +180,7 @@ def create_websocket_host(
     proxy_url=None,
     proxy_auth=None,
     server_context=None,
-    client_context=None
+    client_context=None,
 ):
     """Create a host with WebSocket transport and advanced configuration."""
     # Create key pair
@@ -247,9 +247,7 @@ async def run_server(port: int, use_wss: bool = False, proxy_url: str = None):
     try:
         # Create host with advanced configuration
         host = create_websocket_host(
-            use_wss=use_wss,
-            proxy_url=proxy_url,
-            server_context=server_context
+            use_wss=use_wss, proxy_url=proxy_url, server_context=server_context
         )
 
         # Set up handlers
@@ -340,7 +338,7 @@ async def run_client(
             use_wss=use_wss,
             proxy_url=proxy_url,
             proxy_auth=proxy_auth,
-            client_context=client_context
+            client_context=client_context,
         )
 
         # Start the host
@@ -448,8 +446,10 @@ def main():
         "--proxy", type=str, help="SOCKS proxy URL (e.g., socks5://127.0.0.1:1080)"
     )
     parser.add_argument(
-        "--proxy-auth", nargs=2, metavar=("USERNAME", "PASSWORD"),
-        help="Proxy authentication (username password)"
+        "--proxy-auth",
+        nargs=2,
+        metavar=("USERNAME", "PASSWORD"),
+        help="Proxy authentication (username password)",
     )
 
     args = parser.parse_args()

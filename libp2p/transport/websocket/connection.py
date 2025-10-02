@@ -166,6 +166,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
     async def _start_keepalive(self) -> None:
         """Start keepalive ping/pong."""
+
         async def keepalive_loop() -> None:
             while not self._closed:
                 try:
@@ -243,7 +244,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
                 # Return up to n bytes
                 result = self._read_buffer[:n]
-                self._read_buffer = self._read_buffer[len(result):]
+                self._read_buffer = self._read_buffer[len(result) :]
                 self._bytes_read += len(result)
                 return result
 
@@ -269,9 +270,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
             try:
                 logger.debug(f"WebSocket writing {len(data)} bytes")
 
-                        # Check buffer amount for flow control
-                        # Note: trio-websocket doesn't expose bufferedAmount directly
-                        # This is a placeholder for future flow control implementation
+                # Check buffer amount for flow control
+                # Note: trio-websocket doesn't expose bufferedAmount directly
+                # This is a placeholder for future flow control implementation
 
                 # Send as a binary WebSocket message
                 await self._ws_connection.send_message(data)

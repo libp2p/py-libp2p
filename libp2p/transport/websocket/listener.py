@@ -7,6 +7,7 @@ from typing import Any
 from multiaddr import Multiaddr
 import trio
 from trio_websocket import WebSocketConnection, serve_websocket
+
 try:
     from websockets.legacy.server import WebSocketRequest
     from websockets.server import WebSocketServer

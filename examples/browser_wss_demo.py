@@ -399,9 +399,9 @@ async def run_server(port: int, web_port: int):
 
             class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 def do_GET(self):
-                    if self.path == '/' or self.path == '/index.html':
+                    if self.path == "/" or self.path == "/index.html":
                         self.send_response(200)
-                        self.send_header('Content-type', 'text/html')
+                        self.send_header("Content-type", "text/html")
                         self.end_headers()
                         self.wfile.write(html_content.encode())
                     else:
@@ -446,8 +446,11 @@ def main():
         "-p", "--port", default=8443, type=int, help="WSS server port (default: 8443)"
     )
     parser.add_argument(
-        "-w", "--web-port", default=8080, type=int,
-        help="Web interface port (default: 8080)"
+        "-w",
+        "--web-port",
+        default=8080,
+        type=int,
+        help="Web interface port (default: 8080)",
     )
 
     args = parser.parse_args()

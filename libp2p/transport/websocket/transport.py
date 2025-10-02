@@ -263,15 +263,13 @@ class WebsocketTransport(ITransport):
 
             # Extract host and port from the rest_multiaddr
             host = (
-            proto_info.rest_multiaddr.value_for_protocol("ip4")
-            or proto_info.rest_multiaddr.value_for_protocol("ip6")
-            or "localhost"
-        )
+                proto_info.rest_multiaddr.value_for_protocol("ip4")
+                or proto_info.rest_multiaddr.value_for_protocol("ip6")
+                or "localhost"
+            )
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
-            logger.debug(
-                f"Connecting through SOCKS proxy to {host}:{port}"
-            )
+            logger.debug(f"Connecting through SOCKS proxy to {host}:{port}")
 
             # Create connection through proxy
             ws_connection = await proxy_manager.create_connection(
@@ -368,6 +366,7 @@ class WebsocketTransport(ITransport):
 
             # Create the listener
             from .listener import WebsocketListenerConfig
+
             config = WebsocketListenerConfig(
                 tls_config=ssl_context,
                 max_connections=self._config.max_connections,
@@ -428,6 +427,7 @@ class WebsocketTransport(ITransport):
         """
         logger.debug("WebsocketTransport.create_listener called")
         from .listener import WebsocketListenerConfig
+
         return WebsocketListener(
             handler,
             self._upgrader,

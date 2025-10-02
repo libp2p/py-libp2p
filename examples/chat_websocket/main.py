@@ -12,7 +12,6 @@ This is a complete end-to-end chat application demonstrating:
 import argparse
 import logging
 import time
-from typing import List, Set
 
 from multiaddr import Multiaddr
 import trio
@@ -45,10 +44,11 @@ class ChatMessage:
     def to_bytes(self) -> bytes:
         """Serialize message to bytes."""
         import json
+
         data = {
             "sender": self.sender,
             "content": self.content,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
         }
         return json.dumps(data).encode()
 
@@ -56,11 +56,10 @@ class ChatMessage:
     def from_bytes(cls, data: bytes) -> "ChatMessage":
         """Deserialize message from bytes."""
         import json
+
         obj = json.loads(data.decode())
         return cls(
-            sender=obj["sender"],
-            content=obj["content"],
-            timestamp=obj["timestamp"]
+            sender=obj["sender"], content=obj["content"], timestamp=obj["timestamp"]
         )
 
     def __str__(self) -> str:
@@ -74,8 +73,8 @@ class ChatServer:
     def __init__(self, host, port: int):
         self.host = host
         self.port = port
-        self.connected_peers: Set[str] = set()
-        self.message_history: List[ChatMessage] = []
+        self.connected_peers: set[str] = set()
+        self.message_history: list[ChatMessage] = []
 
     async def handle_chat_stream(self, stream):
         """Handle incoming chat stream."""
@@ -128,7 +127,7 @@ class ChatServer:
             logger.error(f"Error handling chat stream: {e}")
         finally:
             # Remove peer from connected list
-            if hasattr(stream, 'muxed_conn') and hasattr(stream.muxed_conn, 'peer_id'):
+            if hasattr(stream, "muxed_conn") and hasattr(stream.muxed_conn, "peer_id"):
                 peer_id = str(stream.muxed_conn.peer_id)
                 self.connected_peers.discard(peer_id)
                 logger.info(f"👤 Peer disconnected: {peer_id}")
@@ -278,7 +277,7 @@ async def run_client(server_address: str):
                 # Get user input
                 message = input("You: ").strip()
 
-                if message.lower() == 'quit':
+                if message.lower() == "quit":
                     logger.info("👋 Goodbye!")
                     break
 
