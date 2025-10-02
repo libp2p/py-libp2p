@@ -618,7 +618,7 @@ async def test_websocket_data_exchange():
         key_pair=key_pair_a,
         sec_opt=security_options_a,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
     )
 
     # Host B (dialer)
@@ -631,7 +631,7 @@ async def test_websocket_data_exchange():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # WebSocket transport
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # WebSocket transport
     )
 
     # Test data

@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import logging
 import ssl
 import time
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class WebSocketStats:
     """Statistics for a WebSocket connection."""
 
-    created_at: datetime = datetime.utcnow()
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     bytes_sent: int = 0
     bytes_received: int = 0
     messages_sent: int = 0
@@ -34,7 +34,7 @@ class WebSocketStats:
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        self.last_activity = datetime.utcnow()
+        self.last_activity = datetime.now(timezone.utc)
 
     def record_error(self, error: str) -> None:
         """Record an error occurrence."""

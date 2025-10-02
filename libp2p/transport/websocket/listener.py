@@ -38,6 +38,7 @@ class WebsocketListenerConfig:
     max_message_size: int = 32 * 1024 * 1024  # 32MB
 
     # Timeouts
+    handshake_timeout: float = 15.0
     ping_interval: float = 20.0
     ping_timeout: float = 10.0
     close_timeout: float = 5.0
@@ -73,6 +74,9 @@ class WebsocketListener(IListener):
         self._handler = handler
         self._upgrader = upgrader
         self._config = config or WebsocketListenerConfig()
+
+        # Configuration attributes for test access
+        self._handshake_timeout = self._config.handshake_timeout
 
         # Connection tracking
         self._connections: dict[str, P2PWebSocketConnection] = {}
@@ -149,13 +153,27 @@ class WebsocketListener(IListener):
             )
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
-            # Create WebSocket server
-            self._server = await serve_websocket(
-                handler=self._handle_websocket_request,
-                host=host,
-                port=port,
-                ssl_context=self._tls_config,
-            )
+            # Create WebSocket server using nursery.start pattern
+            async def websocket_server_task(task_status: trio.TaskStatus) -> None:
+                """Run the WebSocket server."""
+                try:
+                    # Use trio_websocket's serve_websocket
+                    from trio_websocket import serve_websocket
+                    
+                    # Create the server
+                    await serve_websocket(
+                        handler=self._handle_websocket_connection,
+                        host=host,
+                        port=port,
+                        ssl_context=self._tls_config,
+                        task_status=task_status,
+                    )
+                except Exception as e:
+                    logger.error(f"WebSocket server error: {e}")
+                    raise
+
+            # Start the server in the nursery
+            await nursery.start(websocket_server_task)
 
             self._listen_maddr = maddr
             logger.info(f"WebSocket listener started on {maddr}")
@@ -165,17 +183,14 @@ class WebsocketListener(IListener):
             logger.error(f"Failed to start WebSocket listener: {e}")
             raise OpenConnectionError(f"Failed to listen on {maddr}: {str(e)}")
 
-    async def _handle_websocket_request(self, request: Any) -> None:
-        """Handle incoming WebSocket request."""
-        if WebSocketRequest is None:
-            logger.error("websockets package not installed, cannot handle request")
-            return
+    async def _handle_websocket_connection(self, request: Any) -> None:
+        """Handle incoming WebSocket connection from trio_websocket."""
         try:
-            # Accept the WebSocket connection
-            ws = await request.accept()
+            # trio_websocket provides the connection directly
+            ws = request if hasattr(request, 'send_message') else await request.accept()
             await self._handle_connection(ws)
         except Exception as e:
-            logger.error(f"Error handling WebSocket request: {e}")
+            logger.error(f"Error handling WebSocket connection: {e}")
 
     async def _handle_connection(self, ws: WebSocketConnection) -> None:
         """Handle incoming WebSocket connection."""
