@@ -93,6 +93,9 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 import libp2p.security.secio.transport as secio
+from libp2p.service import (
+    background_trio_service,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
@@ -103,9 +106,6 @@ from libp2p.stream_muxer.mplex.mplex_stream import (
 from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
-)
-from libp2p.tools.async_service import (
-    background_trio_service,
 )
 from libp2p.tools.constants import (
     FLOODSUB_PROTOCOL_ID,

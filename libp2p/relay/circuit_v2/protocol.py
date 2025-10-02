@@ -30,12 +30,12 @@ from libp2p.io.abc import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.service import (
+    Service,
+)
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
-)
-from libp2p.tools.async_service import (
-    Service,
 )
 
 from .config import (

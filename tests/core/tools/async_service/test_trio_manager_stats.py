@@ -1,10 +1,10 @@
 import pytest
 import trio
 
-from libp2p.tools.async_service import (
+from libp2p.service import (
     Service,
+    TrioManager,
 )
-from libp2p.tools.async_service.trio_service import TrioManager
 
 
 @pytest.mark.trio

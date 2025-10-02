@@ -19,7 +19,7 @@ from libp2p.relay.circuit_v2.protocol import (
     DEFAULT_RELAY_LIMITS,
     CircuitV2Protocol,
 )
-from libp2p.tools.async_service import (
+from libp2p.service import (
     background_trio_service,
 )
 from tests.utils.factories import (

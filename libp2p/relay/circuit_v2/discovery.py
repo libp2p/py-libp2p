@@ -27,7 +27,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
-from libp2p.tools.async_service import (
+from libp2p.service import (
     Service,
 )
 

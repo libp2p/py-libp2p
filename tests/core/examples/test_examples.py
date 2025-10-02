@@ -23,7 +23,7 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
-from libp2p.tools.async_service.trio_service import (
+from libp2p.service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (

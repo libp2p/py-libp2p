@@ -13,7 +13,7 @@ from libp2p.relay.circuit_v2.dcutr import (
     DCUtRProtocol,
 )
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import HolePunch
-from libp2p.tools.async_service import background_trio_service
+from libp2p.service import background_trio_service
 
 logger = logging.getLogger(__name__)
 

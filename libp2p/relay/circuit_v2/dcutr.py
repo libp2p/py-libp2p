@@ -40,7 +40,7 @@ from libp2p.relay.circuit_v2.nat import (
 from libp2p.relay.circuit_v2.pb.dcutr_pb2 import (
     HolePunch,
 )
-from libp2p.tools.async_service import (
+from libp2p.service import (
     Service,
 )
 

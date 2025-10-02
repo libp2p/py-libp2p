@@ -23,12 +23,12 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
+from libp2p.service import (
+    background_trio_service,
+)
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
-)
-from libp2p.tools.async_service.trio_service import (
-    background_trio_service,
 )
 from libp2p.utils.address_validation import (
     find_free_port,

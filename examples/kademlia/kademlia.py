@@ -35,7 +35,7 @@ from libp2p.kad_dht.kad_dht import (
 from libp2p.kad_dht.utils import (
     create_key_from_binary,
 )
-from libp2p.tools.async_service import (
+from libp2p.service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (
