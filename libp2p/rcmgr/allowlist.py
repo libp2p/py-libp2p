@@ -1,10 +1,12 @@
 """
 Allowlist implementation for the resource manager.
 
-Only the specific peers and multiaddresses in the allowlist can bypass the resource limits.
+Only the specific peers and multiaddresses in the
+allowlist can bypass the resource limits.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from multiaddr import Multiaddr
 
@@ -30,7 +32,7 @@ class Allowlist:
     - Specific peer-multiaddr combinations
     """
 
-    def __init__(self, config: AllowlistConfig = None):
+    def __init__(self, config: Optional[AllowlistConfig] = None):
         if config is None:
             config = AllowlistConfig()
 

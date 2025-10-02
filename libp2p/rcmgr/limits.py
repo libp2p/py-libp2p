@@ -3,11 +3,18 @@ Resource limits and limiters for the resource manager.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 import sys
 
 from libp2p.custom_types import TProtocol
-from libp2p.network import Direction
 from libp2p.peer.id import ID
+
+
+class Direction(Enum):
+    """Direction of network connections and streams."""
+    
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
 
 # Type alias for clarity
 ProtocolID = TProtocol
