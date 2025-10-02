@@ -2,10 +2,17 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-import aiohttp
-import socks
-from websockets.client import connect as ws_connect
-from websockets.exceptions import WebSocketException
+try:
+    import aiohttp
+    import socks
+    from websockets.client import connect as ws_connect
+    from websockets.exceptions import WebSocketException
+except ImportError:
+    # Optional dependencies - aiohttp, socks, websockets packages not installed
+    aiohttp = None  # type: ignore
+    socks = None  # type: ignore
+    ws_connect = None  # type: ignore
+    WebSocketException = Exception  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +50,8 @@ class SOCKSConnectionManager:
 
     def _get_proxy_type(self, scheme: str) -> int:
         """Get SOCKS type from scheme."""
+        if socks is None:
+            raise ImportError("SOCKS proxy support requires PySocks package")
         return {
             "socks4": socks.SOCKS4,
             "socks4a": socks.SOCKS4,
@@ -71,6 +80,9 @@ class SOCKSConnectionManager:
             WebSocketException: If connection fails
 
         """
+        if socks is None or ws_connect is None:
+            raise ImportError("SOCKS proxy support requires PySocks and websockets packages")
+            
         try:
             # Create SOCKS connection
             sock = socks.socksocket()
