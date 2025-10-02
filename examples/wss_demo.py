@@ -312,8 +312,11 @@ def main():
         description="WSS (WebSocket Secure) Demo - Production-ready WSS example"
     )
     parser.add_argument(
-        "-p", "--port", default=8443, type=int,
-        help="Server port number (default: 8443)"
+        "-p",
+        "--port",
+        default=8443,
+        type=int,
+        help="Server port number (default: 8443)",
     )
     parser.add_argument(
         "-d",

@@ -81,8 +81,10 @@ class SOCKSConnectionManager:
 
         """
         if socks is None or ws_connect is None:
-            raise ImportError("SOCKS proxy support requires PySocks and websockets packages")
-            
+            raise ImportError(
+                "SOCKS proxy support requires PySocks and websockets packages"
+            )
+
         try:
             # Create SOCKS connection
             sock = socks.socksocket()

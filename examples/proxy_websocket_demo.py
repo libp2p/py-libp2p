@@ -119,7 +119,9 @@ async def run_server(port: int):
         logger.info("🔒 Proxy: None (Direct connection)")
         logger.info()
         logger.info("📋 To test with proxy, run:")
-        logger.info(f"   python proxy_websocket_demo.py -c {client_addr} --proxy socks5://127.0.0.1:1080")
+        logger.info(
+            f"   python proxy_websocket_demo.py -c {client_addr} --proxy socks5://127.0.0.1:1080"
+        )
         logger.info()
         logger.info("⏳ Waiting for connections...")
         logger.info("─" * 50)
@@ -231,8 +233,10 @@ def main():
         "--proxy", type=str, help="SOCKS proxy URL (e.g., socks5://127.0.0.1:1080)"
     )
     parser.add_argument(
-        "--proxy-auth", nargs=2, metavar=("USERNAME", "PASSWORD"),
-        help="Proxy authentication (username password)"
+        "--proxy-auth",
+        nargs=2,
+        metavar=("USERNAME", "PASSWORD"),
+        help="Proxy authentication (username password)",
     )
 
     args = parser.parse_args()
