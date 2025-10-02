@@ -165,8 +165,11 @@ class WebsocketListener(IListener):
             logger.error(f"Failed to start WebSocket listener: {e}")
             raise OpenConnectionError(f"Failed to listen on {maddr}: {str(e)}")
 
-    async def _handle_websocket_request(self, request: WebSocketRequest) -> None:
+    async def _handle_websocket_request(self, request: Any) -> None:
         """Handle incoming WebSocket request."""
+        if WebSocketRequest is None:
+            logger.error("websockets package not installed, cannot handle request")
+            return
         try:
             # Accept the WebSocket connection
             ws = await request.accept()
@@ -221,7 +224,7 @@ class WebsocketListener(IListener):
                 logger.warning(f"Error closing connection: {e}")
 
         # Close server
-        if self._server:
+        if self._server is not None and WebSocketServer is not None:
             await self._server.close()
 
         logger.info("WebSocket listener closed")

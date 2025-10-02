@@ -60,13 +60,14 @@ def create_self_signed_certificate():
         # Create certificate
         subject = issuer = x509.Name(
             [
-                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),
-                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
                 x509.NameAttribute(
-                    NameOID.ORGANIZATION_NAME, "libp2p Comprehensive Demo"
+                    NameOID.ORGANIZATION_NAME,
+                    "libp2p Comprehensive Demo",  # type: ignore
                 ),
-                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
             ]
         )
 
@@ -223,12 +224,16 @@ def create_websocket_host(
     )
 
     # Replace the default transport with our configured one
-    host.get_network().swarm.transport = transport
+    from libp2p.network.swarm import Swarm
+
+    swarm = host.get_network()
+    if isinstance(swarm, Swarm):
+        swarm.transport = transport
 
     return host
 
 
-async def run_server(port: int, use_wss: bool = False, proxy_url: str = None):
+async def run_server(port: int, use_wss: bool = False, proxy_url: str | None = None):
     """Run WebSocket server with advanced features."""
     logger.info("🚀 Starting Comprehensive WebSocket Server...")
 

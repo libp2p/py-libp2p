@@ -56,11 +56,11 @@ def create_self_signed_certificate():
         # Create certificate
         subject = issuer = x509.Name(
             [
-                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),
-                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p WSS Demo"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p WSS Demo"),  # type: ignore
+                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
             ]
         )
 

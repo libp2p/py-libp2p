@@ -83,7 +83,11 @@ def create_websocket_host_with_proxy(proxy_url=None, proxy_auth=None):
     )
 
     # Replace the default transport with our configured one
-    host.get_network().swarm.transport = transport
+    from libp2p.network.swarm import Swarm
+
+    swarm = host.get_network()
+    if isinstance(swarm, Swarm):
+        swarm.transport = transport
 
     return host
 
