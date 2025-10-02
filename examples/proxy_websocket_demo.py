@@ -117,12 +117,12 @@ async def run_server(port: int):
         logger.info("🔧 Protocol: /echo/1.0.0")
         logger.info("🚀 Transport: WebSocket (/ws)")
         logger.info("🔒 Proxy: None (Direct connection)")
-        logger.info()
+        logger.info("")
         logger.info("📋 To test with proxy, run:")
         logger.info(
             f"   python proxy_websocket_demo.py -c {client_addr} --proxy socks5://127.0.0.1:1080"
         )
-        logger.info()
+        logger.info("")
         logger.info("⏳ Waiting for connections...")
         logger.info("─" * 50)
 
@@ -130,7 +130,11 @@ async def run_server(port: int):
         await trio.sleep_forever()
 
 
-async def run_client(destination: str, proxy_url: str = None, proxy_auth: tuple = None):
+async def run_client(
+    destination: str,
+    proxy_url: str | None = None,
+    proxy_auth: tuple | None = None,
+):
     """Run WebSocket client with optional proxy."""
     logger.info("🔌 Starting WebSocket Client...")
 
@@ -152,7 +156,7 @@ async def run_client(destination: str, proxy_url: str = None, proxy_auth: tuple 
                 logger.info(f"🔐 Proxy Auth: {proxy_auth[0]}:***")
         else:
             logger.info("🔒 Proxy: None (Direct connection)")
-        logger.info()
+        logger.info("")
 
         try:
             logger.info("🔗 Connecting to WebSocket server...")
@@ -206,13 +210,13 @@ async def run_client(destination: str, proxy_url: str = None, proxy_auth: tuple 
             except Exception:
                 pass
 
-            logger.info()
+            logger.info("")
             logger.info("🎉 Proxy WebSocket Demo Completed Successfully!")
             logger.info("=" * 50)
             logger.info("✅ WebSocket transport with proxy is working perfectly!")
             logger.info("✅ Echo protocol communication successful!")
             logger.info("✅ libp2p integration verified!")
-            logger.info()
+            logger.info("")
             logger.info(
                 "🚀 Your WebSocket transport with proxy is ready for production use!"
             )
