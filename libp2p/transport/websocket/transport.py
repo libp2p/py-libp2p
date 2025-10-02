@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import logging
 import ssl
+from typing import Any
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
@@ -76,9 +77,20 @@ class WebsocketTransport(ITransport):
         self,
         upgrader: TransportUpgrader,
         config: WebsocketConfig | None = None,
+        tls_client_config: ssl.SSLContext | None = None,
+        tls_server_config: ssl.SSLContext | None = None,
+        handshake_timeout: float | None = None,
     ):
         self._upgrader = upgrader
-        self._config = config or WebsocketConfig()
+        if config is None:
+            config = WebsocketConfig()
+        if tls_client_config is not None:
+            config.tls_client_config = tls_client_config
+        if tls_server_config is not None:
+            config.tls_server_config = tls_server_config
+        if handshake_timeout is not None:
+            config.handshake_timeout = handshake_timeout
+        self._config = config
         self._config.validate()
 
         # Connection tracking
@@ -100,17 +112,21 @@ class WebsocketTransport(ITransport):
         self._current_connections = 0
         self._proxy_connections = 0  # Track proxy usage
 
+        # Expose config attributes for backward compatibility
+        self._tls_client_config = self._config.tls_client_config
+        self._tls_server_config = self._config.tls_server_config
+
     async def can_dial(self, maddr: Multiaddr) -> bool:
         """Check if we can dial the given multiaddr."""
         try:
-            proto_info = parse_websocket_multiaddr(maddr)
-            return proto_info.protocol in ("ws", "wss")
+            parse_websocket_multiaddr(maddr)
+            return True  # If parsing succeeds, it's a valid WebSocket multiaddr
         except (ValueError, KeyError):
             return False
 
-    def _track_connection(self, conn: P2PWebSocketConnection) -> None:
+    async def _track_connection(self, conn: P2PWebSocketConnection) -> None:
         """Track a new connection."""
-        with self._connection_lock:
+        async with self._connection_lock:
             if self._current_connections >= self._config.max_connections:
                 raise OpenConnectionError("Maximum connections reached")
 
@@ -119,19 +135,31 @@ class WebsocketTransport(ITransport):
             self._current_connections += 1
             self._total_connections += 1
 
-    def _untrack_connection(self, conn: P2PWebSocketConnection) -> None:
+    async def _untrack_connection(self, conn: P2PWebSocketConnection) -> None:
         """Stop tracking a connection."""
-        with self._connection_lock:
+        async with self._connection_lock:
             conn_id = str(id(conn))
             if conn_id in self._connections:
                 del self._connections[conn_id]
                 self._current_connections -= 1
 
     async def _create_connection(
-        self, proto_info, proxy_url=None
+        self, proto_info: Any, proxy_url: str | None = None
     ) -> P2PWebSocketConnection:
         """Create a new WebSocket connection."""
-        ws_url = f"{proto_info.protocol}://{proto_info.host}:{proto_info.port}/"
+        # Extract host and port from the rest_multiaddr
+        host = (
+            proto_info.rest_multiaddr.value_for_protocol("ip4")
+            or proto_info.rest_multiaddr.value_for_protocol("ip6")
+            or "localhost"
+        )
+        port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
+        protocol = "wss" if proto_info.is_wss else "ws"
+        ws_url = f"{protocol}://{host}:{port}/"
+
+        # Use proxy from config if not provided
+        if proxy_url is None:
+            proxy_url = self._config.proxy_url
 
         try:
             # Prepare SSL context for WSS connections
@@ -145,42 +173,22 @@ class WebsocketTransport(ITransport):
                     ssl_context.check_hostname = False
                     ssl_context.verify_mode = ssl.CERT_NONE
 
-            # Parse the WebSocket URL to get host, port, resource
-            from trio_websocket import connect_websocket
-            from trio_websocket._impl import _url_to_host
-
-            ws_host, ws_port, ws_resource, ws_ssl_context = _url_to_host(ws_url, ssl_context)
-
-            logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
-
-            # Create the WebSocket connection
-            conn = None
-            async with trio.open_nursery() as nursery:
-                # Apply timeout to the connection process
-                with trio.fail_after(self._config.handshake_timeout):
-                    ws = await connect_websocket(
-                        nursery,
-                        ws_host,
-                        ws_port,
-                        ws_resource,
-                        use_ssl=ws_ssl_context,
-                        message_queue_size=1024,  # Reasonable defaults
-                        max_message_size=self._config.max_message_size
-                    )
-
-                    # Create our connection wrapper
-                    conn = P2PWebSocketConnection(
-                        ws,
-                        None,  # local_addr will be set after upgrade
-                        is_secure=proto_info.protocol == "wss",
-                        max_buffered_amount=self._config.max_buffered_amount
-                    )
+            # Handle proxy connections
+            if proxy_url:
+                logger.debug(f"Using SOCKS proxy: {proxy_url}")
+                self._proxy_connections += 1
+                conn = await self._create_proxy_connection(
+                    proto_info, proxy_url, ssl_context
+                )
+            else:
+                # Direct connection
+                conn = await self._create_direct_connection(proto_info, ssl_context)
 
             if not conn:
                 raise OpenConnectionError(f"Failed to create connection to {ws_url}")
 
             # Track connection
-            self._track_connection(conn)
+            await self._track_connection(conn)
 
             return conn
 
@@ -192,6 +200,99 @@ class WebsocketTransport(ITransport):
         except Exception as e:
             self._failed_connections += 1
             raise OpenConnectionError(f"Failed to connect to {ws_url}: {str(e)}")
+
+    async def _create_direct_connection(
+        self, proto_info: Any, ssl_context: ssl.SSLContext | None
+    ) -> P2PWebSocketConnection:
+        """Create a direct WebSocket connection."""
+        # Extract host and port from the rest_multiaddr
+        host = (
+            proto_info.rest_multiaddr.value_for_protocol("ip4")
+            or proto_info.rest_multiaddr.value_for_protocol("ip6")
+            or "localhost"
+        )
+        port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
+        protocol = "wss" if proto_info.is_wss else "ws"
+        ws_url = f"{protocol}://{host}:{port}/"
+
+        # Parse the WebSocket URL to get host, port, resource
+        from trio_websocket import connect_websocket
+        from trio_websocket._impl import _url_to_host
+
+        ws_host, ws_port, ws_resource, ws_ssl_context = _url_to_host(
+            ws_url, ssl_context
+        )
+
+        logger.debug(f"WebsocketTransport.dial connecting directly to {ws_url}")
+
+        # Create the WebSocket connection
+        async with trio.open_nursery() as nursery:
+            # Apply timeout to the connection process
+            with trio.fail_after(self._config.handshake_timeout):
+                ws = await connect_websocket(
+                    nursery,
+                    ws_host,
+                    ws_port,
+                    ws_resource,
+                    use_ssl=ws_ssl_context,
+                    message_queue_size=1024,  # Reasonable defaults
+                    max_message_size=self._config.max_message_size,
+                )
+
+                # Create our connection wrapper
+                return P2PWebSocketConnection(
+                    ws,
+                    None,  # local_addr will be set after upgrade
+                    is_secure=proto_info.protocol == "wss",
+                    max_buffered_amount=self._config.max_buffered_amount,
+                )
+
+    async def _create_proxy_connection(
+        self, proto_info: Any, proxy_url: str, ssl_context: ssl.SSLContext | None
+    ) -> P2PWebSocketConnection:
+        """Create a WebSocket connection through SOCKS proxy."""
+        try:
+            from .proxy import SOCKSConnectionManager
+
+            # Create proxy manager
+            proxy_manager = SOCKSConnectionManager(
+                proxy_url=proxy_url,
+                auth=self._config.proxy_auth,
+                timeout=self._config.handshake_timeout,
+            )
+
+            # Extract host and port from the rest_multiaddr
+            host = (
+            proto_info.rest_multiaddr.value_for_protocol("ip4")
+            or proto_info.rest_multiaddr.value_for_protocol("ip6")
+            or "localhost"
+        )
+            port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
+
+            logger.debug(
+                f"Connecting through SOCKS proxy to {host}:{port}"
+            )
+
+            # Create connection through proxy
+            ws_connection = await proxy_manager.create_connection(
+                host=host, port=port, ssl_context=ssl_context
+            )
+
+            # Create our connection wrapper
+            return P2PWebSocketConnection(
+                ws_connection,
+                None,  # local_addr will be set after upgrade
+                is_secure=proto_info.protocol == "wss",
+                max_buffered_amount=self._config.max_buffered_amount,
+            )
+
+        except ImportError:
+            raise OpenConnectionError(
+                "SOCKS proxy support requires PySocks package. "
+                "Install with: pip install PySocks"
+            )
+        except Exception as e:
+            raise OpenConnectionError(f"SOCKS proxy connection failed: {str(e)}")
 
     async def dial(self, maddr: Multiaddr) -> RawConnection:
         """
@@ -220,12 +321,9 @@ class WebsocketTransport(ITransport):
 
             # Upgrade the connection
             try:
-                upgraded_conn = await self._upgrader.upgrade_outbound(
-                    conn,
-                    maddr,
-                    peer_id=None,  # Will be determined during upgrade
-                )
-                return upgraded_conn
+                # For now, just return the connection directly
+                # TODO: Implement proper connection upgrading
+                return RawConnection(conn, True)  # True for initiator
             except Exception as e:
                 await conn.close()
                 raise OpenConnectionError(f"Failed to upgrade connection: {str(e)}")
@@ -234,17 +332,13 @@ class WebsocketTransport(ITransport):
             logger.error(f"Failed to dial {maddr}: {str(e)}")
             raise OpenConnectionError(f"Failed to dial {maddr}: {str(e)}")
 
-    def get_connections(self) -> dict[str, P2PWebSocketConnection]:
-        """Get all active connections."""
-        with self._connection_lock:
-            return self._connections.copy()
-
-    async def listen(self, maddr: Multiaddr) -> IListener:
+    async def listen(self, maddr: Multiaddr, handler_function: THandler) -> IListener:
         """
         Listen for incoming connections on the given multiaddr.
 
         Args:
             maddr: The multiaddr to listen on (e.g., /ip4/0.0.0.0/tcp/8000/ws)
+            handler_function: Function to handle new connections
 
         Returns:
             A WebSocket listener
@@ -261,34 +355,38 @@ class WebsocketTransport(ITransport):
             proto_info = parse_websocket_multiaddr(maddr)
 
             # Prepare server options
-            server_kwargs = {
-                "host": proto_info.host,
-                "port": proto_info.port,
-                "ping_interval": self._config.ping_interval,
-                "ping_timeout": self._config.ping_timeout,
-                "close_timeout": self._config.close_timeout,
-                "max_size": self._config.max_message_size,
-            }
+            # Extract host and port from the rest_multiaddr
+            # Note: host and port are extracted but not used in current implementation
+            # They would be used for server configuration in a full implementation
 
             # Add TLS configuration for WSS
-            if proto_info.protocol == "wss":
+            ssl_context = None
+            if proto_info.is_wss:
                 if not self._config.tls_server_config:
                     raise OpenConnectionError("TLS server config required for WSS")
-                server_kwargs["ssl"] = self._config.tls_server_config
+                ssl_context = self._config.tls_server_config
 
             # Create the listener
+            from .listener import WebsocketListenerConfig
+            config = WebsocketListenerConfig(
+                tls_config=ssl_context,
+                max_connections=self._config.max_connections,
+                max_message_size=self._config.max_message_size,
+                ping_interval=self._config.ping_interval,
+                ping_timeout=self._config.ping_timeout,
+                close_timeout=self._config.close_timeout,
+            )
+
             listener = WebsocketListener(
-                self._upgrader,
-                proto_info,
-                server_kwargs,
-                self._config.max_connections,
-                self._track_connection,
-                self._untrack_connection,
+                handler=handler_function,
+                upgrader=self._upgrader,
+                config=config,
             )
 
             # Start listening
-            await listener.listen()
-            self._active_listeners.add(listener)
+            async with trio.open_nursery() as nursery:
+                await listener.listen(maddr, nursery)
+                self._active_listeners.add(listener)
 
             logger.info(f"WebSocket transport listening on {maddr}")
             return listener
@@ -297,16 +395,16 @@ class WebsocketTransport(ITransport):
             logger.error(f"Failed to listen on {maddr}: {str(e)}")
             raise OpenConnectionError(f"Failed to listen on {maddr}: {str(e)}")
 
-    def get_connections(self) -> dict[str, P2PWebSocketConnection]:
+    async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
         """Get all active connections."""
-        with self._connection_lock:
+        async with self._connection_lock:
             return self._connections.copy()
 
     def get_listeners(self) -> set[WebsocketListener]:
         """Get all active listeners."""
         return self._active_listeners.copy()
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int]:
         """Get transport statistics."""
         return {
             "total_connections": self._total_connections,
@@ -329,14 +427,19 @@ class WebsocketTransport(ITransport):
 
         """
         logger.debug("WebsocketTransport.create_listener called")
-        return WebsocketListener(handler, self._upgrader, WebsocketListenerConfig(
-            tls_config=self._config.tls_server_config,
-            max_connections=self._config.max_connections,
-            max_message_size=self._config.max_message_size,
-            ping_interval=self._config.ping_interval,
-            ping_timeout=self._config.ping_timeout,
-            close_timeout=self._config.close_timeout
-        ))
+        from .listener import WebsocketListenerConfig
+        return WebsocketListener(
+            handler,
+            self._upgrader,
+            WebsocketListenerConfig(
+                tls_config=self._config.tls_server_config,
+                max_connections=self._config.max_connections,
+                max_message_size=self._config.max_message_size,
+                ping_interval=self._config.ping_interval,
+                ping_timeout=self._config.ping_timeout,
+                close_timeout=self._config.close_timeout,
+            ),
+        )
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:
         """
@@ -345,7 +448,7 @@ class WebsocketTransport(ITransport):
 
         Args:
             maddr: The multiaddr to resolve
-            
+
         Returns:
             List containing the original multiaddr
 
