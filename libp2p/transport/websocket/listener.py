@@ -9,8 +9,8 @@ import trio
 from trio_websocket import WebSocketConnection, serve_websocket
 
 try:
-    from websockets.legacy.server import WebSocketRequest
-    from websockets.server import WebSocketServer
+    from websockets.legacy.server import WebSocketRequest  # type: ignore
+    from websockets.server import WebSocketServer  # type: ignore
 except ImportError:
     # Optional dependency - websockets package not installed
     WebSocketRequest = None  # type: ignore
@@ -225,7 +225,13 @@ class WebsocketListener(IListener):
 
         # Close server
         if self._server is not None and WebSocketServer is not None:
-            await self._server.close()
+            # Type guard to ensure WebSocketServer is not None
+            assert WebSocketServer is not None
+            # Additional type guard for the close method
+            if hasattr(self._server, "close") and callable(
+                getattr(self._server, "close", None)
+            ):
+                await self._server.close()  # type: ignore
 
         logger.info("WebSocket listener closed")
 
