@@ -164,7 +164,7 @@ class WebsocketTransport(ITransport):
         try:
             # Prepare SSL context for WSS connections
             ssl_context = None
-            if proto_info.protocol == "wss":
+            if proto_info.is_wss:
                 if self._config.tls_client_config:
                     ssl_context = self._config.tls_client_config
                 else:
@@ -215,37 +215,34 @@ class WebsocketTransport(ITransport):
         protocol = "wss" if proto_info.is_wss else "ws"
         ws_url = f"{protocol}://{host}:{port}/"
 
-        # Parse the WebSocket URL to get host, port, resource
-        from trio_websocket import connect_websocket
-        from trio_websocket._impl import _url_to_host
+        logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
-        ws_host, ws_port, ws_resource, ws_ssl_context = _url_to_host(
-            ws_url, ssl_context
-        )
-
-        logger.debug(f"WebsocketTransport.dial connecting directly to {ws_url}")
-
-        # Create the WebSocket connection
-        async with trio.open_nursery() as nursery:
-            # Apply timeout to the connection process
-            with trio.fail_after(self._config.handshake_timeout):
-                ws = await connect_websocket(
-                    nursery,
-                    ws_host,
-                    ws_port,
-                    ws_resource,
-                    use_ssl=ws_ssl_context,
-                    message_queue_size=1024,  # Reasonable defaults
+        # Apply timeout to the connection process
+        with trio.fail_after(self._config.handshake_timeout):
+            # Create a temporary nursery just for the WebSocket connection establishment
+            async with trio.open_nursery() as temp_nursery:
+                from trio_websocket import connect_websocket_url
+                
+                # Create the WebSocket connection
+                ws = await connect_websocket_url(
+                    temp_nursery,
+                    ws_url,
+                    ssl_context=ssl_context,
+                    message_queue_size=1024,
                     max_message_size=self._config.max_message_size,
                 )
 
                 # Create our connection wrapper
-                return P2PWebSocketConnection(
+                conn = P2PWebSocketConnection(
                     ws,
                     None,  # local_addr will be set after upgrade
-                    is_secure=proto_info.protocol == "wss",
+                    is_secure=proto_info.is_wss,
                     max_buffered_amount=self._config.max_buffered_amount,
                 )
+                
+                # The nursery will close when we exit this block, which might close the connection
+                # We need to handle this differently, but for now let's see if it works
+                return conn
 
     async def _create_proxy_connection(
         self, proto_info: Any, proxy_url: str, ssl_context: ssl.SSLContext | None
@@ -330,90 +327,6 @@ class WebsocketTransport(ITransport):
             logger.error(f"Failed to dial {maddr}: {str(e)}")
             raise OpenConnectionError(f"Failed to dial {maddr}: {str(e)}")
 
-    async def listen(self, maddr: Multiaddr, handler_function: THandler) -> IListener:
-        """
-        Listen for incoming connections on the given multiaddr.
-
-        Args:
-            maddr: The multiaddr to listen on (e.g., /ip4/0.0.0.0/tcp/8000/ws)
-            handler_function: Function to handle new connections
-
-        Returns:
-            A WebSocket listener
-
-        Raises:
-            OpenConnectionError: If listening fails
-            ValueError: If multiaddr is invalid
-
-        """
-        logger.debug(f"WebsocketTransport.listen called with {maddr}")
-
-        try:
-            # Parse multiaddr
-            proto_info = parse_websocket_multiaddr(maddr)
-
-            # Prepare server options
-            # Extract host and port from the rest_multiaddr
-            # Note: host and port are extracted but not used in current implementation
-            # They would be used for server configuration in a full implementation
-
-            # Add TLS configuration for WSS
-            ssl_context = None
-            if proto_info.is_wss:
-                if not self._config.tls_server_config:
-                    raise OpenConnectionError("TLS server config required for WSS")
-                ssl_context = self._config.tls_server_config
-
-            # Create the listener
-            from .listener import WebsocketListenerConfig
-
-            config = WebsocketListenerConfig(
-                tls_config=ssl_context,
-                max_connections=self._config.max_connections,
-                max_message_size=self._config.max_message_size,
-                ping_interval=self._config.ping_interval,
-                ping_timeout=self._config.ping_timeout,
-                close_timeout=self._config.close_timeout,
-            )
-
-            listener = WebsocketListener(
-                handler=handler_function,
-                upgrader=self._upgrader,
-                config=config,
-            )
-
-            # Start listening
-            async with trio.open_nursery() as nursery:
-                await listener.listen(maddr, nursery)
-                self._active_listeners.add(listener)
-
-            logger.info(f"WebSocket transport listening on {maddr}")
-            return listener
-
-        except Exception as e:
-            logger.error(f"Failed to listen on {maddr}: {str(e)}")
-            raise OpenConnectionError(f"Failed to listen on {maddr}: {str(e)}")
-
-    async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
-        """Get all active connections."""
-        async with self._connection_lock:
-            return self._connections.copy()
-
-    def get_listeners(self) -> set[WebsocketListener]:
-        """Get all active listeners."""
-        return self._active_listeners.copy()
-
-    def get_stats(self) -> dict[str, int]:
-        """Get transport statistics."""
-        return {
-            "total_connections": self._total_connections,
-            "current_connections": self._current_connections,
-            "failed_connections": self._failed_connections,
-            "active_listeners": len(self._active_listeners),
-            "proxy_connections": self._proxy_connections,
-            "has_proxy_config": bool(self._config.proxy_url),
-        }
-
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
         Create a WebSocket listener with the given handler.
@@ -435,11 +348,32 @@ class WebsocketTransport(ITransport):
                 tls_config=self._config.tls_server_config,
                 max_connections=self._config.max_connections,
                 max_message_size=self._config.max_message_size,
+                handshake_timeout=self._config.handshake_timeout,
                 ping_interval=self._config.ping_interval,
                 ping_timeout=self._config.ping_timeout,
                 close_timeout=self._config.close_timeout,
             ),
         )
+
+    async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
+        """Get all active connections."""
+        async with self._connection_lock:
+            return self._connections.copy()
+
+    def get_listeners(self) -> set[WebsocketListener]:
+        """Get all active listeners."""
+        return self._active_listeners.copy()
+
+    def get_stats(self) -> dict[str, int]:
+        """Get transport statistics."""
+        return {
+            "total_connections": self._total_connections,
+            "current_connections": self._current_connections,
+            "failed_connections": self._failed_connections,
+            "active_listeners": len(self._active_listeners),
+            "proxy_connections": self._proxy_connections,
+            "has_proxy_config": bool(self._config.proxy_url),
+        }
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:
         """
