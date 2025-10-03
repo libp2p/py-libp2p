@@ -11,7 +11,7 @@ if sys.version_info >= (3, 11):
 else:
     from exceptiongroup import ExceptionGroup
 
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     LifecycleError,
     Service,
     background_trio_service,

@@ -12,7 +12,7 @@ else:
 import pytest
 import trio
 
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     LifecycleError,
     Service,
     TrioManager,

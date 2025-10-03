@@ -16,7 +16,7 @@ from libp2p.network.exceptions import (
 from libp2p.network.swarm import (
     Swarm,
 )
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.utils import (

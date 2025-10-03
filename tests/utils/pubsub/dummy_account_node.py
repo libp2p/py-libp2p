@@ -13,7 +13,7 @@ from libp2p.abc import (
 from libp2p.pubsub.pubsub import (
     Pubsub,
 )
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     Service,
     background_trio_service,
 )

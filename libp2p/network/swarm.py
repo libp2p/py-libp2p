@@ -34,7 +34,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.transport.exceptions import (

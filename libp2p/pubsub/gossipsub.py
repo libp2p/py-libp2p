@@ -38,7 +38,7 @@ from libp2p.pubsub import (
     floodsub,
 )
 from libp2p.pubsub.utils import maybe_consume_signed_record
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 

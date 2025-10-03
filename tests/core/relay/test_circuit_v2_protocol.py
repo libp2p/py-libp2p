@@ -25,7 +25,7 @@ from libp2p.relay.circuit_v2.protocol import (
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
 )
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (

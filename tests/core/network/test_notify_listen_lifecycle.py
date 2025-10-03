@@ -10,7 +10,7 @@ from libp2p.abc import (
     INetwork,
     INotifee,
 )
-from libp2p.service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 from libp2p.tools.constants import LISTEN_MADDR
 from tests.utils.factories import SwarmFactory
 

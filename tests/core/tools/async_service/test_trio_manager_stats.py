@@ -1,7 +1,7 @@
 import pytest
 import trio
 
-from libp2p.service import (
+from libp2p.tools.anyio_service import (
     Service,
     TrioManager,
 )
