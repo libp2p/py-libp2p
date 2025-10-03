@@ -347,3 +347,14 @@ todo_include_todos = True
 # Allow duplicate object descriptions
 nitpicky = False
 nitpick_ignore = [("py:class", "type")]
+
+# Resolve ambiguous type references by prioritizing the actual API module
+# This tells Sphinx to prefer libp2p.tools.anyio_service.api classes over re-exports
+autodoc_type_aliases = {
+    "ServiceAPI": "libp2p.tools.anyio_service.api.ServiceAPI",
+    "ManagerAPI": "libp2p.tools.anyio_service.api.ManagerAPI",
+    "InternalManagerAPI": "libp2p.tools.anyio_service.api.InternalManagerAPI",
+}
+
+# Tell Sphinx to prefer fully qualified names when there are duplicates
+python_use_unqualified_type_names = False
