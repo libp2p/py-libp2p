@@ -23,6 +23,13 @@ async def background_trio_service(service: ServiceAPI) -> AsyncIterator[ManagerA
 
     The service is running within the context block and will be properly
     cleaned up upon exiting the context block.
+
+    Args:
+        service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI` instance to run.
+
+    Yields:
+        A :class:`~libp2p.tools.anyio_service.api.ManagerAPI` instance.
+
     """
     async with trio.open_nursery() as nursery:
         manager = AnyIOManager(service)

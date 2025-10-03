@@ -50,6 +50,13 @@ class AnyIOManager(InternalManagerAPI):
 
     Implements proper lifecycle with locks, stats tracking, dual nursery
     architecture, task hierarchy, and ordered cancellation.
+
+    Args:
+        service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI` instance
+            to manage.
+        max_children_per_task: Maximum number of children tasks per parent.
+        logger: Optional custom logger instance.
+
     """
 
     def __init__(
@@ -168,7 +175,14 @@ class AnyIOManager(InternalManagerAPI):
 
     @classmethod
     async def run_service(cls, service: ServiceAPI) -> None:
-        """Class method to run a service."""
+        """
+        Class method to run a service.
+
+        Args:
+            service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI`
+                instance to run.
+
+        """
         manager = cls(service)
         await manager.run()
 
@@ -451,6 +465,17 @@ class AnyIOManager(InternalManagerAPI):
         - Finds parent using trio.lowlevel.current_task()
         - Adds to task hierarchy
         - Returns child manager for external control
+
+        Args:
+            service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI`
+                instance to run as a child.
+            daemon: Whether this is a daemon service.
+            name: Optional custom name for the service task.
+
+        Returns:
+            A :class:`~libp2p.tools.anyio_service.api.ManagerAPI` for the
+            child service.
+
         """
         task = ChildServiceTask(
             name=get_task_name(service, name),
@@ -470,5 +495,17 @@ class AnyIOManager(InternalManagerAPI):
     def run_daemon_child_service(
         self, service: ServiceAPI, name: str | None = None
     ) -> ManagerAPI:
-        """Run a daemon child service."""
+        """
+        Run a daemon child service.
+
+        Args:
+            service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI`
+                instance to run as a daemon child.
+            name: Optional custom name for the service task.
+
+        Returns:
+            A :class:`~libp2p.tools.anyio_service.api.ManagerAPI` for the
+            child service.
+
+        """
         return self.run_child_service(service, daemon=True, name=name)
