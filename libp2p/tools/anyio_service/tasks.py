@@ -301,14 +301,6 @@ class ChildServiceTask(BaseTask):
     - Creates a manager for the child service
     - Integrates with task hierarchy
     - Proper lifecycle management
-
-    Args:
-        name: Task name.
-        daemon: Whether this is a daemon task.
-        parent: Optional parent task.
-        child_service: A :class:`~libp2p.tools.anyio_service.api.ServiceAPI`
-            instance to run.
-
     """
 
     def __init__(
