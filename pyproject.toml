@@ -100,6 +100,8 @@ test = [
     "pytest-xdist>=2.4.0",
 ]
 
+upnp = ["miniupnpc>=2.0"]
+
 [tool.setuptools]
 include-package-data = true
 
