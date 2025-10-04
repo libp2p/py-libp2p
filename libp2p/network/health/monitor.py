@@ -49,7 +49,7 @@ class ConnectionHealthMonitor(Service):
         logger.info("Starting ConnectionHealthMonitor service")
 
         # Only run if health monitoring is enabled
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             logger.debug("Health monitoring disabled, skipping monitor service")
             return
 
@@ -128,16 +128,29 @@ class ConnectionHealthMonitor(Service):
         try:
             # Skip checks during connection warmup window
             warmup = getattr(self.config, "health_warmup_window", 0.0)
-            if warmup and hasattr(conn, "established_at"):
-                # Fallback to event_started if established_at not present
-                try:
+            if warmup:
+                # Check if we have health data with established_at timestamp
+                if self._has_health_data(peer_id, conn):
                     import time
 
-                    established_at = getattr(conn, "established_at")
-                    if established_at and (time.time() - established_at) < warmup:
+                    health = self.swarm.health_data[peer_id][conn]
+                    if (
+                        health.established_at
+                        and (time.time() - health.established_at) < warmup
+                    ):
+                        logger.debug(
+                            f"Skipping health check for {peer_id} during warmup window"
+                        )
                         return
-                except Exception:
-                    pass
+                else:
+                    # If no health data yet, this is likely a new connection
+                    # Initialize health tracking and skip the first check
+                    self.swarm.initialize_connection_health(peer_id, conn)
+                    logger.debug(
+                        f"Skipping health check for {peer_id} - "
+                        f"initializing health data"
+                    )
+                    return
 
             # Ensure health tracking is initialized
             if not self._has_health_data(peer_id, conn):
@@ -299,24 +312,15 @@ class ConnectionHealthMonitor(Service):
 
             # Try to establish a new connection to maintain connectivity
             try:
-                # Get peer info for dialing
-                peer_info = self.swarm.peerstore.peer_info(peer_id)
-                if peer_info and peer_info.addrs:
-                    logger.info(f"Attempting to dial new connection to {peer_id}")
-                    new_conn = await self.swarm.dial_peer(peer_id)
-                    if new_conn:
-                        logger.info(
-                            f"Successfully established replacement connection to "
-                            f"{peer_id}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Failed to establish replacement connection to {peer_id}"
-                        )
+                logger.info(f"Attempting to dial replacement connection to {peer_id}")
+                new_conn = await self.swarm.dial_peer_replacement(peer_id)
+                if new_conn:
+                    logger.info(
+                        f"Successfully established replacement connection to {peer_id}"
+                    )
                 else:
                     logger.warning(
-                        f"No addresses available for {peer_id}, "
-                        f"cannot establish replacement"
+                        f"Failed to establish replacement connection to {peer_id}"
                     )
 
             except Exception as e:
@@ -327,9 +331,10 @@ class ConnectionHealthMonitor(Service):
         except Exception as e:
             logger.error(f"Error replacing connection to {peer_id}: {e}")
 
+    @property
     def _is_health_monitoring_enabled(self) -> bool:
         """Check if health monitoring is enabled."""
-        return self.swarm._is_health_monitoring_enabled()
+        return self.swarm._is_health_monitoring_enabled
 
     def _has_health_data(self, peer_id: ID, conn: INetConn) -> bool:
         """Check if health data exists for a connection."""
@@ -341,7 +346,7 @@ class ConnectionHealthMonitor(Service):
 
     async def get_monitoring_status(self) -> HealthMonitorStatus:
         """Get current monitoring status and statistics."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return HealthMonitorStatus(enabled=False)
 
         total_connections = sum(len(conns) for conns in self.swarm.connections.values())

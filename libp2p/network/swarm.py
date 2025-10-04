@@ -159,7 +159,7 @@ class Swarm(Service, INetworkService):
                 self.transport.set_swarm(self)
 
             # Start health monitoring service if enabled
-            if self._is_health_monitoring_enabled():
+            if self._is_health_monitoring_enabled:
                 from libp2p.network.health.monitor import ConnectionHealthMonitor
 
                 self._health_monitor = ConnectionHealthMonitor(self)
@@ -413,6 +413,51 @@ class Swarm(Service, INetworkService):
         :return: network connection
         """
         return await self._dial_with_retry(addr, peer_id)
+
+    async def dial_peer_replacement(self, peer_id: ID) -> INetConn | None:
+        """
+        Create a new connection to peer_id for replacement purposes.
+        This bypasses the existing connection check and always creates a new connection.
+
+        :param peer_id: peer ID to dial
+        :raises SwarmException: raised when an error occurs
+        :return: new network connection or None if no addresses available
+        """
+        logger.debug("attempting to dial replacement connection to peer %s", peer_id)
+
+        try:
+            # Get peer info from peer store
+            addrs = self.peerstore.addrs(peer_id)
+        except PeerStoreError:
+            logger.warning(f"No known addresses to peer {peer_id} for replacement")
+            return None
+
+        if not addrs:
+            logger.warning(f"No addresses available for {peer_id} for replacement")
+            return None
+
+        exceptions: list[SwarmException] = []
+
+        # Try all known addresses with retry logic
+        for multiaddr in addrs:
+            try:
+                connection = await self._dial_with_retry(multiaddr, peer_id)
+                logger.info(
+                    f"Successfully established replacement connection to {peer_id}"
+                )
+                return connection
+            except SwarmException as e:
+                exceptions.append(e)
+                logger.debug(
+                    "encountered swarm exception when trying to connect to %s, "
+                    "trying next address...",
+                    multiaddr,
+                    exc_info=e,
+                )
+
+        # All addresses failed
+        logger.warning(f"Failed to establish replacement connection to {peer_id}")
+        return None
 
     async def new_stream(self, peer_id: ID) -> INetStream:
         """
@@ -839,6 +884,7 @@ class Swarm(Service, INetworkService):
 
     # Health monitoring methods (conditional on health monitoring being enabled)
 
+    @property
     def _is_health_monitoring_enabled(self) -> bool:
         """Check if health monitoring is enabled."""
         return (
@@ -849,7 +895,7 @@ class Swarm(Service, INetworkService):
 
     def initialize_connection_health(self, peer_id: ID, connection: INetConn) -> None:
         """Initialize health tracking for a new connection."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return
 
         from libp2p.network.health.data_structures import (
@@ -871,7 +917,7 @@ class Swarm(Service, INetworkService):
 
     def cleanup_connection_health(self, peer_id: ID, connection: INetConn) -> None:
         """Clean up health tracking for a closed connection."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return
 
         if peer_id in self.health_data and connection in self.health_data[peer_id]:
@@ -885,7 +931,7 @@ class Swarm(Service, INetworkService):
     ) -> None:
         """Record a connection lifecycle event."""
         if (
-            self._is_health_monitoring_enabled()
+            self._is_health_monitoring_enabled
             and peer_id in self.health_data
             and connection in self.health_data[peer_id]
         ):
@@ -896,7 +942,7 @@ class Swarm(Service, INetworkService):
     ) -> None:
         """Record a connection error."""
         if (
-            self._is_health_monitoring_enabled()
+            self._is_health_monitoring_enabled
             and peer_id in self.health_data
             and connection in self.health_data[peer_id]
         ):
@@ -904,7 +950,7 @@ class Swarm(Service, INetworkService):
 
     def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
         """Get health summary for a specific peer."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return {}
 
         if peer_id not in self.health_data:
@@ -942,7 +988,7 @@ class Swarm(Service, INetworkService):
 
     def get_global_health_summary(self) -> dict[str, Any]:
         """Get global health summary across all peers."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return {}
 
         all_peers = list(self.health_data.keys())
@@ -975,7 +1021,7 @@ class Swarm(Service, INetworkService):
 
     def export_health_metrics(self, format: str = "json") -> str:
         """Export health metrics in various formats."""
-        if not self._is_health_monitoring_enabled():
+        if not self._is_health_monitoring_enabled:
             return "{}" if format == "json" else ""
 
         summary = self.get_global_health_summary()
@@ -1018,7 +1064,7 @@ class Swarm(Service, INetworkService):
 
     async def get_health_monitor_status(self) -> dict[str, Any]:
         """Get status information about the health monitoring service."""
-        if not self._is_health_monitoring_enabled() or self._health_monitor is None:
+        if not self._is_health_monitoring_enabled or self._health_monitor is None:
             return {"enabled": False}
 
         status = await self._health_monitor.get_monitoring_status()
