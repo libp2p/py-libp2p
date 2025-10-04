@@ -120,7 +120,9 @@ class YamuxStream(IMuxedStream):
                         # To avoid re-acquiring the lock immediately,
                         with trio.move_on_after(5.0) as cancel_scope:
                             while self.send_window == 0 and not self.closed:
-                                await trio.sleep(0.01)
+                                # Use adaptive delay for connection errors
+                                from libp2p.tools.adaptive_delays import adaptive_sleep
+                                await adaptive_sleep(e, f"yamux_connection_{self.peer_id}")
                             # If we timed out, cancel the scope
                             timeout = cancel_scope.cancelled_caught
                         # Re-acquire lock
@@ -724,8 +726,13 @@ class Yamux(IMuxedConn):
                 ):
                     await self._cleanup_on_error()
                     break
-                # For other errors, log and continue
-                await trio.sleep(0.01)
+                # For other errors, use adaptive delay based on error type
+                from libp2p.tools.adaptive_delays import adaptive_sleep
+                should_retry = await adaptive_sleep(e, f"yamux_handle_incoming_{self.peer_id}")
+                if not should_retry:
+                    # Max retries exceeded, break the loop
+                    logger.warning(f"Max retries exceeded for peer {self.peer_id}, stopping handle_incoming")
+                    break
 
     async def _cleanup_on_error(self) -> None:
         # Set shutdown flag first to prevent other operations
