@@ -61,6 +61,7 @@ from .utils import (
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
+PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
@@ -98,6 +99,10 @@ class GossipSub(IPubsubRouter, Service):
     prune_back_off: int
     unsubscribe_back_off: int
 
+    # Gossipsub v1.2 features
+    dont_send_message_ids: dict[ID, set[bytes]]
+    max_idontwant_messages: int
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -116,6 +121,7 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
+        max_idontwant_messages: int = 10,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -155,6 +161,10 @@ class GossipSub(IPubsubRouter, Service):
         self.back_off = dict()
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
+
+        # Gossipsub v1.2 features
+        self.dont_send_message_ids = dict()
+        self.max_idontwant_messages = max_idontwant_messages
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -199,13 +209,22 @@ class GossipSub(IPubsubRouter, Service):
         if protocol_id is None:
             raise ValueError("Protocol cannot be None")
 
-        if protocol_id not in (PROTOCOL_ID, floodsub.PROTOCOL_ID):
+        if protocol_id not in (
+            PROTOCOL_ID,
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            floodsub.PROTOCOL_ID,
+        ):
             # We should never enter here. Becuase the `protocol_id` is registered by
             #   your pubsub instance in multistream-select, but it is not the protocol
             #   that gossipsub supports. In this case, probably we registered gossipsub
             #   to a wrong `protocol_id` in multistream-select, or wrong versions.
             raise ValueError(f"Protocol={protocol_id} is not supported.")
         self.peer_protocol[peer_id] = protocol_id
+
+        # Initialize IDONTWANT tracking for this peer
+        if peer_id not in self.dont_send_message_ids:
+            self.dont_send_message_ids[peer_id] = set()
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -221,6 +240,9 @@ class GossipSub(IPubsubRouter, Service):
             self.fanout[topic].discard(peer_id)
 
         self.peer_protocol.pop(peer_id, None)
+
+        # Clean up IDONTWANT tracking for this peer
+        self.dont_send_message_ids.pop(peer_id, None)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -251,15 +273,26 @@ class GossipSub(IPubsubRouter, Service):
         if control_message.prune:
             for prune in control_message.prune:
                 await self.handle_prune(prune, sender_peer_id)
+        if control_message.idontwant:
+            for idontwant in control_message.idontwant:
+                await self.handle_idontwant(idontwant, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
         self.mcache.put(pubsub_msg)
 
+        # Get message ID for IDONTWANT
+        if self.pubsub is not None:
+            msg_id = self.pubsub.get_message_id(pubsub_msg)
+        else:
+            # Fallback to default ID construction
+            msg_id = pubsub_msg.seqno + pubsub_msg.from_id
+
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
             msg_forwarder=msg_forwarder,
             origin=ID(pubsub_msg.from_id),
+            msg_id=msg_id,
         )
         rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
 
@@ -269,6 +302,9 @@ class GossipSub(IPubsubRouter, Service):
             rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
+
+        # Send IDONTWANT to mesh peers about this message
+        await self._emit_idontwant_for_message(msg_id, pubsub_msg.topicIDs)
 
         for peer_id in peers_gen:
             if self.pubsub is None:
@@ -284,7 +320,11 @@ class GossipSub(IPubsubRouter, Service):
             self.time_since_last_publish[topic] = int(time.time())
 
     def _get_peers_to_send(
-        self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
+        self,
+        topic_ids: Iterable[str],
+        msg_forwarder: ID,
+        origin: ID,
+        msg_id: bytes | None = None,
     ) -> Iterable[ID]:
         """
         Get the eligible peers to send the data to.
@@ -338,7 +378,18 @@ class GossipSub(IPubsubRouter, Service):
                 gossipsub_peers = fanout_peers
             send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
-        yield from send_to.difference([msg_forwarder, origin])
+        filtered_peers = send_to.difference([msg_forwarder, origin])
+
+        # Filter out peers that have sent IDONTWANT for this message
+        if msg_id is not None:
+            filtered_peers = {
+                peer_id
+                for peer_id in filtered_peers
+                if peer_id not in self.dont_send_message_ids
+                or msg_id not in self.dont_send_message_ids[peer_id]
+            }
+
+        yield from filtered_peers
 
     async def join(self, topic: str) -> None:
         """
@@ -498,6 +549,9 @@ class GossipSub(IPubsubRouter, Service):
             )
 
             self.mcache.shift()
+
+            # Prune old IDONTWANT entries to prevent memory leaks
+            self._prune_idontwant_entries()
 
             await trio.sleep(self.heartbeat_interval)
 
@@ -696,7 +750,8 @@ class GossipSub(IPubsubRouter, Service):
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
-            if self.peer_protocol[peer_id] == PROTOCOL_ID
+            if self.peer_protocol[peer_id]
+            in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12)
         }
         if backoff_check:
             # filter out peers that are in back off for this topic
@@ -748,6 +803,18 @@ class GossipSub(IPubsubRouter, Service):
         else:
             del self.back_off[topic][peer]
             return False
+
+    def _prune_idontwant_entries(self) -> None:
+        """
+        Prune old IDONTWANT entries during heartbeat to prevent memory leaks.
+
+        This method removes all IDONTWANT entries since they are only relevant
+        for the current heartbeat period. The specific message IDs that peers
+        don't want should be cleared regularly to prevent indefinite growth.
+        """
+        # Clear all IDONTWANT entries for all peers
+        for peer_id in self.dont_send_message_ids:
+            self.dont_send_message_ids[peer_id].clear()
 
     async def _do_px(self, px_peers: list[rpc_pb2.PeerInfo]) -> None:
         if len(px_peers) > self.px_peers_count:
@@ -917,6 +984,7 @@ class GossipSub(IPubsubRouter, Service):
         ihave_msgs: list[rpc_pb2.ControlIHave] | None,
         graft_msgs: list[rpc_pb2.ControlGraft] | None,
         prune_msgs: list[rpc_pb2.ControlPrune] | None,
+        idontwant_msgs: list[rpc_pb2.ControlIDontWant] | None = None,
     ) -> rpc_pb2.ControlMessage:
         control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
         if ihave_msgs:
@@ -925,6 +993,8 @@ class GossipSub(IPubsubRouter, Service):
             control_msg.graft.extend(graft_msgs)
         if prune_msgs:
             control_msg.prune.extend(prune_msgs)
+        if idontwant_msgs:
+            control_msg.idontwant.extend(idontwant_msgs)
         return control_msg
 
     async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
@@ -989,6 +1059,16 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
+    async def emit_idontwant(self, msg_ids: list[bytes], to_peer: ID) -> None:
+        """Emit idontwant message, sent to to_peer, for msg_ids."""
+        idontwant_msg: rpc_pb2.ControlIDontWant = rpc_pb2.ControlIDontWant()
+        idontwant_msg.messageIDs.extend(msg_ids)
+
+        control_msg: rpc_pb2.ControlMessage = rpc_pb2.ControlMessage()
+        control_msg.idontwant.extend([idontwant_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
@@ -1014,3 +1094,59 @@ class GossipSub(IPubsubRouter, Service):
 
         # Write rpc to stream
         await self.pubsub.write_msg(peer_stream, packet)
+
+    async def _emit_idontwant_for_message(
+        self, msg_id: bytes, topic_ids: Iterable[str]
+    ) -> None:
+        """
+        Emit IDONTWANT message to mesh peers about a received message.
+
+        :param msg_id: The message ID to notify peers about
+        :param topic_ids: The topics the message belongs to
+        """
+        if self.pubsub is None:
+            return
+
+        # Get all mesh peers for the topics in this message
+        mesh_peers: set[ID] = set()
+        for topic in topic_ids:
+            if topic in self.mesh:
+                mesh_peers.update(self.mesh[topic])
+
+        # Only send to peers that support gossipsub 1.2
+        v12_peers = {
+            peer_id
+            for peer_id in mesh_peers
+            if self.peer_protocol.get(peer_id) == PROTOCOL_ID_V12
+        }
+
+        if not v12_peers:
+            return
+
+        # Send IDONTWANT message to all v1.2 mesh peers
+        for peer_id in v12_peers:
+            await self.emit_idontwant([msg_id], peer_id)
+
+    async def handle_idontwant(
+        self, idontwant_msg: rpc_pb2.ControlIDontWant, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle incoming IDONTWANT control message by adding message IDs
+        to the peer's dont_send_message_ids set.
+
+        :param idontwant_msg: The IDONTWANT control message
+        :param sender_peer_id: ID of the peer who sent the message
+        """
+        # Initialize set if peer not tracked
+        if sender_peer_id not in self.dont_send_message_ids:
+            self.dont_send_message_ids[sender_peer_id] = set()
+
+        # Add all message IDs to the peer's dont_send set
+        for msg_id in idontwant_msg.messageIDs:
+            self.dont_send_message_ids[sender_peer_id].add(msg_id)
+
+        logger.debug(
+            "Added %d message IDs to dont_send list for peer %s",
+            len(idontwant_msg.messageIDs),
+            sender_peer_id,
+        )
