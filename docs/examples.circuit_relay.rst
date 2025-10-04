@@ -35,7 +35,7 @@ Create a file named ``relay_node.py`` with the following content:
     from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
     from libp2p.relay.circuit_v2.transport import CircuitV2Transport
     from libp2p.relay.circuit_v2.config import RelayConfig
-    from libp2p.tools.async_service import background_trio_service
+    from libp2p.tools.anyio_service import background_trio_service
     from libp2p.utils import get_wildcard_address
 
     logging.basicConfig(level=logging.DEBUG)
@@ -108,7 +108,7 @@ Create a file named ``destination_node.py`` with the following content:
     from libp2p.relay.circuit_v2.transport import CircuitV2Transport
     from libp2p.relay.circuit_v2.config import RelayConfig
     from libp2p.peer.peerinfo import info_from_p2p_addr
-    from libp2p.tools.async_service import background_trio_service
+    from libp2p.tools.anyio_service import background_trio_service
     from libp2p.utils import get_wildcard_address
 
     logging.basicConfig(level=logging.DEBUG)
@@ -254,7 +254,7 @@ Create a file named ``source_node.py`` with the following content:
     from libp2p.relay.circuit_v2.transport import CircuitV2Transport
     from libp2p.relay.circuit_v2.config import RelayConfig
     from libp2p.peer.peerinfo import info_from_p2p_addr
-    from libp2p.tools.async_service import background_trio_service
+    from libp2p.tools.anyio_service import background_trio_service
     from libp2p.relay.circuit_v2.discovery import RelayInfo
     from libp2p.utils import get_wildcard_address
 

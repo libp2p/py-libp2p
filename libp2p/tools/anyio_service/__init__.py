@@ -12,15 +12,7 @@ The implementation is split across multiple modules for clarity:
 - api: Service APIs, decorators, and base classes
 - context: Context managers for running services
 """
-from .api import (
-    AsyncFn,
-    InternalManagerAPI,
-    ManagerAPI,
-    Service,
-    ServiceAPI,
-    as_service,
-    external_api,
-)
+from .api import Service, as_service, external_api
 from .context import TrioManager, background_trio_service
 from .exceptions import (
     DaemonTaskExit,
@@ -30,37 +22,16 @@ from .exceptions import (
 )
 from .manager import AnyIOManager
 from .stats import Stats, TaskStats
-from .tasks import (
-    BaseTask,
-    BaseTaskWithChildren,
-    CHANNEL_BUFFER,
-    ChildServiceTask,
-    FunctionTask,
-    MAX_CHILDREN_TASKS,
-    TaskAPI,
-    TaskType,
-    TaskWithChildrenAPI,
-)
+from .tasks import MAX_CHILDREN_TASKS, TaskType
 from .utils import get_task_name, is_verbose_logging_enabled
 
 __all__ = [
-    # Core service APIs
+    # Core service classes (concrete implementations only)
     "Service",
-    "ServiceAPI",
-    "ManagerAPI",
-    "InternalManagerAPI",
     "AnyIOManager",
     "TrioManager",
     "as_service",
     "background_trio_service",
-    # Task APIs
-    "TaskAPI",
-    "TaskWithChildrenAPI",
-    "BaseTask",
-    "BaseTaskWithChildren",
-    "FunctionTask",
-    "ChildServiceTask",
-    "TaskType",
     # Exceptions
     "ServiceException",
     "DaemonTaskExit",
@@ -69,11 +40,9 @@ __all__ = [
     # Stats
     "Stats",
     "TaskStats",
-    # Types
-    "AsyncFn",
     # Constants
     "MAX_CHILDREN_TASKS",
-    "CHANNEL_BUFFER",
+    "TaskType",
     # Decorators
     "external_api",
     # Utilities
