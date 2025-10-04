@@ -39,7 +39,7 @@ logging.basicConfig(
     level=logging.INFO,  # Set default to DEBUG for more verbose output
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("pubsub-demo")
+logger = logging.getLogger(__name__)
 CHAT_TOPIC = "pubsub-chat"
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 

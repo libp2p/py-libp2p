@@ -31,8 +31,7 @@ from libp2p.transport.exceptions import (
     OpenConnectionError,
 )
 
-logger = logging.getLogger("libp2p.transport.tcp")
-
+logger = logging.getLogger(__name__)
 
 class TCPListener(IListener):
     listeners: list[trio.SocketListener]
