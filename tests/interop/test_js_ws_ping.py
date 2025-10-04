@@ -27,7 +27,8 @@ PLAINTEXT_PROTOCOL_ID = "/plaintext/2.0.0"
 async def test_ping_with_js_node():
     # Skip this test due to JavaScript dependency issues
     pytest.skip("Skipping JS interop test due to dependency issues")
-    js_node_dir = os.path.join(os.path.dirname(__file__), "js_libp2p", "js_node", "src")
+    from libp2p.utils.paths import join_paths, get_script_dir
+    js_node_dir = join_paths(get_script_dir(__file__), "js_libp2p", "js_node", "src")
     script_name = "./ws_ping_node.mjs"
 
     try:

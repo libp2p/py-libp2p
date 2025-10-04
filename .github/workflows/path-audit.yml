@@ -1,0 +1,58 @@
+name: Cross-Platform Path Handling Audit
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+      - 'scripts/audit_paths.py'
+      - '.github/workflows/path-audit.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.py'
+      - 'scripts/audit_paths.py'
+      - '.github/workflows/path-audit.yml'
+
+jobs:
+  path-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      
+      - name: Run path handling audit
+        run: |
+          echo "🔍 Running cross-platform path handling audit..."
+          python scripts/audit_paths.py --output path_audit_report.md
+          
+          # Check if there are any high-priority issues (P0 or P1)
+          if grep -q "🔴 P0\|🟡 P1" path_audit_report.md; then
+            echo "❌ High-priority path handling issues found!"
+            echo "Please review the audit report and fix the issues."
+            cat path_audit_report.md
+            exit 1
+          else
+            echo "✅ No high-priority path handling issues found."
+            cat path_audit_report.md
+          fi
+      
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: path-audit-report-${{ matrix.python-version }}
+          path: path_audit_report.md
