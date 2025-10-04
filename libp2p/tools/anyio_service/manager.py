@@ -402,14 +402,6 @@ class AnyIOManager(InternalManagerAPI):
         - Finds parent using trio.lowlevel.current_task()
         - Adds to task hierarchy
         - Schedules for execution
-
-        Args:
-            async_fn: The async function to run
-            *args: Arguments to pass to the function
-            daemon: Whether this is a daemon task (runs forever)
-            name: Optional name for the task
-            _internal: Internal framework task (not counted in user stats)
-
         """
         count_in_stats = not _internal
 
