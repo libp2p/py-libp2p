@@ -272,12 +272,8 @@ async def main() -> None:
         print("\n📤 Host 1 pushing identify information to Host 2...")
 
         try:
-            success = await push_identify_to_peer(host_1, host_2.get_id())
-
-            if success:
-                print("✅ Identify push completed successfully!")
-            else:
-                print("⚠️  Identify push didn't complete successfully")
+            await push_identify_to_peer(host_1, host_2.get_id())
+            print("✅ Identify push completed successfully!")
 
         except Exception as e:
             print(f"❌ Error during identify push: {str(e)}")

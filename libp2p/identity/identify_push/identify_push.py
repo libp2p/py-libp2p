@@ -17,6 +17,9 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.host.exceptions import (
+    HostException,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
@@ -172,7 +175,7 @@ async def push_identify_to_peer(
     observed_multiaddr: Multiaddr | None = None,
     limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
     use_varint_format: bool = True,
-) -> bool:
+) -> None:
     """
     Push an identify message to a specific peer.
 
@@ -186,8 +189,8 @@ async def push_identify_to_peer(
         limit: Semaphore for concurrency control.
         use_varint_format: True=length-prefixed, False=raw protobuf.
 
-    Returns:
-        bool: True if the push was successful, False otherwise.
+    Raises:
+        HostException: If the identify push fails.
 
     """
     async with limit:
@@ -224,10 +227,42 @@ async def push_identify_to_peer(
             await stream.close()
 
             logger.debug("Successfully pushed identify to peer %s", peer_id)
-            return True
         except Exception as e:
             logger.error("Error pushing identify to peer %s: %s", peer_id, e)
-            return False
+            raise HostException(
+                f"Failed to push identify to peer {peer_id}: {e}"
+            ) from e
+
+
+async def _safe_push_identify_to_peer(
+    host: IHost,
+    peer_id: ID,
+    observed_multiaddr: Multiaddr | None = None,
+    limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
+    use_varint_format: bool = True,
+) -> None:
+    """
+    Safely push identify information to a specific peer, catching and logging
+    exceptions.
+
+    This is a wrapper around push_identify_to_peer that catches exceptions and
+    logs them instead of letting them propagate, which is useful when calling
+    from a nursery.
+
+    Args:
+        host: The libp2p host.
+        peer_id: The peer ID to push to.
+        observed_multiaddr: The observed multiaddress (optional).
+        limit: Semaphore for concurrency control.
+        use_varint_format: True=length-prefixed, False=raw protobuf.
+
+    """
+    try:
+        await push_identify_to_peer(
+            host, peer_id, observed_multiaddr, limit, use_varint_format
+        )
+    except Exception as e:
+        logger.debug("Failed to push identify to peer %s: %s", peer_id, e)
 
 
 async def push_identify_to_peers(
@@ -260,7 +295,7 @@ async def push_identify_to_peers(
     async with trio.open_nursery() as nursery:
         for peer_id in peer_ids:
             nursery.start_soon(
-                push_identify_to_peer,
+                _safe_push_identify_to_peer,
                 host,
                 peer_id,
                 observed_multiaddr,
