@@ -64,7 +64,7 @@ from libp2p.tools.async_service import (
 )
 
 # Type alias for metadata values - JSON-serializable types
-MetadataValue = Union[str, int, float, bool, list, dict, None]
+MetadataValue = Union[str, int, float, bool, list[Any], dict[str, Any], None]
 
 # -------------------------- raw_connection interface.py --------------------------
 

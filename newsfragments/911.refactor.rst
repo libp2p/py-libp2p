@@ -2,12 +2,12 @@ Improve type safety for metadata handling by introducing MetadataValue type alia
 
 - Added ``MetadataValue`` type alias for JSON-serializable metadata values (``Union[str, int, float, bool, list, dict, None]``)
 - Replaced generic ``Any`` types with specific ``MetadataValue`` constraints in:
-  
+
   * ``IPeerMetadata.get()`` and ``put()`` methods
-  * ``IPeerStore.get()`` and ``put()`` methods  
+  * ``IPeerStore.get()`` and ``put()`` methods
   * ``IPeerData.put_metadata()`` and ``get_metadata()`` methods
   * ``PeerData.metadata`` field type definition
-  
+
 - Fixed incorrect return type annotation in ``IPeerData.get_metadata()`` from ``IPeerMetadata`` to ``MetadataValue``
 - Improves type safety and prevents runtime serialization errors
 - Maintains backward compatibility with existing code

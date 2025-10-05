@@ -5,9 +5,6 @@ from collections.abc import (
     AsyncIterable,
     Sequence,
 )
-from typing import (
-    Any,
-)
 
 from multiaddr import (
     Multiaddr,
