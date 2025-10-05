@@ -213,7 +213,6 @@ class BasicHost(IHost):
         self,
         peer_id: ID,
         protocol_ids: Sequence[TProtocol],
-        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> INetStream:
         """
         :param peer_id: peer_id that host is connecting
