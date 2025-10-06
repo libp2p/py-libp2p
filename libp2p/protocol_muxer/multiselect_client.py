@@ -54,21 +54,21 @@ class MultiselectClient(IMultiselectClient):
         self,
         protocols: Sequence[TProtocol],
         communicator: IMultiselectCommunicator,
-        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> TProtocol:
         """
         For each protocol, send message to multiselect selecting protocol and
         fail if multiselect does not return same protocol. Returns first
         protocol that multiselect agrees on (i.e. that multiselect selects)
 
-        :param protocol: protocol to select
+        :param protocols: protocols to select from
         :param communicator: communicator to use to communicate with counterparty
         :param negotiate_timeout: timeout for negotiation
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
         try:
-            with trio.fail_after(negotitate_timeout):
+            with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
 
                 for protocol in protocols:
