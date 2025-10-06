@@ -320,7 +320,6 @@ async def test_stress_test_multiple_runs():
             std_dev = variance**0.5
             consistency_ratio = std_dev / mean_score if mean_score > 0 else 0
 
-            print(".2f")
             # Allow up to 15% variation for simulation consistency
             assert consistency_ratio < 0.15, (
                 f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
