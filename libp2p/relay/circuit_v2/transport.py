@@ -92,6 +92,7 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self.relay_counter = 0  # for round robin load balancing
 
     async def dial(
         self,
@@ -221,9 +222,25 @@ class CircuitV2Transport(ITransport):
             # Get a relay from the list of discovered relays
             relays = self.discovery.get_relays()
             if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+                # Prioritize relays with active reservations
+                relays_with_reservations = []
+                other_relays = []
+
+                for relay_id in relays:
+                    relay_info = self.discovery.get_relay_info(relay_id)
+                    if relay_info and relay_info.has_reservation:
+                        relays_with_reservations.append(relay_id)
+                    else:
+                        other_relays.append(relay_id)
+
+                # Return first available relay with reservation, or fallback to others
+                self.relay_counter += 1
+                if relays_with_reservations:
+                    return relays_with_reservations[
+                        (self.relay_counter - 1) % len(relays_with_reservations)
+                    ]
+                elif other_relays:
+                    return other_relays[(self.relay_counter - 1) % len(other_relays)]
 
             # Wait and try discovery
             await trio.sleep(1)
