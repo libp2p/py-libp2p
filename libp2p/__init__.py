@@ -361,7 +361,7 @@ def new_host(
         network=swarm,
         enable_mDNS=enable_mDNS,
         bootstrap=bootstrap,
-        negotitate_timeout=negotiate_timeout
+        negotiate_timeout=negotiate_timeout
     )
 
 
