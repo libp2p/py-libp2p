@@ -362,8 +362,8 @@ def new_host(
         network=swarm,
         enable_mDNS=enable_mDNS,
         bootstrap=bootstrap,
-        negotiate_timeout=negotiate_timeout,
         enable_upnp=enable_upnp
+        negotiate_timeout=negotiate_timeout
     )
 
 __version__ = __version("libp2p")
