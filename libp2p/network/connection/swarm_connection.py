@@ -154,7 +154,7 @@ class SwarmConn(INetConn):
         # This is to ensure that the new streams created after connection has started
         # are immediately set to OPEN state.
         if self.event_started.is_set():
-            net_stream.set_state(StreamState.OPEN)
+            await net_stream.set_state(StreamState.OPEN)
         self.streams.add(net_stream)
         await self.swarm.notify_opened_stream(net_stream)
         return net_stream
@@ -166,7 +166,7 @@ class SwarmConn(INetConn):
         streams_open = self.get_streams()
         for stream in streams_open:
             """Set the state of the stream to OPEN."""
-            stream.set_state(StreamState.OPEN)
+            await stream.set_state(StreamState.OPEN)
         await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:

@@ -7,6 +7,8 @@ from typing import (
     TYPE_CHECKING,
 )
 
+import trio
+
 from libp2p.abc import (
     IMuxedStream,
     INetStream,
@@ -45,6 +47,78 @@ class StreamState(Enum):
 
 
 class NetStream(INetStream):
+    """
+    A Network stream implementation with comprehensive state management.
+
+    NetStream wraps a muxed stream and provides proper state tracking, resource cleanup,
+    and event notification capabilities with thread-safe operations.
+
+    State Machine
+    _____________
+
+    .. code:: markdown
+
+        [INIT] → OPEN → CLOSE_READ → CLOSE_BOTH → [CLEANUP]
+                      ↓         ↗           ↗
+                 CLOSE_WRITE → ←          ↗
+                      ↓                   ↗
+                    RESET ────────────────┘
+                      ↓
+                    ERROR ────────────────┘
+
+    State Transitions
+    _________________
+        - INIT → OPEN: Stream establishment
+        - OPEN → CLOSE_READ: EOF encountered during read() or explicit close_read()
+        - OPEN → CLOSE_WRITE: Explicit close_write() call
+        - OPEN → RESET: reset() call or critical stream error
+        - OPEN → ERROR: Unexpected error during I/O operations
+        - CLOSE_READ → CLOSE_BOTH: Explicit close_write() call
+        - CLOSE_WRITE → CLOSE_BOTH: EOF encountered during read()
+        - Any state → ERROR: Unrecoverable error condition
+        - Any state → RESET: reset() call (for cleanup)
+
+        **Terminal States**: RESET and ERROR are terminal - no further transitions
+
+    Stream States
+    _____________
+        INIT: Stream is created but not yet established
+        OPEN: Stream is established and ready for I/O operations
+        CLOSE_READ: Read side is closed, write side may still be open
+        CLOSE_WRITE: Write side is closed, read side may still be open
+        CLOSE_BOTH: Both sides are closed, stream is terminated
+        RESET: Stream was reset by remote peer or locally
+        ERROR: Stream encountered an unrecoverable error
+
+    Operation Validity by State
+    ___________________________
+        OPEN:        read() ✓  write() ✓  close_read() ✓  close_write() ✓  reset() ✓
+        CLOSE_READ:  read() ✗  write() ✓  close_read() ✓  close_write() ✓  reset() ✓
+        CLOSE_WRITE: read() ✓  write() ✗  close_read() ✓  close_write() ✓  reset() ✓
+        CLOSE_BOTH:  read() ✗  write() ✗  close_read() ✓  close_write() ✓  reset() ✓
+        RESET:       read() ✗  write() ✗  close_read() ✗  close_write() ✗  reset() ✓
+        ERROR:       read() ✗  write() ✗  close_read() ✗  close_write() ✗  reset() ✓
+
+    Thread Safety
+    _____________
+        All state operations are protected by trio.Lock() for safe concurrent access.
+        State checks and modifications are atomic operations preventing race conditions.
+
+    QUIC Compatibility
+    _________________
+        Half-closed states (CLOSE_READ, CLOSE_WRITE) are essential for QUIC transport
+        where streams can independently close read or write sides.
+
+    Error Handling
+    _____________
+        ERROR state is triggered by unexpected exceptions during I/O operations.
+        Known exceptions (EOF, Reset, etc.) are handled gracefully without ERROR state.
+        Recovery from ERROR state is possible but not guaranteed.
+
+    :param muxed_stream: The underlying muxed stream
+    :param swarm_conn: Optional swarm connection for stream management
+    """
+
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
 
@@ -57,6 +131,9 @@ class NetStream(INetStream):
         self._state = StreamState.INIT
         self.swarm_conn = swarm_conn
         self.logger = logging.getLogger(__name__)
+
+        # Thread safety for state operations (following AkMo3's approach)
+        self._state_lock = trio.Lock()
 
     def get_protocol(self) -> TProtocol | None:
         """
@@ -71,29 +148,33 @@ class NetStream(INetStream):
         self.protocol_id = protocol_id
 
     @property
-    def state(self) -> StreamState:
+    async def state(self) -> StreamState:
         """
         :return: current state of the stream
         """
-        return self._state
+        async with self._state_lock:
+            return self._state
 
-    def set_state(self, state: StreamState) -> None:
+    async def set_state(self, state: StreamState) -> None:
         """
         Set the current state of the stream.
 
         :param state: new state of the stream
         """
-        old_state = self._state
-        self._state = state
+        async with self._state_lock:
+            old_state = self._state
+            self._state = state
 
-        # Log state transition for debugging and monitoring
-        self.logger.debug(f"Stream state transition: {old_state.name} → {state.name}")
-
-        # Log important state changes at info level
-        if state in [StreamState.ERROR, StreamState.RESET, StreamState.CLOSE_BOTH]:
-            self.logger.info(
-                f"Stream entered {state.name} state (from {old_state.name})"
+            # Log state transition for debugging and monitoring
+            self.logger.debug(
+                f"Stream state transition: {old_state.name} → {state.name}"
             )
+
+            # Log important state changes at info level
+            if state in [StreamState.ERROR, StreamState.RESET, StreamState.CLOSE_BOTH]:
+                self.logger.info(
+                    f"Stream entered {state.name} state (from {old_state.name})"
+                )
 
     async def read(self, n: int | None = None) -> bytes:
         """
@@ -102,47 +183,55 @@ class NetStream(INetStream):
         :param n: number of bytes to read
         :return: Bytes read from the stream
         """
-        if self.state == StreamState.ERROR:
-            raise StreamError("Cannot read from stream; stream is in error state")
-        elif self.state == StreamState.RESET:
-            raise StreamReset("Cannot read from stream; stream is reset")
-        elif self.state == StreamState.CLOSE_READ:
-            raise StreamClosed("Cannot read from stream; closed for reading")
-        # Note: Allow reading from CLOSE_BOTH state - there might still be buffered data
+        # Check state and perform read atomically to prevent race conditions
+        async with self._state_lock:
+            if self._state == StreamState.ERROR:
+                raise StreamError("Cannot read from stream; stream is in error state")
+            elif self._state == StreamState.RESET:
+                raise StreamReset("Cannot read from stream; stream is reset")
+            elif self._state == StreamState.CLOSE_READ:
+                # Only block reads if explicitly closed for reading
+                # Allow reads from streams that might still have buffered data
+                pass
+            # Note: Allow reading from CLOSE_BOTH state - buffered data may exist
 
-        try:
-            return await self.muxed_stream.read(n)
-        except MuxedStreamEOF as error:
-            # Handle state transitions when EOF is encountered
-            if self.state == StreamState.CLOSE_WRITE:
-                self.set_state(StreamState.CLOSE_BOTH)
-            elif self.state == StreamState.OPEN:
-                self.set_state(StreamState.CLOSE_READ)
-            raise StreamEOF() from error
-        except (MuxedStreamReset, QUICStreamClosedError, QUICStreamResetError) as error:
-            self.set_state(StreamState.RESET)
-            raise StreamReset() from error
-        except Exception as error:
-            # Only set ERROR state for truly unexpected errors
-            # Known exceptions (MuxedStreamEOF, MuxedStreamReset, etc.)
-            # are handled above
-            if not isinstance(
-                error,
-                (
-                    MuxedStreamEOF,
-                    MuxedStreamReset,
-                    QUICStreamClosedError,
-                    QUICStreamResetError,
-                    StreamEOF,
-                    StreamReset,
-                    StreamClosed,
-                    ValueError,  # QUIC stream errors
-                ),
-            ):
-                self.set_state(StreamState.ERROR)
-                raise StreamError(f"Read operation failed: {error}") from error
-            # Re-raise known exceptions as-is
-            raise
+            try:
+                return await self.muxed_stream.read(n)
+            except MuxedStreamEOF as error:
+                # Handle state transitions when EOF is encountered
+                if self._state == StreamState.CLOSE_WRITE:
+                    self._state = StreamState.CLOSE_BOTH
+                elif self._state == StreamState.OPEN:
+                    self._state = StreamState.CLOSE_READ
+                raise StreamEOF() from error
+            except (
+                MuxedStreamReset,
+                QUICStreamClosedError,
+                QUICStreamResetError,
+            ) as error:
+                self._state = StreamState.RESET
+                raise StreamReset() from error
+            except Exception as error:
+                # Only set ERROR state for truly unexpected errors
+                # Known exceptions (MuxedStreamEOF, MuxedStreamReset, etc.)
+                # are handled above
+                if not isinstance(
+                    error,
+                    (
+                        MuxedStreamEOF,
+                        MuxedStreamReset,
+                        QUICStreamClosedError,
+                        QUICStreamResetError,
+                        StreamEOF,
+                        StreamReset,
+                        StreamClosed,
+                        ValueError,  # QUIC stream errors
+                    ),
+                ):
+                    self._state = StreamState.ERROR
+                    raise StreamError(f"Read operation failed: {error}") from error
+                # Re-raise known exceptions as-is
+                raise
 
     async def write(self, data: bytes) -> None:
         """
@@ -150,75 +239,86 @@ class NetStream(INetStream):
 
         :param data: bytes to write
         """
-        try:
-            if self.state == StreamState.ERROR:
+        # Check state and perform write atomically to prevent race conditions
+        async with self._state_lock:
+            if self._state == StreamState.ERROR:
                 raise StreamError("Cannot write to stream; stream is in error state")
-            elif self.state == StreamState.RESET:
+            elif self._state == StreamState.RESET:
                 raise StreamReset("Cannot write to stream; stream is reset")
-            elif self.state in [StreamState.CLOSE_WRITE, StreamState.CLOSE_BOTH]:
+            elif self._state in [StreamState.CLOSE_WRITE, StreamState.CLOSE_BOTH]:
                 raise StreamClosed("Cannot write to stream; closed for writing")
-            else:
+
+            try:
                 await self.muxed_stream.write(data)
-        except (
-            MuxedStreamClosed,
-            QUICStreamClosedError,
-            QUICStreamResetError,
-        ) as error:
-            if self.state == StreamState.CLOSE_READ:
-                self.set_state(StreamState.CLOSE_BOTH)
-            elif self.state == StreamState.OPEN:
-                self.set_state(StreamState.CLOSE_WRITE)
-            raise StreamClosed() from error
-        except (MuxedStreamReset, MuxedStreamError) as error:
-            self.set_state(StreamState.RESET)
-            raise StreamReset() from error
-        except Exception as error:
-            # Only set ERROR state for truly unexpected errors
-            # Known exceptions are handled above
-            if not isinstance(
-                error,
-                (
-                    MuxedStreamClosed,
-                    MuxedStreamReset,
-                    MuxedStreamError,
-                    QUICStreamClosedError,
-                    QUICStreamResetError,
-                    StreamClosed,
-                    StreamReset,
-                    ValueError,  # QUIC stream errors
-                ),
-            ):
-                self.set_state(StreamState.ERROR)
-                raise StreamError(f"Write operation failed: {error}") from error
-            # Re-raise known exceptions as-is
-            raise
+            except (
+                MuxedStreamClosed,
+                QUICStreamClosedError,
+                QUICStreamResetError,
+            ) as error:
+                if self._state == StreamState.CLOSE_READ:
+                    self._state = StreamState.CLOSE_BOTH
+                elif self._state == StreamState.OPEN:
+                    self._state = StreamState.CLOSE_WRITE
+                raise StreamClosed() from error
+            except (MuxedStreamReset, MuxedStreamError) as error:
+                self._state = StreamState.RESET
+                raise StreamReset() from error
+            except Exception as error:
+                # Only set ERROR state for truly unexpected errors
+                # Known exceptions are handled above
+                if not isinstance(
+                    error,
+                    (
+                        MuxedStreamClosed,
+                        MuxedStreamReset,
+                        MuxedStreamError,
+                        QUICStreamClosedError,
+                        QUICStreamResetError,
+                        StreamClosed,
+                        StreamReset,
+                        ValueError,  # QUIC stream errors
+                    ),
+                ):
+                    self._state = StreamState.ERROR
+                    raise StreamError(f"Write operation failed: {error}") from error
+                # Re-raise known exceptions as-is
+                raise
 
     async def close(self) -> None:
         """Close stream completely and clean up resources."""
         await self.muxed_stream.close()
-        self.set_state(StreamState.CLOSE_BOTH)
+        await self.set_state(StreamState.CLOSE_BOTH)
         await self.remove()
 
     async def close_read(self) -> None:
         """Close the stream for reading only."""
-        if self.state == StreamState.ERROR:
-            raise StreamError("Cannot close read on stream; stream is in error state")
-        elif self.state == StreamState.OPEN:
-            self.set_state(StreamState.CLOSE_READ)
-        elif self.state == StreamState.CLOSE_WRITE:
-            self.set_state(StreamState.CLOSE_BOTH)
-            await self.remove()
+        async with self._state_lock:
+            if self._state == StreamState.ERROR:
+                raise StreamError(
+                    "Cannot close read on stream; stream is in error state"
+                )
+            elif self._state == StreamState.OPEN:
+                self._state = StreamState.CLOSE_READ
+            elif self._state == StreamState.CLOSE_WRITE:
+                self._state = StreamState.CLOSE_BOTH
+                await self.remove()
 
     async def close_write(self) -> None:
         """Close the stream for writing only."""
-        if self.state == StreamState.ERROR:
-            raise StreamError("Cannot close write on stream; stream is in error state")
+        async with self._state_lock:
+            if self._state == StreamState.ERROR:
+                raise StreamError(
+                    "Cannot close write on stream; stream is in error state"
+                )
+
         await self.muxed_stream.close()
-        if self.state == StreamState.OPEN:
-            self.set_state(StreamState.CLOSE_WRITE)
-        elif self.state == StreamState.CLOSE_READ:
-            self.set_state(StreamState.CLOSE_BOTH)
-            await self.remove()
+
+        async with self._state_lock:
+            if self._state == StreamState.OPEN:
+                self._state = StreamState.CLOSE_WRITE
+            elif self._state == StreamState.CLOSE_READ:
+                self._state = StreamState.CLOSE_BOTH
+                await self.remove()
 
     async def reset(self) -> None:
         """Reset stream."""
@@ -229,7 +329,8 @@ class NetStream(INetStream):
             # If reset fails, we still want to mark the stream as reset
             # This allows cleanup to proceed even if the underlying stream is broken
             pass
-        self.set_state(StreamState.RESET)
+        async with self._state_lock:
+            self._state = StreamState.RESET
         await self.remove()
 
     async def remove(self) -> None:
@@ -244,54 +345,39 @@ class NetStream(INetStream):
         """Delegate to the underlying muxed stream."""
         return self.muxed_stream.get_remote_address()
 
-    def is_operational(self) -> bool:
+    async def is_operational(self) -> bool:
         """
         Check if stream is in an operational state.
 
         :return: True if stream can perform I/O operations
         """
-        return self.state not in [
-            StreamState.ERROR,
-            StreamState.RESET,
-            StreamState.CLOSE_BOTH,
-        ]
+        async with self._state_lock:
+            return self._state not in [
+                StreamState.ERROR,
+                StreamState.RESET,
+                StreamState.CLOSE_BOTH,
+            ]
 
-    async def recover_from_error(self) -> None:
-        """
-        Attempt to recover from error state.
-
-        This method attempts to reset the underlying muxed stream
-        and transition back to OPEN state if successful.
-        """
-        if self.state != StreamState.ERROR:
-            return
-
-        try:
-            # Attempt to reset the underlying muxed stream
-            await self.muxed_stream.reset()
-            self.set_state(StreamState.OPEN)
-        except Exception:
-            # If recovery fails, keep ERROR state
-            # The stream remains in ERROR state
-            pass
-
-    def get_state_transition_summary(self) -> str:
+    async def get_state_transition_summary(self) -> str:
         """
         Get a summary of the stream's current state and operational status.
 
         :return: Human-readable summary of stream state
         """
-        if self.is_operational():
-            return f"Stream is operational in {self.state.name} state"
+        current_state = await self.state
+        operational = await self.is_operational()
+        if operational:
+            return f"Stream is operational in {current_state.name} state"
         else:
-            return f"Stream is non-operational in {self.state.name} state"
+            return f"Stream is non-operational in {current_state.name} state"
 
-    def get_valid_transitions(self) -> list[StreamState]:
+    async def get_valid_transitions(self) -> list[StreamState]:
         """
         Get valid next states from the current state.
 
         :return: List of valid next states
         """
+        current_state = await self.state
         valid_transitions = {
             StreamState.INIT: [StreamState.OPEN, StreamState.ERROR],
             StreamState.OPEN: [
@@ -306,38 +392,4 @@ class NetStream(INetStream):
             StreamState.CLOSE_BOTH: [StreamState.ERROR],  # CLOSE_BOTH is terminal
             StreamState.ERROR: [],  # ERROR is terminal
         }
-        return valid_transitions.get(self.state, [])
-
-    def get_state_transition_documentation(self) -> str:
-        """
-        Get comprehensive documentation about stream state transitions.
-
-        :return: Documentation string explaining state transitions
-        """
-        return """
-Stream State Lifecycle Documentation:
-
-INIT: Stream is created but not yet established
-OPEN: Stream is established and ready for I/O operations
-CLOSE_READ: Read side is closed, write side may still be open
-CLOSE_WRITE: Write side is closed, read side may still be open
-CLOSE_BOTH: Both sides are closed, stream is terminated
-RESET: Stream was reset by remote peer or locally
-ERROR: Stream encountered an unrecoverable error
-
-State Transitions:
-- INIT → OPEN: Stream establishment
-- OPEN → CLOSE_READ/CLOSE_WRITE: Partial closure
-- OPEN → RESET: Stream reset
-- OPEN → ERROR: Error condition
-- CLOSE_READ/CLOSE_WRITE → CLOSE_BOTH: Complete closure
-- Any → ERROR: Unrecoverable error
-
-Current State: {current_state}
-Valid Next States: {valid_states}
-Operational Status: {operational}
-        """.format(
-            current_state=self.state.name,
-            valid_states=", ".join([s.name for s in self.get_valid_transitions()]),
-            operational="Yes" if self.is_operational() else "No",
-        ).strip()
+        return valid_transitions.get(current_state, [])

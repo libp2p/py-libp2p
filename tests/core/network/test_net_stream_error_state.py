@@ -77,7 +77,7 @@ def mock_stream():
 async def test_error_state_prevents_read(mock_stream):
     """Test that ERROR state prevents read operations."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Attempting to read should raise StreamError
     with pytest.raises(
@@ -90,7 +90,7 @@ async def test_error_state_prevents_read(mock_stream):
 async def test_error_state_prevents_write(mock_stream):
     """Test that ERROR state prevents write operations."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Attempting to write should raise StreamError
     with pytest.raises(
@@ -103,7 +103,7 @@ async def test_error_state_prevents_write(mock_stream):
 async def test_error_state_prevents_close_read(mock_stream):
     """Test that ERROR state prevents close_read operations."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Attempting to close read should raise StreamError
     with pytest.raises(
@@ -116,7 +116,7 @@ async def test_error_state_prevents_close_read(mock_stream):
 async def test_error_state_prevents_close_write(mock_stream):
     """Test that ERROR state prevents close_write operations."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Attempting to close write should raise StreamError
     with pytest.raises(
@@ -129,13 +129,13 @@ async def test_error_state_prevents_close_write(mock_stream):
 async def test_error_state_allows_reset_for_cleanup(mock_stream):
     """Test that ERROR state allows reset operations for cleanup."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Reset should be allowed from ERROR state for cleanup purposes
     await mock_stream.reset()
 
     # Stream should be in RESET state after reset
-    assert mock_stream.state == StreamState.RESET
+    assert await mock_stream.state == StreamState.RESET
 
 
 @pytest.mark.trio
@@ -149,7 +149,7 @@ async def test_read_error_triggers_error_state(mock_stream):
         await mock_stream.read()
 
     # Stream should be in ERROR state
-    assert mock_stream.state == StreamState.ERROR
+    assert await mock_stream.state == StreamState.ERROR
 
 
 @pytest.mark.trio
@@ -163,69 +163,27 @@ async def test_write_error_triggers_error_state(mock_stream):
         await mock_stream.write(b"test data")
 
     # Stream should be in ERROR state
-    assert mock_stream.state == StreamState.ERROR
+    assert await mock_stream.state == StreamState.ERROR
 
 
 @pytest.mark.trio
 async def test_is_operational_with_error_state(mock_stream):
     """Test is_operational method with ERROR state."""
     # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
+    await mock_stream.set_state(StreamState.ERROR)
 
     # Stream should not be operational
-    assert not mock_stream.is_operational()
+    assert not await mock_stream.is_operational()
 
 
 @pytest.mark.trio
 async def test_is_operational_with_open_state(mock_stream):
     """Test is_operational method with OPEN state."""
     # Set stream to OPEN state
-    mock_stream.set_state(StreamState.OPEN)
+    await mock_stream.set_state(StreamState.OPEN)
 
     # Stream should be operational
-    assert mock_stream.is_operational()
-
-
-@pytest.mark.trio
-async def test_recover_from_error_success(mock_stream):
-    """Test successful recovery from ERROR state."""
-    # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
-
-    # Attempt recovery
-    await mock_stream.recover_from_error()
-
-    # Stream should be back to OPEN state
-    assert mock_stream.state == StreamState.OPEN
-
-
-@pytest.mark.trio
-async def test_recover_from_error_failure(mock_stream):
-    """Test failed recovery from ERROR state."""
-    # Set stream to ERROR state
-    mock_stream.set_state(StreamState.ERROR)
-
-    # Configure mock to fail on reset
-    mock_stream.muxed_stream.set_fail_on_reset(True)
-
-    # Attempt recovery
-    await mock_stream.recover_from_error()
-
-    # Stream should remain in ERROR state
-    assert mock_stream.state == StreamState.ERROR
-
-
-@pytest.mark.trio
-async def test_recover_from_error_wrong_state(mock_stream):
-    """Test recovery from non-ERROR state."""
-    # Set stream to OPEN state
-    mock_stream.set_state(StreamState.OPEN)
-
-    # Attempt recovery (should do nothing)
-    await mock_stream.recover_from_error()
-
-    # Stream should remain in OPEN state
-    assert mock_stream.state == StreamState.OPEN
+    assert await mock_stream.is_operational()
 
 
 @pytest.mark.trio
@@ -235,12 +193,12 @@ async def test_error_state_lifecycle():
     stream = NetStream(muxed_stream, None)
 
     # Start in INIT state
-    assert stream.state == StreamState.INIT
+    assert await stream.state == StreamState.INIT
 
     # Transition to OPEN
-    stream.set_state(StreamState.OPEN)
-    assert stream.state == StreamState.OPEN
-    assert stream.is_operational()
+    await stream.set_state(StreamState.OPEN)
+    assert await stream.state == StreamState.OPEN
+    assert await stream.is_operational()
 
     # Simulate error by configuring mock to fail
     muxed_stream.set_fail_on_read(True)
@@ -249,8 +207,8 @@ async def test_error_state_lifecycle():
     with pytest.raises(StreamError):
         await stream.read()
 
-    assert stream.state == StreamState.ERROR
-    assert not stream.is_operational()
+    assert await stream.state == StreamState.ERROR
+    assert not await stream.is_operational()
 
     # Attempt operations should fail
     with pytest.raises(StreamError):
@@ -259,10 +217,7 @@ async def test_error_state_lifecycle():
     with pytest.raises(StreamError):
         await stream.write(b"data")
 
-    # Attempt recovery
-    muxed_stream.set_fail_on_read(False)  # Fix the underlying issue
-    await stream.recover_from_error()
-
-    # Should be back to OPEN state
-    assert stream.state == StreamState.OPEN
-    assert stream.is_operational()
+    # ERROR state is terminal - no recovery possible
+    # Stream should remain in ERROR state
+    assert await stream.state == StreamState.ERROR
+    assert not await stream.is_operational()
