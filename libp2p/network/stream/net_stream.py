@@ -105,12 +105,12 @@ class NetStream(INetStream):
         State checks and modifications are atomic operations preventing race conditions.
 
     QUIC Compatibility
-    _________________
+    __________________
         Half-closed states (CLOSE_READ, CLOSE_WRITE) are essential for QUIC transport
         where streams can independently close read or write sides.
 
     Error Handling
-    _____________
+    ______________
         ERROR state is triggered by unexpected exceptions during I/O operations.
         Known exceptions (EOF, Reset, etc.) are handled gracefully without ERROR state.
         Recovery from ERROR state is possible but not guaranteed.
