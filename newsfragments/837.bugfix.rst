@@ -1,1 +1,0 @@
-Added multiselect type consistency in negotiate method. Updates all the usages of the method.
