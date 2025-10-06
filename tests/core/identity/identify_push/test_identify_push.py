@@ -598,7 +598,7 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
 
             # Cleanup: Cancel nursery and close all connections
             nursery.cancel_scope.cancel()
-            
+
             # Give time for proper cleanup
             await trio.sleep(0.1)
 
