@@ -97,12 +97,12 @@ class BasicHost(IHost):
         enable_mDNS: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
-        negotitate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
-        self.negotiate_timeout = negotitate_timeout
+        self.negotiate_timeout = negotiate_timeout
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))

@@ -15,6 +15,7 @@ Examples
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
+   examples.rendezvous
    examples.random_walk
    examples.multiple_connections
    examples.connection_health_monitoring
