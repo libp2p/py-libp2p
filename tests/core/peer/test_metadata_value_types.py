@@ -120,8 +120,9 @@ class TestMetadataValueTypeSafety:
 
         # Test PeerStore error handling
         peerstore = PeerStore()
+        # Use a known valid peer ID that doesn't exist in the store
         non_existent_peer = ID.from_base58(
-            "QmNonExistentPeer1234567890123456789012345678"
+            "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
         )
 
         with pytest.raises(PeerStoreError, match="peer ID not found"):
@@ -241,9 +242,9 @@ class TestInvalidMetadataTypes:
 
         # These types are not in MetadataValue but might be passed at runtime
         # They should work for storage but fail during JSON serialization
+        # Note: tuples are converted to lists by json.dumps, so they serialize fine
         problematic_values = [
             ("set_type", {1, 2, 3}),  # set is not JSON serializable
-            ("tuple_type", (1, 2, 3)),  # tuple is not JSON serializable
             # complex numbers not JSON serializable
             ("complex_type", complex(1, 2)),
             ("bytes_type", b"binary data"),  # bytes not JSON serializable
@@ -252,7 +253,7 @@ class TestInvalidMetadataTypes:
         for key, value in problematic_values:
             # These might work at runtime (Python is dynamically typed)
             # but they violate the MetadataValue type constraint
-            peer_data.put_metadata(key, value)  # This works at runtime
+            peer_data.put_metadata(key, value)  # type: ignore[arg-type]
             retrieved = peer_data.get_metadata(key)
             assert retrieved == value  # This also works
 
@@ -271,7 +272,7 @@ class TestInvalidMetadataTypes:
         custom_obj = CustomObject("test")
 
         # This works at runtime (no static type checking)
-        peer_data.put_metadata("custom", custom_obj)
+        peer_data.put_metadata("custom", custom_obj)  # type: ignore[arg-type]
         retrieved = peer_data.get_metadata("custom")
         assert retrieved is custom_obj
 
@@ -319,6 +320,7 @@ class TestMetadataValueIntegration:
             {"uptime": 7200, "messages_relayed": 3000, "connections": 30},
         )
         updated_stats = peerstore.get(peer_id, "stats")
+        assert isinstance(updated_stats, dict)
         assert updated_stats["uptime"] == 7200
         assert updated_stats["messages_relayed"] == 3000
 
