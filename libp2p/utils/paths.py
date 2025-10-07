@@ -216,7 +216,7 @@ def find_executable(name: str) -> Path | None:
 
     """
     # Check if name already contains path
-    if Path(name).parent != Path('.'):
+    if Path(name).parent != Path("."):
         path = Path(name)
         if path.exists() and os.access(path, os.X_OK):
             return path
