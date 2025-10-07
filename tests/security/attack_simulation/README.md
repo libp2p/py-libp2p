@@ -30,7 +30,7 @@ pytest tests/security/attack_simulation/ -v
 ```
 tests/security/attack_simulation/
 ├── eclipse_attack/     # Eclipse attack simulation
-├── sybil_attack/      # Sybil attack simulation 
+├── sybil_attack/      # Sybil attack simulation
 ├── flooding_attack/   # Flooding attack simulation
 ├── connection_exhaustion/ # Connection exhaustion
 ├── protocol_attack/   # Protocol attack simulation

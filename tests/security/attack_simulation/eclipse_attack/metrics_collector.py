@@ -83,7 +83,8 @@ class AttackMetrics:
             len(malicious_peers) * attack_intensity * 5
         )
 
-        # Network isolation is more likely with higher intensity and more malicious peers
+        # Network isolation is more likely with
+        #  higher intensity and more malicious peers
         isolation_probability = min(
             attack_intensity * len(malicious_peers) / len(honest_peers), 0.9
         )
