@@ -17,6 +17,8 @@ from typing import (
 )
 
 import trio
+from multiformats.cid import CID
+from multiformats import multihash
 
 from libp2p.abc import (
     IHost,
@@ -73,6 +75,8 @@ class RelayInfo:
     has_reservation: bool = False
     reservation_expires_at: float | None = None
     reservation_data_limit: int | None = None
+    successful_connects: int = 0
+    failed_connects: int = 0
 
 
 class RelayDiscovery(Service):
@@ -154,13 +158,30 @@ class RelayDiscovery(Service):
         r"""
         Discover relay nodes in the network.
 
-        This method queries the network for peers that support the
-        Circuit Relay v2 protocol.
+        This method first queries the DHT for peers advertising the relay protocol,
+        then falls back to checking already-connected peers.
         """
         logger.debug("Starting relay discovery")
 
         try:
-            # Get connected peers
+            # Use the DHT to find relays if available
+            if hasattr(self.host, "get_routing") and self.host.get_routing():
+                routing = self.host.get_routing()
+                # The namespace for relay discovery is the protocol ID.
+                # We create a CID from the protocol ID to query the DHT.
+                protocol_bytes = PROTOCOL_ID.encode("utf-8")
+                mh_digest = multihash.digest(protocol_bytes, "sha2-256")
+                # Codec 0x72 is 'libp2p-key'
+                cid_v1 = CID("base58btc", 1, 0x72, mh_digest)
+
+                logger.debug("Querying DHT for relays with CID %s", cid_v1)
+                async for peer_info in routing.find_providers_iter(
+                    cid_v1, self.max_relays
+                ):
+                    if peer_info.peer_id != self.host.get_id():
+                        await self.add_relay(peer_info.peer_id)
+
+            # Get connected peers as a fallback/supplement
             connected_peers = self.host.get_connected_peers()
             logger.debug(
                 "Checking %d connected peers for relay support", len(connected_peers)
@@ -179,7 +200,7 @@ class RelayDiscovery(Service):
                 # Don't wait too long for protocol info
                 with trio.move_on_after(self.peer_protocol_timeout):
                     if await self._supports_relay_protocol(peer_id):
-                        await self._add_relay(peer_id)
+                        await self.add_relay(peer_id)
 
             # Limit number of relays we track
             if len(self._discovered_relays) > self.max_relays:
@@ -333,9 +354,12 @@ class RelayDiscovery(Service):
             logger.debug("Error checking protocols via mux: %s", str(e))
             return None
 
-    async def _add_relay(self, peer_id: ID) -> None:
+    async def add_relay(self, peer_id: ID) -> None:
         """
         Add a peer as a relay and optionally make a reservation.
+
+        This method is idempotent and can be called for peers that are already
+        tracked as relays.
 
         Parameters
         ----------
@@ -343,6 +367,9 @@ class RelayDiscovery(Service):
             The ID of the peer to add as a relay
 
         """
+        if peer_id in self._discovered_relays:
+            return  # Already tracking this relay
+
         now = time.time()
         relay_info = RelayInfo(
             peer_id=peer_id,

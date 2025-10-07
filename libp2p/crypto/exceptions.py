@@ -12,3 +12,7 @@ class MissingDeserializerError(CryptographyError):
     Raise if the requested deserialization routine is missing for some type
     of cryptographic key.
     """
+
+
+class InvalidSignature(CryptographyError):
+    """Raise if the signature of a message is invalid."""

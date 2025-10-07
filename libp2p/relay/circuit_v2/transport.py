@@ -61,6 +61,8 @@ class CircuitV2Transport(ITransport):
     when direct connections are not possible.
     """
 
+    _last_relay_index: int
+
     def __init__(
         self,
         host: IHost,
@@ -92,6 +94,7 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self._last_relay_index = -1
 
     async def dial(
         self,
@@ -99,6 +102,10 @@ class CircuitV2Transport(ITransport):
     ) -> RawConnection:
         """
         Dial a peer using the multiaddr.
+
+        This method handles both direct and relayed dials. If the multiaddr
+        is a /p2p-circuit address, it will be dialed through the specified
+        relay. Otherwise, it will attempt to find an available relay.
 
         Parameters
         ----------
@@ -116,16 +123,48 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established
 
         """
-        # Extract peer ID from multiaddr - P_P2P code is 0x01A5 (421)
-        peer_id_str = maddr.value_for_protocol("p2p")
-        if not peer_id_str:
-            raise ConnectionError("Multiaddr does not contain peer ID")
+        # Check if the multiaddr is a relayed address
+        components = maddr.to_string().split("/p2p-circuit")
+        if len(components) > 1 and components[0]:
+            # This is a relayed address, of the form /p2p/relay_id/p2p-circuit/p2p/target_id
+            relay_maddr = multiaddr.Multiaddr(components[0])
+            target_maddr_str = components[1]
+            if not target_maddr_str.startswith("/"):
+                target_maddr_str = "/" + target_maddr_str
+            target_maddr = multiaddr.Multiaddr(target_maddr_str)
 
-        peer_id = ID.from_base58(peer_id_str)
-        peer_info = PeerInfo(peer_id, [maddr])
+            try:
+                relay_peer_id_str = relay_maddr.value_for_protocol("p2p")
+                target_peer_id_str = target_maddr.value_for_protocol("p2p")
 
-        # Use the internal dial_peer_info method
-        return await self.dial_peer_info(peer_info)
+                if not relay_peer_id_str or not target_peer_id_str:
+                    raise ValueError("Missing peer ID")
+
+                relay_peer_id = ID.from_base58(relay_peer_id_str)
+                target_peer_id = ID.from_base58(target_peer_id_str)
+                peer_info = PeerInfo(target_peer_id, [target_maddr])
+
+                return await self.dial_peer_info(peer_info, relay_peer_id=relay_peer_id)
+
+            except (ValueError, Exception) as e:
+                raise ConnectionError(
+                    f"Invalid p2p-circuit multiaddr: {maddr}, error: {e}"
+                )
+
+        # This is not a relayed address, so we need to find a relay
+        try:
+            peer_id_str = maddr.value_for_protocol("p2p")
+            if not peer_id_str:
+                raise ValueError("Multiaddr does not contain peer ID")
+
+            peer_id = ID.from_base58(peer_id_str)
+            peer_info = PeerInfo(peer_id, [maddr])
+
+            # Use the internal dial_peer_info method to find a relay automatically
+            return await self.dial_peer_info(peer_info)
+
+        except (ValueError, Exception) as e:
+            raise ConnectionError(f"Failed to dial non-relayed address {maddr}: {e}")
 
     async def dial_peer_info(
         self,
@@ -160,12 +199,17 @@ class CircuitV2Transport(ITransport):
             if not relay_peer_id:
                 raise ConnectionError("No suitable relay found")
 
-        # Get a stream to the relay
-        relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
-        if not relay_stream:
-            raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
+        # Ensure the relay is tracked by the discovery service for refresh.
+        await self.discovery.add_relay(relay_peer_id)
 
+        relay_info = self.discovery.get_relay_info(relay_peer_id)
+        relay_stream = None
         try:
+            # Get a stream to the relay
+            relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+            if not relay_stream:
+                raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
+
             # First try to make a reservation if enabled
             if self.config.enable_client:
                 success = await self._make_reservation(relay_stream, relay_peer_id)
@@ -193,16 +237,36 @@ class CircuitV2Transport(ITransport):
             if status_code != StatusCode.OK:
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
+            # If successful, add the relay address to the peerstore for the remote peer.
+            # This allows us to reconnect to the peer through the same relay in the future.
+            relay_addr = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit"
+            )
+            self.host.get_peerstore().add_addr(
+                peer_info.peer_id, relay_addr, self.config.reservation_ttl
+            )
+
+            # Update stats for a successful connection.
+            if relay_info:
+                relay_info.successful_connects += 1
+
             # Create raw connection from stream
             return RawConnection(stream=relay_stream, initiator=True)
 
         except Exception as e:
-            await relay_stream.close()
+            # Update stats for a failed connection.
+            if relay_info:
+                relay_info.failed_connects += 1
+            if relay_stream:
+                await relay_stream.close()
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
 
     async def _select_relay(self, peer_info: PeerInfo) -> ID | None:
         """
-        Select an appropriate relay for the given peer.
+        Select an appropriate relay for the given peer using a scoring model.
+
+        The scoring model prioritizes relays with a higher success rate and
+        lower latency.
 
         Parameters
         ----------
@@ -220,12 +284,49 @@ class CircuitV2Transport(ITransport):
         while attempts < self.client_config.max_auto_relay_attempts:
             # Get a relay from the list of discovered relays
             relays = self.discovery.get_relays()
-            if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+            if not relays:
+                # Wait and try discovery
+                await trio.sleep(1)
+                attempts += 1
+                continue
 
-            # Wait and try discovery
+            best_relay: ID | None = None
+            max_score = -1.0
+
+            for relay_id in relays:
+                relay_info = self.discovery.get_relay_info(relay_id)
+                if not relay_info:
+                    continue
+
+                # Calculate success rate (from 0.0 to 1.0)
+                total_attempts = (
+                    relay_info.successful_connects + relay_info.failed_connects
+                )
+                if total_attempts == 0:
+                    # Prioritize new relays by giving them a default success rate of 100%.
+                    success_rate = 1.0
+                else:
+                    success_rate = relay_info.successful_connects / total_attempts
+
+                # Get latency from peerstore (in seconds)
+                latency = self.host.get_peerstore().latency_EWMA(relay_id)
+                if latency <= 0:
+                    # Default to 1 second if no latency is available.
+                    # This avoids division by zero and gives a neutral score.
+                    latency = 1.0
+
+                # Simple scoring model: success_rate / latency.
+                # Lower latency and higher success rate result in a higher score.
+                score = success_rate / latency
+
+                if score > max_score:
+                    max_score = score
+                    best_relay = relay_id
+
+            if best_relay:
+                return best_relay
+
+            # Wait and try discovery if no suitable relay was found
             await trio.sleep(1)
             attempts += 1
 
@@ -277,8 +378,15 @@ class CircuitV2Transport(ITransport):
                 )
                 return False
 
-            # Store reservation info
-            # TODO: Implement reservation storage and refresh mechanism
+            # Store reservation info in the discovery service.
+            relay_info = self.discovery.get_relay_info(relay_peer_id)
+            if relay_info:
+                relay_info.has_reservation = True
+                if resp.HasField("reservation"):
+                    relay_info.reservation_expires_at = resp.reservation.expire
+                if resp.HasField("limit"):
+                    relay_info.reservation_data_limit = resp.limit.data
+
             return True
 
         except Exception as e:
@@ -303,17 +411,22 @@ class CircuitV2Transport(ITransport):
             The created listener
 
         """
-        return CircuitV2Listener(self.host, self.protocol, self.config)
+        return CircuitV2Listener(
+            self.host, self.protocol, self.config, handler_function
+        )
 
 
 class CircuitV2Listener(Service, IListener):
     """Listener for incoming relay connections."""
+
+    _handler_function: Callable[[ReadWriteCloser], Awaitable[None]]
 
     def __init__(
         self,
         host: IHost,
         protocol: CircuitV2Protocol,
         config: RelayConfig,
+        handler_function: Callable[[ReadWriteCloser], Awaitable[None]],
     ) -> None:
         """
         Initialize the Circuit v2 listener.
@@ -326,12 +439,15 @@ class CircuitV2Listener(Service, IListener):
             The Circuit v2 protocol instance
         config : RelayConfig
             Relay configuration
+        handler_function : Callable[[ReadWriteCloser], Awaitable[None]]
+            The handler function for new connections
 
         """
         super().__init__()
         self.host = host
         self.protocol = protocol
         self.config = config
+        self._handler_function = handler_function
         self.multiaddrs: list[
             multiaddr.Multiaddr
         ] = []  # Store multiaddrs as Multiaddr objects
@@ -383,7 +499,39 @@ class CircuitV2Listener(Service, IListener):
 
     async def run(self) -> None:
         """Run the listener service."""
-        # Implementation would go here
+
+        async def stream_handler(stream: INetStream) -> None:
+            """Handle incoming streams."""
+            try:
+                # Use get_conn() to access the connection object and remote peer
+                remote_peer_id = stream.get_conn().get_remote_peer()
+
+                # Process the incoming connection
+                raw_conn = await self.handle_incoming_connection(
+                    stream, remote_peer_id
+                )
+
+                # Pass the connection to the handler
+                await self._handler_function(raw_conn)
+
+            except ConnectionError as e:
+                logger.warning(
+                    "Failed to handle incoming relayed connection: %s", str(e)
+                )
+                await stream.reset()
+            except Exception as e:
+                logger.error("Error handling incoming relayed connection: %s", str(e))
+                await stream.reset()
+
+        # Register the stream handler for the relay protocol
+        self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
+
+        try:
+            # Keep the listener running until cancelled
+            await trio.sleep_forever()
+        finally:
+            # Clean up the stream handler when the service is stopped
+            self.host.remove_stream_handler(PROTOCOL_ID)
 
     async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
         """

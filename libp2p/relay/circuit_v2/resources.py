@@ -13,6 +13,7 @@ import hashlib
 import os
 import time
 
+from libp2p.crypto.exceptions import InvalidSignature
 from libp2p.peer.id import (
     ID,
 )
@@ -116,10 +117,10 @@ class Reservation:
 
     def to_proto(self) -> PbReservation:
         """Convert the reservation to its protobuf representation."""
-        # TODO: For production use, implement proper signature generation
-        # The signature should be created by signing the voucher with the
-        # peer's private key. The current implementation with an empty signature
-        # is intended for development and testing only.
+        # Note: The signature is intentionally left empty.
+        # The client receiving this reservation is responsible for signing
+        # the voucher with its private key and including the signature
+        # when using the reservation to open a relayed connection.
         return PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
@@ -197,7 +198,7 @@ class RelayResourceManager:
 
     def verify_reservation(self, peer_id: ID, proto_res: PbReservation) -> bool:
         """
-        Verify a reservation from a protobuf message.
+        Verify a reservation from a protobuf message, including its voucher and signature.
 
         Parameters
         ----------
@@ -209,16 +210,30 @@ class RelayResourceManager:
         Returns
         -------
         bool
-            True if the reservation is valid
+            True if the reservation is valid, False otherwise
 
         """
-        # TODO: Implement voucher and signature verification
+        # Look up the reservation for the given peer
         reservation = self._reservations.get(peer_id)
-        return (
-            reservation is not None
-            and not reservation.is_expired()
-            and reservation.expires_at == proto_res.expire
-        )
+        if reservation is None or reservation.is_expired():
+            return False
+
+        # Vouchers must match for the given peer
+        if reservation.voucher != proto_res.voucher:
+            return False
+
+        # Expiration must match what we have on record
+        if int(reservation.expires_at) != proto_res.expire:
+            return False
+
+        # Validate that the signature was created by the peer
+        try:
+            public_key = peer_id.get_public_key()
+            # The signature is on the voucher itself
+            return public_key.verify(proto_res.voucher, proto_res.signature)
+        except (InvalidSignature, Exception):
+            # If signature verification fails, the reservation is invalid
+            return False
 
     def can_accept_connection(self, peer_id: ID) -> bool:
         """
