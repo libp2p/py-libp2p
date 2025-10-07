@@ -22,7 +22,7 @@ from libp2p.abc import (
     IHost,
 )
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
-from libp2p.kad_dht.utils import maybe_consume_signed_record
+from libp2p.kad_dht.utils import maybe_consume_signed_record, sort_peer_ids_by_distance
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -63,6 +63,7 @@ logger = logging.getLogger("kademlia-example.kad_dht")
 # logger = logging.getLogger("libp2p.kademlia")
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
+MIN_PEERS_THRESHOLD = 5  # Configurable minimum for fallback to connected peers
 
 
 class DHTMode(Enum):
@@ -280,14 +281,12 @@ class KadDHT(Service):
                     )
                     
                     # Fallback to connected peers if routing table has insufficient peers
-                    MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                     if len(closest_peers) < MIN_PEERS_THRESHOLD:
                         logger.debug("Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, using connected peers as fallback", 
                                     len(closest_peers), MIN_PEERS_THRESHOLD)
                         connected_peers = self.host.get_connected_peers()
                         if connected_peers:
                             # Sort connected peers by distance to target and use as response
-                            from .utils import sort_peer_ids_by_distance
                             fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:20]
                             closest_peers = fallback_peers
                             logger.debug("Using %d connected peers as fallback for FIND_NODE in KadDHT", len(closest_peers))
@@ -482,7 +481,6 @@ class KadDHT(Service):
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
                                 # Sort connected peers by distance to target and use as response
-                                from .utils import sort_peer_ids_by_distance
                                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)[:20]
                                 closest_peers = fallback_peers
                                 logger.debug("Using %d connected peers as fallback for provider response", len(closest_peers))
@@ -587,7 +585,6 @@ class KadDHT(Service):
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
                                 # Sort connected peers by distance to target and use as response
-                                from .utils import sort_peer_ids_by_distance
                                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)[:20]
                                 closest_peers = fallback_peers
                                 logger.debug("Using %d connected peers as fallback for GET_VALUE response", len(closest_peers))
@@ -729,7 +726,6 @@ class KadDHT(Service):
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
                 # Sort connected peers by distance to target and use as fallback
-                from .utils import sort_peer_ids_by_distance
                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)
                 routing_table_peers = fallback_peers
                 logger.debug("Using %d connected peers as fallback for put_value", len(routing_table_peers))
@@ -789,7 +785,6 @@ class KadDHT(Service):
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
                 # Sort connected peers by distance to target and use as fallback
-                from .utils import sort_peer_ids_by_distance
                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)
                 routing_table_peers = fallback_peers
                 logger.debug("Using %d connected peers as fallback for get_value", len(routing_table_peers))
