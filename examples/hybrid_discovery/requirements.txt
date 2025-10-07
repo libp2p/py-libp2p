@@ -1,0 +1,8 @@
+# Core dependencies (required)
+base58>=2.1.0
+trio>=0.22.0
+
+# Optional dependencies for Ethereum integration
+# Uncomment the following lines if you want to use real Ethereum contracts:
+# web3>=6.0.0
+# eth-account>=0.8.0
