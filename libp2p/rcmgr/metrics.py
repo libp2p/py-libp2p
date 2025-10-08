@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 import time
-from typing import Any, Union
+from typing import Any
 
 
 @dataclass
@@ -19,11 +19,11 @@ class Metrics:
     ## time may not be necessary, but maybe useful for some metrics
     ## some implementation for remaining blocked services might be left
     def __init__(self) -> None:
-        self.data: dict[str, Union[float, str]] = {}
+        self.data: dict[str, float | str] = {}
         self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
         self._start_time = time.time()
 
-    def record(self, key: str, value: Union[float, str]) -> None:
+    def record(self, key: str, value: float | str) -> None:
         self.data[key] = value
 
     def get(self, key: str) -> float:
@@ -32,7 +32,8 @@ class Metrics:
 
     def increment(self, key: str, delta: float = 1.0) -> None:
         current = self.data.get(key, 0.0)
-        self.data[key] = (float(current) if isinstance(current, (int, float, str)) else 0.0) + delta
+        current = float(current) if isinstance(current, (int, float, str)) else 0.0
+        self.data[key] = current + delta
 
     def block_memory(self, size: int) -> None:
         self.resource_metrics["memory"].blocked += 1

@@ -88,7 +88,15 @@ FORCE:
 # docs commands
 
 docs: check-docs
-	open docs/_build/html/index.html
+	@echo "Documentation built successfully!"
+	@echo "To view the documentation, open docs/_build/html/index.html in your browser"
+	@if command -v xdg-open >/dev/null 2>&1; then \
+		xdg-open docs/_build/html/index.html; \
+	elif command -v open >/dev/null 2>&1; then \
+		open docs/_build/html/index.html; \
+	else \
+		echo "Please manually open docs/_build/html/index.html in your browser"; \
+	fi
 
 linux-docs: check-docs
 	xdg-open docs/_build/html/index.html
