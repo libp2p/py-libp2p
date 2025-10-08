@@ -279,10 +279,10 @@ class KadDHT(Service):
                     closest_peers = self.routing_table.find_local_closest_peers(
                         target_key, 20
                     )
-                    
+
                     # Fallback to connected peers if routing table has insufficient peers
                     if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                        logger.debug("Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, using connected peers as fallback", 
+                        logger.debug("Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, using connected peers as fallback",
                                     len(closest_peers), MIN_PEERS_THRESHOLD)
                         connected_peers = self.host.get_connected_peers()
                         if connected_peers:
@@ -290,7 +290,7 @@ class KadDHT(Service):
                             fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:20]
                             closest_peers = fallback_peers
                             logger.debug("Using %d connected peers as fallback for FIND_NODE in KadDHT", len(closest_peers))
-                    
+
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
                     # Consume the source signed_peer_record if sent
@@ -472,11 +472,11 @@ class KadDHT(Service):
                         closest_peers = self.routing_table.find_local_closest_peers(
                             key, 20
                         )
-                        
+
                         # Fallback to connected peers if routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                            logger.debug("Routing table has insufficient peers (%d < %d) for provider response, using connected peers as fallback", 
+                            logger.debug("Routing table has insufficient peers (%d < %d) for provider response, using connected peers as fallback",
                                         len(closest_peers), MIN_PEERS_THRESHOLD)
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
@@ -484,7 +484,7 @@ class KadDHT(Service):
                                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)[:20]
                                 closest_peers = fallback_peers
                                 logger.debug("Using %d connected peers as fallback for provider response", len(closest_peers))
-                        
+
                         logger.debug(
                             f"No providers found, including {len(closest_peers)}"
                             "closest peers"
@@ -576,11 +576,11 @@ class KadDHT(Service):
                         closest_peers = self.routing_table.find_local_closest_peers(
                             key, 20
                         )
-                        
+
                         # Fallback to connected peers if routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                            logger.debug("Routing table has insufficient peers (%d < %d) for GET_VALUE response, using connected peers as fallback", 
+                            logger.debug("Routing table has insufficient peers (%d < %d) for GET_VALUE response, using connected peers as fallback",
                                         len(closest_peers), MIN_PEERS_THRESHOLD)
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
@@ -588,7 +588,7 @@ class KadDHT(Service):
                                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)[:20]
                                 closest_peers = fallback_peers
                                 logger.debug("Using %d connected peers as fallback for GET_VALUE response", len(closest_peers))
-                        
+
                         logger.debug(
                             "No value found,"
                             f"including {len(closest_peers)} closest peers"
@@ -717,11 +717,11 @@ class KadDHT(Service):
 
         # 2. Get closest peers, excluding self
         routing_table_peers = self.routing_table.find_local_closest_peers(key)
-        
+
         # Fallback to connected peers if routing table has insufficient peers
         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
         if len(routing_table_peers) < MIN_PEERS_THRESHOLD:
-            logger.debug("Routing table has insufficient peers (%d < %d) for put_value, using connected peers as fallback", 
+            logger.debug("Routing table has insufficient peers (%d < %d) for put_value, using connected peers as fallback",
                         len(routing_table_peers), MIN_PEERS_THRESHOLD)
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
@@ -729,7 +729,7 @@ class KadDHT(Service):
                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)
                 routing_table_peers = fallback_peers
                 logger.debug("Using %d connected peers as fallback for put_value", len(routing_table_peers))
-        
+
         closest_peers = [
             peer
             for peer in routing_table_peers
@@ -776,11 +776,11 @@ class KadDHT(Service):
 
         # 2. Get closest peers, excluding self
         routing_table_peers = self.routing_table.find_local_closest_peers(key)
-        
+
         # Fallback to connected peers if routing table has insufficient peers
         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
         if len(routing_table_peers) < MIN_PEERS_THRESHOLD:
-            logger.debug("Routing table has insufficient peers (%d < %d) for get_value, using connected peers as fallback", 
+            logger.debug("Routing table has insufficient peers (%d < %d) for get_value, using connected peers as fallback",
                         len(routing_table_peers), MIN_PEERS_THRESHOLD)
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
@@ -788,7 +788,7 @@ class KadDHT(Service):
                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)
                 routing_table_peers = fallback_peers
                 logger.debug("Using %d connected peers as fallback for get_value", len(routing_table_peers))
-        
+
         closest_peers = [
             peer
             for peer in routing_table_peers
