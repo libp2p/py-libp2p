@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass, field
 import time
-from typing import Any
+from typing import Any, Union
 
 
 @dataclass
@@ -18,19 +18,21 @@ class ResourceMetrics:
 class Metrics:
     ## time may not be necessary, but maybe useful for some metrics
     ## some implementation for remaining blocked services might be left
-    def __init__(self):
-        self.data: dict[str, Any] = {}
+    def __init__(self) -> None:
+        self.data: dict[str, Union[float, str]] = {}
         self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
         self._start_time = time.time()
 
-    def record(self, key: str, value: float) -> None:
+    def record(self, key: str, value: Union[float, str]) -> None:
         self.data[key] = value
 
     def get(self, key: str) -> float:
-        return self.data.get(key, 0.0)
+        value = self.data.get(key, 0.0)
+        return float(value) if isinstance(value, (int, float, str)) else 0.0
 
     def increment(self, key: str, delta: float = 1.0) -> None:
-        self.data[key] = self.data.get(key, 0.0) + delta
+        current = self.data.get(key, 0.0)
+        self.data[key] = (float(current) if isinstance(current, (int, float, str)) else 0.0) + delta
 
     def block_memory(self, size: int) -> None:
         self.resource_metrics["memory"].blocked += 1
@@ -169,7 +171,7 @@ class Metrics:
         self.record("last_service_peer_block_time", time.time())
 
     def get_summary(self) -> dict[str, Any]:
-        summary = {
+        summary: dict[str, Any] = {
             "uptime": time.time() - self._start_time,
             "resource_metrics": {},
             "totals": {},
@@ -177,6 +179,8 @@ class Metrics:
 
         # Resource metrics summary
         for resource_type, metrics in self.resource_metrics.items():
+            if "resource_metrics" not in summary:
+                summary["resource_metrics"] = {}
             summary["resource_metrics"][resource_type] = {
                 "allowed": metrics.allowed,
                 "blocked": metrics.blocked,
@@ -192,6 +196,8 @@ class Metrics:
         # Total counters
         for key, value in self.data.items():
             if "_total" in key or "_current" in key or "_peak" in key:
+                if "totals" not in summary:
+                    summary["totals"] = {}
                 summary["totals"][key] = value
 
         return summary
