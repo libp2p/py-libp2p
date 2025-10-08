@@ -1,8 +1,6 @@
 @pytest.mark.trio
 async def test_find_closest_peers_network_fallback_to_connected_peers(
-    self,
-    peer_routing,
-    mock_host
+    self, peer_routing, mock_host
 ):
     """
     Test network search falls back to connected peers with insufficient routing table
@@ -26,11 +24,10 @@ async def test_find_closest_peers_network_fallback_to_connected_peers(
             result = await peer_routing.find_closest_peers_network(target_key)
             assert result == connected_peers
 
+
 @pytest.mark.trio
 async def test_find_closest_peers_network_no_fallback_when_sufficient_peers(
-    self,
-    peer_routing,
-    mock_host
+    self, peer_routing, mock_host
 ):
     """
     Test network search doesn't fall back when routing table has sufficient
@@ -55,11 +52,10 @@ async def test_find_closest_peers_network_no_fallback_when_sufficient_peers(
             # Should not use connected peers as fallback
             assert result == sufficient_peers
 
+
 @pytest.mark.trio
 async def test_find_closest_peers_network_fallback_with_no_connected_peers(
-    self,
-    peer_routing,
-    mock_host
+    self, peer_routing, mock_host
 ):
     """
     Test network search handling when no connected peers are available for

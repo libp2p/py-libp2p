@@ -7,9 +7,7 @@ logger.debug(
 
 # Fix for lines 179-180
 # Sort connected peers by distance to target and use as initial query targets
-fallback_peers = sort_peer_ids_by_distance(
-    target_key, connected_peers
-)[:count]
+fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:count]
 
 # Fix for line 404-414
 # Split long comment line
@@ -26,9 +24,7 @@ if len(closest_peers) < MIN_PEERS_THRESHOLD:
     connected_peers = self.host.get_connected_peers()
     if connected_peers:
         # Sort connected peers by distance to target and use as response
-        fallback_peers = sort_peer_ids_by_distance(
-            target_key, connected_peers
-        )[:20]
+        fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:20]
         closest_peers = fallback_peers
         logger.debug(
             "Using %d connected peers as fallback for FIND_NODE response",

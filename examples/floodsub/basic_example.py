@@ -91,11 +91,11 @@ async def main() -> None:
             messages = [
                 "Hello from FloodSub!",
                 "This is message number 2",
-                "FloodSub is working great!"
+                "FloodSub is working great!",
             ]
 
             for i, message in enumerate(messages):
-                logger.info(f"Publishing message {i+1}: {message}")
+                logger.info(f"Publishing message {i + 1}: {message}")
                 await pubsub1.publish(topic, message.encode())
                 await trio.sleep(0.5)
 
@@ -103,7 +103,7 @@ async def main() -> None:
             logger.info("Receiving messages...")
             for i in range(len(messages)):
                 message = await subscription.get()
-                logger.info(f"Received message {i+1}: {message.data.decode()}")
+                logger.info(f"Received message {i + 1}: {message.data.decode()}")
                 logger.info(f"  From peer: {message.from_id.hex()}")
                 logger.info(f"  Topics: {message.topicIDs}")
 
