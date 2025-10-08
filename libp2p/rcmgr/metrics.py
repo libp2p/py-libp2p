@@ -16,9 +16,8 @@ class ResourceMetrics:
 
 
 class Metrics:
-
     ## time may not be necessary, but maybe useful for some metrics
-    ## some implementation for remaining blocked services might be left 
+    ## some implementation for remaining blocked services might be left
     def __init__(self):
         self.data: dict[str, Any] = {}
         self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
@@ -58,9 +57,7 @@ class Metrics:
 
         self.record("memory_current_usage", metrics.current_usage)
 
-
     ## Stream Metrics
-
 
     def block_stream(self, peer_id: str, direction: str) -> None:
         """Record a blocked stream."""
@@ -92,8 +89,7 @@ class Metrics:
 
         self.record(f"{key}_current", metrics.current_usage)
 
-    ## Connection Metrics 
-
+    ## Connection Metrics
 
     def block_conn(self, direction: str, use_fd: bool) -> None:
         """Record a blocked connection."""
@@ -144,19 +140,15 @@ class Metrics:
 
             self.record("fd_current", fd_metrics.current_usage)
 
-
-
     def allow_peer(self, peer_id: str) -> None:
         self.increment("peer_connections_total")
         self.record("last_peer_connected", peer_id)
         self.record("last_peer_connect_time", time.time())
 
-
     def allow_protocol(self, protocol: str) -> None:
         self.increment("protocol_streams_total")
         self.record("last_protocol_stream", protocol)
         self.record("last_protocol_stream_time", time.time())
-
 
     def allow_service(self, service: str) -> None:
         """Record an allowed service stream."""

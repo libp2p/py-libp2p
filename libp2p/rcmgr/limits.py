@@ -12,9 +12,10 @@ from libp2p.peer.id import ID
 
 class Direction(Enum):
     """Direction of network connections and streams."""
-    
+
     INBOUND = "inbound"
     OUTBOUND = "outbound"
+
 
 # Type alias for clarity
 ProtocolID = TProtocol

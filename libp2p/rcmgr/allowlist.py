@@ -6,7 +6,6 @@ allowlist can bypass the resource limits.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from multiaddr import Multiaddr
 
@@ -32,7 +31,7 @@ class Allowlist:
     - Specific peer-multiaddr combinations
     """
 
-    def __init__(self, config: Optional[AllowlistConfig] = None):
+    def __init__(self, config: AllowlistConfig | None = None):
         if config is None:
             config = AllowlistConfig()
 
