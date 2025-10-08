@@ -63,52 +63,65 @@ async def main() -> None:
         strict_signing=False,  # Disable for simplicity
     )
 
-    # Start both pubsub services
-    async with background_trio_service(pubsub1):
-        async with background_trio_service(pubsub2):
-            await pubsub1.wait_until_ready()
-            await pubsub2.wait_until_ready()
+    # Start both pubsub services with a cancellation scope
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(pubsub1.run)
+        nursery.start_soon(pubsub2.run)
+        
+        # Give services time to start
+        await trio.sleep(0.5)
+        await pubsub1.wait_until_ready()
+        await pubsub2.wait_until_ready()
 
-            logger.info(f"Host 1 ID: {host1.get_id()}")
-            logger.info(f"Host 2 ID: {host2.get_id()}")
+        logger.info(f"Host 1 ID: {host1.get_id()}")
+        logger.info(f"Host 2 ID: {host2.get_id()}")
 
-            # Start listening on both hosts
-            logger.info("Starting hosts...")
-            await host1.get_network().listen()
-            await host2.get_network().listen()
-            await trio.sleep(0.5)  # Wait for hosts to start listening
+        # Start listening on both hosts
+        logger.info("Starting hosts...")
+        await host1.get_network().listen()
+        await host2.get_network().listen()
+        await trio.sleep(0.5)  # Wait for hosts to start listening
 
-            # Connect the hosts
-            logger.info("Connecting hosts...")
-            peer_info = PeerInfo(host2.get_id(), host2.get_addrs())
-            await host1.connect(peer_info)
-            await trio.sleep(1)  # Wait for connection
+        # Connect the hosts
+        logger.info("Connecting hosts...")
+        peer_info = PeerInfo(host2.get_id(), host2.get_addrs())
+        await host1.connect(peer_info)
+        await trio.sleep(1)  # Wait for connection
 
-            # Subscribe to topic on host2
-            topic = "test-topic"
-            logger.info(f"Subscribing to topic: {topic}")
-            subscription = await pubsub2.subscribe(topic)
-            await trio.sleep(0.5)  # Wait for subscription to propagate
+        # Subscribe to topic on host2
+        topic = "test-topic"
+        logger.info(f"Subscribing to topic: {topic}")
+        subscription = await pubsub2.subscribe(topic)
+        await trio.sleep(0.5)  # Wait for subscription to propagate
 
-            # Publish messages from host1
-            messages = [
-                "Hello from FloodSub!",
-                "This is message number 2",
-                "FloodSub is working great!",
-            ]
+        # Publish messages from host1
+        messages = [
+            "Hello from FloodSub!",
+            "This is message number 2",
+            "FloodSub is working great!",
+        ]
 
-            for i, message in enumerate(messages):
-                logger.info(f"Publishing message {i + 1}: {message}")
-                await pubsub1.publish(topic, message.encode())
-                await trio.sleep(0.5)
+        for i, message in enumerate(messages):
+            logger.info(f"Publishing message {i + 1}: {message}")
+            await pubsub1.publish(topic, message.encode())
+            await trio.sleep(0.5)
 
-            # Receive messages on host2
-            logger.info("Receiving messages...")
-            for i in range(len(messages)):
+        # Receive messages on host2 with timeout
+        logger.info("Receiving messages...")
+        for i in range(len(messages)):
+            # Use a timeout to prevent hanging
+            with trio.move_on_after(5) as cancel_scope:
                 message = await subscription.get()
                 logger.info(f"Received message {i + 1}: {message.data.decode()}")
                 logger.info(f"  From peer: {message.from_id.hex()}")
                 logger.info(f"  Topics: {message.topicIDs}")
+                
+            if cancel_scope.cancelled_caught:
+                logger.warning(f"Timed out waiting for message {i + 1}")
+                break
+        
+        # Clean up by cancelling the nursery
+        nursery.cancel_scope.cancel()
 
     logger.info("Basic FloodSub example completed successfully!")
 
