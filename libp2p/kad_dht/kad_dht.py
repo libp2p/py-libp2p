@@ -282,14 +282,22 @@ class KadDHT(Service):
 
                     # Fallback to connected peers if routing table has insufficient peers
                     if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                        logger.debug("Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, using connected peers as fallback",
-                                    len(closest_peers), MIN_PEERS_THRESHOLD)
+                        logger.debug(
+                            "Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, "
+                            "using connected peers as fallback",
+                            len(closest_peers), MIN_PEERS_THRESHOLD
+                        )
                         connected_peers = self.host.get_connected_peers()
                         if connected_peers:
                             # Sort connected peers by distance to target and use as response
-                            fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:20]
+                            fallback_peers = sort_peer_ids_by_distance(
+                                target_key, connected_peers
+                            )[:20]
                             closest_peers = fallback_peers
-                            logger.debug("Using %d connected peers as fallback for FIND_NODE in KadDHT", len(closest_peers))
+                            logger.debug(
+                                "Using %d connected peers as fallback for FIND_NODE in KadDHT",
+                                len(closest_peers)
+                            )
 
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
 
@@ -476,14 +484,22 @@ class KadDHT(Service):
                         # Fallback to connected peers if routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                            logger.debug("Routing table has insufficient peers (%d < %d) for provider response, using connected peers as fallback",
-                                        len(closest_peers), MIN_PEERS_THRESHOLD)
+                            logger.debug(
+                                "Routing table has insufficient peers (%d < %d) for provider response, "
+                                "using connected peers as fallback",
+                                len(closest_peers), MIN_PEERS_THRESHOLD
+                            )
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
                                 # Sort connected peers by distance to target and use as response
-                                fallback_peers = sort_peer_ids_by_distance(key, connected_peers)[:20]
+                                fallback_peers = sort_peer_ids_by_distance(
+                                    key, connected_peers
+                                )[:20]
                                 closest_peers = fallback_peers
-                                logger.debug("Using %d connected peers as fallback for provider response", len(closest_peers))
+                                logger.debug(
+                                    "Using %d connected peers as fallback for provider response",
+                                    len(closest_peers)
+                                )
 
                         logger.debug(
                             f"No providers found, including {len(closest_peers)}"
@@ -580,8 +596,11 @@ class KadDHT(Service):
                         # Fallback to connected peers if routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
-                            logger.debug("Routing table has insufficient peers (%d < %d) for GET_VALUE response, using connected peers as fallback",
-                                        len(closest_peers), MIN_PEERS_THRESHOLD)
+                            logger.debug(
+                                "Routing table has insufficient peers (%d < %d) for GET_VALUE response, "
+                                "using connected peers as fallback",
+                                len(closest_peers), MIN_PEERS_THRESHOLD
+                            )
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
                                 # Sort connected peers by distance to target and use as response
@@ -590,8 +609,9 @@ class KadDHT(Service):
                                 logger.debug("Using %d connected peers as fallback for GET_VALUE response", len(closest_peers))
 
                         logger.debug(
-                            "No value found,"
-                            f"including {len(closest_peers)} closest peers"
+                            "No value found, "
+                            "including %d closest peers",
+                            len(closest_peers)
                         )
 
                         for peer in closest_peers:
@@ -651,12 +671,15 @@ class KadDHT(Service):
                             )
 
                         self.value_store.put(key, value)
-                        logger.debug(f"Stored value {value.hex()} for key {key.hex()}")
+                        logger.debug(
+                            "Stored value %s for key %s",
+                            value.hex(), key.hex()
+                        )
                         success = True
                     except Exception as e:
                         logger.warning(
-                            f"Failed to store value {value.hex()} for key "
-                            f"{key.hex()}: {e}"
+                            "Failed to store value %s for key %s: %s",
+                            value.hex(), key.hex(), str(e)
                         )
                     finally:
                         # Send acknowledgement
@@ -676,11 +699,11 @@ class KadDHT(Service):
                         logger.debug("Sent PUT_VALUE acknowledgement")
 
             except Exception as proto_err:
-                logger.warning(f"Failed to parse protobuf message: {proto_err}")
+                logger.warning("Failed to parse protobuf message: %s", str(proto_err))
 
             await stream.close()
         except Exception as e:
-            logger.error(f"Error handling DHT stream: {e}")
+            logger.error("Error handling DHT stream: %s", str(e))
             await stream.close()
 
     async def refresh_routing_table(self) -> None:
@@ -694,7 +717,7 @@ class KadDHT(Service):
         """
         Find a peer with the given ID.
         """
-        logger.debug(f"Finding peer: {peer_id}")
+        logger.debug("Finding peer: %s", str(peer_id))
         return await self.peer_routing.find_peer(peer_id)
 
     # Value storage and retrieval methods
@@ -703,7 +726,7 @@ class KadDHT(Service):
         """
         Store a value in the DHT.
         """
-        logger.debug(f"Storing value for key {key.hex()}")
+        logger.debug("Storing value for key %s", key.hex())
 
         # 1. Store locally first
         self.value_store.put(key, value)
@@ -712,7 +735,8 @@ class KadDHT(Service):
         except UnicodeDecodeError:
             decoded_value = value.hex()
         logger.debug(
-            f"Stored value locally for key {key.hex()} with value {decoded_value}"
+            "Stored value locally for key %s with value %s",
+            key.hex(), decoded_value
         )
 
         # 2. Get closest peers, excluding self
@@ -721,21 +745,27 @@ class KadDHT(Service):
         # Fallback to connected peers if routing table has insufficient peers
         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
         if len(routing_table_peers) < MIN_PEERS_THRESHOLD:
-            logger.debug("Routing table has insufficient peers (%d < %d) for put_value, using connected peers as fallback",
-                        len(routing_table_peers), MIN_PEERS_THRESHOLD)
+            logger.debug(
+                "Routing table has insufficient peers (%d < %d) for put_value, "
+                "using connected peers as fallback",
+                len(routing_table_peers), MIN_PEERS_THRESHOLD
+            )
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
                 # Sort connected peers by distance to target and use as fallback
                 fallback_peers = sort_peer_ids_by_distance(key, connected_peers)
                 routing_table_peers = fallback_peers
-                logger.debug("Using %d connected peers as fallback for put_value", len(routing_table_peers))
+                logger.debug(
+                    "Using %d connected peers as fallback for put_value",
+                    len(routing_table_peers)
+                )
 
         closest_peers = [
             peer
             for peer in routing_table_peers
             if peer != self.local_peer_id
         ]
-        logger.debug(f"Found {len(closest_peers)} peers to store value at")
+        logger.debug("Found %d peers to store value at", len(closest_peers))
 
         # 3. Store at remote peers in batches of ALPHA, in parallel
         stored_count = 0
@@ -751,11 +781,11 @@ class KadDHT(Service):
                         )
                         batch_results[idx] = success
                         if success:
-                            logger.debug(f"Stored value at peer {peer}")
+                            logger.debug("Stored value at peer %s", str(peer))
                         else:
-                            logger.debug(f"Failed to store value at peer {peer}")
+                            logger.debug("Failed to store value at peer %s", str(peer))
                 except Exception as e:
-                    logger.debug(f"Error storing value at peer {peer}: {e}")
+                    logger.debug("Error storing value at peer %s: %s", str(peer), str(e))
 
             async with trio.open_nursery() as nursery:
                 for idx, peer in enumerate(batch):
@@ -763,10 +793,10 @@ class KadDHT(Service):
 
             stored_count += sum(batch_results)
 
-        logger.info(f"Successfully stored value at {stored_count} peers")
+        logger.info("Successfully stored value at %d peers", stored_count)
 
     async def get_value(self, key: bytes) -> bytes | None:
-        logger.debug(f"Getting value for key: {key.hex()}")
+        logger.debug("Getting value for key: %s", key.hex())
 
         # 1. Check local store first
         value = self.value_store.get(key)
@@ -780,8 +810,11 @@ class KadDHT(Service):
         # Fallback to connected peers if routing table has insufficient peers
         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
         if len(routing_table_peers) < MIN_PEERS_THRESHOLD:
-            logger.debug("Routing table has insufficient peers (%d < %d) for get_value, using connected peers as fallback",
-                        len(routing_table_peers), MIN_PEERS_THRESHOLD)
+            logger.debug(
+                "Routing table has insufficient peers (%d < %d) for get_value, "
+                "using connected peers as fallback",
+                len(routing_table_peers), MIN_PEERS_THRESHOLD
+            )
             connected_peers = self.host.get_connected_peers()
             if connected_peers:
                 # Sort connected peers by distance to target and use as fallback
@@ -794,7 +827,7 @@ class KadDHT(Service):
             for peer in routing_table_peers
             if peer != self.local_peer_id
         ]
-        logger.debug(f"Searching {len(closest_peers)} peers for value")
+        logger.debug("Searching %d peers for value", len(closest_peers))
 
         # 3. Query ALPHA peers at a time in parallel
         for i in range(0, len(closest_peers), ALPHA):
@@ -808,9 +841,9 @@ class KadDHT(Service):
                         value = await self.value_store._get_from_peer(peer, key)
                         if value is not None and found_value is None:
                             found_value = value
-                            logger.debug(f"Found value at peer {peer}")
+                            logger.debug("Found value at peer %s", str(peer))
                 except Exception as e:
-                    logger.debug(f"Error querying peer {peer}: {e}")
+                    logger.debug("Error querying peer %s: %s", str(peer), str(e))
 
             async with trio.open_nursery() as nursery:
                 for peer in batch:

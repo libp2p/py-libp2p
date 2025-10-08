@@ -602,10 +602,8 @@ async def test_sparse_connect():
 
 @pytest.mark.trio
 async def test_flood_publish():
-    """
-    Test that with flood_publish disabled, message propagation still works
-    in a fully connected network topology.
-    """
+    """Test that with flood_publish disabled, message propagation still works
+    in a fully connected network topology."""
     async with PubsubFactory.create_batch_with_gossipsub(
         6,
         degree=2,
@@ -648,17 +646,15 @@ async def test_flood_publish():
                     assert msg.data == msg_content, f"node {i} received wrong message: {msg.data}"
             except trio.TooSlowError:
                 pytest.fail(f"Node {i} did not receive the message (timeout)")
-
+                
         # Test passed if all nodes received the message
         print("Basic flood test passed - all nodes received the message")
 
 
 @pytest.mark.trio
 async def test_flood_publish_enabled():
-    """
-    Test that with flood_publish enabled, all nodes receive the message
-    even with a sparse network topology.
-    """
+    """Test that with flood_publish enabled, all nodes receive the message
+    even with a sparse network topology."""
     # Create a network with flood_publish enabled
     async with PubsubFactory.create_batch_with_gossipsub(
         6,
@@ -694,7 +690,7 @@ async def test_flood_publish_enabled():
 
         # wait for messages to propagate
         await trio.sleep(2)
-
+        
         # verify all nodes received the message with timeout
         for i, queue in enumerate(queues):
             try:
@@ -704,7 +700,7 @@ async def test_flood_publish_enabled():
                     print(f"Node {i} received message correctly")
             except trio.TooSlowError:
                 pytest.fail(f"Node {i} did not receive the message (timeout)")
-
+        
         # Test passed if all nodes received the message
         print("Flood publish test passed - all nodes received the message")
 
