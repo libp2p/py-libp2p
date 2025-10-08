@@ -108,6 +108,7 @@ class GossipSub(IPubsubRouter, Service):
         time_to_live: int = 60,
         gossip_window: int = 3,
         gossip_history: int = 5,
+        flood_publish: bool = False,
         heartbeat_initial_delay: float = 0.1,
         heartbeat_interval: int = 120,
         direct_connect_initial_delay: float = 0.1,
@@ -137,6 +138,11 @@ class GossipSub(IPubsubRouter, Service):
 
         # Create message cache
         self.mcache = MessageCache(gossip_window, gossip_history)
+
+        # Whether to flood publish to all peers instead of following gossipsub
+        # mesh/fanout logic. Kept as an option primarily for tests and
+        # compatibility with the test factory. Default is False.
+        self.flood_publish = flood_publish
 
         # Create heartbeat timer
         self.heartbeat_initial_delay = heartbeat_initial_delay
