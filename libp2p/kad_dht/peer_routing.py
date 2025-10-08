@@ -1,18 +1,14 @@
-# Fix for lines 175-176
 logger.debug(
-    "Routing table has insufficient peers (%d < %d), using connected peers as fallback",
+    "Routing table has insufficient peers (%d < %d), "
+    "using connected peers as fallback",
     len(closest_peers),
     MIN_PEERS_THRESHOLD,
 )
 
-# Fix for lines 179-180
 # Sort connected peers by distance to target and use as initial query targets
 fallback_peers = sort_peer_ids_by_distance(target_key, connected_peers)[:count]
 
-# Fix for line 404-414
-# Split long comment line
-# Fallback to connected peers if routing table has insufficient
-# peers
+# Fallback to connected peers if routing table has insufficient peers
 MIN_PEERS_THRESHOLD = 5  # Configurable minimum
 if len(closest_peers) < MIN_PEERS_THRESHOLD:
     logger.debug(

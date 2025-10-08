@@ -432,13 +432,13 @@ class QUICListener(IListener):
                     if ext.oid == LIBP2P_TLS_EXTENSION_OID:
                         has_libp2p_ext = True
                         break
-                logger.debug(f"Certificate has libp2p extension: {has_libp2p_ext}")
+                logger.debug("Certificate has libp2p extension: %s", has_libp2p_ext)
 
                 if not has_libp2p_ext:
                     logger.error("Certificate missing libp2p extension!")
 
             logger.debug(
-                f"Original destination CID: {packet_info.destination_cid.hex()}"
+                "Original destination CID: %s", packet_info.destination_cid.hex()
             )
 
             quic_conn = QuicConnection(
@@ -450,18 +450,23 @@ class QUICListener(IListener):
             # Use the first host CID as our routing CID
             if quic_conn._host_cids:
                 destination_cid = quic_conn._host_cids[0].cid
-                logger.debug(f"Using host CID as routing CID: {destination_cid.hex()}")
+                logger.debug(
+                    "Using host CID as routing CID: %s", destination_cid.hex()
+                )
             else:
                 # Fallback to random if no host CIDs generated
                 import secrets
 
                 destination_cid = secrets.token_bytes(8)
-                logger.debug(f"Fallback to random CID: {destination_cid.hex()}")
-
-            logger.debug(f"Generated {len(quic_conn._host_cids)} host CIDs for client")
+                logger.debug("Fallback to random CID: %s", destination_cid.hex())
 
             logger.debug(
-                f"QUIC connection created for destination CID {destination_cid.hex()}"
+                "Generated %d host CIDs for client", len(quic_conn._host_cids)
+            )
+
+            logger.debug(
+                "QUIC connection created for destination CID %s",
+                destination_cid.hex(),
             )
 
             # Store connection mapping using our generated CID
@@ -479,21 +484,25 @@ class QUICListener(IListener):
                             "request_client_certificate set to True in server TLS"
                         )
                     except Exception as e:
-                        logger.error(f"FAILED to apply request_client_certificate: {e}")
+                        logger.error(
+                            "FAILED to apply request_client_certificate: %s", e
+                        )
 
             # Process events and send response
             await self._process_quic_events(quic_conn, addr, destination_cid)
             await self._transmit_for_connection(quic_conn, addr)
 
             logger.debug(
-                f"Started handshake for new connection from {addr} "
-                f"(version: 0x{packet_info.version:08x}, cid: {destination_cid.hex()})"
+                "Started handshake for new connection from %s (version: 0x%08x, cid: %s)",
+                addr,
+                packet_info.version,
+                destination_cid.hex(),
             )
 
             return quic_conn
 
         except Exception as e:
-            logger.error(f"Error handling new connection from {addr}: {e}")
+            logger.error("Error handling new connection from %s: %s", addr, e)
             self._stats["connections_rejected"] += 1
             return None
 

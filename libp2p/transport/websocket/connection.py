@@ -46,13 +46,13 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         async with self._write_lock:
             try:
-                logger.debug(f"WebSocket writing {len(data)} bytes")
+                logger.debug("WebSocket writing %d bytes", len(data))
 
                 # Check buffer amount for flow control
                 if hasattr(self._ws_connection, "bufferedAmount"):
                     buffered = self._ws_connection.bufferedAmount
                     if buffered > self._max_buffered_amount:
-                        logger.warning(f"WebSocket buffer full: {buffered} bytes")
+                        logger.warning("WebSocket buffer full: %d bytes", buffered)
                         # In production, you might want to
                         # wait or implement backpressure
                         # For now, we'll continue but log the warning
@@ -60,10 +60,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 # Send as a binary WebSocket message
                 await self._ws_connection.send_message(data)
                 self._bytes_written += len(data)
-                logger.debug(f"WebSocket wrote {len(data)} bytes successfully")
+                logger.debug("WebSocket wrote %d bytes successfully", len(data))
 
             except Exception as e:
-                logger.error(f"WebSocket write failed: {e}")
+                logger.error("WebSocket write failed: %s", str(e))
                 self._closed = True
                 raise IOException from e
 
@@ -137,7 +137,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 return result
 
             except Exception as e:
-                logger.error(f"WebSocket read failed: {e}")
+                logger.error("WebSocket read failed: %s", str(e))
                 raise IOException from e
 
     async def close(self) -> None:
@@ -157,7 +157,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 if self._ws_context is not None:
                     await self._ws_context.__aexit__(None, None, None)
             except Exception as e:
-                logger.error(f"WebSocket close error: {e}")
+                logger.error("WebSocket close error: %s", str(e))
                 # Don't raise here, as close() should be idempotent
             finally:
                 logger.debug("WebSocket connection closed")

@@ -183,7 +183,7 @@ def new_swarm(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
 ) -> INetworkService:
-    logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
+    logger.debug("new_swarm: enable_quic=%s, listen_addrs=%s", enable_quic, listen_addrs)
     """
     Create a swarm instance based on the parameters.
 
@@ -227,7 +227,7 @@ def new_swarm(
         )
 
         addr = listen_addrs[0]
-        logger.debug(f"new_swarm: Creating transport for address: {addr}")
+    logger.debug("new_swarm: Creating transport for address: %s", addr)
         transport_maybe = create_transport_for_multiaddr(
             addr,
             temp_upgrader,
@@ -241,14 +241,17 @@ def new_swarm(
             raise ValueError(f"Unsupported transport for listen_addrs: {listen_addrs}")
 
         transport = transport_maybe
-        logger.debug(f"new_swarm: Created transport: {type(transport)}")
+    logger.debug("new_swarm: Created transport: %s", type(transport))
 
     # If enable_quic is True but we didn't get a QUIC transport, force QUIC
     if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
+        logger.debug(
+            "new_swarm: Forcing QUIC transport (enable_quic=True but got %s)",
+            type(transport),
+        )
         transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
 
-    logger.debug(f"new_swarm: Final transport type: {type(transport)}")
+    logger.debug("new_swarm: Final transport type: %s", type(transport))
 
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()

@@ -162,7 +162,7 @@ class KadDHT(Service):
 
     async def run(self) -> None:
         """Run the DHT service."""
-        logger.info(f"Starting Kademlia DHT with peer ID {self.local_peer_id}")
+        logger.info("Starting Kademlia DHT with peer ID %s", self.local_peer_id)
 
         # Start the RT Refresh Manager in parallel with the main DHT service
         async with trio.open_nursery() as nursery:
@@ -191,7 +191,7 @@ class KadDHT(Service):
             # Clean up expired values and provider records
             expired_values = self.value_store.cleanup_expired()
             if expired_values > 0:
-                logger.debug(f"Cleaned up {expired_values} expired values")
+                logger.debug("Cleaned up %d expired values", expired_values)
 
             self.provider_store.cleanup_expired()
 
@@ -218,12 +218,12 @@ class KadDHT(Service):
         """
         # Validate that new_mode is a DHTMode enum
         if not isinstance(new_mode, DHTMode):
-            raise TypeError(f"new_mode must be DHTMode enum, got {type(new_mode)}")
+            raise TypeError("new_mode must be DHTMode enum, got %s", type(new_mode))
 
         if new_mode == DHTMode.CLIENT:
             self.routing_table.cleanup_routing_table()
         self.mode = new_mode
-        logger.info(f"Switched to {new_mode.value} mode")
+    logger.info("Switched to %s mode", new_mode.value)
         return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
@@ -233,10 +233,10 @@ class KadDHT(Service):
         if self.mode == DHTMode.CLIENT:
             stream.close
             return
-        peer_id = stream.muxed_conn.peer_id
-        logger.debug(f"Received DHT stream from peer {peer_id}")
-        await self.add_peer(peer_id)
-        logger.debug(f"Added peer {peer_id} to routing table")
+    peer_id = stream.muxed_conn.peer_id
+    logger.debug("Received DHT stream from peer %s", peer_id)
+    await self.add_peer(peer_id)
+    logger.debug("Added peer %s to routing table", peer_id)
 
         closer_peer_envelope: Envelope | None = None
         provider_peer_envelope: Envelope | None = None
@@ -267,7 +267,9 @@ class KadDHT(Service):
                 message = Message()
                 message.ParseFromString(msg_bytes)
                 logger.debug(
-                    f"Received DHT message from {peer_id}, type: {message.type}"
+                    "Received DHT message from %s, type: %s",
+                    peer_id,
+                    message.type,
                 )
 
                 # Handle FIND_NODE message
@@ -300,7 +302,7 @@ class KadDHT(Service):
                                 len(closest_peers),
                             )
 
-                    logger.debug(f"Found {len(closest_peers)} peers close to target")
+                    logger.debug("Found %d peers close to target", len(closest_peers))
 
                     # Consume the source signed_peer_record if sent
                     if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -354,14 +356,15 @@ class KadDHT(Service):
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.debug(
-                        f"Sent FIND_NODE response with{len(response.closerPeers)} peers"
+                        "Sent FIND_NODE response with %d peers",
+                        len(response.closerPeers),
                     )
 
                 # Handle ADD_PROVIDER message
                 elif message.type == Message.MessageType.ADD_PROVIDER:
                     # Process ADD_PROVIDER
                     key = message.key
-                    logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
+                    logger.debug("Received ADD_PROVIDER for key %s", key.hex())
 
                     # Consume the source signed-peer-record if sent
                     if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -378,8 +381,9 @@ class KadDHT(Service):
                             provider_id = ID(provider_proto.id)
                             if provider_id != peer_id:
                                 logger.warning(
-                                    f"Provider ID {provider_id} doesn't"
-                                    f"match sender {peer_id}, ignoring"
+                                    "Provider ID %s doesn't match sender %s, ignoring",
+                                    provider_id,
+                                    peer_id,
                                 )
                                 continue
 
@@ -389,13 +393,15 @@ class KadDHT(Service):
                                 try:
                                     addrs.append(Multiaddr(addr_bytes))
                                 except Exception as e:
-                                    logger.warning(f"Failed to parse address: {e}")
+                                    logger.warning("Failed to parse address: %s", e)
 
                             # Add to provider store
                             provider_info = PeerInfo(provider_id, addrs)
                             self.provider_store.add_provider(key, provider_info)
                             logger.debug(
-                                f"Added provider {provider_id} for key {key.hex()}"
+                                "Added provider %s for key %s",
+                                provider_id,
+                                key.hex(),
                             )
 
                             # Process the signed-records of provider if sent
@@ -409,7 +415,7 @@ class KadDHT(Service):
                                 await stream.close()
                                 return
                         except Exception as e:
-                            logger.warning(f"Failed to process provider info: {e}")
+                            logger.warning("Failed to process provider info: %s", e)
 
                     # Send acknowledgement
                     response = Message()
@@ -429,7 +435,7 @@ class KadDHT(Service):
                 elif message.type == Message.MessageType.GET_PROVIDERS:
                     # Process GET_PROVIDERS
                     key = message.key
-                    logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
+                    logger.debug("Received GET_PROVIDERS request for key %s", key.hex())
 
                     # Consume the source signed_peer_record if sent
                     if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -441,9 +447,11 @@ class KadDHT(Service):
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
-                    logger.debug(
-                        f"Found {len(providers)} providers for key {key.hex()}"
-                    )
+                        logger.debug(
+                            "Found %d providers for key %s",
+                            len(providers),
+                            key.hex(),
+                        )
 
                     # Create response
                     response = Message()
@@ -804,7 +812,7 @@ class KadDHT(Service):
         logger.info("Successfully stored value at %d peers", stored_count)
 
     async def get_value(self, key: bytes) -> bytes | None:
-        logger.debug("Getting value for key: %s", key.hex())
+    logger.debug("Getting value for key: %s", key.hex())
 
         # 1. Check local store first
         value = self.value_store.get(key)
@@ -865,7 +873,7 @@ class KadDHT(Service):
                 return found_value
 
         # 4. Not found
-        logger.warning(f"Value not found for key {key.hex()}")
+    logger.warning("Value not found for key %s", key.hex())
         return None
 
     # Add these methods in the Utility methods section

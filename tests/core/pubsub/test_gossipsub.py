@@ -537,8 +537,8 @@ async def test_dense_connect_fallback():
             connected_peers = len(pubsub.peers)
             expected_connections = len(hosts) - 1
             assert connected_peers == expected_connections, (
-                f"Host {i} has {connected_peers} connections, "
-                f"expected {expected_connections} in dense mode"
+                "Host %d has %d connections, expected %d in dense mode"
+                % (i, connected_peers, expected_connections)
             )
 
 
@@ -560,8 +560,8 @@ async def test_sparse_connect():
         for i, pubsub in enumerate(pubsubs_gsub):
             connected_peers = len(pubsub.peers)
             assert degree <= connected_peers < len(hosts) - 1, (
-                f"Host {i} has {connected_peers} connections, "
-                f"expected between {degree} and {len(hosts) - 1} in sparse mode"
+                "Host %d has %d connections, expected between %d and %d in sparse mode"
+                % (i, connected_peers, degree, len(hosts) - 1)
             )
 
         # Test message propagation
@@ -593,10 +593,9 @@ async def test_sparse_connect():
             # require more than half for acceptable scalability
             min_required = (total_nodes + 1) // 2
             assert received_count >= min_required, (
-                f"Message propagation insufficient: "
-                f"{received_count}/{total_nodes} nodes "
-                f"received the message. Ideally all nodes should receive it, but at "
-                f"minimum {min_required} required for sparse network scalability."
+                "Message propagation insufficient: %d/%d nodes received the message. "
+                "Ideally all nodes should receive it, but at minimum %d required "
+                "for sparse network scalability." % (received_count, total_nodes, min_required)
             )
 
 

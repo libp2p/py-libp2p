@@ -46,13 +46,13 @@ class WebsocketTransport(ITransport):
 
     async def dial(self, maddr: Multiaddr) -> RawConnection:
         """Dial a WebSocket connection to the given multiaddr."""
-        logger.debug(f"WebsocketTransport.dial called with {maddr}")
+    logger.debug("WebsocketTransport.dial called with %s", maddr)
 
         # Parse the WebSocket multiaddr to determine if it's secure
         try:
             parsed = parse_websocket_multiaddr(maddr)
         except ValueError as e:
-            raise ValueError(f"Invalid WebSocket multiaddr: {e}") from e
+            raise ValueError("Invalid WebSocket multiaddr: %s" % e) from e
 
         # Extract host and port from the base multiaddr
         host = (
@@ -64,14 +64,14 @@ class WebsocketTransport(ITransport):
         )
         port_str = parsed.rest_multiaddr.value_for_protocol("tcp")
         if port_str is None:
-            raise ValueError(f"No TCP port found in multiaddr: {maddr}")
+            raise ValueError("No TCP port found in multiaddr: %s" % maddr)
         port = int(port_str)
 
         # Build WebSocket URL based on security
         if parsed.is_wss:
-            ws_url = f"wss://{host}:{port}/"
+            ws_url = "wss://%s:%d/" % (host, port)
         else:
-            ws_url = f"ws://{host}:{port}/"
+            ws_url = "ws://%s:%d/" % (host, port)
 
         logger.debug(
             f"WebsocketTransport.dial connecting to {ws_url} (secure={parsed.is_wss})"
@@ -113,8 +113,10 @@ class WebsocketTransport(ITransport):
             )
 
             logger.debug(
-                f"WebsocketTransport.dial parsed URL: host={ws_host}, "
-                f"port={ws_port}, resource={ws_resource}"
+                "WebsocketTransport.dial parsed URL: host=%s, port=%s, resource=%s",
+                ws_host,
+                ws_port,
+                ws_resource,
             )
 
             # Create a background task manager for this connection
@@ -123,7 +125,7 @@ class WebsocketTransport(ITransport):
             nursery_manager = trio.lowlevel.current_task().parent_nursery
             if nursery_manager is None:
                 raise OpenConnectionError(
-                    f"No parent nursery available for WebSocket connection to {maddr}"
+                    "No parent nursery available for WebSocket connection to %s" % maddr
                 )
 
             # Apply timeout to the connection process
@@ -150,17 +152,17 @@ class WebsocketTransport(ITransport):
                 logger.debug("WebsocketTransport.dial created P2PWebSocketConnection")
 
                 self._connection_count += 1
-                logger.debug(f"Total connections: {self._connection_count}")
+                    logger.debug("Total connections: %d", self._connection_count)
 
                 return RawConnection(conn, initiator=True)
         except trio.TooSlowError as e:
             raise OpenConnectionError(
-                f"WebSocket handshake timeout after {self._handshake_timeout}s "
-                f"for {maddr}"
+                "WebSocket handshake timeout after %s s for %s"
+                % (self._handshake_timeout, maddr)
             ) from e
         except Exception as e:
-            logger.error(f"Failed to dial WebSocket {maddr}: {e}")
-            raise OpenConnectionError(f"Failed to dial WebSocket {maddr}: {e}") from e
+            logger.error("Failed to dial WebSocket %s: %s", maddr, e)
+            raise OpenConnectionError("Failed to dial WebSocket %s: %s" % (maddr, e)) from e
 
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
@@ -182,11 +184,14 @@ class WebsocketTransport(ITransport):
         try:
             parsed = parse_websocket_multiaddr(maddr)
         except ValueError as e:
-            logger.debug(f"Invalid WebSocket multiaddr for resolution: {e}")
+            logger.debug("Invalid WebSocket multiaddr for resolution: %s", e)
             return [maddr]  # Return original if not a valid WebSocket multiaddr
 
         logger.debug(
-            f"Parsed multiaddr {maddr}: is_wss={parsed.is_wss}, sni={parsed.sni}"
+            "Parsed multiaddr %s: is_wss=%s, sni=%s",
+            maddr,
+            parsed.is_wss,
+            parsed.sni,
         )
 
         if not parsed.is_wss:
@@ -216,14 +221,14 @@ class WebsocketTransport(ITransport):
         try:
             # Remove /wss and add /tls/sni/example.com/ws
             without_wss = maddr.decapsulate(Multiaddr("/wss"))
-            sni_component = Multiaddr(f"/sni/{dns_name}")
+            sni_component = Multiaddr("/sni/%s" % dns_name)
             resolved = (
                 without_wss.encapsulate(Multiaddr("/tls"))
                 .encapsulate(sni_component)
                 .encapsulate(Multiaddr("/ws"))
             )
-            logger.debug(f"Resolved {maddr} to {resolved}")
+            logger.debug("Resolved %s to %s", maddr, resolved)
             return [resolved]
         except Exception as e:
-            logger.debug(f"Failed to resolve multiaddr {maddr}: {e}")
+            logger.debug("Failed to resolve multiaddr %s: %s", maddr, e)
             return [maddr]

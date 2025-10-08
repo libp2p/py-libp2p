@@ -51,8 +51,14 @@ def make_handshake_payload_sig(
     id_privkey: PrivateKey, noise_static_pubkey: PublicKey
 ) -> bytes:
     data = make_data_to_be_signed(noise_static_pubkey)
-    logger.debug(f"make_handshake_payload_sig: signing data length: {len(data)}")
-    logger.debug(f"make_handshake_payload_sig: signing data hex: {data.hex()}")
+    logger.debug(
+        "make_handshake_payload_sig: signing data length: %d",
+        len(data),
+    )
+    logger.debug(
+        "make_handshake_payload_sig: signing data hex: %s",
+        data.hex(),
+    )
     return id_privkey.sign(data)
 
 
@@ -66,26 +72,32 @@ def verify_handshake_payload_sig(
     """
     expected_data = make_data_to_be_signed(noise_static_pubkey)
     logger.debug(
-        f"verify_handshake_payload_sig: payload.id_pubkey type: "
-        f"{type(payload.id_pubkey)}"
+        "verify_handshake_payload_sig: payload.id_pubkey type: %s",
+        type(payload.id_pubkey),
     )
     logger.debug(
-        f"verify_handshake_payload_sig: noise_static_pubkey type: "
-        f"{type(noise_static_pubkey)}"
+        "verify_handshake_payload_sig: noise_static_pubkey type: %s",
+        type(noise_static_pubkey),
     )
     logger.debug(
-        f"verify_handshake_payload_sig: expected_data length: {len(expected_data)}"
+        "verify_handshake_payload_sig: expected_data length: %d",
+        len(expected_data),
     )
     logger.debug(
-        f"verify_handshake_payload_sig: expected_data hex: {expected_data.hex()}"
+        "verify_handshake_payload_sig: expected_data hex: %s",
+        expected_data.hex(),
     )
     logger.debug(
-        f"verify_handshake_payload_sig: payload.id_sig length: {len(payload.id_sig)}"
+        "verify_handshake_payload_sig: payload.id_sig length: %d",
+        len(payload.id_sig),
     )
     try:
         result = payload.id_pubkey.verify(expected_data, payload.id_sig)
         logger.debug(f"verify_handshake_payload_sig: verification result: {result}")
         return result
     except Exception as e:
-        logger.error(f"verify_handshake_payload_sig: verification exception: {e}")
+        logger.error(
+            "verify_handshake_payload_sig: verification exception: %s",
+            e,
+        )
         return False
