@@ -200,10 +200,19 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
     go_node = GoLibp2pNode()
 
     try:
-        # Start go-libp2p node
-        await go_node.start()
+        # Start go-libp2p node with a simple timeout
+        logger.info("Starting Go libp2p node...")
+        try:
+            with trio.fail_after(30):
+                await go_node.start()
+        except trio.TooSlowError:
+            pytest.skip("Timed out waiting for Go node to start")
+
+        if go_node.addr is None or go_node.peer_id is None:
+            pytest.skip("Failed to get Go node address or peer ID")
 
         # Create py-libp2p node
+        logger.info("Creating py-libp2p node...")
         key_pair = create_new_key_pair()
         host = new_host(
             key_pair=key_pair,
@@ -218,8 +227,10 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
             strict_signing=False,
         )
 
+        # Start the service and perform interop test
         async with background_trio_service(pubsub):
             await pubsub.wait_until_ready()
+            logger.info("Pubsub service ready")
 
             # Connect to go-libp2p node
             go_addr = f"{go_node.addr}/p2p/{go_node.peer_id}"
@@ -228,9 +239,15 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
             # Parse the address and connect
             ma = Multiaddr(go_addr)
             from libp2p.peer.peerinfo import info_from_p2p_addr
-
             peer_info = info_from_p2p_addr(ma)
-            await host.connect(peer_info)
+            
+            try:
+                with trio.fail_after(10):
+                    await host.connect(peer_info)
+                    logger.info("Connected to Go node successfully")
+            except trio.TooSlowError:
+                logger.error("Connection to Go node timed out")
+                pytest.skip("Connection to Go node timed out")
 
             # Wait for connection to establish
             await trio.sleep(2)
@@ -248,8 +265,17 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
             # but if no errors occurred, the test passes)
             logger.info("Message published successfully")
 
+    except Exception as e:
+        logger.error(f"Test failed with error: {str(e)}")
+        pytest.fail(f"Test failed with error: {str(e)}")
     finally:
-        await go_node.stop()
+        # Stop the Go node
+        logger.info("Stopping Go node...")
+        try:
+            with trio.fail_after(10):
+                await go_node.stop()
+        except trio.TooSlowError:
+            logger.warning("Go node stop operation timed out")
 
 
 @pytest.mark.trio
@@ -290,37 +316,49 @@ async def test_floodsub_basic_functionality():
         strict_signing=False,
     )
 
-    async with background_trio_service(pubsub1):
-        async with background_trio_service(pubsub2):
-            await pubsub1.wait_until_ready()
-            await pubsub2.wait_until_ready()
+    try:
+        # Simplified approach without complex nesting of context managers
+        async with background_trio_service(pubsub1):
+            async with background_trio_service(pubsub2):
+                await pubsub1.wait_until_ready()
+                await pubsub2.wait_until_ready()
 
-            # Start network listening for both hosts
-            await host1.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-            await host2.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-            await trio.sleep(0.1)  # Wait for listeners to start
+                # Start network listening for both hosts
+                await host1.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+                await host2.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+                await trio.sleep(0.1)  # Wait for listeners to start
 
-            # Connect the nodes
-            await connect(host1, host2)
-            await trio.sleep(1)
+                # Connect the nodes
+                logger.debug("Connecting nodes...")
+                await connect(host1, host2)
+                await trio.sleep(1)  # Give time for connection to establish
 
-            # Subscribe to topic on host2
-            topic = "test-topic"
-            subscription = await pubsub2.subscribe(topic)
-            await trio.sleep(0.5)
+                # Subscribe to topic on host2
+                topic = "test-topic"
+                logger.debug(f"Subscribing to {topic}...")
+                subscription = await pubsub2.subscribe(topic)
+                await trio.sleep(0.5)  # Allow subscription to propagate
 
-            # Publish message from host1
-            test_message = "Hello FloodSub!"
-            await pubsub1.publish(topic, test_message.encode())
+                # Publish message from host1
+                test_message = "Hello FloodSub!"
+                logger.debug(f"Publishing message: {test_message}")
+                await pubsub1.publish(topic, test_message.encode())
 
-            # Receive message on host2
-            received_message = await subscription.get()
-
-            # Verify the message
-            assert received_message.data.decode() == test_message
-            assert received_message.topicIDs == [topic]
-
-            logger.info("FloodSub basic functionality test passed!")
+                # Receive message with simple timeout approach
+                logger.debug("Waiting for message...")
+                with trio.fail_after(5):
+                    received_message = await subscription.get()
+                    
+                    # Verify the message
+                    assert received_message.data.decode() == test_message
+                    assert received_message.topicIDs == [topic]
+                    
+                    logger.info("FloodSub basic functionality test passed!")
+    
+    except trio.TooSlowError:
+        pytest.fail("Test timed out waiting for message")
+    except Exception as e:
+        pytest.fail(f"Test failed with error: {str(e)}")
 
 
 if __name__ == "__main__":

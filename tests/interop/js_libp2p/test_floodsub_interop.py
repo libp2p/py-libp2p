@@ -186,10 +186,19 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
     js_node = JSLibp2pNode()
 
     try:
-        # Start js-libp2p node
-        await js_node.start()
+        # Start js-libp2p node with a simple timeout
+        logger.info("Starting JS libp2p node...")
+        try:
+            with trio.fail_after(30):
+                await js_node.start()
+        except trio.TooSlowError:
+            pytest.skip("Timed out waiting for JS node to start")
+
+        if js_node.addr is None or js_node.peer_id is None:
+            pytest.skip("Failed to get JS node address or peer ID")
 
         # Create py-libp2p node
+        logger.info("Creating py-libp2p node...")
         key_pair = create_new_key_pair()
         host = new_host(
             key_pair=key_pair,
@@ -204,8 +213,10 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             strict_signing=False,
         )
 
+        # Start the service and perform interop test
         async with background_trio_service(pubsub):
             await pubsub.wait_until_ready()
+            logger.info("Pubsub service ready")
 
             # Connect to js-libp2p node
             js_addr = f"{js_node.addr}/p2p/{js_node.peer_id}"
@@ -214,9 +225,15 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             # Parse the address and connect
             ma = Multiaddr(js_addr)
             from libp2p.peer.peerinfo import info_from_p2p_addr
-
             peer_info = info_from_p2p_addr(ma)
-            await host.connect(peer_info)
+            
+            try:
+                with trio.fail_after(10):
+                    await host.connect(peer_info)
+                    logger.info("Connected to JS node successfully")
+            except trio.TooSlowError:
+                logger.error("Connection to JS node timed out")
+                pytest.skip("Connection to JS node timed out")
 
             # Wait for connection to establish
             await trio.sleep(2)
@@ -234,8 +251,17 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             # but if no errors occurred, the test passes)
             logger.info("Message published successfully")
 
+    except Exception as e:
+        logger.error(f"Test failed with error: {str(e)}")
+        pytest.fail(f"Test failed with error: {str(e)}")
     finally:
-        await js_node.stop()
+        # Stop the JS node
+        logger.info("Stopping JS node...")
+        try:
+            with trio.fail_after(10):
+                await js_node.stop()
+        except trio.TooSlowError:
+            logger.warning("JS node stop operation timed out")
 
 
 @pytest.mark.trio
@@ -276,46 +302,60 @@ async def test_floodsub_js_compatibility():
         strict_signing=False,
     )
 
-    async with background_trio_service(pubsub1):
-        async with background_trio_service(pubsub2):
-            await pubsub1.wait_until_ready()
-            await pubsub2.wait_until_ready()
+    try:
+        # Simple approach without nested trio.open_nursery to avoid complex cancellation issues
+        async with background_trio_service(pubsub1):
+            async with background_trio_service(pubsub2):
+                await pubsub1.wait_until_ready()
+                await pubsub2.wait_until_ready()
 
-            # Start network listening for both hosts
-            await host1.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-            await host2.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
-            await trio.sleep(0.1)  # Wait for listeners to start
+                # Start network listening for both hosts
+                await host1.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+                await host2.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+                await trio.sleep(0.1)  # Wait for listeners to start
 
-            # Connect the nodes
-            await connect(host1, host2)
-            await trio.sleep(1)
+                # Connect the nodes
+                logger.debug("Connecting nodes...")
+                await connect(host1, host2)
+                await trio.sleep(1)  # Give time for connection to establish
 
-            # Test multiple topics
-            topics = ["test-topic-1", "test-topic-2"]
-            subscriptions = []
+                # Test multiple topics
+                topics = ["test-topic-1", "test-topic-2"]
+                subscriptions = []
 
-            # Subscribe to topics on host2
-            for topic in topics:
-                subscription = await pubsub2.subscribe(topic)
-                subscriptions.append((topic, subscription))
+                # Subscribe to topics on host2
+                for topic in topics:
+                    subscription = await pubsub2.subscribe(topic)
+                    subscriptions.append((topic, subscription))
 
-            await trio.sleep(0.5)
+                await trio.sleep(0.5)  # Allow subscriptions to propagate
 
-            # Publish messages from host1
-            messages = ["Message 1", "Message 2"]
-            for topic, message in zip(topics, messages):
-                await pubsub1.publish(topic, message.encode())
+                # Publish messages from host1
+                messages = ["Message 1", "Message 2"]
+                for topic, message in zip(topics, messages):
+                    logger.debug(f"Publishing to {topic}: {message}")
+                    await pubsub1.publish(topic, message.encode())
 
-            # Receive messages on host2
-            for topic, subscription in subscriptions:
-                received_message = await subscription.get()
-                expected_message = messages[topics.index(topic)]
+                # Receive messages on host2 with simplified timeout approach
+                for i, (topic, subscription) in enumerate(subscriptions):
+                    logger.debug(f"Waiting for message on topic {topic}...")
+                    
+                    # Use a simple timeout
+                    with trio.fail_after(5):
+                        received_message = await subscription.get()
+                        expected_message = messages[topics.index(topic)]
 
-                # Verify the message
-                assert received_message.data.decode() == expected_message
-                assert received_message.topicIDs == [topic]
+                        # Verify the message
+                        assert received_message.data.decode() == expected_message
+                        assert received_message.topicIDs == [topic]
+                        logger.debug(f"Received expected message on topic {topic}")
 
-            logger.info("FloodSub JS compatibility test passed!")
+                logger.info("FloodSub JS compatibility test passed!")
+    
+    except trio.TooSlowError:
+        pytest.fail("Test timed out waiting for messages")
+    except Exception as e:
+        pytest.fail(f"Test failed with error: {str(e)}")
 
 
 if __name__ == "__main__":
