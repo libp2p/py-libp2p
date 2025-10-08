@@ -1,5 +1,5 @@
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
 import trio
@@ -19,7 +19,7 @@ def test_temp_files_cleanup() -> None:
 
     # Get the cross-platform temporary directory
     tmp_dir = Path(tempfile.gettempdir())
-    
+
     # Handle cases where temp directory might not be accessible
     try:
         tmp_files_before = {f for f in tmp_dir.iterdir() if f.is_file()}
@@ -54,7 +54,7 @@ async def test_sensitive_data_handling(nursery: trio.Nursery) -> None:
 
     # Get initial state of cross-platform temp directory
     tmp_dir = Path(tempfile.gettempdir())
-    
+
     # Handle cases where temp directory might not be accessible
     try:
         initial_files = {f.absolute() for f in tmp_dir.iterdir() if f.is_file()}
