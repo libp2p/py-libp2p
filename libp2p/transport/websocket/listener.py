@@ -189,7 +189,7 @@ class WebsocketListener(IListener):
 
             # Update the listen address with the actual port if port was 0
             if port == 0 and hasattr(server_info, "port"):
-                actual_port = server_info.port
+                actual_port = getattr(server_info, "port")
                 # Create new multiaddr with actual port
                 if proto_info.is_wss:
                     protocol_part = "/wss"
