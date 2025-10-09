@@ -118,7 +118,7 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
-        flood_publish: bool = False,  # Whether to use flood publishing mode (send to all peers for messages originating from this node)
+        flood_publish: bool = False,  # Enable hybrid mode: flood initial publishes to all topic peers, then use normal GossipSub mesh routing for forwarding
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -305,27 +305,26 @@ class GossipSub(IPubsubRouter, Service):
             if topic not in self.pubsub.peer_topics:
                 continue
 
-            # If flood_publish is enabled and we are the original publisher,
-            # send to all peers subscribed to the topic (like floodsub behavior)
-            # This is a hybrid mode between GossipSub and FloodSub that provides better
-            # reliability for the initial publish, ensuring better message propagation
-            # at the cost of increased bandwidth usage.
+            # FLOOD_PUBLISH MODE: Hybrid GossipSub/FloodSub behavior
+            # When flood_publish is enabled and we are the original publisher of a message,
+            # we send the message to ALL peers subscribed to the topic, similar to FloodSub.
+            # This provides a hybrid approach that combines GossipSub's efficiency with
+            # FloodSub's reliability for initial message propagation.
             if self.flood_publish and msg_forwarder == self.pubsub.my_id:
-                # When we're the original publisher (msg_forwarder is our own ID) and 
-                # flood_publish is enabled, send to all peers that are subscribed to this topic,
-                # similar to how FloodSub would behave. This ensures that the message has 
-                # the best chance of propagating across the network.
-                #
-                # Interaction with mesh selection logic:
-                # - This bypasses the normal GossipSub's selective peer targeting via mesh/fanout
-                # - Only applies to messages originating from this node (not forwarded messages)
-                # - Increases the initial spread factor at the first hop, after which the message
-                #   propagates according to normal GossipSub rules (mesh-based forwarding)
-                # - This helps overcome potential propagation issues in sparse networks while
-                #   maintaining GossipSub's bandwidth efficiency for subsequent message propagation
+                # CRITICAL: Only apply flooding to messages we originally published
+                # (msg_forwarder == self.pubsub.my_id), not to messages we're forwarding.
+                # This ensures that:
+                # 1. Our own messages get maximum initial propagation (flooding behavior)
+                # 2. Forwarded messages still use efficient GossipSub mesh routing
+                # 3. We don't create excessive network traffic for relayed messages
+                
+                # Send to all peers subscribed to this topic, bypassing normal mesh selection
+                # This is the core of the flood_publish feature - it temporarily switches
+                # from selective GossipSub routing to FloodSub-style broadcasting for
+                # messages originating from this node.
                 for peer in self.pubsub.peer_topics[topic]:
-                    # TODO: add score threshold check when peer scoring is implemented
-                    #       if direct peer then skip score check
+                    # TODO: When peer scoring is implemented, add score threshold check here
+                    #       Direct peers should skip score checks as they're trusted connections
                     send_to.add(peer)
             else:
                 # Normal GossipSub behavior when flood_publish is disabled or we're not the original publisher

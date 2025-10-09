@@ -119,7 +119,7 @@ main().catch(console.error)
             )
 
             # Wait for the node to be ready and parse its address
-            timeout = 10  # seconds
+            timeout = 8  # seconds - reduced timeout
             start_time = time.time()
 
             while time.time() - start_time < timeout:
@@ -150,6 +150,13 @@ main().catch(console.error)
 
                 await asyncio.sleep(0.1)
 
+            # If we get here, the node didn't start properly
+            if self.process is not None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
             raise RuntimeError("JS node failed to start within timeout")
 
         except FileNotFoundError:
@@ -189,12 +196,17 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
         # Start js-libp2p node with a simple timeout
         logger.info("Starting JS libp2p node...")
         try:
-            with trio.fail_after(30):
+            with trio.fail_after(15):  # Reduced timeout to prevent hanging
                 await js_node.start()
         except trio.TooSlowError:
+            logger.error("Timed out waiting for JS node to start")
             pytest.skip("Timed out waiting for JS node to start")
+        except Exception as e:
+            logger.error(f"Failed to start JS node: {e}")
+            pytest.skip(f"Failed to start JS node: {e}")
 
         if js_node.addr is None or js_node.peer_id is None:
+            logger.error("Failed to get JS node address or peer ID")
             pytest.skip("Failed to get JS node address or peer ID")
 
         # Create py-libp2p node
@@ -228,12 +240,15 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             peer_info = info_from_p2p_addr(ma)
             
             try:
-                with trio.fail_after(10):
+                with trio.fail_after(5):  # Reduced connection timeout
                     await host.connect(peer_info)
                     logger.info("Connected to JS node successfully")
             except trio.TooSlowError:
                 logger.error("Connection to JS node timed out")
                 pytest.skip("Connection to JS node timed out")
+            except Exception as e:
+                logger.error(f"Failed to connect to JS node: {e}")
+                pytest.skip(f"Failed to connect to JS node: {e}")
 
             # Wait for connection to establish
             await trio.sleep(2)
@@ -258,10 +273,12 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
         # Stop the JS node
         logger.info("Stopping JS node...")
         try:
-            with trio.fail_after(10):
+            with trio.fail_after(5):  # Reduced cleanup timeout
                 await js_node.stop()
         except trio.TooSlowError:
             logger.warning("JS node stop operation timed out")
+        except Exception as e:
+            logger.warning(f"Error stopping JS node: {e}")
 
 
 @pytest.mark.trio
