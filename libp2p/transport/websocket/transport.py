@@ -222,7 +222,7 @@ class WebsocketTransport(ITransport):
             # Create a temporary nursery just for the WebSocket connection establishment
             async with trio.open_nursery() as temp_nursery:
                 from trio_websocket import connect_websocket_url
-                
+
                 # Create the WebSocket connection
                 ws = await connect_websocket_url(
                     temp_nursery,
@@ -239,9 +239,9 @@ class WebsocketTransport(ITransport):
                     is_secure=proto_info.is_wss,
                     max_buffered_amount=self._config.max_buffered_amount,
                 )
-                
-                # The nursery will close when we exit this block, which might close the connection
-                # We need to handle this differently, but for now let's see if it works
+
+                # The nursery will close when we exit this block, which might close the
+                # connection. We need to handle this differently.
                 return conn
 
     async def _create_proxy_connection(

@@ -6,7 +6,7 @@ from typing import Any
 
 from multiaddr import Multiaddr
 import trio
-from trio_websocket import WebSocketConnection, serve_websocket
+from trio_websocket import WebSocketConnection
 
 try:
     from websockets.legacy.server import WebSocketRequest  # type: ignore
@@ -159,7 +159,7 @@ class WebsocketListener(IListener):
                 try:
                     # Use trio_websocket's serve_websocket
                     from trio_websocket import serve_websocket
-                    
+
                     # Create the server
                     await serve_websocket(
                         handler=self._handle_websocket_connection,
@@ -187,7 +187,7 @@ class WebsocketListener(IListener):
         """Handle incoming WebSocket connection from trio_websocket."""
         try:
             # trio_websocket provides the connection directly
-            ws = request if hasattr(request, 'send_message') else await request.accept()
+            ws = request if hasattr(request, "send_message") else await request.accept()
             await self._handle_connection(ws)
         except Exception as e:
             logger.error(f"Error handling WebSocket connection: {e}")
