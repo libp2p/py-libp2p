@@ -143,8 +143,9 @@ class WebsocketListener(IListener):
             # Validate TLS configuration for WSS
             if self._is_wss and self._tls_config is None:
                 raise ValueError(
-                    "WSS (secure WebSocket) requires TLS configuration but none was provided. "
-                    "Please provide tls_server_config when creating the WebSocket transport."
+                    "WSS (secure WebSocket) requires TLS configuration but none "
+                    "was provided. Please provide tls_server_config when creating "
+                    "the WebSocket transport."
                 )
 
             # Check connection limits

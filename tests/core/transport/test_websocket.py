@@ -699,7 +699,7 @@ async def test_wss_host_pair_data_exchange():
     assert wss_transport._config.tls_server_config is not None
 
     # Test multiaddr parsing works correctly
-    assert parsed.is_wss == True
+    assert parsed.is_wss
     assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
     assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
 
@@ -945,7 +945,8 @@ async def test_wss_listen_without_tls_config():
                         break
                 if not found_tls_error:
                     pytest.fail(
-                        f"Expected TLS configuration error in ExceptionGroup, got: {e.exceptions}"
+                        "Expected TLS configuration error in ExceptionGroup, "
+                        f"got: {e.exceptions}"
                     )
         else:
             pytest.fail(
