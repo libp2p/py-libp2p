@@ -242,9 +242,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Get connection ID statistics and current state."""
         return {
             "available_connection_ids": len(self._available_connection_ids),
-            "current_connection_id": self._current_connection_id.hex()
-            if self._current_connection_id
-            else None,
+            "current_connection_id": (
+                self._current_connection_id.hex()
+                if self._current_connection_id
+                else None
+            ),
             "retired_connection_ids": len(self._retired_connection_ids),
             "connection_ids_issued": self._stats["connection_ids_issued"],
             "connection_ids_retired": self._stats["connection_ids_retired"],
@@ -289,7 +291,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._started = True
         self.event_started.set()
-    logger.debug("Starting QUIC connection to %s", self._remote_peer_id)
+        logger.debug("Starting QUIC connection to %s", self._remote_peer_id)
 
         try:
             # If this is a client connection, we need to establish the connection
@@ -379,7 +381,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 logger.debug("QUICConnection %s: Peer identity verified", id(self))
                 self._established = True
-                logger.debug("QUIC connection established with %s", self._remote_peer_id)
+                logger.debug(
+                    "QUIC connection established with %s", self._remote_peer_id
+                )
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
@@ -724,7 +728,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
                 stream = QUICStream(
-                    connection=self,
+                    connection=self,  # type: ignore
                     stream_id=stream_id,
                     direction=StreamDirection.OUTBOUND,
                     resource_scope=self._resource_scope,
@@ -883,7 +887,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 for event in event_list:
                     await self._handle_quic_event(event)
 
-    logger.debug("Processed batch of %d events", len(self._event_batch))
+        logger.debug("Processed batch of %d events", len(self._event_batch))
 
     async def _handle_stream_data_batch(
         self, events_list: list[events.StreamDataReceived]
@@ -965,8 +969,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _handle_quic_event(self, event: events.QuicEvent) -> None:
         """Handle a single QUIC event with COMPLETE event type coverage."""
-    logger.debug("Handling QUIC event: %s", type(event).__name__)
-    logger.debug("QUIC event: %s", type(event).__name__)
+        logger.debug("Handling QUIC event: %s", type(event).__name__)
+        logger.debug("QUIC event: %s", type(event).__name__)
 
         try:
             if isinstance(event, events.ConnectionTerminated):
@@ -1006,8 +1010,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         This is the CRITICAL missing functionality that was causing your issue!
         """
-    logger.debug("🆔 NEW CONNECTION ID ISSUED: %s", event.connection_id.hex())
-    logger.debug("🆔 NEW CONNECTION ID ISSUED: %s", event.connection_id.hex())
+        logger.debug("🆔 NEW CONNECTION ID ISSUED: %s", event.connection_id.hex())
+        logger.debug("🆔 NEW CONNECTION ID ISSUED: %s", event.connection_id.hex())
 
         # Add to available connection IDs
         self._available_connection_ids.add(event.connection_id)
@@ -1040,7 +1044,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         This handles when the peer tells us to stop using a connection ID.
         """
-    logger.debug("🗑️ CONNECTION ID RETIRED: %s", event.connection_id.hex())
+        logger.debug("🗑️ CONNECTION ID RETIRED: %s", event.connection_id.hex())
 
         # Remove from available IDs and add to retired set
         self._available_connection_ids.discard(event.connection_id)
@@ -1067,13 +1071,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""
-    logger.debug("Ping acknowledged: uid=%s", event.uid)
+        logger.debug("Ping acknowledged: uid=%s", event.uid)
 
     async def _handle_protocol_negotiated(
         self, event: events.ProtocolNegotiated
     ) -> None:
         """Handle protocol negotiation completion."""
-    logger.debug("Protocol negotiated: %s", event.alpn_protocol)
+        logger.debug("Protocol negotiated: %s", event.alpn_protocol)
 
     async def _handle_stop_sending_received(
         self, event: events.StopSendingReceived
@@ -1110,7 +1114,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self, event: events.ConnectionTerminated
     ) -> None:
         """Handle connection termination."""
-    logger.debug("QUIC connection terminated: %s", event.reason_phrase)
+        logger.debug("QUIC connection terminated: %s", event.reason_phrase)
 
         # Close all streams
         for stream in list(self._streams.values()):
@@ -1125,7 +1129,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed_event.set()
 
         self._stream_accept_event.set()
-    logger.debug("Woke up pending accept_stream() calls, %s", id(self))
+        logger.debug("Woke up pending accept_stream() calls, %s", id(self))
 
         await self._notify_parent_of_termination()
 
@@ -1207,13 +1211,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Force remove the stream
                 self._remove_stream(stream_id)
         else:
-        logger.debug("Received reset for unknown stream %d", stream_id)
+            logger.debug("Received reset for unknown stream %d", stream_id)
 
     async def _handle_datagram_received(
         self, event: events.DatagramFrameReceived
     ) -> None:
         """Handle datagram frame (if using QUIC datagrams)."""
-    logger.debug("Datagram frame received: size=%d", len(event.data))
+        logger.debug("Datagram frame received: size=%d", len(event.data))
         # For now, just log. Could be extended for custom datagram handling
 
     async def _handle_timer_events(self) -> None:
@@ -1284,7 +1288,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         self._closed = True
-    logger.debug("Closing QUIC connection to %s", self._remote_peer_id)
+        logger.debug("Closing QUIC connection to %s", self._remote_peer_id)
 
         try:
             # Close all streams gracefully

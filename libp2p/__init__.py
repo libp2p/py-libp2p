@@ -227,7 +227,7 @@ def new_swarm(
         )
 
         addr = listen_addrs[0]
-    logger.debug("new_swarm: Creating transport for address: %s", addr)
+        logger.debug("new_swarm: Creating transport for address: %s", addr)
         transport_maybe = create_transport_for_multiaddr(
             addr,
             temp_upgrader,

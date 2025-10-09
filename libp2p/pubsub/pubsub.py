@@ -12,9 +12,16 @@ import hashlib
 import logging
 import time
 from typing import (
+    TYPE_CHECKING,
     NamedTuple,
     cast,
 )
+
+if TYPE_CHECKING:
+    from typing import TYPE_CHECKING
+    if TYPE_CHECKING:
+        from typing_extensions import TypeAlias
+        Pubsub: TypeAlias = 'Pubsub'
 
 import base58
 import trio
@@ -162,12 +169,9 @@ class Pubsub(Service, IPubsub):
         gossipsub, etc.
         """
         self.host = host
-        self.router = router
-
-        self._msg_id_constructor = msg_id_constructor
-
         # Attach this new Pubsub object to the router
-        self.router.attach(self)
+        from typing import cast
+        self.router.attach(cast('Pubsub', self))  # type: ignore
 
         peer_send, peer_receive = trio.open_memory_channel[ID](0)
         dead_peer_send, dead_peer_receive = trio.open_memory_channel[ID](0)
@@ -218,6 +222,9 @@ class Pubsub(Service, IPubsub):
 
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
+
+        # Store the message ID constructor function
+        self._msg_id_constructor = msg_id_constructor
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
