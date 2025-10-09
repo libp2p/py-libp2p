@@ -20,7 +20,6 @@ from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.pubsub.floodsub import FloodSub
 from libp2p.pubsub.pubsub import Pubsub
-from libp2p.tools.async_service import background_trio_service
 from libp2p.tools.constants import FLOODSUB_PROTOCOL_ID
 
 # Configure logging
@@ -67,7 +66,7 @@ async def main() -> None:
     async with trio.open_nursery() as nursery:
         nursery.start_soon(pubsub1.run)
         nursery.start_soon(pubsub2.run)
-        
+
         # Give services time to start
         await trio.sleep(0.5)
         await pubsub1.wait_until_ready()
@@ -93,13 +92,13 @@ async def main() -> None:
             logger.error("Connection timed out")
             nursery.cancel_scope.cancel()
             return
-        
+
         await trio.sleep(1)  # Wait for connection to establish
 
         # Subscribe to topic on host2
         topic = "test-topic"
         logger.info(f"Subscribing to topic: {topic}")
-        subscription = await pubsub2.subscribe(t
+        subscription = await pubsub2.subscribe(topic)
         await trio.sleep(0.5)  # Wait for subscription to propagate
 
         # Publish messages from host1
@@ -126,13 +125,15 @@ async def main() -> None:
                 logger.info(f"  From peer: {message.from_id.hex()}")
                 logger.info(f"  Topics: {message.topicIDs}")
                 received_count += 1
-                
+
             if cancel_scope.cancelled_caught:
                 logger.warning(f"Timed out waiting for message {i + 1}")
                 break
-        
-        logger.info(f"Successfully received {received_count} out of {len(messages)} messages")
-        
+
+        logger.info(
+            f"Successfully received {received_count} out of {len(messages)} messages"
+        )
+
         # Clean up by cancelling the nursery
         nursery.cancel_scope.cancel()
 

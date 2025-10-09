@@ -237,8 +237,9 @@ async def test_py_libp2p_to_js_libp2p_floodsub():
             # Parse the address and connect
             ma = Multiaddr(js_addr)
             from libp2p.peer.peerinfo import info_from_p2p_addr
+
             peer_info = info_from_p2p_addr(ma)
-            
+
             try:
                 with trio.fail_after(5):  # Reduced connection timeout
                     await host.connect(peer_info)
@@ -320,7 +321,8 @@ async def test_floodsub_js_compatibility():
     )
 
     try:
-        # Simple approach without nested trio.open_nursery to avoid complex cancellation issues
+        # Simple approach without nested trio.open_nursery
+        # to avoid complex cancellation issues
         async with background_trio_service(pubsub1):
             async with background_trio_service(pubsub2):
                 await pubsub1.wait_until_ready()
@@ -356,7 +358,7 @@ async def test_floodsub_js_compatibility():
                 # Receive messages on host2 with simplified timeout approach
                 for i, (topic, subscription) in enumerate(subscriptions):
                     logger.debug(f"Waiting for message on topic {topic}...")
-                    
+
                     # Use a simple timeout
                     with trio.fail_after(5):
                         received_message = await subscription.get()
@@ -368,7 +370,7 @@ async def test_floodsub_js_compatibility():
                         logger.debug(f"Received expected message on topic {topic}")
 
                 logger.info("FloodSub JS compatibility test passed!")
-    
+
     except trio.TooSlowError:
         pytest.fail("Test timed out waiting for messages")
     except Exception as e:

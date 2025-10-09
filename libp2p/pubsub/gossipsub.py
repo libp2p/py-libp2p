@@ -118,7 +118,9 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
-        flood_publish: bool = False,  # Enable hybrid mode: flood initial publishes to all topic peers, then use normal GossipSub mesh routing for forwarding
+        # Enable hybrid mode: flood initial publishes to all topic peers,
+        # then use normal GossipSub mesh routing for forwarding
+        flood_publish: bool = False,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -306,29 +308,30 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             # FLOOD_PUBLISH MODE: Hybrid GossipSub/FloodSub behavior
-            # When flood_publish is enabled and we are the original publisher of a message,
-            # we send the message to ALL peers subscribed to the topic, similar to FloodSub.
+            # When flood_publish is enabled and we are the original publisher,
+            # we send the message to ALL peers subscribed to the topic.
             # This provides a hybrid approach that combines GossipSub's efficiency with
             # FloodSub's reliability for initial message propagation.
             if self.flood_publish and msg_forwarder == self.pubsub.my_id:
                 # CRITICAL: Only apply flooding to messages we originally published
-                # (msg_forwarder == self.pubsub.my_id), not to messages we're forwarding.
+                # (msg_forwarder == self.pubsub.my_id), not to forwarded messages.
                 # This ensures that:
-                # 1. Our own messages get maximum initial propagation (flooding behavior)
+                # 1. Our own messages get maximum initial propagation (flooding)
                 # 2. Forwarded messages still use efficient GossipSub mesh routing
                 # 3. We don't create excessive network traffic for relayed messages
-                
-                # Send to all peers subscribed to this topic, bypassing normal mesh selection
-                # This is the core of the flood_publish feature - it temporarily switches
-                # from selective GossipSub routing to FloodSub-style broadcasting for
-                # messages originating from this node.
+
+                # Send to all peers subscribed to this topic, bypassing mesh
+                # This is the core of the flood_publish feature - it switches
+                # from selective GossipSub routing to FloodSub-style broadcast
+                # for messages originating from this node.
                 for peer in self.pubsub.peer_topics[topic]:
-                    # TODO: When peer scoring is implemented, add score threshold check here
-                    #       Direct peers should skip score checks as they're trusted connections
+                    # TODO: When peer scoring is implemented, add score check
+                    #       Direct peers should skip score checks (trusted)
                     send_to.add(peer)
             else:
-                # Normal GossipSub behavior when flood_publish is disabled or we're not the original publisher
-                
+                # Normal GossipSub behavior when flood_publish is disabled
+                # or we're not the original publisher
+
                 # direct peers
                 _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
                 send_to.update(_direct_peers)
@@ -351,7 +354,9 @@ class GossipSub(IPubsubRouter, Service):
                     # randomly pick `self.degree` number of peers who have subscribed
                     #  to the topic and add them as our `fanout` peers.
                     topic_in_fanout: bool = topic in self.fanout
-                    fanout_peers: set[ID] = self.fanout[topic] if topic_in_fanout else set()
+                    fanout_peers: set[ID] = (
+                        self.fanout[topic] if topic_in_fanout else set()
+                    )
                     fanout_size = len(fanout_peers)
                     if not topic_in_fanout or (
                         topic_in_fanout and fanout_size < self.degree

@@ -239,8 +239,9 @@ async def test_py_libp2p_to_go_libp2p_floodsub():
             # Parse the address and connect
             ma = Multiaddr(go_addr)
             from libp2p.peer.peerinfo import info_from_p2p_addr
+
             peer_info = info_from_p2p_addr(ma)
-            
+
             try:
                 with trio.fail_after(10):
                     await host.connect(peer_info)
@@ -348,13 +349,13 @@ async def test_floodsub_basic_functionality():
                 logger.debug("Waiting for message...")
                 with trio.fail_after(5):
                     received_message = await subscription.get()
-                    
+
                     # Verify the message
                     assert received_message.data.decode() == test_message
                     assert received_message.topicIDs == [topic]
-                    
+
                     logger.info("FloodSub basic functionality test passed!")
-    
+
     except trio.TooSlowError:
         pytest.fail("Test timed out waiting for message")
     except Exception as e:
