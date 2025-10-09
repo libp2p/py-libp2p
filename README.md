@@ -66,7 +66,7 @@ ______________________________________________________________________
 | **`bootstrap`**      |     ✅     |  [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/bootstrap)  |
 | **`random-walk`**    |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/random_walk) |
 | **`mdns-discovery`** |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns)     |
-| **`rendezvous`**     |     🌱     |                                                                                      |
+| **`rendezvous`**     |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/rendezvous)  |
 
 ______________________________________________________________________
 
