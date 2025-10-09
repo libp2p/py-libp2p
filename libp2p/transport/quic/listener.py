@@ -493,7 +493,8 @@ class QUICListener(IListener):
             await self._transmit_for_connection(quic_conn, addr)
 
             logger.debug(
-                "Started handshake for new connection from %s (version: 0x%08x, cid: %s)",
+                "Started handshake for new connection from %s "
+                "(version: 0x%08x, cid: %s)",
                 addr,
                 packet_info.version,
                 destination_cid.hex(),

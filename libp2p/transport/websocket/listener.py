@@ -41,8 +41,7 @@ class WebsocketListener(IListener):
         self._is_wss = False  # Track whether this is a WSS listener
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
-    logger.debug("WebsocketListener.listen called with %s", maddr)
-
+        logger.debug("WebsocketListener.listen called with %s", maddr)
         # Parse the WebSocket multiaddr to determine if it's secure
         try:
             parsed = parse_websocket_multiaddr(maddr)
@@ -117,10 +116,10 @@ class WebsocketListener(IListener):
                         )
 
                 except trio.TooSlowError:
-                            logger.debug(
-                                "WebSocket handshake timeout after %s s",
-                                self._handshake_timeout,
-                            )
+                    logger.debug(
+                        "WebSocket handshake timeout after %s s",
+                        self._handshake_timeout,
+                    )
                     try:
                         await request.reject(408)  # Request Timeout
                     except Exception:
@@ -154,7 +153,7 @@ class WebsocketListener(IListener):
             port,
             host,
         )
-    logger.debug("nursery.start() returned: %s", started_listeners)
+        logger.debug("nursery.start() returned: %s", started_listeners)
 
         if started_listeners is None:
             logger.error("Failed to start WebSocket listener for %s", maddr)
@@ -185,7 +184,7 @@ class WebsocketListener(IListener):
             listeners = self._listeners
             # Get addresses from listeners like TCP does
             return tuple(
-                _multiaddr_from_socket(listener.socket, self._is_wss)
+                self._multiaddr_from_socket(listener.socket, self._is_wss)
                 for listener in listeners
             )
 
@@ -220,10 +219,10 @@ class WebsocketListener(IListener):
             logger.debug("WebsocketListener.close completed")
 
 
-def _multiaddr_from_socket(
-    socket: trio.socket.SocketType, is_wss: bool = False
-) -> Multiaddr:
-    """Convert socket to multiaddr"""
-    ip, port = socket.getsockname()
-    protocol = "wss" if is_wss else "ws"
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")
+    def _multiaddr_from_socket(
+        socket: trio.socket.SocketType, is_wss: bool = False
+    ) -> Multiaddr:
+        """Convert socket to multiaddr"""
+        ip, port = socket.getsockname()
+        protocol = "wss" if is_wss else "ws"
+        return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")
