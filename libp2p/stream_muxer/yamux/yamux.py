@@ -105,7 +105,12 @@ class YamuxStream(IMuxedStream):
             # Flow control: Check if we have enough send window
             total_len = len(data)
             sent = 0
-            logger.debug("Stream %d: Starts writing %d bytes", self.stream_id, total_len)
+            logger.debug(
+                "Stream %d: Starts writing %d bytes",
+                self.stream_id,
+                total_len,
+            )
+
             while sent < total_len:
                 # Wait for available window with timeout
                 timeout = False
@@ -468,7 +473,8 @@ class Yamux(IMuxedConn):
                 stream = self.streams[stream_id]
                 buffer = self.stream_buffers.get(stream_id)
                 logger.debug(
-                    "Stream %s:%s: closed=%s, recv_closed=%s, reset_received=%s, buffer_len=%s",
+                    "Stream %s:%s: closed=%s, recv_closed=%s,"
+                    " reset_received=%s, buffer_len=%s",
                     self.peer_id,
                     stream_id,
                     stream.closed,
