@@ -294,7 +294,10 @@ class PeerRouting(IPeerRouting):
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
-                    logger.debug("Connection closed by peer %s while reading data", peer)
+                    logger.debug(
+                        "Connection closed by peer %s while reading data",
+                        peer,
+                    )
                     return []
                 chunk_len = len(chunk)
                 if chunk_len == 0:
