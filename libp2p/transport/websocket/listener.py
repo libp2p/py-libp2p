@@ -218,6 +218,7 @@ class WebsocketListener(IListener):
             self._listeners = None
             logger.debug("WebsocketListener.close completed")
 
+    @staticmethod
     def _multiaddr_from_socket(
         socket: trio.socket.SocketType, is_wss: bool = False
     ) -> Multiaddr:

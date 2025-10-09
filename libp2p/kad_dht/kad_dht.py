@@ -886,7 +886,7 @@ class KadDHT(Service):
 
             # 4. Not found
             logger.warning("Value not found for key %s", key.hex())
-            return None
+        return None
 
     # Add these methods in the Utility methods section
 

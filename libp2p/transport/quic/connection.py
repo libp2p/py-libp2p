@@ -728,7 +728,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
                 stream = QUICStream(
-                    connection=self,  # type: ignore
+                    connection=self,
                     stream_id=stream_id,
                     direction=StreamDirection.OUTBOUND,
                     resource_scope=self._resource_scope,
