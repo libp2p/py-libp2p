@@ -450,9 +450,7 @@ class QUICListener(IListener):
             # Use the first host CID as our routing CID
             if quic_conn._host_cids:
                 destination_cid = quic_conn._host_cids[0].cid
-                logger.debug(
-                    "Using host CID as routing CID: %s", destination_cid.hex()
-                )
+                logger.debug("Using host CID as routing CID: %s", destination_cid.hex())
             else:
                 # Fallback to random if no host CIDs generated
                 import secrets
@@ -460,9 +458,7 @@ class QUICListener(IListener):
                 destination_cid = secrets.token_bytes(8)
                 logger.debug("Fallback to random CID: %s", destination_cid.hex())
 
-            logger.debug(
-                "Generated %d host CIDs for client", len(quic_conn._host_cids)
-            )
+            logger.debug("Generated %d host CIDs for client", len(quic_conn._host_cids))
 
             logger.debug(
                 "QUIC connection created for destination CID %s",

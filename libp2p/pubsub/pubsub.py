@@ -19,9 +19,11 @@ from typing import (
 
 if TYPE_CHECKING:
     from typing import TYPE_CHECKING
+
     if TYPE_CHECKING:
-        from typing_extensions import TypeAlias
-        Pubsub: TypeAlias = 'Pubsub'
+        from typing import TypeAlias
+
+        Pubsub: TypeAlias = "Pubsub"
 
 import base58
 import trio
@@ -171,7 +173,8 @@ class Pubsub(Service, IPubsub):
         self.host = host
         # Attach this new Pubsub object to the router
         from typing import cast
-        self.router.attach(cast('Pubsub', self))  # type: ignore
+
+        self.router.attach(cast("Pubsub", self))  # type: ignore
 
         peer_send, peer_receive = trio.open_memory_channel[ID](0)
         dead_peer_send, dead_peer_receive = trio.open_memory_channel[ID](0)

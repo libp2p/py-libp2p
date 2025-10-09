@@ -79,9 +79,12 @@ async def main() -> None:
             # Connect the hosts
             logger.info("Connecting hosts...")
             from libp2p.peer.peerinfo import info_from_p2p_addr
-            peer_info = info_from_p2p_addr(host2.get_addrs()[0].encapsulate(
-                Multiaddr(f"/p2p/{host2.get_id().pretty()}")
-            ))
+
+            peer_info = info_from_p2p_addr(
+                host2.get_addrs()[0].encapsulate(
+                    Multiaddr(f"/p2p/{host2.get_id().pretty()}")
+                )
+            )
             await host1.connect(peer_info)
             await trio.sleep(1)  # Wait for connection
 

@@ -224,9 +224,7 @@ class YamuxStream(IMuxedStream):
                     # Send window update for the chunk we just read
                     async with self.window_lock:
                         self.recv_window += len(chunk)
-                        logger.debug(
-                            "Stream %d: Update %d", self.stream_id, len(chunk)
-                        )
+                        logger.debug("Stream %d: Update %d", self.stream_id, len(chunk))
                         await self.send_window_update(len(chunk), skip_lock=True)
 
                 # If stream is closed (FIN received) and buffer is empty, break
@@ -244,7 +242,7 @@ class YamuxStream(IMuxedStream):
                 await self.conn.stream_events[self.stream_id].wait()
                 self.conn.stream_events[self.stream_id] = trio.Event()
 
-            # After loop exit, first check if we have data to return
+                # After loop exit, first check if we have data to return
                 if data:
                     logger.debug(
                         "Stream %d: Returning %d bytes after loop",

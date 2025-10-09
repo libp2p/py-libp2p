@@ -595,7 +595,8 @@ async def test_sparse_connect():
             assert received_count >= min_required, (
                 "Message propagation insufficient: %d/%d nodes received the message. "
                 "Ideally all nodes should receive it, but at minimum %d required "
-                "for sparse network scalability." % (received_count, total_nodes, min_required)
+                "for sparse network scalability."
+                % (received_count, total_nodes, min_required)
             )
 
 
