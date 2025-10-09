@@ -935,7 +935,8 @@ async def test_wss_listen_without_tls_config():
             # For ExceptionGroup, check the nested exceptions
             if hasattr(e, "exceptions"):
                 found_tls_error = False
-                for exc in e.exceptions:
+                exceptions = getattr(e, "exceptions")
+                for exc in exceptions:
                     nested_msg = str(exc)
                     if (
                         "TLS configuration" in nested_msg
@@ -946,7 +947,7 @@ async def test_wss_listen_without_tls_config():
                 if not found_tls_error:
                     pytest.fail(
                         "Expected TLS configuration error in ExceptionGroup, "
-                        f"got: {e.exceptions}"
+                        f"got: {exceptions}"
                     )
         else:
             pytest.fail(
