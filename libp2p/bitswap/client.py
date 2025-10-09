@@ -317,6 +317,14 @@ class BitswapClient:
 
             await self._write_message(stream, msg)
             logger.debug(f"Sent wantlist to peer {peer_id}")
+            
+            # Keep stream open and read responses
+            # This allows the provider to send blocks back on the same stream
+            if self._nursery:
+                self._nursery.start_soon(self._read_responses_from_stream, stream, peer_id)
+            else:
+                await self._read_responses_from_stream(stream, peer_id)
+            
         except Exception as e:
             logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
 
@@ -385,6 +393,34 @@ class BitswapClient:
                 logger.debug(f"Sent block {cid.hex()[:16]}... to peer {peer_id}")
             except Exception as e:
                 logger.error(f"Failed to send block to peer {peer_id}: {e}")
+
+    async def _read_responses_from_stream(
+        self, stream: INetStream, peer_id: PeerID
+    ) -> None:
+        """Read responses from a stream after sending a wantlist.
+        
+        This keeps the stream open so the provider can send blocks back.
+        """
+        try:
+            logger.debug(f"Reading responses from {peer_id} on stream")
+            while True:
+                # Read message from provider
+                msg = await self._read_message(stream)
+                if msg is None:
+                    logger.debug(f"Stream from {peer_id} closed")
+                    break
+
+                logger.debug(f"Received response from {peer_id}")
+                # Process the response (blocks, presences, etc.)
+                await self._process_message(msg, peer_id, stream)
+
+        except Exception as e:
+            logger.debug(f"Stream from {peer_id} ended: {e}")
+        finally:
+            try:
+                await stream.close()
+            except Exception:
+                pass  # Stream might already be closed
 
     async def _handle_stream(self, stream: INetStream) -> None:
         """Handle incoming Bitswap stream."""
@@ -493,7 +529,9 @@ class BitswapClient:
                 blocks_v110=blocks_to_send_v110 if blocks_to_send_v110 else None,
                 block_presences=presences_to_send if presences_to_send else None,
             )
+            logger.debug(f"Sending response message to {peer_id} on stream {stream}")
             await self._write_message(stream, response_msg)
+            logger.debug(f"Response message sent to {peer_id}")
 
             if blocks_to_send_v100 or blocks_to_send_v110:
                 count = len(blocks_to_send_v100) + len(blocks_to_send_v110)
@@ -505,6 +543,7 @@ class BitswapClient:
 
     async def _process_blocks_v100(self, blocks: list[bytes]) -> None:
         """Process received blocks (v1.0.0 format)."""
+        logger.debug(f"Processing {len(blocks)} blocks (v1.0.0)")
         for block_data in blocks:
             # For v1.0.0, compute CID from the block data
             cid = compute_cid(block_data, version=CID_V0)
@@ -515,21 +554,20 @@ class BitswapClient:
 
             # Notify pending requests
             if cid in self._pending_requests:
+                logger.debug(f"Notifying pending request for {cid.hex()[:16]}...")
                 self._pending_requests[cid].set()
+            else:
+                logger.debug(f"No pending request for {cid.hex()[:16]}...")
 
     async def _process_blocks_v110(self, blocks: list[Any]) -> None:
-        """Process received blocks (v1.1.0+ format with CID prefix)."""
-        for block_msg in blocks:
-            prefix = block_msg.prefix
-            data = block_msg.data
+        """Process received blocks (v1.1.0+ format with prefix)."""
+        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
+        for block in blocks:
+            prefix = block.prefix
+            data = block.data
 
-            # Reconstruct CID from prefix and data
+            # Decode CID from prefix and data
             cid = reconstruct_cid_from_prefix_and_data(prefix, data)
-
-            # Verify CID matches data
-            if not verify_cid(cid, data):
-                logger.warning(f"CID verification failed for block {cid.hex()[:16]}...")
-                continue
 
             # Store the block
             await self.block_store.put_block(cid, data)
@@ -537,7 +575,10 @@ class BitswapClient:
 
             # Notify pending requests
             if cid in self._pending_requests:
+                logger.debug(f"Notifying pending request for {cid.hex()[:16]}...")
                 self._pending_requests[cid].set()
+            else:
+                logger.debug(f"No pending request for {cid.hex()[:16]}...")
 
     async def _process_block_presences(self, presences: list[Any]) -> None:
         """Process received block presences (v1.2.0)."""
@@ -556,30 +597,46 @@ class BitswapClient:
     async def _read_message(self, stream: INetStream) -> Message | None:
         """Read a length-prefixed message from the stream."""
         try:
-            # Read length prefix
-            length_bytes = await stream.read(10)  # Max varint length
-            if not length_bytes:
-                return None
+            # Read length prefix byte-by-byte (varint encoding)
+            length_bytes = b""
+            while True:
+                byte = await stream.read(1)
+                if not byte:
+                    return None  # Stream closed
+                length_bytes += byte
+                # Check if this is the last byte of the varint (high bit not set)
+                if byte[0] & 0x80 == 0:
+                    break
+                # Limit to max varint length (10 bytes for 64-bit values)
+                if len(length_bytes) >= 10:
+                    logger.error("Varint length prefix too long")
+                    return None
 
             # Decode length
-            length, bytes_read = varint.decode_bytes(length_bytes)
+            length = varint.decode_bytes(length_bytes)
 
             if length > MAX_MESSAGE_SIZE:
                 raise MessageTooLargeError(
                     f"Message size {length} exceeds maximum {MAX_MESSAGE_SIZE}"
                 )
 
-            # Read message data (accounting for already read bytes)
+            # Read message data
+            msg_data = b""
             remaining = length
-            msg_data = length_bytes[bytes_read:]
-            remaining -= len(msg_data)
 
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
                     break
-                msg_data += chunk  # type: ignore[operator]
+                msg_data += chunk
                 remaining -= len(chunk)
+
+            # Verify we read all expected bytes
+            if len(msg_data) != length:
+                logger.error(
+                    f"Expected {length} bytes but got {len(msg_data)}"
+                )
+                return None
 
             # Parse message
             msg = Message()
@@ -588,6 +645,8 @@ class BitswapClient:
 
         except Exception as e:
             logger.error(f"Error reading message: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     async def _write_message(self, stream: INetStream, msg: Message) -> None:

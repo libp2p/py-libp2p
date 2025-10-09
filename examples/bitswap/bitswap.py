@@ -86,6 +86,15 @@ async def run_provider(port: int = 0, file_path: str | None = None) -> None:
             logger.info("Block CIDs:")
             for i, cid in enumerate(blocks):
                 logger.info(f"  Block {i}: {cid.hex()}")
+
+            # Show example command to fetch these blocks
+            if blocks:
+                logger.info("\nTo fetch these blocks from a client, use:")
+                cids_arg = " ".join([cid.hex() for cid in blocks[:3]])
+                logger.info(
+                    f"  python bitswap.py --mode client --provider "
+                    f"{host.get_addrs()[0]} --cids {cids_arg}"
+                )
         else:
             # Add some example text blocks
             example_blocks = [
@@ -95,10 +104,20 @@ async def run_provider(port: int = 0, file_path: str | None = None) -> None:
                 b"Block exchange in py-libp2p",
             ]
 
+            block_cids = []
             for i, data in enumerate(example_blocks):
                 cid = compute_cid(data)
                 await bitswap.add_block(cid, data)
-                logger.info(f"Added block {i}: {cid.hex()[:16]}... = {data.decode()}")
+                block_cids.append(cid)
+                logger.info(f"Added block {i}: {cid.hex()} = {data.decode()}")
+
+            # Show example command to fetch these blocks
+            logger.info("\nTo fetch these blocks from a client, use:")
+            cids_arg = " ".join([cid.hex() for cid in block_cids[:3]])
+            logger.info(
+                f"  python bitswap.py --mode client --provider "
+                f"<addr> --cids {cids_arg}"
+            )
 
         actual_addrs = host.get_addrs()
         logger.info(f"Provider node started with peer ID: {host.get_id()}")
@@ -113,10 +132,11 @@ async def run_provider(port: int = 0, file_path: str | None = None) -> None:
         logger.info("Press Ctrl+C to stop...")
 
         try:
+            await trio.sleep_forever()
             # Keep server running
-            while True:
-                await trio.sleep(5)
-                logger.info(f"Provider has {block_store.size()} blocks available")
+            # while True:
+            #     await trio.sleep(5)
+            #     logger.info(f"Provider has {block_store.size()} blocks available")
         except KeyboardInterrupt:
             logger.info("Shutting down provider...")
         finally:
@@ -182,35 +202,20 @@ async def run_client(
                 except Exception as e:
                     logger.error(f"Failed to get block {cid_hex[:16]}...: {e}")
         else:
-            # Interactive mode
+            # Interactive mode - need CIDs from provider
             logger.info(
-                "\nInteractive mode - Enter block CIDs (hex) to request, "
-                "or 'quit' to exit:"
+                "\nNo block CIDs provided. In interactive mode, you need to specify "
+                "CIDs to request."
             )
-            logger.info("(You can get CIDs from the provider's output)")
-
-            # In a real application, you'd use async input
-            # For this example, we'll just demonstrate with example blocks
-            logger.info("\nTrying to fetch example blocks...")
-            example_data = [
-                b"Hello from Bitswap!",
-                b"This is block number 2",
-                b"Bitswap makes file sharing easy",
-            ]
-
-            for i, data in enumerate(example_data):
-                try:
-                    cid = compute_cid(data)
-                    logger.info(f"\nRequesting block {i}: {cid.hex()[:16]}...")
-
-                    received_data = await bitswap.get_block(
-                        cid, provider_info.peer_id, timeout=10
-                    )
-                    logger.info(f"✓ Received: {received_data.decode()}")
-
-                    await trio.sleep(1)
-                except Exception as e:
-                    logger.error(f"✗ Failed to get block: {e}")
+            logger.info("Example usage:")
+            logger.info(
+                "  python bitswap.py --mode client --provider <addr> "
+                "--cids <cid1> <cid2>"
+            )
+            logger.info("\nYou can get CIDs from the provider's output.")
+            logger.info(
+                "\nWaiting for manual block requests (press Ctrl+C to exit)..."
+            )
 
         logger.info(f"\nClient now has {block_store.size()} blocks")
         logger.info("Press Ctrl+C to exit...")
@@ -274,8 +279,8 @@ Examples:
   # Run as client
   python bitswap.py --mode client --provider /ip4/127.0.0.1/tcp/4001/p2p/QmPeer...
 
-  # Run as client requesting specific blocks
-  python bitswap.py --mode client --provider /ip4/... --blocks abc123 def456
+  # Run as client requesting specific blocks (use CIDs from provider output)
+  python bitswap.py --mode client --provider /ip4/... --cids abc123 def456
 
   # Run demo
   python bitswap.py --mode demo
@@ -305,7 +310,7 @@ Examples:
         help="File to share (provider mode only)",
     )
     parser.add_argument(
-        "--blocks",
+        "--cids",
         nargs="+",
         help="Block CIDs to request (hex strings, client mode only)",
     )
@@ -318,7 +323,7 @@ Examples:
         elif args.mode == "client":
             if not args.provider:
                 parser.error("--provider is required in client mode")
-            trio.run(run_client, args.provider, args.blocks, args.port)
+            trio.run(run_client, args.provider, args.cids, args.port)
         elif args.mode == "demo":
             trio.run(run_file_transfer_demo)
     except KeyboardInterrupt:
