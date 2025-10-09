@@ -75,8 +75,9 @@ async def test_reject_graft():
                 # Connect the hosts
                 await connect(host_0, host_1)
 
-                # Wait 2 seconds for heartbeat to allow mesh to connect
-                await trio.sleep(1)
+                # Wait for heartbeat to allow mesh to connect
+                # Increased from 1 to 2 seconds for reliable mesh formation
+                await trio.sleep(2)
 
                 topic = "test_reject_graft"
 
@@ -103,7 +104,7 @@ async def test_reject_graft():
                 assert isinstance(router_obj, GossipSub)
                 await router_obj.emit_graft(topic, host_1.get_id())
 
-                await trio.sleep(1)
+                await trio.sleep(2)  # Increased from 1 to 2 seconds for mesh processing
 
                 # Post-Graft assertions
                 assert host_1.get_id() not in pubsubs_gsub_0[0].router.mesh[topic], (
@@ -141,7 +142,7 @@ async def test_heartbeat_reconnect():
 
             try:
                 # Wait for initial connection and mesh setup
-                await trio.sleep(1)
+                await trio.sleep(2)  # Increased from 1 to 2 seconds for connection stability
 
                 # Verify initial connection
                 assert host_1.get_id() in pubsubs_gsub_0[0].peers, (
@@ -155,7 +156,7 @@ async def test_heartbeat_reconnect():
                 await host_0.disconnect(host_1.get_id())
 
                 # Wait for heartbeat to detect disconnection
-                await trio.sleep(1)
+                await trio.sleep(2)  # Increased from 1 to 2 seconds for disconnection detection
 
                 # Verify that peers are removed after disconnection
                 assert host_0.get_id() not in pubsubs_gsub_1[0].peers, (

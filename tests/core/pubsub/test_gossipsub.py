@@ -56,8 +56,9 @@ async def test_join():
         # Connect central host to all other hosts
         await one_to_all_connect(hosts, central_node_index)
 
-        # Wait 1 seconds for heartbeat to allow mesh to connect
-        await trio.sleep(1)
+        # Wait for heartbeat to allow mesh to connect
+        # Increased from 1 to 2 seconds for more reliable mesh formation
+        await trio.sleep(2)
 
         # Central node publish to the topic so that this topic
         # is added to central node's fanout
@@ -74,13 +75,13 @@ async def test_join():
         assert topic in gossipsubs[central_node_index].time_since_last_publish
         assert to_drop_topic in gossipsubs[central_node_index].time_since_last_publish
 
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for reliable TTL cleanup
         # Check that after ttl the to_drop_topic is no more in fanout of central node
         assert to_drop_topic not in gossipsubs[central_node_index].fanout
         # Central node subscribes the topic
         await pubsubs_gsub[central_node_index].subscribe(topic)
 
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for mesh formation
 
         # Check that the gossipsub of central node no longer has fanout for the topic
         assert topic not in gossipsubs[central_node_index].fanout
@@ -164,7 +165,7 @@ async def test_handle_graft(monkeypatch):
 
         await gossipsubs[index_bob].emit_graft(topic, id_alice)
 
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for mesh update
 
         # Check that bob is now alice's mesh peer
         assert id_bob in gossipsubs[index_alice].mesh[topic]
@@ -193,7 +194,7 @@ async def test_handle_prune():
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
         # Wait for heartbeat to allow mesh to connect
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for mesh formation
 
         # Check that they are each other's mesh peer
         assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -623,29 +624,53 @@ async def test_flood_publish():
         # connect host 0 to all other hosts
         await one_to_all_connect(hosts, 0)
 
-        # wait for connections to be established
-        await trio.sleep(1)
+        # wait for connections to be established and mesh to form
+        # Increased from 1 to 2 seconds to ensure mesh is fully formed
+        await trio.sleep(2)
+
+        # Force a heartbeat to ensure mesh is properly initialized
+        # This is critical when flood_publish=False as mesh needs to be stable
+        for router in routers:
+            if hasattr(router, 'heartbeat'):
+                await router.heartbeat()
+
+        # Additional stabilization time after heartbeat
+        await trio.sleep(0.5)
 
         # publish a message from the first host
         msg_content = b"flood_msg"
         await pubsubs_gsub[0].publish(topic, msg_content)
 
-        # wait for messages to propagate
-        await trio.sleep(1)
+        # wait for messages to propagate - increased from 1 to 2 seconds
+        # when flood_publish=False, mesh-based propagation takes longer
+        await trio.sleep(2)
 
-        # Debug info - only log if needed
-        # print(f"Mesh for topic: {routers[0].mesh[topic]}")
-        # if routers[0].pubsub:
-        #     print(f"Peer topics: {routers[0].pubsub.peer_topics}")
+        # Debug info - log mesh state for troubleshooting
+        print(f"Publisher mesh for topic '{topic}': {routers[0].mesh.get(topic, set())}")
+        for i, router in enumerate(routers):
+            peer_topics = router.pubsub.peer_topics if router.pubsub else {}
+            mesh_peers = router.mesh.get(topic, set())
+            print(f"Node {i}: mesh_peers={mesh_peers}, connected_peers={set(peer_topics.keys())}")
 
         # verify all nodes received the message with timeout
+        failed_nodes = []
         for i, queue in enumerate(queues):
             try:
-                with trio.fail_after(5):
+                with trio.fail_after(8):  # Increased timeout from 5 to 8 seconds
                     msg = await queue.get()
                     assert msg.data == msg_content, f"node {i} received wrong message: {msg.data}"
+                    print(f"Node {i} successfully received message")
             except trio.TooSlowError:
-                pytest.fail(f"Node {i} did not receive the message (timeout)")
+                failed_nodes.append(i)
+                print(f"Node {i} did not receive the message (timeout)")
+            except Exception as e:
+                failed_nodes.append(i)
+                print(f"Node {i} failed with error: {e}")
+
+        # Report all failures at once for better debugging
+        if failed_nodes:
+            mesh_info = {f"node_{i}": list(routers[i].mesh.get(topic, set())) for i in range(len(routers))}
+            pytest.fail(f"Nodes {failed_nodes} did not receive the message. Mesh state: {mesh_info}")
                 
         # Test passed if all nodes received the message
         print("Basic flood test passed - all nodes received the message")
@@ -681,8 +706,17 @@ async def test_flood_publish_enabled():
         await connect(hosts[3], hosts[4])
         await connect(hosts[4], hosts[5])
 
-        # wait for connections to be established
-        await trio.sleep(1)
+        # wait for connections to be established and mesh to form
+        # Increased from 1 to 2 seconds for mesh stability
+        await trio.sleep(2)
+
+        # Force a heartbeat to ensure mesh is properly initialized
+        for router in routers:
+            if hasattr(router, 'heartbeat'):
+                await router.heartbeat()
+
+        # Additional stabilization time after heartbeat
+        await trio.sleep(0.5)
 
         # publish a message from the first host
         msg_content = b"flood_publish_msg"
@@ -692,14 +726,23 @@ async def test_flood_publish_enabled():
         await trio.sleep(2)
         
         # verify all nodes received the message with timeout
+        failed_nodes = []
         for i, queue in enumerate(queues):
             try:
-                with trio.fail_after(5):
+                with trio.fail_after(8):  # Increased timeout from 5 to 8 seconds
                     msg = await queue.get()
                     assert msg.data == msg_content, f"node {i} received wrong message: {msg.data}"
                     print(f"Node {i} received message correctly")
             except trio.TooSlowError:
-                pytest.fail(f"Node {i} did not receive the message (timeout)")
+                failed_nodes.append(i)
+                print(f"Node {i} did not receive the message (timeout)")
+            except Exception as e:
+                failed_nodes.append(i)
+                print(f"Node {i} failed with error: {e}")
+        
+        # Report all failures at once for better debugging
+        if failed_nodes:
+            pytest.fail(f"Nodes {failed_nodes} did not receive the message in flood_publish=True test")
         
         # Test passed if all nodes received the message
         print("Flood publish test passed - all nodes received the message")

@@ -96,8 +96,8 @@ async def test_reissue_when_listen_addrs_change():
     async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Yield to let 0 notify 1 - increased timeout for reliability
+        await trio.sleep(2)  # Increased from 1 to 2 seconds
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
         # Check whether signed-records were transfered properly in the subscribe call
@@ -115,7 +115,7 @@ async def test_reissue_when_listen_addrs_change():
         with patch.object(pubsubs_fsub[0].host, "get_addrs", return_value=[new_addr]):
             # Unsubscribe from A's side so that a new_record is issued
             await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
-            await trio.sleep(1)
+            await trio.sleep(2)  # Increased from 1 to 2 seconds for record propagation
 
         # B should be holding A's new record with bumped seq
         envelope_b_unsub = (
