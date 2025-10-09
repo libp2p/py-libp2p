@@ -1019,7 +1019,7 @@ class QUICListener(IListener):
             logger.error(f"Error adding QUIC connection to swarm: {e}")
             await connection.close()
 
-    def get_addrs(self) -> tuple[Multiaddr]:
+    def get_addrs(self) -> tuple[Multiaddr, ...]:
         return tuple(self.get_addresses())
 
     def is_listening(self) -> bool:

@@ -302,7 +302,7 @@ class KadDHT(Service):
                         )
                         connected_peers = self.host.get_connected_peers()
                         if connected_peers:
-                        # Sort connected peers by distance to target & use as response
+                            # Sort connected peers by distance & use as response
                             fallback_peers = sort_peer_ids_by_distance(
                                 target_key, connected_peers
                             )[:20]
@@ -629,7 +629,7 @@ class KadDHT(Service):
                             )
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
-                            # Sort connected peers by distance to target
+                                # Sort connected peers by distance to target
                                 # and use as response
                                 fallback_peers = sort_peer_ids_by_distance(
                                     key, connected_peers

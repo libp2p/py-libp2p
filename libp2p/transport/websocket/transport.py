@@ -2,6 +2,7 @@ import logging
 import ssl
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
@@ -119,8 +120,6 @@ class WebsocketTransport(ITransport):
             )
 
             # Create a background task manager for this connection
-            import trio
-
             nursery_manager = trio.lowlevel.current_task().parent_nursery
             if nursery_manager is None:
                 raise OpenConnectionError(
@@ -161,9 +160,8 @@ class WebsocketTransport(ITransport):
             ) from e
         except Exception as e:
             logger.error("Failed to dial WebSocket %s: %s", maddr, e)
-            msg = "Failed to dial WebSocket %s: %s" % (maddr, e)
+            msg = f"Failed to dial WebSocket {maddr}: {e}"
             raise OpenConnectionError(msg) from e
-
 
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
