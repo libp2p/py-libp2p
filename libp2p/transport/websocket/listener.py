@@ -6,6 +6,7 @@ from typing import Any
 
 from multiaddr import Multiaddr
 import trio
+from trio_typing import TaskStatus
 from trio_websocket import WebSocketConnection
 
 try:
@@ -154,7 +155,7 @@ class WebsocketListener(IListener):
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             # Create WebSocket server using nursery.start pattern
-            async def websocket_server_task(task_status: trio.TaskStatus) -> None:
+            async def websocket_server_task(task_status: TaskStatus[Any]) -> None:
                 """Run the WebSocket server."""
                 try:
                     # Use trio_websocket's serve_websocket
