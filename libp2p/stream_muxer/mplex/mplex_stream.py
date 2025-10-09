@@ -114,6 +114,33 @@ class MplexStream(IMuxedStream):
 
         :param n: number of bytes to read
         :return: bytes actually read
+        :raises TimeoutError: if read_deadline is set and operation times out
+        :raises MplexStreamReset: if stream has been reset
+        :raises MplexStreamEOF: if stream has reached end of file
+        :raises ValueError: if n is negative
+        """
+        # Check if stream is already reset before attempting operation
+        if self.event_reset.is_set():
+            raise MplexStreamReset
+
+        # Apply read deadline if set
+        if self.read_deadline is not None:
+            try:
+                with trio.fail_after(self.read_deadline):
+                    return await self._do_read(n)
+            except trio.TooSlowError:
+                raise TimeoutError(
+                    f"Read operation timed out after {self.read_deadline} seconds"
+                )
+        else:
+            return await self._do_read(n)
+
+    async def _do_read(self, n: int | None = None) -> bytes:
+        """
+        Internal read implementation that performs the actual read operation.
+
+        :param n: number of bytes to read
+        :return: bytes actually read
         """
         async with self.rw_lock.read_lock():
             if n is not None and n < 0:
@@ -163,7 +190,31 @@ class MplexStream(IMuxedStream):
         """
         Write to stream.
 
-        :return: number of bytes written
+        :param data: bytes to write
+        :raises TimeoutError: if write_deadline is set and operation times out
+        :raises MplexStreamClosed: if stream is closed for writing
+        """
+        # Check if stream is already closed before attempting operation
+        if self.event_local_closed.is_set():
+            raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
+
+        # Apply write deadline if set
+        if self.write_deadline is not None:
+            try:
+                with trio.fail_after(self.write_deadline):
+                    await self._do_write(data)
+            except trio.TooSlowError:
+                raise TimeoutError(
+                    f"Write operation timed out after {self.write_deadline} seconds"
+                )
+        else:
+            await self._do_write(data)
+
+    async def _do_write(self, data: bytes) -> None:
+        """
+        Internal write implementation that performs the actual write operation.
+
+        :param data: bytes to write
         """
         async with self.rw_lock.write_lock():
             if self.event_local_closed.is_set():
@@ -241,11 +292,15 @@ class MplexStream(IMuxedStream):
             if self.muxed_conn.streams is not None:
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
-    # TODO deadline not in use
     def set_deadline(self, ttl: int) -> bool:
         """
-        Set deadline for muxed stream.
+        Set deadline for both read and write operations on the muxed stream.
 
+        The deadline is enforced for the entire operation including lock acquisition.
+        If the operation takes longer than the specified timeout, a TimeoutError
+        is raised.
+
+        :param ttl: timeout in seconds for read and write operations
         :return: True if successful
         """
         self.read_deadline = ttl
@@ -256,6 +311,11 @@ class MplexStream(IMuxedStream):
         """
         Set read deadline for muxed stream.
 
+        The deadline is enforced for the entire read operation including lock
+        acquisition. If the read operation takes longer than the specified timeout,
+        a TimeoutError is raised.
+
+        :param ttl: timeout in seconds for read operations
         :return: True if successful
         """
         self.read_deadline = ttl
@@ -265,6 +325,11 @@ class MplexStream(IMuxedStream):
         """
         Set write deadline for muxed stream.
 
+        The deadline is enforced for the entire write operation including lock
+        acquisition. If the write operation takes longer than the specified timeout,
+        a TimeoutError is raised.
+
+        :param ttl: timeout in seconds for write operations
         :return: True if successful
         """
         self.write_deadline = ttl
