@@ -102,6 +102,9 @@ class KadDHT(Service):
         :param enable_random_walk: Whether to enable automatic random walk
         """
         super().__init__()
+        self.MIN_PEERS_THRESHOLD = (
+            5  # Configurable minimum for fallback to connected peers
+        )
 
         self.host = host
         self.local_peer_id = host.get_id()
@@ -176,6 +179,11 @@ class KadDHT(Service):
             # Start the main DHT service loop
             nursery.start_soon(self._run_main_loop)
 
+    async def refresh_routing_table(self) -> None:
+        """Refresh the routing table."""
+        logger.debug("Refreshing routing table")
+        await self.peer_routing.refresh_routing_table()
+
     async def _run_main_loop(self) -> None:
         """Run the main DHT service loop."""
         # Main service loop
@@ -220,23 +228,23 @@ class KadDHT(Service):
         if not isinstance(new_mode, DHTMode):
             raise TypeError("new_mode must be DHTMode enum, got %s", type(new_mode))
 
-    if new_mode == DHTMode.CLIENT:
-        self.routing_table.cleanup_routing_table()
-    self.mode = new_mode
-    logger.info("Switched to %s mode", new_mode.value)
-    return self.mode
+        if new_mode == DHTMode.CLIENT:
+            self.routing_table.cleanup_routing_table()
+        self.mode = new_mode
+        logger.info("Switched to %s mode", new_mode.value)
+        return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
         """
         Handle an incoming DHT stream using varint length prefixes.
         """
-    if self.mode == DHTMode.CLIENT:
-        stream.close
-        return
-    peer_id = stream.muxed_conn.peer_id
-    logger.debug("Received DHT stream from peer %s", peer_id)
-    await self.add_peer(peer_id)
-    logger.debug("Added peer %s to routing table", peer_id)
+        if self.mode == DHTMode.CLIENT:
+            stream.close
+            return
+        peer_id = stream.muxed_conn.peer_id
+        logger.debug("Received DHT stream from peer %s", peer_id)
+        await self.add_peer(peer_id)
+        logger.debug("Added peer %s to routing table", peer_id)
 
         closer_peer_envelope: Envelope | None = None
         provider_peer_envelope: Envelope | None = None
@@ -282,23 +290,25 @@ class KadDHT(Service):
                         target_key, 20
                     )
 
-                    # Fallback to connected peers if routing table has insufficient peers
-                    if len(closest_peers) < MIN_PEERS_THRESHOLD:
+                    # Fallback to connected peers if
+                    # routing table has insufficient peers
+                    if len(closest_peers) < self.MIN_PEERS_THRESHOLD:
                         logger.debug(
-                            "Routing table has insufficient peers (%d < %d) for FIND_NODE in KadDHT, "
+                            "Routing table has insufficient peers (%d < %d) "
+                            "for FIND_NODE in KadDHT, "
                             "using connected peers as fallback",
                             len(closest_peers),
-                            MIN_PEERS_THRESHOLD,
+                            self.MIN_PEERS_THRESHOLD,
                         )
                         connected_peers = self.host.get_connected_peers()
                         if connected_peers:
-                            # Sort connected peers by distance to target and use as response
+                        # Sort connected peers by distance to target & use as response
                             fallback_peers = sort_peer_ids_by_distance(
                                 target_key, connected_peers
                             )[:20]
                             closest_peers = fallback_peers
                             logger.debug(
-                                "Using %d connected peers as fallback for FIND_NODE in KadDHT",
+                                "Using %d connected peers as FIND_NODE fallback in DHT",
                                 len(closest_peers),
                             )
 
@@ -490,24 +500,27 @@ class KadDHT(Service):
                             key, 20
                         )
 
-                        # Fallback to connected peers if routing table has insufficient peers
+                        # Fallback to connected peers if
+                        # routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
                             logger.debug(
-                                "Routing table has insufficient peers (%d < %d) for provider response, "
+                                "Routing table has insufficient peers"
+                                " (%d < %d) for provider response, "
                                 "using connected peers as fallback",
                                 len(closest_peers),
                                 MIN_PEERS_THRESHOLD,
                             )
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
-                                # Sort connected peers by distance to target and use as response
+                                # Sort by distance to target and use as response
                                 fallback_peers = sort_peer_ids_by_distance(
                                     key, connected_peers
                                 )[:20]
                                 closest_peers = fallback_peers
                                 logger.debug(
-                                    "Using %d connected peers as fallback for provider response",
+                                    "Using %d connected peers as "
+                                    "fallback for provider response",
                                     len(closest_peers),
                                 )
 
@@ -603,24 +616,28 @@ class KadDHT(Service):
                             key, 20
                         )
 
-                        # Fallback to connected peers if routing table has insufficient peers
+                        # Fallback to connected peers
+                        # if routing table has insufficient peers
                         MIN_PEERS_THRESHOLD = 5  # Configurable minimum
                         if len(closest_peers) < MIN_PEERS_THRESHOLD:
                             logger.debug(
-                                "Routing table has insufficient peers (%d < %d) for GET_VALUE response, "
+                                "Routing table has insufficient peers"
+                                " (%d < %d) for GET_VALUE response, "
                                 "using connected peers as fallback",
                                 len(closest_peers),
                                 MIN_PEERS_THRESHOLD,
                             )
                             connected_peers = self.host.get_connected_peers()
                             if connected_peers:
-                                # Sort connected peers by distance to target and use as response
+                            # Sort connected peers by distance to target
+                                # and use as response
                                 fallback_peers = sort_peer_ids_by_distance(
                                     key, connected_peers
                                 )[:20]
                                 closest_peers = fallback_peers
                                 logger.debug(
-                                    "Using %d connected peers as fallback for GET_VALUE response",
+                                    "Using %d connected peers as "
+                                    "fallback for GET_VALUE response",
                                     len(closest_peers),
                                 )
 
@@ -721,11 +738,6 @@ class KadDHT(Service):
         except Exception as e:
             logger.error("Error handling DHT stream: %s", str(e))
             await stream.close()
-
-    async def refresh_routing_table(self) -> None:
-        """Refresh the routing table."""
-        logger.debug("Refreshing routing table")
-        await self.peer_routing.refresh_routing_table()
 
     # Peer routing methods
 
@@ -872,9 +884,9 @@ class KadDHT(Service):
                 logger.info("Successfully retrieved value from network")
                 return found_value
 
-        # 4. Not found
-    logger.warning("Value not found for key %s", key.hex())
-    return None
+            # 4. Not found
+            logger.warning("Value not found for key %s", key.hex())
+            return None
 
     # Add these methods in the Utility methods section
 
