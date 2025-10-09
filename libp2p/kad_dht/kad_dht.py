@@ -220,19 +220,19 @@ class KadDHT(Service):
         if not isinstance(new_mode, DHTMode):
             raise TypeError("new_mode must be DHTMode enum, got %s", type(new_mode))
 
-        if new_mode == DHTMode.CLIENT:
-            self.routing_table.cleanup_routing_table()
-        self.mode = new_mode
+    if new_mode == DHTMode.CLIENT:
+        self.routing_table.cleanup_routing_table()
+    self.mode = new_mode
     logger.info("Switched to %s mode", new_mode.value)
-        return self.mode
+    return self.mode
 
     async def handle_stream(self, stream: INetStream) -> None:
         """
         Handle an incoming DHT stream using varint length prefixes.
         """
-        if self.mode == DHTMode.CLIENT:
-            stream.close
-            return
+    if self.mode == DHTMode.CLIENT:
+        stream.close
+        return
     peer_id = stream.muxed_conn.peer_id
     logger.debug("Received DHT stream from peer %s", peer_id)
     await self.add_peer(peer_id)
@@ -447,11 +447,11 @@ class KadDHT(Service):
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
-                        logger.debug(
-                            "Found %d providers for key %s",
-                            len(providers),
-                            key.hex(),
-                        )
+                    logger.debug(
+                        "Found %d providers for key %s",
+                        len(providers),
+                        key.hex(),
+                    )
 
                     # Create response
                     response = Message()
@@ -812,7 +812,7 @@ class KadDHT(Service):
         logger.info("Successfully stored value at %d peers", stored_count)
 
     async def get_value(self, key: bytes) -> bytes | None:
-    logger.debug("Getting value for key: %s", key.hex())
+        logger.debug("Getting value for key: %s", key.hex())
 
         # 1. Check local store first
         value = self.value_store.get(key)
@@ -874,7 +874,7 @@ class KadDHT(Service):
 
         # 4. Not found
     logger.warning("Value not found for key %s", key.hex())
-        return None
+    return None
 
     # Add these methods in the Utility methods section
 
