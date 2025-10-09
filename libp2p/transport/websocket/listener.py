@@ -140,6 +140,13 @@ class WebsocketListener(IListener):
             # Check if this is WSS
             self._is_wss = proto_info.is_wss
 
+            # Validate TLS configuration for WSS
+            if self._is_wss and self._tls_config is None:
+                raise ValueError(
+                    "WSS (secure WebSocket) requires TLS configuration but none was provided. "
+                    "Please provide tls_server_config when creating the WebSocket transport."
+                )
+
             # Check connection limits
             if self._current_connections >= self._config.max_connections:
                 raise OpenConnectionError(
@@ -155,8 +162,11 @@ class WebsocketListener(IListener):
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             # Create WebSocket server using nursery.start pattern
+            server_info = None
+
             async def websocket_server_task(task_status: TaskStatus[Any]) -> None:
                 """Run the WebSocket server."""
+                nonlocal server_info
                 try:
                     # Use trio_websocket's serve_websocket
                     from trio_websocket import serve_websocket
@@ -173,11 +183,38 @@ class WebsocketListener(IListener):
                     logger.error(f"WebSocket server error: {e}")
                     raise
 
-            # Start the server in the nursery
-            await nursery.start(websocket_server_task)
+            # Start the server in the nursery and capture the server info
+            server_info = await nursery.start(websocket_server_task)
 
-            self._listen_maddr = maddr
-            logger.info(f"WebSocket listener started on {maddr}")
+            # Update the listen address with the actual port if port was 0
+            if port == 0 and hasattr(server_info, "port"):
+                actual_port = server_info.port
+                # Create new multiaddr with actual port
+                if proto_info.is_wss:
+                    protocol_part = "/wss"
+                else:
+                    protocol_part = "/ws"
+
+                if "ip4" in str(proto_info.rest_multiaddr):
+                    self._listen_maddr = Multiaddr(
+                        f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
+                    )
+                elif "ip6" in str(proto_info.rest_multiaddr):
+                    self._listen_maddr = Multiaddr(
+                        f"/ip6/{host}/tcp/{actual_port}{protocol_part}"
+                    )
+                else:
+                    self._listen_maddr = Multiaddr(
+                        f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
+                    )
+
+                logger.info(
+                    f"WebSocket listener updated address to {self._listen_maddr}"
+                )
+            else:
+                self._listen_maddr = maddr
+
+            logger.info(f"WebSocket listener started on {self._listen_maddr}")
             return True
 
         except Exception as e:
