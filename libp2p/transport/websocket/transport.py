@@ -46,8 +46,7 @@ class WebsocketTransport(ITransport):
 
     async def dial(self, maddr: Multiaddr) -> RawConnection:
         """Dial a WebSocket connection to the given multiaddr."""
-    logger.debug("WebsocketTransport.dial called with %s", maddr)
-
+        logger.debug("WebsocketTransport.dial called with %s", maddr)
         # Parse the WebSocket multiaddr to determine if it's secure
         try:
             parsed = parse_websocket_multiaddr(maddr)
@@ -152,7 +151,7 @@ class WebsocketTransport(ITransport):
                 logger.debug("WebsocketTransport.dial created P2PWebSocketConnection")
 
                 self._connection_count += 1
-                    logger.debug("Total connections: %d", self._connection_count)
+                logger.debug("Total connections: %d", self._connection_count)
 
                 return RawConnection(conn, initiator=True)
         except trio.TooSlowError as e:
@@ -162,7 +161,9 @@ class WebsocketTransport(ITransport):
             ) from e
         except Exception as e:
             logger.error("Failed to dial WebSocket %s: %s", maddr, e)
-            raise OpenConnectionError("Failed to dial WebSocket %s: %s" % (maddr, e)) from e
+            msg = "Failed to dial WebSocket %s: %s" % (maddr, e)
+            raise OpenConnectionError(msg) from e
+
 
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
