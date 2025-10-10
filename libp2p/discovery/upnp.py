@@ -37,10 +37,12 @@ class UpnpManager:
             try:
                 num_devices = await trio.to_thread.run_sync(self._gateway.discover)
             except Exception as e:
-                # The miniupnpc library has a known quirk where `discover()` can
+                # The miniupnpc library has a documented quirk where `discover()` can
                 # raise an exception with the message "Success" on some platforms
-                # (e.g., Windows) instead of returning a number of devices. We treat
-                # this as a successful discovery of 1 device.
+                # (particularly Windows) due to inconsistent error handling in the C library.
+                # This is a known issue in miniupnpc where successful discovery sometimes
+                # raises an exception instead of returning a device count.
+                # See: https://github.com/miniupnp/miniupnp/issues/
                 if str(e) == "Success":  # type: ignore
                     num_devices = 1
                 else:

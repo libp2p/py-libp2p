@@ -125,6 +125,10 @@ class BasicHost(IHost):
         )
         self.get_peerstore().set_local_record(envelope)
 
+        # Initialize UPnP manager if enabled
+        # Note: UPnP integration follows the same pattern as mDNS for consistency.
+        # The UpnpManager is a standalone component that can be used independently
+        # or integrated into the host lifecycle for automatic port management.
         self.upnp = None
         if enable_upnp:
             self.upnp = UpnpManager()
