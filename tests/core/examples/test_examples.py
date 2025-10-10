@@ -281,8 +281,11 @@ async def identify_push_demo(host_a, host_b):
     logger.debug("Host A protocols before push: %s", host_a_protocols)
 
     # Push identify information from host_a to host_b
-    success = await push_identify_to_peer(host_a, host_b.get_id())
-    assert success is True
+    try:
+        await push_identify_to_peer(host_a, host_b.get_id())
+        # If we get here, the push was successful
+    except Exception as e:
+        pytest.fail(f"push_identify_to_peer failed: {e}")
 
     # Add a small delay to allow processing
     await trio.sleep(0.1)

@@ -321,23 +321,17 @@ async def run_dialer(
             print("\nPushing identify information to listener...")
 
             try:
-                # Call push_identify_to_peer which returns a boolean
-                success = await push_identify_to_peer(
+                # Call push_identify_to_peer which now returns None and raises
+                # exceptions
+                await push_identify_to_peer(
                     host, peer_info.peer_id, use_varint_format=use_varint_format
                 )
 
-                if success:
-                    logger.info("Identify push completed successfully!")
-                    print("✅ Identify push completed successfully!")
+                logger.info("Identify push completed successfully!")
+                print("✅ Identify push completed successfully!")
 
-                    logger.info("Example completed successfully!")
-                    print("\nExample completed successfully!")
-                else:
-                    logger.warning("Identify push didn't complete successfully.")
-                    print("\nWarning: Identify push didn't complete successfully.")
-
-                    logger.warning("Example completed with warnings.")
-                    print("Example completed with warnings.")
+                logger.info("Example completed successfully!")
+                print("\nExample completed successfully!")
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Error during identify push: {error_msg}")
