@@ -18,3 +18,4 @@ Examples
    examples.rendezvous
    examples.random_walk
    examples.multiple_connections
+   examples.hybrid_discovery
