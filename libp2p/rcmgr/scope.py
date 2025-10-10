@@ -5,6 +5,8 @@ This module implements the hierarchical resource scope system that tracks
 and constrains resource usage across different levels of the libp2p stack.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 import threading
 from typing import Protocol
@@ -75,8 +77,11 @@ class Resources:
         new_memory = self.memory + size
         limit = self.limit.get_memory_limit()
 
-        # Priority-based rejection: fail if available memory is less than (1+prio)/256 of limit
-        threshold = limit - (limit * (1 + priority) // 256)
+        # Priority-based rejection: higher priority allows using more memory
+        # threshold = limit * (128 + priority) / 256
+        # This means priority 255 gets (128+255)/256 = 383/256 = ~150% of limit (high)
+        # priority 1 gets (128+1)/256 = 129/256 = ~50% of limit
+        threshold = limit * (128 + priority) // 256
 
         if new_memory > threshold:
             raise MemoryLimitExceeded(
@@ -102,20 +107,22 @@ class Resources:
         total_limit = self.limit.get_stream_total_limit()
         total_streams = self.streams_inbound + self.streams_outbound
 
-        if current + 1 > limit:
-            raise StreamOrConnLimitExceeded(
-                current=current,
-                attempted=1,
-                limit=limit,
-                resource_type=f"streams_{direction.value}",
-            )
-
+        # Check total limit first (as it's more restrictive)
         if total_streams + 1 > total_limit:
             raise StreamOrConnLimitExceeded(
                 current=total_streams,
                 attempted=1,
                 limit=total_limit,
                 resource_type="streams_total",
+            )
+
+        # Then check direction-specific limit
+        if current + 1 > limit:
+            raise StreamOrConnLimitExceeded(
+                current=current,
+                attempted=1,
+                limit=limit,
+                resource_type=f"streams_{direction.value}",
             )
 
     def add_stream(self, direction: Direction) -> None:
@@ -143,6 +150,15 @@ class Resources:
         total_limit = self.limit.get_conn_total_limit()
         total_conns = self.conns_inbound + self.conns_outbound
 
+        # Check FD limit first if using file descriptor
+        if use_fd:
+            fd_limit = self.limit.get_fd_limit()
+            if self.num_fd + 1 > fd_limit:
+                raise StreamOrConnLimitExceeded(
+                    current=self.num_fd, attempted=1, limit=fd_limit, resource_type="fd"
+                )
+
+        # Check direction-specific limit
         if current + 1 > limit:
             raise StreamOrConnLimitExceeded(
                 current=current,
@@ -151,6 +167,7 @@ class Resources:
                 resource_type=f"conns_{direction.value}",
             )
 
+        # Check total connection limit
         if total_conns + 1 > total_limit:
             raise StreamOrConnLimitExceeded(
                 current=total_conns,
@@ -158,13 +175,6 @@ class Resources:
                 limit=total_limit,
                 resource_type="conns_total",
             )
-
-        if use_fd:
-            fd_limit = self.limit.get_fd_limit()
-            if self.num_fd + 1 > fd_limit:
-                raise StreamOrConnLimitExceeded(
-                    current=self.num_fd, attempted=1, limit=fd_limit, resource_type="fd"
-                )
 
     def add_conn(self, direction: Direction, use_fd: bool = True) -> None:
         """Add a connection."""
@@ -204,7 +214,7 @@ class BaseResourceScope:
     def __init__(
         self,
         limit: BaseLimit,
-        edges: list["BaseResourceScope"] | None = None,
+        edges: list[BaseResourceScope] | None = None,
         name: str = "",
         metrics: Metrics | None = None,
     ):
@@ -263,23 +273,36 @@ class BaseResourceScope:
             raise ResourceScopeClosed()
 
     def reserve_memory(self, size: int, priority: int = 1) -> None:
-        """Reserve memory in this scope and check all parent scopes."""
+        """Reserve memory in this scope and all parent scopes."""
         with self._lock:
             self._check_closed()
 
             # Check this scope first
             self.resources.check_memory(size, priority)
 
-            # Check all parent scopes but don't add to them
+            # Check all parent scopes
             for edge in self.edges:
                 edge._check_memory_limits(size, priority)
 
-            # If all checks pass, add memory to this scope only
+            # If all checks pass, add memory to this scope
             self.resources.add_memory(size)
+
+            # Also add memory to all parent scopes (hierarchical tracking)
+            for edge in self.edges:
+                edge._add_memory_hierarchical(size)
 
             # Record metrics
             if self.metrics:
                 self.metrics.allow_memory(size)
+
+    def _add_memory_hierarchical(self, size: int) -> None:
+        """Add memory to this scope and propagate to parents."""
+        with self._lock:
+            self.resources.add_memory(size)
+
+            # Recursively add to parent scopes
+            for edge in self.edges:
+                edge._add_memory_hierarchical(size)
 
     def _check_memory_limits(self, size: int, priority: int = 1) -> None:
         """Check memory limits without adding the memory."""
@@ -292,14 +315,27 @@ class BaseResourceScope:
                 edge._check_memory_limits(size, priority)
 
     def release_memory(self, size: int) -> None:
-        """Release memory from this scope only."""
+        """Release memory from this scope and all parent scopes."""
         with self._lock:
-            # Release from this scope only
+            # Release from this scope
             self.resources.remove_memory(size)
+
+            # Also release from all parent scopes (hierarchical tracking)
+            for edge in self.edges:
+                edge._remove_memory_hierarchical(size)
 
             # Record metrics
             if self.metrics:
                 self.metrics.release_memory(size)
+
+    def _remove_memory_hierarchical(self, size: int) -> None:
+        """Remove memory from this scope and propagate to parents."""
+        with self._lock:
+            self.resources.remove_memory(size)
+
+            # Recursively remove from parent scopes
+            for edge in self.edges:
+                edge._remove_memory_hierarchical(size)
 
     def add_stream(self, direction: Direction) -> None:
         """Add a stream to this scope and all parent scopes."""
@@ -356,28 +392,6 @@ class BaseResourceScope:
             if not self._done:  # Only add if not already closed
                 self.resources.add_conn(direction, use_fd)
 
-    def remove_stream(self, direction: Direction) -> None:
-        """Remove a stream from this scope."""
-        with self._lock:
-            if not self._done:  # Only remove if not already closed
-                self.resources.remove_stream(direction)
-
-    def remove_conn(self, direction: Direction, use_fd: bool = True) -> None:
-        """Remove a connection from this scope."""
-        with self._lock:
-            if not self._done:  # Only remove if not already closed
-                self.resources.remove_conn(direction, use_fd)
-
-    def remove_stream(self, direction: Direction) -> None:
-        """Remove a stream from this scope only."""
-        with self._lock:
-            # Remove from this scope only
-            self.resources.remove_stream(direction)
-
-            # Record metrics
-            if self.metrics:
-                self.metrics.remove_stream(direction.value)
-
     def add_conn(self, direction: Direction, use_fd: bool = True) -> None:
         """Add a connection to this scope and all parent scopes."""
         with self._lock:
@@ -401,15 +415,15 @@ class BaseResourceScope:
             if self.metrics:
                 self.metrics.allow_conn(direction.value, use_fd)
 
-    def _check_conn_limits(self, direction: Direction, use_fd: bool = True) -> None:
-        """Check connection limits without adding the connection."""
+    def remove_stream(self, direction: Direction) -> None:
+        """Remove a stream from this scope only."""
         with self._lock:
-            self._check_closed()
-            self.resources.check_conns(direction, use_fd)
+            # Remove from this scope only
+            self.resources.remove_stream(direction)
 
-            # Recursively check parent scopes
-            for edge in self.edges:
-                edge._check_conn_limits(direction, use_fd)
+            # Record metrics
+            if self.metrics:
+                self.metrics.remove_stream(direction.value)
 
     def remove_conn(self, direction: Direction, use_fd: bool = True) -> None:
         """Remove a connection from this scope only."""
@@ -453,7 +467,10 @@ class TransientScope(BaseResourceScope):
     """Transient scope for resources not yet fully established."""
 
     def __init__(
-        self, limit: BaseLimit, system: SystemScope, metrics: Metrics | None = None
+        self,
+        limit: BaseLimit,
+        system: SystemScope,
+        metrics: Metrics | None = None,
     ):
         super().__init__(limit, edges=[system], name="transient", metrics=metrics)
 

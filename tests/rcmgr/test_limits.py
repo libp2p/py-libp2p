@@ -2,6 +2,7 @@
 Tests for resource limits and limiters.
 """
 
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.rcmgr.limits import BaseLimit, Direction, FixedLimiter
 
@@ -29,7 +30,7 @@ def test_base_limit_custom_values():
         conns_inbound=30,
         conns_outbound=20,
         fd=64,
-        memory=1024 * 1024  # 1MB
+        memory=1024 * 1024,  # 1MB
     )
 
     assert limit.get_memory_limit() == 1024 * 1024
@@ -63,7 +64,7 @@ def test_fixed_limiter_custom_limits():
     """Test FixedLimiter with custom limits."""
     custom_system = BaseLimit(
         streams=1000,
-        memory=512 << 20  # 512MB
+        memory=512 << 20,  # 512MB
     )
 
     limiter = FixedLimiter(system=custom_system)
@@ -88,7 +89,7 @@ def test_fixed_limiter_peer_limits():
 def test_fixed_limiter_protocol_limits():
     """Test protocol-specific limits."""
     limiter = FixedLimiter()
-    protocol = "/test/1.0.0"
+    protocol = TProtocol("/test/1.0.0")
 
     # Should return default protocol limits
     protocol_limits = limiter.get_protocol_limits(protocol)

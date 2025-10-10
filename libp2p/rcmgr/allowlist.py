@@ -5,6 +5,8 @@ Only the specific peers and multiaddresses in the
 allowlist can bypass the resource limits.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from multiaddr import Multiaddr

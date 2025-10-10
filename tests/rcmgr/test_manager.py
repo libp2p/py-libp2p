@@ -2,9 +2,9 @@
 Tests for the main ResourceManager class.
 """
 
-
 import pytest
 
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.rcmgr.allowlist import AllowlistConfig
 from libp2p.rcmgr.exceptions import ResourceLimitExceeded
@@ -41,9 +41,7 @@ def test_new_resource_manager_with_config():
     allowlist_config = AllowlistConfig()
 
     rm = new_resource_manager(
-        limiter,
-        allowlist_config=allowlist_config,
-        enable_metrics=True
+        limiter, allowlist_config=allowlist_config, enable_metrics=True
     )
 
     assert isinstance(rm, ResourceManager)
@@ -61,7 +59,7 @@ def test_open_connection():
         conns_outbound=1,
         fd=2,  # Total FD limit across all connections
         streams=1000,
-        memory=1024**3
+        memory=1024**3,
     )
 
     rm = ResourceManager(limiter)
@@ -88,11 +86,7 @@ def test_open_stream():
     """Test opening streams."""
     # Create limiter with low stream limits for testing
     limiter = FixedLimiter()
-    limiter.peer_default = BaseLimit(
-        streams=2,
-        streams_inbound=1,
-        streams_outbound=1
-    )
+    limiter.peer_default = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
 
     rm = ResourceManager(limiter)
     peer_id = ID(b"test_peer")
@@ -169,7 +163,7 @@ def test_view_protocol():
     """Test viewing protocol scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
-    protocol = "/test/1.0.0"
+    protocol = TProtocol("/test/1.0.0")
 
     def check_protocol(scope):
         assert scope.protocol == protocol
@@ -205,7 +199,7 @@ def test_sticky_scopes():
     rm = ResourceManager(limiter)
 
     peer_id = ID(b"test_peer")
-    protocol = "/test/1.0.0"
+    protocol = TProtocol("/test/1.0.0")
     service = "test_service"
 
     # Mark scopes as sticky
@@ -228,7 +222,7 @@ def test_list_methods():
 
     peer_id1 = ID(b"peer1")
     peer_id2 = ID(b"peer2")
-    protocol = "/test/1.0.0"
+    protocol = TProtocol("/test/1.0.0")
     service = "test_service"
 
     # Create some scopes
@@ -291,8 +285,8 @@ def test_resource_manager_closure():
 
     # Create some scopes
     peer_id = ID(b"test_peer")
-    stream = rm.open_stream(peer_id, Direction.INBOUND)
-    conn = rm.open_connection(Direction.OUTBOUND)
+    _stream = rm.open_stream(peer_id, Direction.INBOUND)
+    _conn = rm.open_connection(Direction.OUTBOUND)
 
     # Close the manager
     rm.close()
@@ -311,7 +305,7 @@ def test_garbage_collection():
     rm = ResourceManager(limiter)
 
     peer_id = ID(b"test_peer")
-    protocol = "/test/1.0.0"
+    protocol = TProtocol("/test/1.0.0")
 
     # Create and release scopes
     def use_peer(scope):

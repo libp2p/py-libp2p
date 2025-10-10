@@ -6,6 +6,7 @@ import threading
 
 import pytest
 
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.rcmgr.allowlist import AllowlistConfig
 from libp2p.rcmgr.exceptions import ResourceLimitExceeded
@@ -25,7 +26,7 @@ def test_full_resource_manager_workflow():
         conns=20,
         conns_inbound=10,
         conns_outbound=10,
-        fd=20
+        fd=20,
     )
 
     # Create resource manager
@@ -36,8 +37,7 @@ def test_full_resource_manager_workflow():
         connections = []
         for i in range(5):
             conn = rm.open_connection(
-                Direction.INBOUND if i % 2 == 0 else Direction.OUTBOUND,
-                use_fd=True
+                Direction.INBOUND if i % 2 == 0 else Direction.OUTBOUND, use_fd=True
             )
             connections.append(conn)
 
@@ -46,8 +46,7 @@ def test_full_resource_manager_workflow():
         for i in range(10):
             peer_id = ID(f"peer_{i}".encode())
             stream = rm.open_stream(
-                peer_id,
-                Direction.INBOUND if i % 2 == 0 else Direction.OUTBOUND
+                peer_id, Direction.INBOUND if i % 2 == 0 else Direction.OUTBOUND
             )
             streams.append(stream)
 
@@ -56,16 +55,25 @@ def test_full_resource_manager_workflow():
         assert len(streams) == 10
 
         # Check individual connection scopes have the right stats
-        inbound_conns = sum(1 for conn in connections if conn.stat().num_conns_inbound > 0)
-        outbound_conns = sum(1 for conn in connections if conn.stat().num_conns_outbound > 0)
+        inbound_conns = sum(
+            1 for conn in connections if conn.stat().num_conns_inbound > 0
+        )
+        outbound_conns = sum(
+            1 for conn in connections if conn.stat().num_conns_outbound > 0
+        )
         assert inbound_conns + outbound_conns == 5
 
         # Check individual stream scopes have the right stats
-        inbound_streams = sum(1 for stream in streams if stream.stat().num_streams_inbound > 0)
-        outbound_streams = sum(1 for stream in streams if stream.stat().num_streams_outbound > 0)
+        inbound_streams = sum(
+            1 for stream in streams if stream.stat().num_streams_inbound > 0
+        )
+        outbound_streams = sum(
+            1 for stream in streams if stream.stat().num_streams_outbound > 0
+        )
         assert inbound_streams + outbound_streams == 10
 
-        # Check system metrics (system scope tracks limits, not usage in our current model)
+        # Check system metrics (system scope tracks limits, not usage in our
+        # current model)
         def check_system(scope):
             stats = scope.stat()
             # System scope in our model doesn't aggregate child usage
@@ -288,7 +296,7 @@ def test_scope_lifecycle():
 
     try:
         peer_id = ID(b"lifecycle_peer")
-        protocol = "/test/1.0.0"
+        protocol = TProtocol("/test/1.0.0")
         service = "test_service"
 
         # Create and use various scopes
@@ -366,7 +374,7 @@ def test_metrics_integration():
         metrics = rm.get_metrics()
 
         # Initial metrics should be empty
-        summary = metrics.get_summary()
+        metrics.get_summary()  # Just call to verify it works
 
         # Create some resources
         peer_id = ID(b"metrics_peer")
@@ -391,13 +399,14 @@ def test_resource_manager_stress():
     limiter.system = BaseLimit(
         streams=1000,
         conns=100,
-        memory=10 * 1024 * 1024  # 10MB
+        memory=10 * 1024 * 1024,  # 10MB
     )
 
     rm = ResourceManager(limiter)
 
     try:
-        resources = []
+        stream_resources = []
+        conn_resources = []
 
         # Create many resources quickly
         for i in range(100):
@@ -406,7 +415,7 @@ def test_resource_manager_stress():
             # Create stream
             try:
                 stream = rm.open_stream(peer_id, Direction.INBOUND)
-                resources.append(stream)
+                stream_resources.append(stream)
             except ResourceLimitExceeded:
                 break
 
@@ -414,15 +423,15 @@ def test_resource_manager_stress():
             if i % 10 == 0:
                 try:
                     conn = rm.open_connection(Direction.OUTBOUND)
-                    resources.append(conn)
+                    conn_resources.append(conn)
                 except ResourceLimitExceeded:
                     pass
 
         # Should have created many resources
-        assert len(resources) > 50
+        assert len(stream_resources) + len(conn_resources) > 50
 
         # Clean up all at once
-        for resource in resources:
+        for resource in stream_resources + conn_resources:
             resource.done()
 
     finally:

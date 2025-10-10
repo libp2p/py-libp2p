@@ -5,6 +5,8 @@ This module provides the core ResourceManager class that coordinates
 resource usage across all scopes and integrates with the libp2p stack.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 import threading
 import time
@@ -20,6 +22,7 @@ from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
 from .limits import Direction, FixedLimiter
 from .metrics import Metrics
 from .scope import (
+    BaseResourceScope,
     ConnectionScope,
     PeerScope,
     ProtocolScope,
@@ -345,35 +348,41 @@ class ResourceManager:
 
             # GC peer scopes
             to_remove = []
-            for peer_id, scope in self._peer_scopes.items():
-                if peer_id not in self._sticky_peers and scope._ref_count <= 0:
+            for peer_id, peer_scope in self._peer_scopes.items():
+                if peer_id not in self._sticky_peers and peer_scope._ref_count <= 0:
                     to_remove.append(peer_id)
 
             for peer_id in to_remove:
                 del self._peer_scopes[peer_id]
 
             # GC protocol scopes
-            to_remove = []
-            for protocol, scope in self._protocol_scopes.items():
-                if protocol not in self._sticky_protocols and scope._ref_count <= 0:
-                    to_remove.append(protocol)
+            protocols_to_remove = []
+            for protocol, protocol_scope in self._protocol_scopes.items():
+                if (
+                    protocol not in self._sticky_protocols
+                    and protocol_scope._ref_count <= 0
+                ):
+                    protocols_to_remove.append(protocol)
 
-            for protocol in to_remove:
+            for protocol in protocols_to_remove:
                 del self._protocol_scopes[protocol]
 
             # GC service scopes
-            to_remove = []
-            for service, scope in self._service_scopes.items():
-                if service not in self._sticky_services and scope._ref_count <= 0:
-                    to_remove.append(service)
+            services_to_remove = []
+            for service, service_scope in self._service_scopes.items():
+                if (
+                    service not in self._sticky_services
+                    and service_scope._ref_count <= 0
+                ):
+                    services_to_remove.append(service)
 
-            for service in to_remove:
+            for service in services_to_remove:
                 del self._service_scopes[service]
 
     def close(self) -> None:
         """Close the resource manager and clean up all resources."""
         # Collect all scopes to close before acquiring the main lock
-        scopes_to_close = []
+        scopes_to_close: list[BaseResourceScope] = []
 
         with self._lock:
             if self._closed:

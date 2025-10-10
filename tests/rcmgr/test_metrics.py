@@ -247,7 +247,9 @@ def test_underflow_protection():
 
     # Try to decrement below zero
     metrics.increment_memory(scope_name, -100)
-    assert metrics.get_memory(scope_name) >= 0  # Should not go negative
+    memory_value = metrics.get_memory(scope_name)
+    # Should not go negative
+    assert isinstance(memory_value, (int, float)) and memory_value >= 0
 
     # Try to remove more streams than exist
     metrics.remove_stream(scope_name, Direction.INBOUND)

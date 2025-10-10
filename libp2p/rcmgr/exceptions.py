@@ -2,6 +2,8 @@
 Resource manager exception classes.
 """
 
+from __future__ import annotations
+
 
 class ResourceManagerException(Exception):
     """Base exception for all resource manager errors."""
@@ -30,12 +32,15 @@ class ResourceLimitExceeded(ResourceManagerException):
         if message:
             super().__init__(message)
         elif (
-            scope_name
-            and resource_type
+            scope_name is not None
             and requested is not None
+            and resource_type is not None
             and available is not None
         ):
-            msg = f"Resource limit exceeded in scope '{scope_name}': requested {requested} {resource_type}, available {available}"
+            msg = (
+                f"Resource limit exceeded in scope '{scope_name}': "
+                f"requested {requested} {resource_type}, available {available}"
+            )
             super().__init__(msg)
         else:
             super().__init__("Resource limit exceeded")
@@ -44,7 +49,11 @@ class ResourceLimitExceeded(ResourceManagerException):
 class ScopeClosedException(ResourceManagerException):
     """Exception raised when trying to use a closed resource scope."""
 
-    def __init__(self, scope_name: str | None = None, message: str | None = None):
+    def __init__(
+        self,
+        scope_name: str | None = None,
+        message: str | None = None,
+    ):
         self.scope_name = scope_name
 
         if message:
@@ -78,16 +87,21 @@ class MemoryLimitExceeded(ResourceLimitExceeded):
 
 
 class StreamOrConnLimitExceeded(ResourceLimitExceeded):
-    """Exception raised when stream or connection limit is exceeded."""
+    """Exception for stream or connection limit exceeded errors."""
 
     def __init__(self, current: int, attempted: int, limit: int, resource_type: str):
         self.current = current
         self.attempted = attempted
         self.limit = limit
-        self.resource_type = resource_type
+
+        # Call parent with consistent resource_type
         super().__init__(
+            scope_name="stream/conn",
+            resource_type=resource_type,
+            requested=attempted,
+            available=limit - current,
             message=f"{resource_type} limit exceeded: current={current}, "
-            f"attempted={attempted}, limit={limit}"
+            f"attempted={attempted}, limit={limit}",
         )
 
 

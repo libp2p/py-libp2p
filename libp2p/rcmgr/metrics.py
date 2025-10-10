@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 import time
@@ -22,6 +24,7 @@ class Metrics:
     ## time may not be necessary, but maybe useful for some metrics
     ## some implementation for remaining blocked services might be left
     def __init__(self) -> None:
+        """Initialize the BasicMetrics collector."""
         self.data: dict[str, float | str] = {}
         self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
         self._start_time = time.time()
@@ -73,7 +76,7 @@ class Metrics:
         self.record(f"memory_{scope_name}", size)
         self.record(f"memory_{scope_name}_time", time.time())
 
-    def get_memory(self, scope_name: str) -> int | str:
+    def get_memory(self, scope_name: str) -> float | str:
         """Get memory usage for a specific scope."""
         value = self.data.get(f"memory_{scope_name}", 0)
         return value
@@ -82,7 +85,7 @@ class Metrics:
         """Increment memory usage for a specific scope by delta amount."""
         current_key = f"memory_{scope_name}"
         current = self.get(current_key, 0)
-        new_value = max(0, current + delta)  # Don't allow negative memory
+        new_value = max(0.0, current + delta)  # Don't allow negative memory
         self.record(current_key, new_value)
         self.record(f"memory_{scope_name}_time", time.time())
 
@@ -135,7 +138,7 @@ class Metrics:
         total = int(self.get(f"streams_{scope_name}_total"))
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
-    def add_stream(self, scope_name: str, direction: "Direction") -> None:
+    def add_stream(self, scope_name: str, direction: Direction) -> None:
         """Add a stream to the specified scope."""
         direction_str = direction.value.lower()
         # Increment the count for this scope and direction
@@ -149,7 +152,7 @@ class Metrics:
         # Update timestamp
         self.record(f"streams_{scope_name}_time", time.time())
 
-    def remove_stream(self, *args) -> None:
+    def remove_stream(self, *args: str | Direction) -> None:
         """Remove a stream - supports both global and scope-specific removal."""
         if len(args) == 1:
             # Global removal: remove_stream(direction_str)
@@ -162,29 +165,36 @@ class Metrics:
         elif len(args) == 2:
             # Scope-specific removal: remove_stream(scope_name, direction)
             scope_name, direction = args
-            if hasattr(direction, "value"):
-                direction_str = direction.value.lower()
-            else:
+            # Handle Direction enum or string safely
+            try:
+                # Try to access .value attribute (Direction enum)
+                if hasattr(direction, "value"):
+                    direction_value = getattr(direction, "value")
+                    if hasattr(direction_value, "lower"):
+                        direction_str = direction_value.lower()
+                    else:
+                        direction_str = str(direction_value).lower()
+                else:
+                    direction_str = str(direction).lower()
+            except (AttributeError, TypeError):
+                # Fallback to string conversion
                 direction_str = str(direction).lower()
 
             # Decrement the count for this scope and direction
             key = f"streams_{scope_name}_{direction_str}"
             current = self.get(key, 0)
-            self.record(key, max(0, current - 1))
+            self.record(key, max(0.0, current - 1))
 
             # Update total count
             total_key = f"streams_{scope_name}_total"
             current_total = self.get(total_key, 0)
-            self.record(total_key, max(0, current_total - 1))
-
+            self.record(total_key, max(0.0, current_total - 1))
             # Update timestamp
             self.record(f"streams_{scope_name}_time", time.time())
         else:
             raise TypeError(
                 f"remove_stream() takes 1 or 2 arguments but {len(args)} were given"
-            )
-
-    ## Connection Metrics
+            )  ## Connection Metrics
 
     def block_conn(self, direction: str, use_fd: bool) -> None:
         """Record a blocked connection."""
@@ -243,7 +253,7 @@ class Metrics:
         self.record(f"connections_{scope_name}_total", total)
         self.record(f"connections_{scope_name}_time", time.time())
 
-    def add_connection(self, scope_name: str, direction: "Direction") -> None:
+    def add_connection(self, scope_name: str, direction: Direction) -> None:
         """Add a connection to the specified scope."""
         direction_str = direction.value.lower()
         # Increment the count for this scope and direction
@@ -264,19 +274,18 @@ class Metrics:
         total = int(self.get(f"connections_{scope_name}_total"))
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
-    def remove_connection(self, scope_name: str, direction: "Direction") -> None:
+    def remove_connection(self, scope_name: str, direction: Direction) -> None:
         """Remove a connection from the specified scope."""
         direction_str = direction.value.lower()
         # Decrement the count for this scope and direction
         key = f"connections_{scope_name}_{direction_str}"
         current = self.get(key, 0)
-        self.record(key, max(0, current - 1))
+        self.record(key, max(0.0, current - 1))
 
         # Update total count
         total_key = f"connections_{scope_name}_total"
         current_total = self.get(total_key, 0)
-        self.record(total_key, max(0, current_total - 1))
-
+        self.record(total_key, max(0.0, current_total - 1))
         # Update timestamp
         self.record(f"connections_{scope_name}_time", time.time())
 
@@ -330,7 +339,8 @@ class Metrics:
                     if scope_info.endswith("_time"):
                         continue
 
-                    # Extract scope name (everything before the last _direction or _property)
+                    # Extract scope name (everything before the last _direction or
+                    # _property)
                     if scope_info.endswith(("_inbound", "_outbound", "_total")):
                         scope_parts = scope_info.rsplit("_", 1)
                         scope_name = scope_parts[0]
@@ -355,7 +365,9 @@ class Metrics:
 
         # Original resource metrics (for backward compatibility)
         for resource_type, metrics in self.resource_metrics.items():
-            summary["resource_metrics"][f"global_{resource_type}"] = {
+            # Store both with and without "global_" prefix for compatibility
+            global_key = f"global_{resource_type}"
+            resource_data = {
                 "allowed": metrics.allowed,
                 "blocked": metrics.blocked,
                 "current_usage": metrics.current_usage,
@@ -366,6 +378,8 @@ class Metrics:
                     else 1.0
                 ),
             }
+            summary["resource_metrics"][global_key] = resource_data
+            summary["resource_metrics"][resource_type] = resource_data
 
         # Total counters
         for key, value in self.data.items():

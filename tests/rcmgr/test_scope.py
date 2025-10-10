@@ -67,11 +67,7 @@ def test_resources_memory_priority():
 
 def test_resources_stream_management():
     """Test stream addition and removal."""
-    limit = BaseLimit(
-        streams=10,
-        streams_inbound=6,
-        streams_outbound=4
-    )
+    limit = BaseLimit(streams=10, streams_inbound=6, streams_outbound=4)
     resources = Resources(limit)
 
     # Add inbound streams
@@ -92,11 +88,7 @@ def test_resources_stream_management():
 
 def test_resources_stream_limits():
     """Test stream limit checking."""
-    limit = BaseLimit(
-        streams=2,
-        streams_inbound=1,
-        streams_outbound=1
-    )
+    limit = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
     resources = Resources(limit)
 
     # First inbound stream should succeed
@@ -120,12 +112,7 @@ def test_resources_stream_limits():
 
 def test_resources_connection_management():
     """Test connection addition and removal."""
-    limit = BaseLimit(
-        conns=10,
-        conns_inbound=6,
-        conns_outbound=4,
-        fd=5
-    )
+    limit = BaseLimit(conns=10, conns_inbound=6, conns_outbound=4, fd=5)
     resources = Resources(limit)
 
     # Add connections with FD
@@ -146,12 +133,7 @@ def test_resources_connection_management():
 
 def test_resources_connection_limits():
     """Test connection limit checking."""
-    limit = BaseLimit(
-        conns=1,
-        conns_inbound=1,
-        conns_outbound=1,
-        fd=1
-    )
+    limit = BaseLimit(conns=1, conns_inbound=1, conns_outbound=1, fd=1)
     resources = Resources(limit)
 
     # First connection should succeed
@@ -195,11 +177,7 @@ def test_base_resource_scope_memory_limit():
 
 def test_base_resource_scope_streams():
     """Test stream management in BaseResourceScope."""
-    limit = BaseLimit(
-        streams=2,
-        streams_inbound=1,
-        streams_outbound=1
-    )
+    limit = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
     scope = BaseResourceScope(limit, name="test")
 
     # Add streams

@@ -37,7 +37,10 @@ def test_resource_limit_exceeded():
     assert exc.available == available
 
     # Check message format
-    expected_msg = f"Resource limit exceeded in scope '{scope_name}': requested {requested} {resource_type}, available {available}"
+    expected_msg = (
+        f"Resource limit exceeded in scope '{scope_name}': "
+        f"requested {requested} {resource_type}, available {available}"
+    )
     assert str(exc) == expected_msg
 
     # Test inheritance
@@ -107,13 +110,14 @@ def test_exception_chaining():
 
 def test_resource_limit_exceeded_usage_pattern():
     """Test typical usage pattern for ResourceLimitExceeded."""
+
     def check_memory_limit(scope_name: str, requested: int, available: int):
         if requested > available:
             raise ResourceLimitExceeded(
                 scope_name=scope_name,
                 resource_type="memory",
                 requested=requested,
-                available=available
+                available=available,
             )
 
     # Should not raise
@@ -132,6 +136,7 @@ def test_resource_limit_exceeded_usage_pattern():
 
 def test_scope_closed_usage_pattern():
     """Test typical usage pattern for ScopeClosedException."""
+
     class MockScope:
         def __init__(self, name):
             self.name = name
@@ -164,14 +169,14 @@ def test_exception_attributes():
     """Test exception attribute access."""
     # ResourceLimitExceeded with all attributes
     exc1 = ResourceLimitExceeded("scope1", "streams", 10, 5)
-    assert hasattr(exc1, 'scope_name')
-    assert hasattr(exc1, 'resource_type')
-    assert hasattr(exc1, 'requested')
-    assert hasattr(exc1, 'available')
+    assert hasattr(exc1, "scope_name")
+    assert hasattr(exc1, "resource_type")
+    assert hasattr(exc1, "requested")
+    assert hasattr(exc1, "available")
 
     # ScopeClosedException with scope name
     exc2 = ScopeClosedException("scope2")
-    assert hasattr(exc2, 'scope_name')
+    assert hasattr(exc2, "scope_name")
 
     # Base exception
     exc3 = ResourceManagerException("test")
@@ -209,6 +214,7 @@ def test_exception_equality():
 
 def test_multiple_exception_types():
     """Test catching different exception types."""
+
     def problematic_function(error_type):
         if error_type == "limit":
             raise ResourceLimitExceeded("scope", "streams", 10, 5)
@@ -241,6 +247,7 @@ def test_multiple_exception_types():
 
 def test_exception_context_manager():
     """Test exceptions in context managers."""
+
     class ResourceScope:
         def __init__(self, name):
             self.name = name

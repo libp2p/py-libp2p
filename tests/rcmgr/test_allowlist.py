@@ -276,10 +276,15 @@ def test_edge_cases():
     """Test edge cases and error conditions."""
     allowlist = Allowlist()
 
-    # None values should be handled gracefully
-    assert not allowlist.allowed_peer(None)
-    assert not allowlist.allowed_multiaddr(None)
-    assert not allowlist.allowed_peer_and_multiaddr(None, None)
+    # Invalid peer ID should be handled gracefully
+    invalid_peer = ID(b"")  # Empty bytes for invalid peer
+    assert not allowlist.allowed_peer(invalid_peer)
+
+    # Empty string multiaddr should be handled gracefully
+    assert not allowlist.allowed_multiaddr("")
+
+    # Invalid combinations should be handled gracefully
+    assert not allowlist.allowed_peer_and_multiaddr(invalid_peer, "")
 
     # Removing non-existent items should not error
     peer_id = ID(b"nonexistent")
