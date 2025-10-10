@@ -725,7 +725,8 @@ class TestProviderStore:
 
         for i, key in enumerate(unicode_keys):
             # Generate valid Base58 peer IDs
-            peer_id = ID.from_base58(f"QmPeer{i + 1}" + "1" * 42)  # Valid base58
+            peer_id_str = f"QmPeer{i + 1}{'1' * 42}"  # Valid base58
+            peer_id = ID.from_base58(peer_id_str)
             provider = PeerInfo(peer_id, [])
             store.add_provider(key, provider)
 
