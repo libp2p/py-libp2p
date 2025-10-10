@@ -139,7 +139,14 @@ class Metrics:
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
     def add_stream(self, scope_name: str, direction: Direction) -> None:
-        """Add a stream to the specified scope."""
+        """
+        Add a stream to the specified scope.
+
+        Args:
+            scope_name: The name of the scope to track the stream under
+            direction: The stream direction (inbound/outbound)
+
+        """
         direction_str = direction.value.lower()
         # Increment the count for this scope and direction
         key = f"streams_{scope_name}_{direction_str}"
@@ -153,7 +160,12 @@ class Metrics:
         self.record(f"streams_{scope_name}_time", time.time())
 
     def remove_stream(self, *args: str | Direction) -> None:
-        """Remove a stream - supports both global and scope-specific removal."""
+        """Remove a stream - supports both global and scope-specific removal.
+        
+        Args:
+            args: Either (direction_str,) for global removal or 
+                 (scope_name, direction) for scope-specific removal
+        """
         if len(args) == 1:
             # Global removal: remove_stream(direction_str)
             direction = args[0]
@@ -254,7 +266,14 @@ class Metrics:
         self.record(f"connections_{scope_name}_time", time.time())
 
     def add_connection(self, scope_name: str, direction: Direction) -> None:
-        """Add a connection to the specified scope."""
+        """
+        Add a connection to the specified scope.
+
+        Args:
+            scope_name: The name of the scope to track the connection under
+            direction: The connection direction (inbound/outbound)
+
+        """
         direction_str = direction.value.lower()
         # Increment the count for this scope and direction
         key = f"connections_{scope_name}_{direction_str}"
@@ -275,7 +294,14 @@ class Metrics:
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
     def remove_connection(self, scope_name: str, direction: Direction) -> None:
-        """Remove a connection from the specified scope."""
+        """
+        Remove a connection from the specified scope.
+
+        Args:
+            scope_name: The name of the scope to remove the connection from
+            direction: The connection direction (inbound/outbound)
+
+        """
         direction_str = direction.value.lower()
         # Decrement the count for this scope and direction
         key = f"connections_{scope_name}_{direction_str}"
