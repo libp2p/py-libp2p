@@ -13,6 +13,7 @@ from libp2p.abc import (
 )
 from libp2p.network.stream.net_stream import (
     NetStream,
+    StreamState,
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
@@ -142,11 +143,18 @@ class SwarmConn(INetConn):
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
-            # As long as `common_stream_handler`, remove the stream.
+            # Always remove the stream when the handler finishes
+            # Use simple remove_stream since stream handles notifications itself
             self.remove_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        net_stream = NetStream(muxed_stream)
+        #
+        net_stream = NetStream(muxed_stream, self)
+        # Set Stream state to OPEN if the event has already started.
+        # This is to ensure that the new streams created after connection has started
+        # are immediately set to OPEN state.
+        if self.event_started.is_set():
+            await net_stream.set_state(StreamState.OPEN)
         self.streams.add(net_stream)
         await self.swarm.notify_opened_stream(net_stream)
         return net_stream
@@ -155,6 +163,10 @@ class SwarmConn(INetConn):
         await self.swarm.notify_disconnected(self)
 
     async def start(self) -> None:
+        streams_open = self.get_streams()
+        for stream in streams_open:
+            """Set the state of the stream to OPEN."""
+            await stream.set_state(StreamState.OPEN)
         await self._handle_new_streams()
 
     async def new_stream(self) -> NetStream:
@@ -186,3 +198,10 @@ class SwarmConn(INetConn):
         if stream not in self.streams:
             return
         self.streams.remove(stream)
+
+    async def _remove_stream(self, stream: NetStream) -> None:
+        """Remove stream and notify about closure."""
+        if stream not in self.streams:
+            return
+        self.streams.remove(stream)
+        await self.swarm.notify_closed_stream(stream)

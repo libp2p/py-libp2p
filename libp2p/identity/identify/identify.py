@@ -97,9 +97,6 @@ def parse_identify_response(response: bytes) -> Identify:
                 identify_response.ParseFromString(protobuf_data)
                 # Sanity check: must have agent_version (protocol_version is optional)
                 if identify_response.agent_version:
-                    logger.debug(
-                        "Parsed length-prefixed identify response (new format)"
-                    )
                     return identify_response
             except Exception:
                 pass  # Fall through to old format
@@ -108,7 +105,6 @@ def parse_identify_response(response: bytes) -> Identify:
     try:
         identify_response = Identify()
         identify_response.ParseFromString(response)
-        logger.debug("Parsed raw protobuf identify response (old format)")
         return identify_response
     except Exception as e:
         logger.error(f"Failed to parse identify response: {e}")
@@ -125,6 +121,7 @@ def identify_handler_for(
         peer_id = (
             stream.muxed_conn.peer_id
         )  # remote peer_id is in class Mplex (mplex.py )
+
         observed_multiaddr: Multiaddr | None = None
         # Get the remote address
         try:
@@ -133,12 +130,6 @@ def identify_handler_for(
             if remote_address:
                 observed_multiaddr = _remote_address_to_multiaddr(remote_address)
 
-            logger.debug(
-                "Connection from remote peer %s, address: %s, multiaddr: %s",
-                peer_id,
-                remote_address,
-                observed_multiaddr,
-            )
         except Exception as e:
             logger.error("Error getting remote address: %s", e)
             remote_address = None
@@ -149,23 +140,25 @@ def identify_handler_for(
         try:
             if use_varint_format:
                 # Send length-prefixed protobuf message (new format)
-                await stream.write(varint.encode_uvarint(len(response)))
-                await stream.write(response)
-                logger.debug(
-                    "Sent new format (length-prefixed) identify response to %s",
-                    peer_id,
-                )
+                # Combine length prefix and response into a single write to avoid races
+                length_prefix = varint.encode_uvarint(len(response))
+                full_response = length_prefix + response
+                await stream.write(full_response)
             else:
                 # Send raw protobuf message (old format for backward compatibility)
                 await stream.write(response)
-                logger.debug(
-                    "Sent old format (raw protobuf) identify response to %s",
-                    peer_id,
-                )
         except StreamClosed:
             logger.debug("Fail to respond to %s request: stream closed", ID)
+            return  # Exit early if stream is closed
+        except Exception as e:
+            logger.error("Error sending identify response to %s: %s", peer_id, e)
+            return  # Exit early on any error
         else:
-            await stream.close()
-            logger.debug("successfully handled request for %s from %s", ID, peer_id)
+            # Only close the stream after all writes are successful
+            try:
+                await stream.close()
+                logger.debug("successfully handled request for %s from %s", ID, peer_id)
+            except Exception as e:
+                logger.debug("Error closing stream: %s", e)
 
     return handle_identify
