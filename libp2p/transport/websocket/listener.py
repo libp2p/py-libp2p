@@ -41,8 +41,7 @@ class WebsocketListener(IListener):
         self._is_wss = False  # Track whether this is a WSS listener
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
-        logger.debug(f"WebsocketListener.listen called with {maddr}")
-
+        logger.debug("WebsocketListener.listen called with %s", maddr)
         # Parse the WebSocket multiaddr to determine if it's secure
         try:
             parsed = parse_websocket_multiaddr(maddr)
@@ -73,7 +72,10 @@ class WebsocketListener(IListener):
         port = int(port_str)
 
         logger.debug(
-            f"WebsocketListener: host={host}, port={port}, secure={parsed.is_wss}"
+            "WebsocketListener: host=%s, port=%s, secure=%s",
+            host,
+            port,
+            parsed.is_wss,
         )
 
         async def serve_websocket_tcp(
@@ -115,18 +117,19 @@ class WebsocketListener(IListener):
 
                 except trio.TooSlowError:
                     logger.debug(
-                        f"WebSocket handshake timeout after {self._handshake_timeout}s"
+                        "WebSocket handshake timeout after %s s",
+                        self._handshake_timeout,
                     )
                     try:
                         await request.reject(408)  # Request Timeout
                     except Exception:
                         pass
                 except Exception as e:
-                    logger.debug(f"WebSocket connection error: {e}")
-                    logger.debug(f"Error type: {type(e)}")
+                    logger.debug("WebSocket connection error: %s", str(e))
+                    logger.debug("Error type: %s", type(e))
                     import traceback
 
-                    logger.debug(f"Traceback: {traceback.format_exc()}")
+                    logger.debug("Traceback: %s", traceback.format_exc())
                     # Reject the connection
                     try:
                         await request.reject(400)
@@ -150,10 +153,10 @@ class WebsocketListener(IListener):
             port,
             host,
         )
-        logger.debug(f"nursery.start() returned: {started_listeners}")
+        logger.debug("nursery.start() returned: %s", started_listeners)
 
         if started_listeners is None:
-            logger.error(f"Failed to start WebSocket listener for {maddr}")
+            logger.error("Failed to start WebSocket listener for %s", maddr)
             return False
 
         # Store the listeners for get_addrs() and close() - these are real
@@ -181,7 +184,7 @@ class WebsocketListener(IListener):
             listeners = self._listeners
             # Get addresses from listeners like TCP does
             return tuple(
-                _multiaddr_from_socket(listener.socket, self._is_wss)
+                self._multiaddr_from_socket(listener.socket, self._is_wss)
                 for listener in listeners
             )
 
@@ -215,11 +218,11 @@ class WebsocketListener(IListener):
             self._listeners = None
             logger.debug("WebsocketListener.close completed")
 
-
-def _multiaddr_from_socket(
-    socket: trio.socket.SocketType, is_wss: bool = False
-) -> Multiaddr:
-    """Convert socket to multiaddr"""
-    ip, port = socket.getsockname()
-    protocol = "wss" if is_wss else "ws"
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")
+    @staticmethod
+    def _multiaddr_from_socket(
+        socket: trio.socket.SocketType, is_wss: bool = False
+    ) -> Multiaddr:
+        """Convert socket to multiaddr"""
+        ip, port = socket.getsockname()
+        protocol = "wss" if is_wss else "ws"
+        return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")

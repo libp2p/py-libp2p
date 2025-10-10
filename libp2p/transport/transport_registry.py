@@ -115,7 +115,9 @@ class TransportRegistry:
         """
         self._transports[protocol] = transport_class
         logger.debug(
-            f"Registered transport {transport_class.__name__} for protocol {protocol}"
+            "Registered transport %s for protocol %s",
+            transport_class.__name__,
+            protocol,
         )
 
     def get_transport(self, protocol: str) -> type[ITransport] | None:
@@ -151,7 +153,8 @@ class TransportRegistry:
                 # WebSocket transport requires upgrader
                 if upgrader is None:
                     logger.warning(
-                        f"WebSocket transport '{protocol}' requires upgrader"
+                        "WebSocket transport '%s' requires upgrader",
+                        protocol,
                     )
                     return None
                 # Use explicit WebsocketTransport to avoid type issues
@@ -166,7 +169,10 @@ class TransportRegistry:
                 # QUIC transport requires private_key
                 private_key = kwargs.get("private_key")
                 if private_key is None:
-                    logger.warning(f"QUIC transport '{protocol}' requires private_key")
+                    logger.warning(
+                        "QUIC transport '%s' requires private_key",
+                        protocol,
+                    )
                     return None
                 # Use explicit QUICTransport to avoid type issues
                 QUICTransport = _get_quic_transport()
@@ -176,7 +182,7 @@ class TransportRegistry:
                 # TCP transport doesn't require upgrader
                 return transport_class()
         except Exception as e:
-            logger.error(f"Failed to create transport for protocol {protocol}: {e}")
+            logger.error("Failed to create transport for protocol %s: %s", protocol, e)
             return None
 
 

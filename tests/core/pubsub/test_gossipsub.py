@@ -537,8 +537,8 @@ async def test_dense_connect_fallback():
             connected_peers = len(pubsub.peers)
             expected_connections = len(hosts) - 1
             assert connected_peers == expected_connections, (
-                f"Host {i} has {connected_peers} connections, "
-                f"expected {expected_connections} in dense mode"
+                "Host %d has %d connections, expected %d in dense mode"
+                % (i, connected_peers, expected_connections)
             )
 
 
@@ -560,8 +560,8 @@ async def test_sparse_connect():
         for i, pubsub in enumerate(pubsubs_gsub):
             connected_peers = len(pubsub.peers)
             assert degree <= connected_peers < len(hosts) - 1, (
-                f"Host {i} has {connected_peers} connections, "
-                f"expected between {degree} and {len(hosts) - 1} in sparse mode"
+                "Host %d has %d connections, expected between %d and %d in sparse mode"
+                % (i, connected_peers, degree, len(hosts) - 1)
             )
 
         # Test message propagation
@@ -593,11 +593,124 @@ async def test_sparse_connect():
             # require more than half for acceptable scalability
             min_required = (total_nodes + 1) // 2
             assert received_count >= min_required, (
-                f"Message propagation insufficient: "
-                f"{received_count}/{total_nodes} nodes "
-                f"received the message. Ideally all nodes should receive it, but at "
-                f"minimum {min_required} required for sparse network scalability."
+                "Message propagation insufficient: %d/%d nodes received the message. "
+                "Ideally all nodes should receive it, but at minimum %d required "
+                "for sparse network scalability."
+                % (received_count, total_nodes, min_required)
             )
+
+
+@pytest.mark.trio
+async def test_flood_publish():
+    """
+    Test that with flood_publish disabled, message propagation still works
+    in a fully connected network topology.
+    """
+    async with PubsubFactory.create_batch_with_gossipsub(
+        6,
+        degree=2,
+        degree_low=1,
+        degree_high=3,
+        flood_publish=False,
+    ) as pubsubs_gsub:
+        routers: list[GossipSub] = []
+        for pubsub in pubsubs_gsub:
+            assert isinstance(pubsub.router, GossipSub)
+            routers.append(pubsub.router)
+        hosts = [ps.host for ps in pubsubs_gsub]
+
+        topic = "flood_test_topic"
+        queues = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub]
+
+        # connect host 0 to all other hosts
+        await one_to_all_connect(hosts, 0)
+
+        # wait for connections to be established
+        await trio.sleep(1)
+
+        # publish a message from the first host
+        msg_content = b"flood_msg"
+        await pubsubs_gsub[0].publish(topic, msg_content)
+
+        # wait for messages to propagate
+        await trio.sleep(1)
+
+        # Debug info - only log if needed
+        # print(f"Mesh for topic: {routers[0].mesh[topic]}")
+        # if routers[0].pubsub:
+        #     print(f"Peer topics: {routers[0].pubsub.peer_topics}")
+
+        # verify all nodes received the message with timeout
+        for i, queue in enumerate(queues):
+            try:
+                with trio.fail_after(5):
+                    msg = await queue.get()
+                    assert msg.data == msg_content, (
+                        f"node {i} received wrong message: {msg.data}"
+                    )
+            except trio.TooSlowError:
+                pytest.fail(f"Node {i} did not receive the message (timeout)")
+
+        # Test passed if all nodes received the message
+        print("Basic flood test passed - all nodes received the message")
+
+
+@pytest.mark.trio
+async def test_flood_publish_enabled():
+    """
+    Test that with flood_publish enabled, all nodes receive the message
+    even with a sparse network topology.
+    """
+    # Create a network with flood_publish enabled
+    async with PubsubFactory.create_batch_with_gossipsub(
+        6,
+        degree=2,
+        degree_low=1,
+        degree_high=3,
+        flood_publish=True,  # Enable flood_publish
+    ) as pubsubs_gsub:
+        routers: list[GossipSub] = []
+        for pubsub in pubsubs_gsub:
+            assert isinstance(pubsub.router, GossipSub)
+            routers.append(pubsub.router)
+        hosts = [ps.host for ps in pubsubs_gsub]
+
+        topic = "flood_test_topic"
+        queues = [await pubsub.subscribe(topic) for pubsub in pubsubs_gsub]
+
+        # Create a sparse topology - only connect to a few nodes
+        # We only connect nodes in a chain, which would normally
+        # prevent complete message propagation without flood_publish
+        await connect(hosts[0], hosts[1])
+        await connect(hosts[1], hosts[2])
+        await connect(hosts[2], hosts[3])
+        await connect(hosts[3], hosts[4])
+        await connect(hosts[4], hosts[5])
+
+        # wait for connections to be established
+        await trio.sleep(1)
+
+        # publish a message from the first host
+        msg_content = b"flood_publish_msg"
+        await pubsubs_gsub[0].publish(topic, msg_content)
+
+        # wait for messages to propagate
+        await trio.sleep(2)
+
+        # verify all nodes received the message with timeout
+        for i, queue in enumerate(queues):
+            try:
+                with trio.fail_after(5):
+                    msg = await queue.get()
+                    assert msg.data == msg_content, (
+                        f"node {i} received wrong message: {msg.data}"
+                    )
+                    print(f"Node {i} received message correctly")
+            except trio.TooSlowError:
+                pytest.fail(f"Node {i} did not receive the message (timeout)")
+
+        # Test passed if all nodes received the message
+        print("Flood publish test passed - all nodes received the message")
 
 
 @pytest.mark.trio

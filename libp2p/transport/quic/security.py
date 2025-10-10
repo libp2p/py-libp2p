@@ -182,8 +182,8 @@ class LibP2PExtensionHandler:
         Handles both ASN.1 DER format (from go-libp2p) and simple binary format.
         """
         try:
-            logger.debug(f"🔍 Extension type: {type(extension)}")
-            logger.debug(f"🔍 Extension.value type: {type(extension.value)}")
+            logger.debug("🔍 Extension type: %s", type(extension))
+            logger.debug("🔍 Extension.value type: %s", type(extension.value))
 
             # Extract the raw bytes from the extension
             if isinstance(extension.value, UnrecognizedExtension):
@@ -195,8 +195,11 @@ class LibP2PExtensionHandler:
                 raw_bytes = extension.value
                 logger.debug("🔍 Extension.value is already bytes")
 
-            logger.debug(f"🔍 Total extension length: {len(raw_bytes)} bytes")
-            logger.debug(f"🔍 Extension hex (first 50 bytes): {raw_bytes[:50].hex()}")
+            logger.debug("🔍 Total extension length: %d bytes", len(raw_bytes))
+            logger.debug(
+                "🔍 Extension hex (first 50 bytes): %s",
+                raw_bytes[:50].hex(),
+            )
 
             if not isinstance(raw_bytes, bytes):
                 raise QUICCertificateError(f"Expected bytes, got {type(raw_bytes)}")
@@ -740,8 +743,8 @@ class CertificateGenerator:
                 .sign(cert_private_key, hashes.SHA256())
             )
 
-            logger.info(f"Generated libp2p TLS certificate for peer {peer_id}")
-            logger.debug(f"Certificate valid from {not_before} to {not_after}")
+            logger.info("Generated libp2p TLS certificate for peer %s", peer_id)
+            logger.debug("Certificate valid from %s to %s", not_before, not_after)
 
             return TLSConfig(
                 certificate=certificate, private_key=cert_private_key, peer_id=peer_id
@@ -799,11 +802,11 @@ class PeerAuthenticator:
                 raise QUICPeerVerificationError("Certificate missing libp2p extension")
 
             assert libp2p_extension.value is not None
-            logger.debug(f"Extension type: {type(libp2p_extension)}")
-            logger.debug(f"Extension value type: {type(libp2p_extension.value)}")
+            logger.debug("Extension type: %s", type(libp2p_extension))
+            logger.debug("Extension value type: %s", type(libp2p_extension.value))
             if hasattr(libp2p_extension.value, "__len__"):
-                logger.debug(f"Extension value length: {len(libp2p_extension.value)}")
-            logger.debug(f"Extension value: {libp2p_extension.value}")
+                logger.debug("Extension value length: %d", len(libp2p_extension.value))
+            logger.debug("Extension value: %s", libp2p_extension.value)
             # Parse the extension to get public key and signature
             public_key, signature = self.extension_handler.parse_signed_key_extension(
                 libp2p_extension
@@ -830,15 +833,16 @@ class PeerAuthenticator:
 
             # Verify against expected peer ID if provided
             if expected_peer_id and derived_peer_id != expected_peer_id:
-                logger.debug(f"Expected Peer id: {expected_peer_id}")
-                logger.debug(f"Derived Peer ID: {derived_peer_id}")
+                logger.debug("Expected Peer id: %s", expected_peer_id)
+                logger.debug("Derived Peer ID: %s", derived_peer_id)
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {expected_peer_id}, "
                     f"got {derived_peer_id}"
                 )
 
             logger.debug(
-                f"Successfully verified peer certificate for {derived_peer_id}"
+                "Successfully verified peer certificate for %s",
+                derived_peer_id,
             )
             return derived_peer_id
 
