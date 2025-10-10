@@ -37,6 +37,13 @@ def install_wheel(venv_path: Path, wheel_path: Path) -> None:
 
 
 def test_install_local_wheel() -> None:
+    # Check if wheel exists before running test
+    wheels = list(Path(".").glob("dist/*.whl"))
+    if not wheels:
+        import pytest
+
+        pytest.skip("No wheel found in dist/ directory. Run 'make dist' first.")
+
     with TemporaryDirectory() as tmpdir:
         venv_path = create_venv(Path(tmpdir))
         wheel_path = find_wheel(Path("."))
