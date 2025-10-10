@@ -1,62 +1,67 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Type, Optional
+from __future__ import annotations
+from curses import raw
+import libp2p.record.pb.record_pb2 as pb
+from typing import Optional, Union
 
-# Registry of payload_type (bytes) -> Record class
-_payload_type_registry: Dict[bytes, Type["Record"]] = {}
 
-class Record(ABC):
+class Record:
     """
-    Record represents a data type that can be used as the payload of an Envelope.
+    Record wraps the protobuf Record message and provides helper
+    methods for marshalling, unmarshalling, and safe field access.
     """
 
-    @abstractmethod
-    def domain(self) -> str:
-        """The signature domain (unique string for this record type)."""
-        pass
+    raw_record: pb.Record
 
-    @abstractmethod
-    def codec(self) -> bytes:
-        """Binary identifier (payload type)."""
-        pass
+    def __init__(
+        self,
+        key: Union[str, bytes],
+        value: bytes,
+        time_received: Optional[str] = None,
+    ):
+        if isinstance(key, str):
+            key = key.encode("utf-8")
 
-    @abstractmethod
-    def marshal_record(self) -> bytes:
-        """Serialize the record into bytes."""
-        pass
+        self.raw_record = pb.Record(
+            key=key,
+            value=value,
+            timeReceived=time_received or "",
+        )
 
-    @abstractmethod
-    def unmarshal_record(self, data: bytes) -> None:
-        """Deserialize bytes into this record instance."""
-        pass
+    @property
+    def key(self) -> bytes:
+        return self.raw_record.key
 
+    @property
+    def value(self) -> bytes:
+        return self.raw_record.value
 
-def register_type(prototype: Record) -> None:
-    """
-    Register a record type by its codec.
-    Should be called in module init where the Record is defined just like the Go version.
-    """
-    codec = prototype.codec()
-    if not isinstance(codec, (bytes, bytearray)):
-        raise TypeError("codec() must return bytes")
-    _payload_type_registry[bytes(codec)] = type(prototype)
+    @property
+    def time_received(self) -> str:
+        return self.raw_record.timeReceived
 
 
-def blank_record_for_payload_type(payload_type: bytes) -> Record:
-    """
-    Create a blank record for the given payload type.
-    """
-    cls = _payload_type_registry.get(payload_type)
-    if cls is None:
-        raise ValueError("payload type is not registered")
-    return cls()
+    def marshal(self) -> bytes:
+        """Serialize the record to bytes."""
+        return self.raw_record.SerializeToString()
 
+    @classmethod
+    def unmarshal(cls, data: bytes) -> Record:
+        """Deserialize bytes into a Record instance."""
+        msg = pb.Record()
+        msg.ParseFromString(data)
+        return cls(
+            key=msg.key,
+            value=msg.value,
+            time_received=msg.timeReceived,
+        )
 
-def unmarshal_record_payload(payload_type: bytes, payload_bytes: bytes) -> Record:
-    """
-    Given a payload type and bytes, return a fully unmarshalled Record.
-    """
-    rec = blank_record_for_payload_type(payload_type)
-    rec.unmarshal_record(payload_bytes)
-    return rec
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Record):
+            return False
+        return self.marshal() == other.marshal()
 
-    
+    def __repr__(self) -> str:
+        return (
+            f"<Record key={self.key!r} value={self.value!r} "
+            f"timeReceived={self.time_received!r}>"
+        )
