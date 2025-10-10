@@ -103,9 +103,10 @@ async def test_sensitive_data_handling(nursery: trio.Nursery) -> None:
             f for f in final_files - initial_files if f.name.startswith("tmp")
         }
 
-        msg = "Temporary files remained after cleanup: "
-        msg += f"{[f.name for f in remaining_files]}"
-        assert not remaining_files, msg
+        assert not remaining_files, (
+            f"Temporary files remained after cleanup: "
+            f"{[f.name for f in remaining_files]}"
+        )
 
         # Verify no sensitive data in any new files
         for f in final_files - initial_files:
