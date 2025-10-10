@@ -39,9 +39,9 @@ class UpnpManager:
             except Exception as e:
                 # The miniupnpc library has a documented quirk where `discover()` can
                 # raise an exception with the message "Success" on some platforms
-                # (particularly Windows) due to inconsistent error handling in the C library.
-                # This is a known issue in miniupnpc where successful discovery sometimes
-                # raises an exception instead of returning a device count.
+                # (particularly Windows) due to inconsistent error handling in the C
+                # library. This is a known issue in miniupnpc where successful
+                # discovery sometimes raises an exception instead of returning a count.
                 # See: https://github.com/miniupnp/miniupnp/issues/
                 if str(e) == "Success":  # type: ignore
                     num_devices = 1
