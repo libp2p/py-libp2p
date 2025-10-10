@@ -163,7 +163,8 @@ class FixedLimiter:
         return self.peer_limits.get(peer_id, self.peer_default)
 
     def get_stream_limits(self, peer_id: ID) -> BaseLimit:
-        return self.stream_default
+        # Streams are limited by the peer limits, not just stream defaults
+        return self.get_peer_limits(peer_id)
 
     def get_conn_limits(self) -> BaseLimit:
         return self.conn_default
