@@ -17,6 +17,7 @@ import uuid
 
 import pytest
 import multiaddr
+from tomlkit import value
 import trio
 
 from libp2p.crypto.rsa import create_new_key_pair
@@ -37,9 +38,14 @@ from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.tools.async_service import (
     background_trio_service,
 )
+from tests.core.record.test_validator import MockValidator
 from tests.utils.factories import (
     host_pair_factory,
 )
+from libp2p.record.exceptions import ErrInvalidRecordType
+from libp2p.record.validator import Validator
+from libp2p.record.record import Record
+from unittest.mock import AsyncMock, Mock
 
 # Configure logger
 logger = logging.getLogger("test.kad_dht")
@@ -49,6 +55,18 @@ TEST_TIMEOUT = 5  # Timeout in seconds
 
 
 T = TypeVar("T")
+
+@pytest.fixture
+def mock_validator():
+    class DummyValidator(Validator):
+        def validate(self, rec):
+            if rec.key.startswith(b"bad"):
+                raise ErrInvalidRecordType("invalid record")
+
+        def select(self, key, values):
+            values = [r.value for r in values]
+            return values.index(max(values))
+    return DummyValidator()
 
 
 async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
@@ -70,7 +88,7 @@ async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
 
 
 @pytest.fixture
-async def dht_pair(security_protocol):
+async def dht_pair(security_protocol, mock_validator):
     """Create a pair of connected DHT nodes for testing."""
     async with host_pair_factory(security_protocol=security_protocol) as (
         host_a,
@@ -81,8 +99,16 @@ async def dht_pair(security_protocol):
         peer_a_info = PeerInfo(host_a.get_id(), host_a.get_addrs())
 
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
-        dht_a: KadDHT = KadDHT(host_a, mode=DHTMode.SERVER)
-        dht_b: KadDHT = KadDHT(host_b, mode=DHTMode.SERVER)
+        dht_a: KadDHT = KadDHT(
+            host_a, 
+            validator=mock_validator,
+            mode=DHTMode.SERVER
+        )
+        dht_b: KadDHT = KadDHT(
+            host_b, 
+            validator=mock_validator,
+            mode=DHTMode.SERVER
+        )
         await dht_a.peer_routing.routing_table.add_peer(peer_b_info)
         await dht_b.peer_routing.routing_table.add_peer(peer_a_info)
 
@@ -119,6 +145,11 @@ async def dht_pair(security_protocol):
 
             # Return the DHT pair
             yield (dht_a, dht_b)
+
+@pytest.fixture
+def dht(dht_pair: tuple[KadDHT, KadDHT]):
+    dht_a, _ = dht_pair
+    return dht_a
 
 
 @pytest.mark.trio
@@ -502,3 +533,84 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receving
     # the record with a different peer_id regardless of a valid signature
     assert retrieved_value is None
+
+
+@pytest.mark.trio
+async def test_put_value_stores_only_valid_records(dht):
+    # invalid record should be skipped
+    await dht.put_value(b"badkey", b"value")
+    assert dht.value_store.get(b"badkey") is None
+
+    # valid record should be stored
+    await dht.put_value(b"goodkey", b"value1")
+    assert dht.value_store.get(b"goodkey") == b"value1"
+
+@pytest.mark.trio
+async def test_validate_and_select_chooses_preferred(dht):
+    key = b"goodkey"
+
+    # Store initial record
+    await dht.put_value(key, b"value1")
+
+    # New record with higher value
+    rec = Record(key, b"value2")
+    selected = dht._validate_and_select(rec)
+    assert selected.value == b"value2"
+
+    # New record with lower value
+    rec2 = Record(key, b"value0")
+    selected2 = dht._validate_and_select(rec2)
+    # Should keep highest value
+    assert selected2.value == b"value1" or selected2.value == b"value2"
+
+@pytest.mark.trio
+async def test_get_value_returns_only_valid(dht):
+    key_valid = b"goodkey"
+    key_invalid = b"badkey"
+
+    # Put both valid and invalid
+    await dht.put_value(key_valid, b"value1")
+    await dht.put_value(key_invalid, b"value2")
+
+    val1 = await dht.get_value(key_valid)
+    val2 = await dht.get_value(key_invalid)
+
+    # Only valid is returned
+    assert val1 == b"value1"
+    assert val2 is None
+
+
+@pytest.mark.trio
+async def test_put_and_get_value_with_validation_and_selection(dht_pair):
+    """Ensure both DHTs obey record validation and selection, invalid records not received."""
+    dht_a, dht_b = dht_pair
+
+    # Add each other to routing table
+    await dht_a.routing_table.add_peer(PeerInfo(dht_b.host.get_id(), []))
+    await dht_b.routing_table.add_peer(PeerInfo(dht_a.host.get_id(), []))
+
+    # Keys and values
+    valid_key = b"goodkey"
+    invalid_key = b"badkey"
+    value1 = b"value1"
+    value2 = b"value2"  # higher value for selector
+
+    # 1. Invalid record should NOT be stored locally
+    await dht_a.put_value(invalid_key, b"invalid")
+    assert dht_a.value_store.get(invalid_key) is None
+
+    # 2. Invalid record should NOT be received by peer
+    retrieved_invalid_b = await dht_b.get_value(invalid_key)
+    assert retrieved_invalid_b is None
+
+    # 3. Valid record should be stored locally
+    await dht_a.put_value(valid_key, value1)
+    assert dht_a.value_store.get(valid_key) == value1
+
+    # 4. Higher-value record should replace previous (selector)
+    await dht_a.put_value(valid_key, value2)
+    assert dht_a.value_store.get(valid_key) == value2
+
+    # 5. Node B retrieves the value (should get latest valid record)
+    retrieved_value_b = await dht_b.get_value(valid_key)
+    assert retrieved_value_b == value2
