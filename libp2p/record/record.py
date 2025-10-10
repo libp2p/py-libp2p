@@ -32,8 +32,16 @@ class Record:
         return self.raw_record.key
 
     @property
+    def key_str(self) -> str:
+        return self.raw_record.key.decode("utf-8")
+
+    @property
     def value(self) -> bytes:
         return self.raw_record.value
+    
+    @property
+    def value_str(self) -> str:
+        return self.raw_record.value.decode("utf-8")
 
     @property
     def time_received(self) -> str:

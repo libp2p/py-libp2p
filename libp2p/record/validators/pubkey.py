@@ -1,5 +1,6 @@
 import multihash
 
+from libp2p.record.record import Record
 from libp2p.record.validator import Validator
 from libp2p.record.utils import (
     split_key,
@@ -14,8 +15,8 @@ class PublicKeyValidator(Validator):
     Validator for public key records.
     """
 
-    def validate(self, key: str, value: bytes) -> None:
-        ns, key = split_key(key)
+    def validate(self, rec: Record) -> None:
+        ns, key = split_key(rec.key_str)
         if ns != "pk":
             raise ErrInvalidRecordType("namespace not 'pk'")
 
@@ -26,7 +27,7 @@ class PublicKeyValidator(Validator):
             raise ErrInvalidRecordType("key did not contain valid multihash")
 
         try:
-            pubkey = unmarshal_public_key(value)
+            pubkey = unmarshal_public_key(rec.value)
         except Exception:
             raise ErrInvalidRecordType("Unable to unmarshal public key")
 
@@ -38,7 +39,7 @@ class PublicKeyValidator(Validator):
         if peer_id.to_bytes() != keyhash:
             raise ErrInvalidRecordType("public key does not match storage key")
     
-    def select(self, key: str, values: list[bytes]) -> int:
+    def select(self, key: str, values: list[Record]) -> int:
         """
         Select a value from a list of public key records.
 

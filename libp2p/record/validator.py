@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 
+from libp2p.record.record import Record
+
 from .exceptions import (
     ErrInvalidRecordType,
 )
@@ -12,7 +14,7 @@ class Validator(ABC):
     """Interface that should be implemented by record validators."""
 
     @abstractmethod
-    def validate(self, key: str, value: bytes) -> None:
+    def validate(self, rec: Record) -> None:
         """
         Validate the given record, raising an exception if it's invalid
         (e.g., expired, signed by the wrong key, etc.).
@@ -20,7 +22,7 @@ class Validator(ABC):
         pass
 
     @abstractmethod
-    def select(self, key: str, values: List[bytes]) -> int:
+    def select(self, key: str, values: List[Record]) -> int:
         """
         Select the best record from the set of records (e.g., the newest).
         Returns (index, error).
@@ -43,13 +45,13 @@ class NamespacedValidator(Validator):
             return None
         return self.validators.get(ns)
 
-    def validate(self, key: str, value: bytes) -> None:  
-        vi = self.validator_by_key(key)
+    def validate(self, rec: Record) -> None:  
+        vi = self.validator_by_key(rec.key_str)
         if vi is None:
             raise ErrInvalidRecordType()
-        return vi.validate(key, value)
+        return vi.validate(rec)
 
-    def select(self, key: str, values: List[bytes]) -> int:
+    def select(self, key: str, values: List[Record]) -> int:
         if not values:
             raise ValueError("can't select from no values")
         vi = self.validator_by_key(key)

@@ -34,6 +34,9 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.record.exceptions import ErrInvalidRecordType
+from libp2p.record.validator import NamespacedValidator
+from libp2p.record.record import Record
 from libp2p.tools.async_service import (
     Service,
 )
@@ -92,7 +95,13 @@ class KadDHT(Service):
 
     """
 
-    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
+    def __init__(
+        self, 
+        host: IHost, 
+        mode: DHTMode, 
+        validator: NamespacedValidator,
+        enable_random_walk: bool = False
+    ):
         """
         Initialize a new Kademlia DHT node.
 
@@ -140,6 +149,7 @@ class KadDHT(Service):
 
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        self.validator = validator
 
     def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
         """
@@ -152,7 +162,7 @@ class KadDHT(Service):
             Callable that takes target_key bytes and returns list of peer IDs
 
         """
-
+        
         async def query_function(target_key: bytes) -> list[ID]:
             """Query for closest peers to target key."""
             return await self.peer_routing.find_closest_peers_network(target_key)
@@ -666,12 +676,17 @@ class KadDHT(Service):
         """
         logger.debug(f"Storing value for key {key.hex()}")
 
+        rec = Record(key, value)
+        new_record = self._validate_and_select(rec)
+        if new_record is None:
+            return #skip invalid record
+
         # 1. Store locally first
-        self.value_store.put(key, value)
+        self.value_store.put(new_record.key, new_record.value)
         try:
-            decoded_value = value.decode("utf-8")
+            decoded_value = new_record.value_str
         except UnicodeDecodeError:
-            decoded_value = value.hex()
+            decoded_value = new_record.value.hex()
         logger.debug(
             f"Stored value locally for key {key.hex()} with value {decoded_value}"
         )
@@ -679,7 +694,7 @@ class KadDHT(Service):
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(new_record.key)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
@@ -694,7 +709,7 @@ class KadDHT(Service):
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self.value_store._store_at_peer(
-                            peer, key, value
+                            peer, new_record.key, new_record.value
                         )
                         batch_results[idx] = success
                         if success:
@@ -750,9 +765,14 @@ class KadDHT(Service):
                     nursery.start_soon(query_one, peer)
 
             if found_value is not None:
-                self.value_store.put(key, found_value)
+                rec = Record(key, found_value)
+                record = self._validate_and_select(rec)
+                if record is None:
+                    return # skip invalid record
+
+                self.value_store.put(record.key, record.value)
                 logger.info("Successfully retrieved value from network")
-                return found_value
+                return record.value
 
         # 4. Not found
         logger.warning(f"Value not found for key {key.hex()}")
@@ -823,3 +843,38 @@ class KadDHT(Service):
 
         """
         return self.enable_random_walk
+
+    def _validate_and_select(
+        self, new_record: Record
+    ) -> Record | None:
+        """
+        Validate a new record and select the preferred record if an old one exists.
+        Returns the record to store, or None if invalid.
+        """
+        if self.validator is None:
+            return new_record
+
+        # validate record
+        try:
+            self.validator.validate(new_record)
+        except (ErrInvalidRecordType, ValueError) as e:
+            logger.warning(f"Record validation failed for key {new_record.key.hex()}: {e}")
+            return None
+
+        # prepare candidates with old record if it exists
+        old_value = self.value_store.get(new_record.key)
+        candidates = [new_record]
+        if old_value is not None:
+            old_record = Record(new_record.key, old_value)
+            candidates.append(old_record)
+
+        # select preferred record if multiple candidates
+        if len(candidates) > 1:
+            try:
+                selected_index = self.validator.select(new_record.key_str, candidates)
+                new_record = candidates[selected_index]
+            except Exception as e:
+                logger.warning(f"Record selection failed for key {new_record.key.hex()}: {e}")
+                return None
+            
+        return new_record
