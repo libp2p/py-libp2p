@@ -104,7 +104,7 @@ async def test_sensitive_data_handling(nursery: trio.Nursery) -> None:
         }
 
         assert not remaining_files, (
-            f"Temporary files remained after cleanup: "
+            "Temporary files remained after cleanup: "
             f"{[f.name for f in remaining_files]}"
         )
 

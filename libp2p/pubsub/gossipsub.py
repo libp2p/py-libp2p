@@ -98,6 +98,8 @@ class GossipSub(IPubsubRouter, Service):
     prune_back_off: int
     unsubscribe_back_off: int
 
+    flood_publish: bool
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -116,6 +118,9 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
+        # Enable hybrid mode: flood initial publishes to all topic peers,
+        # then use normal GossipSub mesh routing for forwarding
+        flood_publish: bool = False,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -155,6 +160,8 @@ class GossipSub(IPubsubRouter, Service):
         self.back_off = dict()
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
+
+        self.flood_publish = flood_publish
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -300,43 +307,70 @@ class GossipSub(IPubsubRouter, Service):
             if topic not in self.pubsub.peer_topics:
                 continue
 
-            # direct peers
-            _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
-            send_to.update(_direct_peers)
+            # FLOOD_PUBLISH MODE: Hybrid GossipSub/FloodSub behavior
+            # When flood_publish is enabled and we are the original publisher,
+            # we send the message to ALL peers subscribed to the topic.
+            # This provides a hybrid approach that combines GossipSub's efficiency with
+            # FloodSub's reliability for initial message propagation.
+            if self.flood_publish and msg_forwarder == self.pubsub.my_id:
+                # CRITICAL: Only apply flooding to messages we originally published
+                # (msg_forwarder == self.pubsub.my_id), not to forwarded messages.
+                # This ensures that:
+                # 1. Our own messages get maximum initial propagation (flooding)
+                # 2. Forwarded messages still use efficient GossipSub mesh routing
+                # 3. We don't create excessive network traffic for relayed messages
 
-            # floodsub peers
-            floodsub_peers: set[ID] = {
-                peer_id
-                for peer_id in self.pubsub.peer_topics[topic]
-                if peer_id in self.peer_protocol
-                and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
-            }
-            send_to.update(floodsub_peers)
-
-            # gossipsub peers
-            gossipsub_peers: set[ID] = set()
-            if topic in self.mesh:
-                gossipsub_peers = self.mesh[topic]
+                # Send to all peers subscribed to this topic, bypassing mesh
+                # This is the core of the flood_publish feature - it switches
+                # from selective GossipSub routing to FloodSub-style broadcast
+                # for messages originating from this node.
+                for peer in self.pubsub.peer_topics[topic]:
+                    # TODO: When peer scoring is implemented, add score check
+                    #       Direct peers should skip score checks (trusted)
+                    send_to.add(peer)
             else:
-                # When we publish to a topic that we have not subscribe to, we randomly
-                # pick `self.degree` number of peers who have subscribed to the topic
-                # and add them as our `fanout` peers.
-                topic_in_fanout: bool = topic in self.fanout
-                fanout_peers: set[ID] = self.fanout[topic] if topic_in_fanout else set()
-                fanout_size = len(fanout_peers)
-                if not topic_in_fanout or (
-                    topic_in_fanout and fanout_size < self.degree
-                ):
-                    if topic in self.pubsub.peer_topics:
-                        # Combine fanout peers with selected peers
-                        fanout_peers.update(
-                            self._get_in_topic_gossipsub_peers_from_minus(
-                                topic, self.degree - fanout_size, fanout_peers
+                # Normal GossipSub behavior when flood_publish is disabled
+                # or we're not the original publisher
+
+                # direct peers
+                _direct_peers: set[ID] = {_peer for _peer in self.direct_peers}
+                send_to.update(_direct_peers)
+
+                # floodsub peers
+                floodsub_peers: set[ID] = {
+                    peer_id
+                    for peer_id in self.pubsub.peer_topics[topic]
+                    if peer_id in self.peer_protocol
+                    and self.peer_protocol[peer_id] == floodsub.PROTOCOL_ID
+                }
+                send_to.update(floodsub_peers)
+
+                # gossipsub peers
+                gossipsub_peers: set[ID] = set()
+                if topic in self.mesh:
+                    gossipsub_peers = self.mesh[topic]
+                else:
+                    # When we publish to a topic that we have not subscribe to, we
+                    # randomly pick `self.degree` number of peers who have subscribed
+                    #  to the topic and add them as our `fanout` peers.
+                    topic_in_fanout: bool = topic in self.fanout
+                    fanout_peers: set[ID] = (
+                        self.fanout[topic] if topic_in_fanout else set()
+                    )
+                    fanout_size = len(fanout_peers)
+                    if not topic_in_fanout or (
+                        topic_in_fanout and fanout_size < self.degree
+                    ):
+                        if topic in self.pubsub.peer_topics:
+                            # Combine fanout peers with selected peers
+                            fanout_peers.update(
+                                self._get_in_topic_gossipsub_peers_from_minus(
+                                    topic, self.degree - fanout_size, fanout_peers
+                                )
                             )
-                        )
-                self.fanout[topic] = fanout_peers
-                gossipsub_peers = fanout_peers
-            send_to.update(gossipsub_peers)
+                    self.fanout[topic] = fanout_peers
+                    gossipsub_peers = fanout_peers
+                send_to.update(gossipsub_peers)
         # Excludes `msg_forwarder` and `origin`
         yield from send_to.difference([msg_forwarder, origin])
 
