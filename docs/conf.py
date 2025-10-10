@@ -17,6 +17,7 @@
 import doctest
 import os
 import sys
+from unittest.mock import MagicMock
 
 # Add the parent directory to sys.path to enable importing libp2p
 # This handles both running from docs/ directory and from root directory
@@ -24,7 +25,6 @@ docs_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(docs_dir)
 sys.path.insert(0, root_dir)
 
-from unittest.mock import MagicMock
 
 try:
     import tomllib

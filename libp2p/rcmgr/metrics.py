@@ -160,11 +160,13 @@ class Metrics:
         self.record(f"streams_{scope_name}_time", time.time())
 
     def remove_stream(self, *args: str | Direction) -> None:
-        """Remove a stream - supports both global and scope-specific removal.
-        
+        """
+        Remove a stream - supports both global and scope-specific removal.
+
         Args:
-            args: Either (direction_str,) for global removal or 
-                 (scope_name, direction) for scope-specific removal
+            args: Either (direction_str,) for global removal or
+            (scope_name, direction) for scope-specific removal
+
         """
         if len(args) == 1:
             # Global removal: remove_stream(direction_str)
