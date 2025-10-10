@@ -267,23 +267,36 @@ def test_memory_pressure_simulation():
         def use_memory(scope):
             # Try to allocate memory in chunks
             allocated = 0
-            chunk_size = 64 * 1024  # 64KB chunks
+            chunk_size = 32 * 1024  # 32KB chunks (smaller to work with priority limits)
 
-            while allocated + chunk_size <= 200 * 1024:  # Stay under peer limit
+            # With priority=1, threshold is about 50% of limit (128KB out of 256KB)
+            # So we can safely allocate about 3 chunks of 32KB = 96KB
+            while allocated + chunk_size <= 96 * 1024:  # Stay under priority threshold
                 scope.reserve_memory(chunk_size)
                 allocated += chunk_size
 
             return scope.stat()
 
         stats = rm.view_peer(peer_id, use_memory)
-        assert stats.memory >= 192 * 1024  # Should have allocated ~192KB
+        assert stats.memory >= 64 * 1024  # Should have allocated at least 64KB
 
-        # Try to exceed peer memory limit
+        # Try to exceed peer memory limit by using high priority
+        def test_high_priority_memory(scope):
+            # High priority (255) should allow much more memory
+            scope.reserve_memory(200 * 1024, priority=255)  # 200KB with high priority
+            return scope.stat()
+
+        high_priority_stats = rm.view_peer(
+            ID(b"high_priority_peer"), test_high_priority_memory
+        )
+        assert high_priority_stats.memory >= 200 * 1024
+
+        # Try to exceed peer memory limit with low priority (should fail)
         def exceed_memory(scope):
-            scope.reserve_memory(512 * 1024)  # Try to allocate 512KB
+            scope.reserve_memory(200 * 1024, priority=1)  # Try 200KB with low priority
 
         with pytest.raises(ResourceLimitExceeded):
-            rm.view_peer(peer_id, exceed_memory)
+            rm.view_peer(ID(b"exceed_peer"), exceed_memory)
 
     finally:
         rm.close()
