@@ -285,7 +285,9 @@ class Pubsub(Service, IPubsub):
                         logger.debug(
                             "received `publish` message %s from peer %s", msg, peer_id
                         )
-                        self.manager.run_task(self.push_msg, peer_id, msg)
+                        # Only schedule task if service is still running
+                        if self.manager.is_running:
+                            self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
                     # deal with RPC.subscriptions
