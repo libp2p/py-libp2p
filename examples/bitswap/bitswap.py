@@ -21,7 +21,7 @@ import multiaddr
 import trio
 
 from libp2p import new_host
-from libp2p.bitswap import BitswapClient, MemoryBlockStore
+from libp2p.bitswap import BitswapClient, MemoryBlockStore, compute_cid
 from libp2p.peer.peerinfo import info_from_p2p_addr
 
 # Enable logging
@@ -35,17 +35,6 @@ logging.getLogger("libp2p.bitswap").setLevel(logging.DEBUG)
 
 # Create logger for this example
 logger = logging.getLogger("bitswap_example")
-
-
-def compute_cid(data: bytes) -> bytes:
-    """
-    Compute a simple CID for data.
-
-    Note: This is a simplified CID computation for demonstration.
-    In a real implementation, you should use proper CIDv0/CIDv1 encoding
-    with multihash and multicodec.
-    """
-    return hashlib.sha256(data).digest()
 
 
 async def run_provider(port: int = 0, file_path: str | None = None) -> None:
