@@ -58,14 +58,14 @@ async def test_invalid_signatures_rejected():
         mock_scorer = MagicMock()
         initial_score = 0.0
         final_score = -1.0  # Lower than initial
-        
+
         # Configure the mock
         mock_scorer.score = MagicMock(side_effect=[initial_score, final_score])
         mock_scorer.on_invalid_message = MagicMock()
-        
+
         # Assign the mock to gsub1
         gsubs[1].scorer = mock_scorer
-            
+
         # Record the initial score
         initial_score = gsubs[1].scorer.score(peer_id, [topic])
 
@@ -75,7 +75,7 @@ async def test_invalid_signatures_rejected():
 
         # Allow time for processing
         await trio.sleep(0.1)
-        
+
         # Check that the score decreased
         final_score = gsubs[1].scorer.score(peer_id, [topic])
         assert final_score < initial_score
@@ -121,14 +121,14 @@ async def test_malformed_payloads_rejected():
         mock_scorer = MagicMock()
         initial_score = 0.0
         final_score = -1.0  # Lower than initial
-        
+
         # Configure the mock
         mock_scorer.score = MagicMock(side_effect=[initial_score, final_score])
         mock_scorer.on_invalid_message = MagicMock()
-        
+
         # Assign the mock to gsub1
         gsubs[1].scorer = mock_scorer
-            
+
         # Record the initial score of peer 0 from peer 1's perspective
         initial_score = gsubs[1].scorer.score(peer_id, [topic])
 
@@ -138,7 +138,7 @@ async def test_malformed_payloads_rejected():
 
         # Allow time for processing
         await trio.sleep(0.1)
-        
+
         # Check that the score of peer 0 decreased
         final_score = gsubs[1].scorer.score(peer_id, [topic])
         assert final_score < initial_score
@@ -179,14 +179,14 @@ async def test_excessive_ihave_iwant_spam_penalized():
         mock_scorer = MagicMock()
         initial_score = 0.0
         final_score = -1.0  # Lower than initial
-        
+
         # Configure the mock
         mock_scorer.score = MagicMock(side_effect=[initial_score, final_score])
         mock_scorer.penalize_behavior = MagicMock()
-        
+
         # Assign the mock to gsub0
         gsubs[0].scorer = mock_scorer
-            
+
         # Record the initial score of peer 1 from peer 0's perspective
         initial_score = gsubs[0].scorer.score(peer_id, [topic])
 
@@ -258,14 +258,14 @@ async def test_repeated_invalid_messages_lead_to_graylist():
 
         # Create a mock scorer
         mock_scorer = MagicMock()
-        
+
         # Configure the mock for initial state (not graylisted)
         mock_scorer.is_graylisted = MagicMock(return_value=False)
         mock_scorer.on_invalid_message = MagicMock()
-        
+
         # Assign the mock to gsub0
         gsubs[0].scorer = mock_scorer
-            
+
         # Verify peer 1 is not initially graylisted
         assert not gsubs[0].scorer.is_graylisted(peer_id, [topic])
 
@@ -279,15 +279,15 @@ async def test_repeated_invalid_messages_lead_to_graylist():
 
         # Configure the mock for final state (graylisted)
         score = -20.0  # A very negative score
-        
+
         # Create a new mock to avoid NoneType issues
         mock_scorer = MagicMock()
         mock_scorer.score = MagicMock(return_value=score)
         mock_scorer.is_graylisted = MagicMock(return_value=True)
-        
+
         # Assign the mock
         gsubs[0].scorer = mock_scorer
-        
+
         # Check the score after penalties
         score = gsubs[0].scorer.score(peer_id, [topic])
 
@@ -295,7 +295,7 @@ async def test_repeated_invalid_messages_lead_to_graylist():
         assert score < 0  # Score should be negative after invalid messages
         # The score should be below the graylist threshold
         assert score < score_params.graylist_threshold
-        
+
         # Ensure the mock is properly set
         if gsubs[0].scorer is not None:
             assert gsubs[0].scorer.is_graylisted(peer_id, [topic])

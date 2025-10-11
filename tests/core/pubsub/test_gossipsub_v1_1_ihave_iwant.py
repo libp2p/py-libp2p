@@ -103,7 +103,7 @@ async def test_iwant_retrieves_missing_messages():
         # Create a mock for pubsub if it doesn't exist
         if not hasattr(gsub1, "pubsub") or gsub1.pubsub is None:
             gsub1.pubsub = MagicMock()
-            
+
         write_msg_mock = AsyncMock()
         gsub1.pubsub.write_msg = write_msg_mock
 
@@ -208,7 +208,7 @@ async def test_no_infinite_gossip_loops():
         mock_cache[msg_id_tuple] = True
         mock_seen_messages.cache = mock_cache
         mock_pubsub.seen_messages = mock_seen_messages
-        
+
         # Set the mock on gsub0
         gsub0.pubsub = mock_pubsub
 

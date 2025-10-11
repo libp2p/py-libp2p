@@ -7,14 +7,9 @@ ensures messages are delivered reliably even when published from non-mesh peers.
 
 import pytest
 import trio
-from typing import cast, List, Set
-from unittest.mock import AsyncMock, MagicMock
 
-from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.tools.utils import connect
 from tests.utils.factories import PubsubFactory
-from libp2p.peer.id import ID
 
 
 @pytest.mark.trio
@@ -24,26 +19,25 @@ async def test_publish_from_non_mesh_peer():
     async with PubsubFactory.create_batch_with_gossipsub(
         5, heartbeat_interval=0.5
     ) as pubsubs:
-        gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
         hosts = [ps.host for ps in pubsubs]
-        
+
         # Connect in a specific topology: 0 connects to all others
         # but others don't connect to each other directly
         for i in range(1, len(hosts)):
             await connect(hosts[0], hosts[i])
         await trio.sleep(0.5)
-        
+
         # Only peers 1-4 subscribe to the topic
         topic = "test_flood_publish"
         received_messages = [[] for _ in range(len(pubsubs))]
-        
+
         async with trio.open_nursery() as nursery:
             # Subscribe peers 1-4 to the topic
             subscriptions = []
             for i in range(1, len(pubsubs)):
                 subscription = await pubsubs[i].subscribe(topic)
                 subscriptions.append(subscription)
-                
+
                 # Create a task to collect messages
                 async def collect_messages(index, sub):
                     try:
@@ -51,24 +45,24 @@ async def test_publish_from_non_mesh_peer():
                             received_messages[index].append(message)
                     except trio.Cancelled:
                         pass
-                
+
                 # Start the collection task in the background
                 nursery.start_soon(collect_messages, i, subscription)
-                
+
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Peer 0 is not subscribed but will publish to the topic
             message_data = b"flood published message"
             await pubsubs[0].publish(topic, message_data)
-            
+
             # Allow time for message propagation
             await trio.sleep(2.0)
-            
+
             # Verify that all subscribed peers received the message
             for i in range(1, len(pubsubs)):
                 assert len(received_messages[i]) > 0
                 assert any(msg.data == message_data for msg in received_messages[i])
-            
+
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()
 
@@ -80,18 +74,17 @@ async def test_flood_publish_with_mesh_formation():
     async with PubsubFactory.create_batch_with_gossipsub(
         4, heartbeat_interval=0.5
     ) as pubsubs:
-        gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
         hosts = [ps.host for ps in pubsubs]
-        
+
         # Connect in a line topology: 0 - 1 - 2 - 3
         for i in range(len(hosts) - 1):
             await connect(hosts[i], hosts[i + 1])
         await trio.sleep(0.5)
-        
+
         # All peers subscribe to the topic
         topic = "test_flood_publish_mesh_formation"
         received_messages = [[] for _ in range(len(pubsubs))]
-        
+
         # Start collecting messages in the background
         async with trio.open_nursery() as nursery:
             # Subscribe all peers to the topic
@@ -99,7 +92,7 @@ async def test_flood_publish_with_mesh_formation():
             for i in range(len(pubsubs)):
                 subscription = await pubsubs[i].subscribe(topic)
                 subscriptions.append(subscription)
-                
+
                 # Start a background task to collect messages for this peer
                 async def collect_messages(peer_index, sub):
                     try:
@@ -107,23 +100,27 @@ async def test_flood_publish_with_mesh_formation():
                             received_messages[peer_index].append(message)
                     except trio.Cancelled:
                         pass
-                
+
                 nursery.start_soon(collect_messages, i, subscription)
-            
+
             # Wait a bit for subscriptions to be processed
             await trio.sleep(0.2)
-            
+
             # Immediately publish before mesh has fully formed
             message_data = b"early message"
             await pubsubs[0].publish(topic, message_data)
-            
+
             # Allow time for message propagation
             await trio.sleep(2.0)
-            
+
             # Verify that peers received the message despite early publishing
-            received_count = sum(1 for msgs in received_messages if any(msg.data == message_data for msg in msgs))
+            received_count = sum(
+                1
+                for msgs in received_messages
+                if any(msg.data == message_data for msg in msgs)
+            )
             assert received_count > 1  # At least some peers should receive it
-            
+
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()
 
@@ -135,9 +132,8 @@ async def test_flood_publish_reliability():
     async with PubsubFactory.create_batch_with_gossipsub(
         6, heartbeat_interval=0.5
     ) as pubsubs:
-        gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
         hosts = [ps.host for ps in pubsubs]
-        
+
         # Connect in a star topology with peer 0 at the center
         for i in range(1, len(hosts)):
             await connect(hosts[0], hosts[i])
@@ -146,18 +142,18 @@ async def test_flood_publish_reliability():
         await connect(hosts[3], hosts[4])
         await connect(hosts[4], hosts[5])
         await trio.sleep(0.5)
-        
+
         # All peers subscribe to the topic
         topic = "test_flood_publish_reliability"
         received_messages = [[] for _ in range(len(pubsubs))]
-        
+
         async with trio.open_nursery() as nursery:
             # Subscribe all peers to the topic
             subscriptions = []
             for i in range(len(pubsubs)):
                 subscription = await pubsubs[i].subscribe(topic)
                 subscriptions.append(subscription)
-                
+
                 # Create a task to collect messages
                 async def collect_messages(index, sub):
                     try:
@@ -165,12 +161,12 @@ async def test_flood_publish_reliability():
                             received_messages[index].append(message)
                     except trio.Cancelled:
                         pass
-                
+
                 # Start the collection task in the background
                 nursery.start_soon(collect_messages, i, subscription)
-                
+
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Publish multiple messages from different peers
             messages = []
             for i in range(3):
@@ -178,16 +174,17 @@ async def test_flood_publish_reliability():
                 messages.append(message_data)
                 await pubsubs[i].publish(topic, message_data)
                 await trio.sleep(0.2)  # Small delay between publishes
-            
+
             # Allow time for message propagation
             await trio.sleep(2.0)
-            
+
             # Verify that all peers received all messages
             for peer_msgs in received_messages:
                 for msg_data in messages:
-                    assert any(msg.data == msg_data for msg in peer_msgs), \
+                    assert any(msg.data == msg_data for msg in peer_msgs), (
                         f"Message {msg_data} not received by a peer"
-            
+                    )
+
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()
 
@@ -199,9 +196,8 @@ async def test_flood_publish_with_disconnected_peers():
     async with PubsubFactory.create_batch_with_gossipsub(
         5, heartbeat_interval=0.5
     ) as pubsubs:
-        gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
         hosts = [ps.host for ps in pubsubs]
-        
+
         # Connect in a specific topology: 0 connects to 1, 2
         # and 3 connects to 2, 4
         await connect(hosts[0], hosts[1])
@@ -209,18 +205,18 @@ async def test_flood_publish_with_disconnected_peers():
         await connect(hosts[3], hosts[2])
         await connect(hosts[3], hosts[4])
         await trio.sleep(0.5)
-        
+
         # All peers subscribe to the topic
         topic = "test_flood_publish_disconnected"
         received_messages = [[] for _ in range(len(pubsubs))]
-        
+
         async with trio.open_nursery() as nursery:
             # Subscribe all peers to the topic
             subscriptions = []
             for i in range(len(pubsubs)):
                 subscription = await pubsubs[i].subscribe(topic)
                 subscriptions.append(subscription)
-                
+
                 # Create a task to collect messages
                 async def collect_messages(index, sub):
                     try:
@@ -228,38 +224,40 @@ async def test_flood_publish_with_disconnected_peers():
                             received_messages[index].append(message)
                     except trio.Cancelled:
                         pass
-                
+
                 # Start the collection task in the background
                 nursery.start_soon(collect_messages, i, subscription)
-                
+
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Publish from peer 0
             message_data = b"message from peer 0"
             await pubsubs[0].publish(topic, message_data)
-            
+
             # Allow time for message propagation
             await trio.sleep(2.0)
-            
+
             # Verify that peers 0, 1, 2 received the message
             # (peers 3, 4 might not receive it due to network topology)
             for i in range(3):
-                assert any(msg.data == message_data for msg in received_messages[i]), \
+                assert any(msg.data == message_data for msg in received_messages[i]), (
                     f"Peer {i} did not receive the message"
-            
+                )
+
             # Publish from peer 4
             message_data = b"message from peer 4"
             await pubsubs[4].publish(topic, message_data)
-            
+
             # Allow time for message propagation
             await trio.sleep(2.0)
-            
+
             # Verify that peers 2, 3, 4 received the message
             # (peers 0, 1 might not receive it due to network topology)
             for i in [2, 3, 4]:
-                assert any(msg.data == message_data for msg in received_messages[i]), \
+                assert any(msg.data == message_data for msg in received_messages[i]), (
                     f"Peer {i} did not receive the message"
-            
+                )
+
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()
 
@@ -271,26 +269,25 @@ async def test_flood_publish_with_high_frequency():
     async with PubsubFactory.create_batch_with_gossipsub(
         4, heartbeat_interval=0.5
     ) as pubsubs:
-        gsubs = [cast(GossipSub, ps.router) for ps in pubsubs]
         hosts = [ps.host for ps in pubsubs]
-        
+
         # Connect in a mesh topology
         for i in range(len(hosts)):
             for j in range(i + 1, len(hosts)):
                 await connect(hosts[i], hosts[j])
         await trio.sleep(0.5)
-        
+
         # All peers subscribe to the topic
         topic = "test_flood_publish_high_frequency"
         received_messages = [[] for _ in range(len(pubsubs))]
-        
+
         async with trio.open_nursery() as nursery:
             # Subscribe all peers to the topic
             subscriptions = []
             for i in range(len(pubsubs)):
                 subscription = await pubsubs[i].subscribe(topic)
                 subscriptions.append(subscription)
-                
+
                 # Create a task to collect messages
                 async def collect_messages(index, sub):
                     try:
@@ -298,12 +295,12 @@ async def test_flood_publish_with_high_frequency():
                             received_messages[index].append(message)
                     except trio.Cancelled:
                         pass
-                
+
                 # Start the collection task in the background
                 nursery.start_soon(collect_messages, i, subscription)
-                
+
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Publish multiple messages in rapid succession
             num_messages = 10
             messages = []
@@ -312,10 +309,10 @@ async def test_flood_publish_with_high_frequency():
                 messages.append(message_data)
                 await pubsubs[0].publish(topic, message_data)
                 # No delay between publishes to test high frequency
-            
+
             # Allow time for message propagation
             await trio.sleep(3.0)
-            
+
             # Verify that peers received most of the messages
             # We don't expect perfect delivery under high load
             for i in range(1, len(pubsubs)):
@@ -323,10 +320,12 @@ async def test_flood_publish_with_high_frequency():
                 for msg_data in messages:
                     if any(msg.data == msg_data for msg in received_messages[i]):
                         received_count += 1
-                
+
                 # At least 70% of messages should be received
-                assert received_count >= num_messages * 0.7, \
-                    f"Peer {i} received too few messages: {received_count}/{num_messages}"
-            
+                assert received_count >= num_messages * 0.7, (
+                    f"Peer {i} received too few messages: "
+                    f"{received_count}/{num_messages}"
+                )
+
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()

@@ -24,7 +24,7 @@ async def test_message_propagation_normal_mesh():
         # Get the hosts and gossipsub routers
         hosts = [ps.host for ps in pubsubs]
         gsubs = [ps.router for ps in pubsubs]
-        
+
         # Verify they're GossipSub instances
         for gsub in gsubs:
             assert isinstance(gsub, GossipSub)
@@ -49,7 +49,7 @@ async def test_message_propagation_normal_mesh():
         test_message = b"test message from host 0"
         await pubsubs[0].publish(topic, test_message)
         await trio.sleep(1.0)
-        
+
         # Host 2 publishes a message
         test_message_2 = b"test message from host 2"
         await pubsubs[2].publish(topic, test_message_2)
@@ -74,32 +74,32 @@ async def test_interop_with_gossipsub_v1_0():
         ) as v1_1_pubsubs:
             v1_0_host = v1_0_pubsubs[0].host
             v1_1_host = v1_1_pubsubs[0].host
-            
+
             v1_0_gsub = v1_0_pubsubs[0].router
             v1_1_gsub = v1_1_pubsubs[0].router
-            
+
             assert isinstance(v1_0_gsub, GossipSub)
             assert isinstance(v1_1_gsub, GossipSub)
-            
+
             # Connect v1.0 and v1.1 hosts
             await connect(v1_0_host, v1_1_host)
             await trio.sleep(0.5)
-            
+
             # Both subscribe to the same topic
             topic = "test_interop"
             await v1_0_pubsubs[0].subscribe(topic)
             await v1_1_pubsubs[0].subscribe(topic)
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Verify that they've formed a mesh
             assert v1_1_host.get_id() in v1_0_gsub.mesh.get(topic, set())
             assert v1_0_host.get_id() in v1_1_gsub.mesh.get(topic, set())
-            
+
             # Test message exchange from v1.0 to v1.1
             test_message = b"test message from v1.0"
             await v1_0_pubsubs[0].publish(topic, test_message)
             await trio.sleep(0.5)
-            
+
             # Test message exchange from v1.1 to v1.0
             test_message_2 = b"test message from v1.1"
             await v1_1_pubsubs[0].publish(topic, test_message_2)
@@ -126,47 +126,47 @@ async def test_graceful_fallback_with_v1_0_peers():
         ) as v1_1_pubsubs:
             v1_0_host = v1_0_pubsubs[0].host
             v1_1_host = v1_1_pubsubs[0].host
-            
+
             v1_0_gsub = v1_0_pubsubs[0].router
             v1_1_gsub = v1_1_pubsubs[0].router
-            
+
             assert isinstance(v1_0_gsub, GossipSub)
             assert isinstance(v1_1_gsub, GossipSub)
-            
+
             # Connect v1.0 and v1.1 hosts
             await connect(v1_0_host, v1_1_host)
             await trio.sleep(0.5)
-            
+
             # Both subscribe to the same topic
             topic = "test_fallback"
             await v1_0_pubsubs[0].subscribe(topic)
             await v1_1_pubsubs[0].subscribe(topic)
             await trio.sleep(1.0)  # Allow time for mesh formation
-            
+
             # Verify that they've formed a mesh
             assert v1_1_host.get_id() in v1_0_gsub.mesh.get(topic, set())
             assert v1_0_host.get_id() in v1_1_gsub.mesh.get(topic, set())
-            
+
             # The v1.1 node should still apply scoring logic
             # but not expect v1.0 node to do the same
             if v1_1_gsub.scorer:
                 # Check initial score
                 initial_score = v1_1_gsub.scorer.score(v1_0_host.get_id(), [topic])
-                
+
                 # Simulate some positive behavior
                 v1_1_gsub.scorer.on_join_mesh(v1_0_host.get_id(), topic)
                 v1_1_gsub.scorer.on_heartbeat()
-                
+
                 # Score should have changed (time_in_mesh should increase)
                 new_score = v1_1_gsub.scorer.score(v1_0_host.get_id(), [topic])
                 assert new_score > initial_score
-            
+
             # Test message exchange works in both directions
             # v1.0 to v1.1
             test_message = b"test message from v1.0"
             await v1_0_pubsubs[0].publish(topic, test_message)
             await trio.sleep(0.5)
-            
+
             # v1.1 to v1.0
             test_message_2 = b"test message from v1.1"
             await v1_1_pubsubs[0].publish(topic, test_message_2)
