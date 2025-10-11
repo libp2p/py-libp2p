@@ -1,0 +1,9 @@
+Add NAT traversal via UPnP port mapping.
+
+- Implements automatic port mapping through UPnP-enabled gateways
+- Adds optional `miniupnpc` dependency via `pip install libp2p[upnp]`
+- Provides `UpnpManager` class for standalone UPnP operations
+- Integrates UPnP support into BasicHost with `enable_upnp=True` parameter
+- Includes comprehensive example demonstrating UPnP functionality
+- Supports double-NAT detection and proper error handling
+- Automatically cleans up port mappings on shutdown
