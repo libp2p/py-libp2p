@@ -157,37 +157,93 @@ class PeerScorer:
 
     # ---- Gates ----
     def allow_publish(self, peer: ID, topics: list[str]) -> bool:
+        """
+        Check if a peer is allowed to publish to the given topics.
+
+        If a single topic is provided, the peer must meet the threshold for that topic.
+        If multiple topics are provided, the peer must meet the threshold for
+        the combined score.
+        """
+        # Empty topic list - default to False for safety
+        if not topics:
+            return False
+
         # When checking a single topic, we need to ensure the peer meets
-        # the threshold for that topic
+        # the threshold for that specific topic only
         if len(topics) == 1:
-            topic_score = self.topic_score(peer, topics[0])
+            topic = topics[0]
+            # Calculate the topic-specific score
+            topic_score = self.topic_score(peer, topic)
+
             # Apply behavior penalty if applicable
             if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
                 topic_score -= (
                     self.behavior_penalty[peer]
                     - self.params.p5_behavior_penalty_threshold
                 ) * self.params.p5_behavior_penalty_weight
+
+            # Check against the threshold
             return topic_score >= self.params.publish_threshold
+
         # For multiple topics, use the combined score
         return self.score(peer, topics) >= self.params.publish_threshold
 
     def allow_gossip(self, peer: ID, topics: list[str]) -> bool:
+        """
+        Check if a peer is allowed to gossip about the given topics.
+
+        If a single topic is provided, the peer must meet the threshold for that topic.
+        If multiple topics are provided, the peer must meet the threshold for
+        the combined score.
+        """
+        # Empty topic list - default to False for safety
+        if not topics:
+            return False
+
         # When checking a single topic, we need to ensure the peer meets
-        # the threshold for that topic
+        # the threshold for that specific topic only
         if len(topics) == 1:
-            topic_score = self.topic_score(peer, topics[0])
+            topic = topics[0]
+            # Calculate the topic-specific score
+            topic_score = self.topic_score(peer, topic)
+
             # Apply behavior penalty if applicable
             if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
                 topic_score -= (
                     self.behavior_penalty[peer]
                     - self.params.p5_behavior_penalty_threshold
                 ) * self.params.p5_behavior_penalty_weight
+
+            # Check against the threshold
             return topic_score >= self.params.gossip_threshold
+
         # For multiple topics, use the combined score
         return self.score(peer, topics) >= self.params.gossip_threshold
 
     def is_graylisted(self, peer: ID, topics: list[str]) -> bool:
+        """
+        Check if a peer is graylisted based on their score for the given topics.
+
+        A peer is graylisted if their score is below the graylist threshold.
+        """
+        # Empty topic list - default to False for safety
+        if not topics:
+            return False
+
+        # For graylisting, we always use the combined score
+        # as it's a more conservative approach
         return self.score(peer, topics) < self.params.graylist_threshold
 
     def allow_px_from(self, peer: ID, topics: list[str]) -> bool:
+        """
+        Check if peer exchange (PX) is allowed from the given peer for the topics.
+
+        PX is allowed if the peer's score meets or exceeds the accept_px_threshold.
+        """
+        # Empty topic list - default to False for safety
+        if not topics:
+            return False
+
+        # For PX acceptance, we always use the combined score
+        # as it's a more conservative approach
         return self.score(peer, topics) >= self.params.accept_px_threshold
