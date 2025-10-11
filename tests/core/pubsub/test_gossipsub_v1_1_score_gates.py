@@ -326,25 +326,62 @@ class TestScoreGates:
             peer_id = host1.get_id()
 
             # Test with mixed topic scores
-            if gsub0.scorer:
-                # Give peer high score in topic1, low score in topic2
-                gsub0.scorer.on_join_mesh(peer_id, "topic1")
-                gsub0.scorer.on_heartbeat()
-                gsub0.scorer.on_join_mesh(peer_id, "topic1")
-                gsub0.scorer.on_heartbeat()  # Score = 2.0 for topic1
+            # Ensure scorer exists
+            assert gsub0.scorer is not None, "Scorer should not be None"
+            scorer = gsub0.scorer
 
-                # Check gates with different topic combinations
-                assert gsub0.scorer.allow_publish(peer_id, ["topic1"])  # High score
-                assert not gsub0.scorer.allow_publish(peer_id, ["topic2"])  # Low score
-                assert gsub0.scorer.allow_publish(
-                    peer_id, topics
-                )  # Combined score = 2.0 is still above threshold
+            # Reset any existing scores to ensure clean state
+            if peer_id in scorer.time_in_mesh:
+                for topic in list(scorer.time_in_mesh[peer_id].keys()):
+                    scorer.time_in_mesh[peer_id][topic] = 0.0
 
-                assert gsub0.scorer.allow_gossip(peer_id, ["topic1"])  # High score
-                assert not gsub0.scorer.allow_gossip(peer_id, ["topic2"])  # Low score
-                assert gsub0.scorer.allow_gossip(
-                    peer_id, topics
-                )  # Combined score = 2.0 is still above threshold
+            # Explicitly set topic1 score high and keep topic2 score at 0
+            scorer.on_join_mesh(peer_id, "topic1")
+            scorer.on_join_mesh(peer_id, "topic1")  # Add more score
+
+            # Verify the scores are as expected before testing gates
+            topic1_score = scorer.topic_score(peer_id, "topic1")
+            topic2_score = scorer.topic_score(peer_id, "topic2")
+
+            # Ensure topic1 score is above threshold and topic2 is below
+            assert topic1_score >= score_params.publish_threshold, (
+                f"Topic1 score {topic1_score} should be >= "
+                f"{score_params.publish_threshold}"
+            )
+            assert topic2_score < score_params.publish_threshold, (
+                f"Topic2 score {topic2_score} should be < "
+                f"{score_params.publish_threshold}"
+            )
+
+            # Now test the gates with the verified scores
+            # Test publish gate
+            assert scorer.allow_publish(peer_id, ["topic1"]), (
+                "Should allow publish for topic1 with high score"
+            )
+            assert not scorer.allow_publish(peer_id, ["topic2"]), (
+                "Should not allow publish for topic2 with low score"
+            )
+
+            # Test combined score (should be above threshold)
+            combined_score = scorer.score(peer_id, topics)
+            assert combined_score >= score_params.publish_threshold, (
+                f"Combined score {combined_score} should be >= "
+                f"{score_params.publish_threshold}"
+            )
+            assert scorer.allow_publish(peer_id, topics), (
+                "Should allow publish for combined topics"
+            )
+
+            # Test gossip gate
+            assert scorer.allow_gossip(peer_id, ["topic1"]), (
+                "Should allow gossip for topic1 with high score"
+            )
+            assert not scorer.allow_gossip(peer_id, ["topic2"]), (
+                "Should not allow gossip for topic2 with low score"
+            )
+            assert scorer.allow_gossip(peer_id, topics), (
+                "Should allow gossip for combined topics"
+            )
 
     @pytest.mark.trio
     async def test_score_gates_with_behavior_penalty(self):
