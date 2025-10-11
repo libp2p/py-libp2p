@@ -38,7 +38,8 @@ async def test_upnp_discover_success(mock_upnp_gateway):
     assert manager._lan_addr == "192.168.1.100"
     mock_gateway.discover.assert_called_once()
     mock_gateway.selectigd.assert_called_once()
-    mock_gateway.externalipaddress.assert_called_once()
+    # externalipaddress is called twice: once in _validate_igd and once in discover
+    assert mock_gateway.externalipaddress.call_count == 2
 
 
 async def test_upnp_discover_with_success_exception(mock_upnp_gateway):
@@ -164,3 +165,45 @@ async def test_remove_port_mapping_success(mock_upnp_gateway):
 
     assert result is True
     mock_gateway.deleteportmapping.assert_called_once_with(8080, "TCP")
+
+
+@patch("libp2p.discovery.upnp.logger")
+async def test_upnp_discover_invalid_igd(mock_logger, mock_upnp_gateway):
+    """
+    Test UPnP discovery when a non-IGD device is selected.
+    """
+    mock_gateway, UpnpManager = mock_upnp_gateway
+    mock_gateway.discover.return_value = 1
+    mock_gateway.selectigd.return_value = None
+    mock_gateway.lanaddr = None  # Simulate invalid IGD
+    mock_gateway.externalipaddress.return_value = None
+
+    manager = UpnpManager()
+    result = await manager.discover()
+
+    assert result is False
+    mock_logger.error.assert_called_with(
+        "Selected UPnP device is not a valid Internet Gateway Device. "
+        "The device may be a smart home device or other UPnP device "
+        "that doesn't support port mapping."
+    )
+
+
+@patch("libp2p.discovery.upnp.logger")
+async def test_upnp_discover_selectigd_failure(mock_logger, mock_upnp_gateway):
+    """
+    Test UPnP discovery when selectigd fails with a descriptive error.
+    """
+    mock_gateway, UpnpManager = mock_upnp_gateway
+    mock_gateway.discover.return_value = 1
+    mock_gateway.selectigd.side_effect = Exception("No UPnP device discovered")
+
+    manager = UpnpManager()
+    result = await manager.discover()
+
+    assert result is False
+    mock_logger.error.assert_any_call("Failed to select IGD: No UPnP device discovered")
+    mock_logger.error.assert_any_call(
+        "UPnP devices were found, but none are valid Internet Gateway Devices. "
+        "Check your router's UPnP/IGD settings."
+    )

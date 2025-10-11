@@ -26,6 +26,40 @@ class UpnpManager:
         self._lan_addr: str | None = None
         self._external_ip: str | None = None
 
+    def _validate_igd(self) -> bool:
+        """
+        Validate that the selected device is actually an Internet Gateway Device.
+
+        :return: True if the device is a valid IGD, False otherwise.
+        """
+        try:
+            # Check if we can get basic IGD information
+            if not self._gateway.lanaddr:
+                logger.debug("IGD validation failed: No LAN address available")
+                return False
+
+            # Try to get the external IP - this is a good test of IGD validity
+            external_ip = self._gateway.externalipaddress()
+            if not external_ip:
+                logger.debug("IGD validation failed: No external IP address available")
+                return False
+
+            # Additional validation: check if we can get the connection type
+            # This is a more advanced IGD feature that non-IGD devices typically
+            # don't support
+            try:
+                connection_type = self._gateway.connectiontype()
+                if connection_type:
+                    logger.debug(f"IGD connection type: {connection_type}")
+            except Exception:
+                # Connection type is optional, so we don't fail if it's not available
+                logger.debug("IGD connection type not available (this is optional)")
+
+            return True
+        except Exception as e:
+            logger.debug(f"IGD validation failed: {e}")
+            return False
+
     async def discover(self) -> bool:
         """
         Discover the UPnP IGD on the network.
@@ -50,7 +84,26 @@ class UpnpManager:
                     return False
 
             if num_devices > 0:
-                await trio.to_thread.run_sync(self._gateway.selectigd)
+                logger.debug(f"Found {num_devices} UPnP device(s), selecting IGD...")
+                try:
+                    await trio.to_thread.run_sync(self._gateway.selectigd)
+                except Exception as e:
+                    logger.error(f"Failed to select IGD: {e}")
+                    logger.error(
+                        "UPnP devices were found, but none are valid Internet "
+                        "Gateway Devices. Check your router's UPnP/IGD settings."
+                    )
+                    return False
+
+                # Validate that the selected device is actually an IGD
+                if not await trio.to_thread.run_sync(self._validate_igd):
+                    logger.error(
+                        "Selected UPnP device is not a valid Internet Gateway Device. "
+                        "The device may be a smart home device or other UPnP device "
+                        "that doesn't support port mapping."
+                    )
+                    return False
+
                 self._lan_addr = self._gateway.lanaddr
                 self._external_ip = await trio.to_thread.run_sync(
                     self._gateway.externalipaddress
