@@ -291,20 +291,47 @@ class TestGossipSubScoringIntegration:
             await pubsubs[1].subscribe(topic)
             await trio.sleep(0.2)
 
-            # Initially, peer should have low score and be blocked
-            peer_id = host1.get_id()
+            # Ensure scorer exists
             assert isinstance(gsub0, GossipSub)
             assert gsub0.scorer is not None
-            assert not gsub0.scorer.allow_publish(peer_id, [topic])
+            scorer = gsub0.scorer
+
+            # Get peer ID
+            peer_id = host1.get_id()
+
+            # Reset any existing scores to ensure clean state
+            if peer_id in scorer.time_in_mesh:
+                for t in list(scorer.time_in_mesh[peer_id].keys()):
+                    scorer.time_in_mesh[peer_id][t] = 0.0
+
+            # Verify initial score is below threshold
+            initial_score = scorer.topic_score(peer_id, topic)
+            assert initial_score < score_params.publish_threshold, (
+                f"Initial score {initial_score} should be < "
+                f"{score_params.publish_threshold}"
+            )
+
+            # Initially, peer should have low score and be blocked
+            assert not scorer.allow_publish(peer_id, [topic]), (
+                "Peer with low score should not be allowed to publish"
+            )
 
             # Simulate peer joining mesh to increase score
-            if gsub0.scorer:
-                gsub0.scorer.on_join_mesh(peer_id, topic)
-                gsub0.scorer.on_heartbeat()
+            # Add enough score to exceed threshold
+            scorer.on_join_mesh(peer_id, topic)
+            # Add more score to ensure it's above threshold
+            scorer.on_join_mesh(peer_id, topic)
+
+            # Verify the score is now above threshold
+            new_score = scorer.topic_score(peer_id, topic)
+            assert new_score >= score_params.publish_threshold, (
+                f"New score {new_score} should be >= {score_params.publish_threshold}"
+            )
 
             # Now peer should be allowed to publish
-            assert gsub0.scorer is not None
-            assert gsub0.scorer.allow_publish(peer_id, [topic])
+            assert scorer.allow_publish(peer_id, [topic]), (
+                "Peer with high score should be allowed to publish"
+            )
 
     @pytest.mark.trio
     async def test_gossip_gate(self):
