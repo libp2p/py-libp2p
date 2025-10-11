@@ -205,11 +205,46 @@ class TestPeerScorer:
 
         # Score should be sum of all topic scores
         total_score = scorer.score(peer_id, topics)
-        assert total_score == 3.0  # 1.0 per topic
+        assert total_score == 3.0  # 1.0 per topic.
 
         # Test with subset of topics
         subset_score = scorer.score(peer_id, topics[:2])
-        assert subset_score == 2.0  # Only first two topics
+        assert subset_score == 2.0  # Only first two topics.
+
+    def test_per_topic_gates(self):
+        """
+        Test that gates evaluate each topic individually when
+        a single topic is provided.
+        """
+        params = ScoreParams(
+            publish_threshold=0.5,
+            gossip_threshold=0.3,
+            p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=1.0),
+        )
+        scorer = PeerScorer(params)
+        peer_id = IDFactory()
+
+        # Give peer high score in topic1, no score in topic2
+        scorer.on_join_mesh(peer_id, "topic1")  # Score = 1.0 for topic1
+
+        # Test individual topic gates
+        # Should pass (score = 1.0)
+        assert scorer.allow_publish(peer_id, ["topic1"])
+        # Should fail (score = 0.0)
+        assert not scorer.allow_publish(peer_id, ["topic2"])
+
+        # Should pass (score = 1.0)
+        assert scorer.allow_gossip(peer_id, ["topic1"])
+        # Should fail (score = 0.0)
+        assert not scorer.allow_gossip(peer_id, ["topic2"])
+
+        # Test combined topic gates
+        assert scorer.allow_publish(
+            peer_id, ["topic1", "topic2"]
+        )  # Combined score = 1.0
+        assert scorer.allow_gossip(
+            peer_id, ["topic1", "topic2"]
+        )  # Combined score = 1.0
 
 
 class TestGossipSubScoringIntegration:

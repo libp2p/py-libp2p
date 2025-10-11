@@ -338,13 +338,13 @@ class TestScoreGates:
                 assert not gsub0.scorer.allow_publish(peer_id, ["topic2"])  # Low score
                 assert gsub0.scorer.allow_publish(
                     peer_id, topics
-                )  # Combined score = 2.0
+                )  # Combined score = 2.0 is still above threshold
 
                 assert gsub0.scorer.allow_gossip(peer_id, ["topic1"])  # High score
                 assert not gsub0.scorer.allow_gossip(peer_id, ["topic2"])  # Low score
                 assert gsub0.scorer.allow_gossip(
                     peer_id, topics
-                )  # Combined score = 2.0
+                )  # Combined score = 2.0 is still above threshold
 
     @pytest.mark.trio
     async def test_score_gates_with_behavior_penalty(self):

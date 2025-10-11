@@ -157,9 +157,33 @@ class PeerScorer:
 
     # ---- Gates ----
     def allow_publish(self, peer: ID, topics: list[str]) -> bool:
+        # When checking a single topic, we need to ensure the peer meets
+        # the threshold for that topic
+        if len(topics) == 1:
+            topic_score = self.topic_score(peer, topics[0])
+            # Apply behavior penalty if applicable
+            if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+                topic_score -= (
+                    self.behavior_penalty[peer]
+                    - self.params.p5_behavior_penalty_threshold
+                ) * self.params.p5_behavior_penalty_weight
+            return topic_score >= self.params.publish_threshold
+        # For multiple topics, use the combined score
         return self.score(peer, topics) >= self.params.publish_threshold
 
     def allow_gossip(self, peer: ID, topics: list[str]) -> bool:
+        # When checking a single topic, we need to ensure the peer meets
+        # the threshold for that topic
+        if len(topics) == 1:
+            topic_score = self.topic_score(peer, topics[0])
+            # Apply behavior penalty if applicable
+            if self.behavior_penalty[peer] > self.params.p5_behavior_penalty_threshold:
+                topic_score -= (
+                    self.behavior_penalty[peer]
+                    - self.params.p5_behavior_penalty_threshold
+                ) * self.params.p5_behavior_penalty_weight
+            return topic_score >= self.params.gossip_threshold
+        # For multiple topics, use the combined score
         return self.score(peer, topics) >= self.params.gossip_threshold
 
     def is_graylisted(self, peer: ID, topics: list[str]) -> bool:
