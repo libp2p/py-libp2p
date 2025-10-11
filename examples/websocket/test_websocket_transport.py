@@ -3,7 +3,6 @@
 Simple test script to verify WebSocket transport functionality.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 import sys
@@ -11,7 +10,9 @@ import sys
 # Add the libp2p directory to the path so we can import it
 sys.path.insert(0, str(Path(__file__).parent))
 
+import pytest
 import multiaddr
+import trio
 
 from libp2p.transport import create_transport, create_transport_for_multiaddr
 from libp2p.transport.upgrader import TransportUpgrader
@@ -21,6 +22,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.trio
 async def test_websocket_transport():
     """Test basic WebSocket transport functionality."""
     print("🧪 Testing WebSocket Transport Functionality")
@@ -79,6 +81,7 @@ async def test_websocket_transport():
     return True
 
 
+@pytest.mark.trio
 async def test_transport_registry():
     """Test the transport registry functionality."""
     print("\n🔧 Testing Transport Registry")
@@ -135,7 +138,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        trio.run(main)
     except KeyboardInterrupt:
         print("\n👋 Test interrupted by user")
     except Exception as e:
