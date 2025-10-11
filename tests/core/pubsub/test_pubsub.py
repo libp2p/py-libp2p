@@ -1241,3 +1241,39 @@ async def test_blacklist_tears_down_existing_connection():
         else:
             # It’s also fine if the entire topic entry was pruned
             assert TESTING_TOPIC not in pubsub0.peer_topics
+
+
+@pytest.mark.trio
+async def test_get_message_id():
+    """Test that the get_message_id method provides correct message ID construction."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        # Create a test message
+        msg = make_pubsub_msg(
+            origin_id=pubsub.my_id,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00\x00\x00\x00\x00\x00\x00\x01",
+        )
+
+        # Test that get_message_id returns the same result as the internal method
+        public_msg_id = pubsub.get_message_id(msg)
+        internal_msg_id = pubsub._msg_id_constructor(msg)
+
+        assert public_msg_id == internal_msg_id
+
+        # Test that it works with different message ID constructors
+        def custom_msg_id_constructor(msg):
+            return msg.data + msg.from_id
+
+        # Create a new pubsub instance with custom constructor
+        async with PubsubFactory.create_batch_with_floodsub(
+            1, msg_id_constructor=custom_msg_id_constructor
+        ) as custom_pubsubs:
+            custom_pubsub = custom_pubsubs[0]
+
+            custom_msg_id = custom_pubsub.get_message_id(msg)
+            expected_custom_id = msg.data + msg.from_id
+
+            assert custom_msg_id == expected_custom_id
