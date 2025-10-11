@@ -67,6 +67,9 @@ class PublicKey(Key):
         data = self.to_bytes()
         protobuf_key = crypto_pb2.PublicKey(key_type=key_type, data=data)
         return protobuf_key
+    
+    def serialize_to_protobuf(self) -> crypto_pb2.PublicKey:
+        return self._serialize_to_protobuf()
 
     def serialize(self) -> bytes:
         """Return the canonical serialization of this ``Key``."""
