@@ -439,28 +439,36 @@ def new_host(
         effective_connection_config = quic_transport_opt
 
         # If both connection_config and quic_transport_opt are provided,
-        # merge health monitoring settings
+        # merge ALL connection and health monitoring settings
         if connection_config is not None:
-            # Merge health monitoring settings from connection_config
-            # into quic_transport_opt
-            if hasattr(connection_config, "enable_health_monitoring"):
-                quic_transport_opt.enable_health_monitoring = (
-                    connection_config.enable_health_monitoring
-                )
-            if hasattr(connection_config, "health_check_interval"):
-                quic_transport_opt.health_check_interval = (
-                    connection_config.health_check_interval
-                )
-            if hasattr(connection_config, "load_balancing_strategy"):
-                quic_transport_opt.load_balancing_strategy = (
-                    connection_config.load_balancing_strategy
-                )
-            if hasattr(connection_config, "max_connections_per_peer"):
-                quic_transport_opt.max_connections_per_peer = (
-                    connection_config.max_connections_per_peer
-                )
+            # Merge all ConnectionConfig attributes from connection_config
+            # into quic_transport_opt (which inherits from ConnectionConfig)
+            connection_config_attrs = [
+                "max_connections_per_peer",
+                "connection_timeout",
+                "load_balancing_strategy",
+                "enable_health_monitoring",
+                "health_initial_delay",
+                "health_warmup_window",
+                "health_check_interval",
+                "ping_timeout",
+                "min_health_threshold",
+                "min_connections_per_peer",
+                "latency_weight",
+                "success_rate_weight",
+                "stability_weight",
+                "max_ping_latency",
+                "min_ping_success_rate",
+                "max_failed_streams",
+                "unhealthy_grace_period",
+            ]
+
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+
             logger.info(
-                "Merged health monitoring settings from "
+                "Merged all connection and health monitoring settings from "
                 "connection_config into QUIC config"
             )
     elif connection_config is not None:
