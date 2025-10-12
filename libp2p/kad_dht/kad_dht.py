@@ -133,8 +133,10 @@ class KadDHT(Service):
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
         self.enable_values = enable_values
-
         self.validator = validator
+
+        if validator is None:
+            self.validator = NamespacedValidator({"pk": PublicKeyValidator()})
 
         # If true implies that the validator has been changed and that
         # Defaults should not be used
@@ -233,7 +235,7 @@ class KadDHT(Service):
         else:
             logger.info("RT Refresh Manager was not running (Random Walk disabled)")
 
-    async def apply_fallbacks(self, host: IHost) -> None:
+    def apply_fallbacks(self) -> None:
         """
         Apply fallback validators if not explicitely changed by the user
 
@@ -767,24 +769,25 @@ class KadDHT(Service):
         """
         logger.debug(f"Storing value for key {key.hex()}")
 
-        if self.validator is not None:
-            # Dont allow local users to put bad values
-            self.validator.validate(key.decode("utf-8"), value)
+        if key.decode("utf-8").startswith("/"):
+            if self.validator is not None:
+                # Dont allow local users to put bad values
+                self.validator.validate(key.decode("utf-8"), value)
 
-            old_value_record = self.value_store.get(key)
-            if old_value_record is not None and old_value_record.value != value:
-                # Select which value is better
-                try:
-                    index = self.validator.select(
-                        key.decode("utf-8"), [value, old_value_record.value]
-                    )
-                    if index != 0:
-                        raise ValueError(
-                            "Refusing to replace newer value with the older one"
+                old_value_record = self.value_store.get(key)
+                if old_value_record is not None and old_value_record.value != value:
+                    # Select which value is better
+                    try:
+                        index = self.validator.select(
+                            key.decode("utf-8"), [value, old_value_record.value]
                         )
-                except Exception as e:
-                    logger.debug(f"Validation select error for key {key.hex()}: {e}")
-                    raise
+                        if index != 0:
+                            raise ValueError(
+                                "Refusing to replace newer value with the older one"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Validation error for key {key.hex()}: {e}")
+                        raise
 
         # 1. Store locally first
         self.value_store.put(key, value)

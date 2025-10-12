@@ -31,6 +31,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.records.utils import InvalidRecordType
 from libp2p.records.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
@@ -278,6 +279,25 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Verify that the retrieved value matches the original
     assert retrieved_value == value, "Retrieved value does not match the stored value"
+
+    # TEST PUB-KEY VALIDATORS
+
+    # VALID KEY PAIR
+    keypair = create_new_key_pair()
+    peer_id = ID.from_pubkey(keypair.public_key)
+    key = f"/pk/{peer_id.to_bytes().hex()}"
+    value = keypair.public_key.serialize()
+
+    with trio.fail_after(TEST_TIMEOUT):
+        await dht_a.put_value(key.encode(), value)
+
+    # INVALID KEY PAIR
+    key = "/pk/abcdef1234567890"  # Not a valid multihash
+    value = b"not-a-real-key"
+
+    with trio.fail_after(TEST_TIMEOUT):
+        with pytest.raises(InvalidRecordType, match="valid multihash"):
+            await dht_a.put_value(key.encode(), value)
 
 
 @pytest.mark.trio
