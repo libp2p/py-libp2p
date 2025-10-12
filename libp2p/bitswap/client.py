@@ -3,6 +3,7 @@ Bitswap client implementation for block exchange.
 Supports v1.0.0, v1.1.0, and v1.2.0 protocols.
 """
 
+import hashlib
 import logging
 from typing import Any
 
@@ -75,6 +76,7 @@ class BitswapClient:
         ] = {}  # peer -> wantlist
         self._pending_requests: dict[bytes, trio.Event] = {}  # CID -> event
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
+        self._expected_blocks: dict[PeerID, set[bytes]] = {}  # peer -> expected CIDs
         self._nursery: trio.Nursery | None = None
         self._started = False
 
@@ -104,6 +106,7 @@ class BitswapClient:
         self._peer_wantlists.clear()
         self._pending_requests.clear()
         self._peer_protocols.clear()
+        self._expected_blocks.clear()
         logger.info("Bitswap client stopped")
 
     def set_nursery(self, nursery: trio.Nursery) -> None:
@@ -276,6 +279,11 @@ class BitswapClient:
 
     async def _send_wantlist_to_peer(self, peer_id: PeerID, cids: list[bytes]) -> None:
         """Send wantlist to a specific peer."""
+        # Track expected blocks for this peer
+        if peer_id not in self._expected_blocks:
+            self._expected_blocks[peer_id] = set()
+        self._expected_blocks[peer_id].update(cids)
+        
         try:
             # Create wantlist entries with full v1.2.0 information
             entries = []
@@ -312,8 +320,8 @@ class BitswapClient:
             )
 
             # Store negotiated protocol
-            if hasattr(stream, "protocol"):
-                self._peer_protocols[peer_id] = stream.protocol  # type: ignore[attr-defined]
+            if hasattr(stream, "protocol_id"):
+                self._peer_protocols[peer_id] = stream.protocol_id  # type: ignore[attr-defined]
 
             await self._write_message(stream, msg)
             logger.debug(f"Sent wantlist to peer {peer_id}")
@@ -400,14 +408,26 @@ class BitswapClient:
         """Read responses from a stream after sending a wantlist.
         
         This keeps the stream open so the provider can send blocks back.
+        Stops reading once all expected blocks are received.
         """
         try:
             logger.debug(f"Reading responses from {peer_id} on stream")
             while True:
-                # Read message from provider
-                msg = await self._read_message(stream)
-                if msg is None:
-                    logger.debug(f"Stream from {peer_id} closed")
+                # Check if we've received all expected blocks from this peer
+                if peer_id in self._expected_blocks:
+                    if len(self._expected_blocks[peer_id]) == 0:
+                        logger.debug(f"All expected blocks received from {peer_id}, closing stream")
+                        break
+                
+                # Read message from provider with timeout
+                try:
+                    with trio.fail_after(5.0):  # 5 second timeout for each message
+                        msg = await self._read_message(stream)
+                        if msg is None:
+                            logger.debug(f"Stream from {peer_id} closed")
+                            break
+                except trio.TooSlowError:
+                    logger.debug(f"Timeout reading from {peer_id}, assuming no more data")
                     break
 
                 logger.debug(f"Received response from {peer_id}")
@@ -417,6 +437,9 @@ class BitswapClient:
         except Exception as e:
             logger.debug(f"Stream from {peer_id} ended: {e}")
         finally:
+            # Clean up expected blocks for this peer
+            if peer_id in self._expected_blocks:
+                del self._expected_blocks[peer_id]
             try:
                 await stream.close()
             except Exception:
@@ -456,7 +479,7 @@ class BitswapClient:
 
         # Process blocks (v1.0.0 format)
         if msg.blocks:
-            await self._process_blocks_v100(msg.blocks)  # type: ignore[arg-type]
+            await self._process_blocks_v100(msg.blocks, peer_id)  # type: ignore[arg-type]
 
         # Process payload (v1.1.0+ format)
         if msg.payload:
@@ -541,23 +564,53 @@ class BitswapClient:
                     f"Sent {len(presences_to_send)} block presences to peer {peer_id}"
                 )
 
-    async def _process_blocks_v100(self, blocks: list[bytes]) -> None:
-        """Process received blocks (v1.0.0 format)."""
-        logger.debug(f"Processing {len(blocks)} blocks (v1.0.0)")
-        for block_data in blocks:
-            # For v1.0.0, compute CID from the block data
-            cid = compute_cid(block_data, version=CID_V0)
-
-            # Store the block
-            await self.block_store.put_block(cid, block_data)
-            logger.debug(f"Received and stored block {cid.hex()[:16]}... (v1.0.0)")
-
-            # Notify pending requests
-            if cid in self._pending_requests:
-                logger.debug(f"Notifying pending request for {cid.hex()[:16]}...")
-                self._pending_requests[cid].set()
+    async def _process_blocks_v100(self, blocks: list[bytes], peer_id: bytes) -> None:
+        """Process received blocks (v1.0.0 format).
+        
+        For v1.0.0, we can't reliably recompute CIDs from block data alone
+        because we don't know which codec was used. Instead, we verify the
+        block data against the CIDs we're expecting.
+        """
+        logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id.hex()[:8]}")
+        
+        # Get the CIDs we're expecting from this peer
+        expected_cids = self._expected_blocks.get(peer_id, set()).copy()
+        logger.info(f"Expected {len(expected_cids)} blocks from this peer")
+        
+        for idx, block_data in enumerate(blocks):
+            block_hash = hashlib.sha256(block_data).hexdigest()
+            logger.info(f"Block {idx+1}: size={len(block_data)} bytes, hash={block_hash[:16]}...")
+            
+            # Find which expected CID matches this block data
+            matched_cid = None
+            for cid in expected_cids:
+                if verify_cid(cid, block_data):
+                    matched_cid = cid
+                    logger.info(f"✓ Block matched CID: {matched_cid.hex()}")
+                    break
+            
+            if matched_cid:
+                # Store the block with the correct CID
+                await self.block_store.put_block(matched_cid, block_data)
+                logger.debug(f"Stored block {matched_cid.hex()[:16]}...")
+                
+                # Remove from expected blocks for all peers
+                for pid in self._expected_blocks:
+                    self._expected_blocks[pid].discard(matched_cid)
+                
+                # Notify pending requests
+                if matched_cid in self._pending_requests:
+                    logger.debug(f"Notifying pending request for {matched_cid.hex()[:16]}...")
+                    self._pending_requests[matched_cid].set()
             else:
-                logger.debug(f"No pending request for {cid.hex()[:16]}...")
+                logger.warning(f"✗ Block {idx+1} doesn't match any expected CID!")
+                logger.warning(f"  Block hash: {block_hash}")
+                logger.warning(f"  Expected CIDs ({len(expected_cids)}):")
+                for i, cid in enumerate(list(expected_cids)[:5]):
+                    logger.warning(f"    {i+1}. {cid.hex()}")
+                if len(expected_cids) > 5:
+                    logger.warning(f"    ... and {len(expected_cids) - 5} more")
+
 
     async def _process_blocks_v110(self, blocks: list[Any]) -> None:
         """Process received blocks (v1.1.0+ format with prefix)."""
@@ -572,6 +625,10 @@ class BitswapClient:
             # Store the block
             await self.block_store.put_block(cid, data)
             logger.debug(f"Received and stored block {cid.hex()[:16]}... (v1.1.0+)")
+
+            # Remove from expected blocks for all peers
+            for peer_id in self._expected_blocks:
+                self._expected_blocks[peer_id].discard(cid)
 
             # Notify pending requests
             if cid in self._pending_requests:

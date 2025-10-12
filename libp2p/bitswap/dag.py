@@ -158,7 +158,9 @@ class MerkleDag:
             return cid
 
         # Chunk the file
-        logger.debug(f"Chunking file into ~{estimate_chunk_count(file_size, chunk_size)} chunks")
+        estimated_chunks = estimate_chunk_count(file_size, chunk_size)
+        logger.debug(f"Chunking file into ~{estimated_chunks} chunks")
+        logger.info(f"=== Starting file chunking process ===")
 
         chunks_data: List[Tuple[bytes, int]] = []
         bytes_processed = 0
@@ -184,6 +186,12 @@ class MerkleDag:
                     f"chunking ({i + 1} chunks)",
                 )
 
+            # Enhanced logging with full CID
+            logger.info(
+                f"Chunk {i + 1}: CID={chunk_cid.hex()}, "
+                f"Size={len(chunk_data)} bytes, "
+                f"Progress={bytes_processed}/{file_size}"
+            )
             logger.debug(
                 f"Stored chunk {i}: {chunk_cid.hex()[:16]}... "
                 f"({len(chunk_data)} bytes)"
@@ -198,6 +206,18 @@ class MerkleDag:
         root_data = create_file_node(chunks_data)
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
         await self.bitswap.add_block(root_cid, root_data)
+
+        # Enhanced logging for root CID
+        logger.info("=== File chunking completed ===")
+        logger.info(
+            f"Root CID: {root_cid.hex()} "
+            f"(Links to {len(chunks_data)} chunks)"
+        )
+        logger.info(f"Total file size: {file_size} bytes")
+        logger.info("=== Chunk CIDs ===")
+        for i, (chunk_cid, chunk_size) in enumerate(chunks_data):
+            logger.info(f"  Chunk {i}: {chunk_cid.hex()} ({chunk_size} bytes)")
+        logger.info("=" * 50)
 
         logger.info(
             f"Added file with {len(chunks_data)} chunks. "
@@ -293,30 +313,44 @@ class MerkleDag:
         Fetch a file from the DAG.
 
         Automatically resolves links and fetches all chunks. Works with both
-        single-block files and multi-chunk files.
+        single-block files and multi-chunk files. Everything is handled
+        automatically - just provide the root CID!
+
+        The method automatically:
+        - Fetches and decodes the root block
+        - Determines file size and number of chunks
+        - Fetches all chunks in sequence
+        - Verifies integrity of all blocks
+        - Reconstructs the complete file
 
         Args:
-            root_cid: Root CID of the file
+            root_cid: Root CID of the file (this is all you need!)
             peer_id: Optional specific peer to fetch from
             timeout: Timeout per block in seconds
             progress_callback: Optional callback(current, total, status)
+                              Receives metadata automatically in first call
 
         Returns:
-            Complete file data
+            Complete file data as bytes
 
         Raises:
             BlockNotFoundError: If any block cannot be found
             ValueError: If CID verification fails
 
         Example:
+            >>> # Simple usage - just provide root CID
+            >>> data = await dag.fetch_file(root_cid)
+            >>> open('downloaded_movie.mp4', 'wb').write(data)
+            
+            >>> # With progress tracking
             >>> def progress(current, total, status):
             ...     percent = (current / total) * 100 if total > 0 else 0
             ...     print(f"{status}: {percent:.1f}%")
             >>> data = await dag.fetch_file(root_cid, progress_callback=progress)
-            >>> open('downloaded_movie.mp4', 'wb').write(data)
 
         """
         logger.info(f"Fetching file: {root_cid.hex()[:16]}...")
+        logger.info(f"=== Starting file fetch for CID: {root_cid.hex()} ===")
 
         # Get root block
         root_data = await self.bitswap.get_block(root_cid, peer_id, timeout)
@@ -335,13 +369,39 @@ class MerkleDag:
             if not links:
                 # File with inline data (small file)
                 logger.debug("File has inline data")
-                if unixfs_data and unixfs_data.data:
-                    return unixfs_data.data
-                return b""
+                file_data = unixfs_data.data if unixfs_data and unixfs_data.data else b""
+                
+                # Notify progress callback with metadata
+                if progress_callback:
+                    await _call_progress_callback(
+                        progress_callback, 
+                        len(file_data), 
+                        len(file_data), 
+                        f"metadata: size={len(file_data)}, chunks=0"
+                    )
+                
+                return file_data
 
             # File with multiple chunks
             total_size = unixfs_data.filesize if unixfs_data else 0
             logger.debug(f"File has {len(links)} chunks, total size: {total_size}")
+            logger.info(f"Fetching multi-chunk file: {len(links)} chunks, {total_size} bytes")
+            logger.info("=== Chunk CIDs to fetch ===")
+            for i, link in enumerate(links):
+                logger.info(f"  Chunk {i}: {link.cid.hex()} ({link.size} bytes)")
+            logger.info("=" * 50)
+            
+            # Notify progress callback with file metadata at the start
+            if progress_callback:
+                await _call_progress_callback(
+                    progress_callback,
+                    0,
+                    total_size,
+                    f"metadata: size={total_size}, chunks={len(links)}"
+                )
+            for i, link in enumerate(links):
+                logger.info(f"  Chunk {i}: {link.cid.hex()} ({link.size} bytes)")
+            logger.info("=" * 50)
 
             file_data = b""
             bytes_fetched = 0
@@ -355,6 +415,8 @@ class MerkleDag:
                         total_size,
                         f"fetching chunk {i + 1}/{len(links)}",
                     )
+
+                logger.info(f"Fetching chunk {i + 1}/{len(links)}: CID={link.cid.hex()}")
 
                 # Fetch chunk
                 chunk_data = await self.bitswap.get_block(
@@ -370,6 +432,10 @@ class MerkleDag:
                 file_data += chunk_data
                 bytes_fetched += len(chunk_data)
 
+                logger.info(
+                    f"✓ Chunk {i + 1} fetched and verified: "
+                    f"{len(chunk_data)} bytes (total: {bytes_fetched}/{total_size})"
+                )
                 logger.debug(
                     f"Fetched chunk {i + 1}/{len(links)}: "
                     f"{link.cid.hex()[:16]}... ({len(chunk_data)} bytes)"
@@ -380,6 +446,10 @@ class MerkleDag:
                     progress_callback, total_size, total_size, "completed"
                 )
 
+            logger.info(f"=== File fetch completed ===")
+            logger.info(f"Total bytes fetched: {len(file_data)}")
+            logger.info(f"All {len(links)} chunks verified successfully")
+            logger.info("=" * 50)
             logger.info(f"Fetched file: {len(file_data)} bytes")
             return file_data
 

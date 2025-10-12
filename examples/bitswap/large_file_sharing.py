@@ -103,7 +103,8 @@ async def run_provider(file_path: str, port: int = 0):
     host = new_host()
 
     # Start host
-    async with host.run([f"/ip4/0.0.0.0/tcp/{port}"]):
+    listen_maddr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    async with host.run([listen_maddr]):
         # Setup Bitswap and MerkleDag
         store = MemoryBlockStore()
         bitswap = BitswapClient(host, store)
@@ -111,13 +112,13 @@ async def run_provider(file_path: str, port: int = 0):
 
         dag = MerkleDag(bitswap)
 
-        # Print provider info
+        # Print provider info (addresses already include peer ID)
         addrs = host.get_addrs()
         print("\n" + "=" * 60)
         print("PROVIDER READY")
         print("=" * 60)
         for addr in addrs:
-            print(f"Listening on: {addr}/p2p/{host.get_id()}")
+            print(f"Listening on: {addr}")
         print("=" * 60)
 
         # Add file to DAG
@@ -152,7 +153,7 @@ async def run_provider(file_path: str, port: int = 0):
         print("=" * 60)
         print(f"Root CID: {root_cid.hex()}")
         print("\nShare these with the client:")
-        print(f"  --peer {addrs[0]}/p2p/{host.get_id()}")
+        print(f"  --peer {addrs[0]}")
         print(f"  --cid {root_cid.hex()}")
         print("=" * 60)
 
@@ -202,7 +203,8 @@ async def run_client(
     host = new_host()
 
     # Start host
-    async with host.run(["/ip4/0.0.0.0/tcp/0"]):
+    client_listen = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
+    async with host.run([client_listen]):
         # Setup Bitswap and MerkleDag
         store = MemoryBlockStore()
         bitswap = BitswapClient(host, store)
@@ -223,28 +225,41 @@ async def run_client(
             logger.error(f"Failed to connect: {e}")
             sys.exit(1)
 
-        # Get file info first
-        print("\nFetching file metadata...")
-        try:
-            info = await dag.get_file_info(root_cid, peer_id=peer_info.peer_id)
-            file_size = info["size"]
-            num_chunks = info["chunks"]
+        # Give the connection a moment to fully establish
+        print("Waiting for connection to stabilize...")
+        await trio.sleep(1.0)
+        
+        print("Establishing bitswap protocol...")
+        await trio.sleep(0.5)
 
-            print("✓ File metadata received")
-            print(f"  File size: {format_size(file_size)}")
-            print(f"  Chunks: {num_chunks}")
-        except Exception as e:
-            logger.error(f"Failed to get file info: {e}")
-            sys.exit(1)
-
-        # Download file with progress
-        print("\nDownloading file...")
+        # Fetch the file - metadata is provided automatically via progress callback!
+        print("\nFetching file from provider...")
+        print("(File metadata will be received automatically)\n")
+        logger.debug(f"Requesting root CID: {root_cid.hex()}")
+        
+        # Track metadata and progress
+        file_metadata = {}
         last_progress = [0]
-
+        
         def progress_callback(current, total, status):
-            # Print every 2% to show progress without spam
+            # First callback contains metadata
+            if status.startswith("metadata:"):
+                # Parse metadata from status string
+                # Format: "metadata: size=5242880, chunks=20"
+                parts = status.split(": ")[1].split(", ")
+                for part in parts:
+                    key, value = part.split("=")
+                    file_metadata[key] = int(value)
+                
+                print("✓ File metadata received automatically:")
+                print(f"  File size: {format_size(file_metadata['size'])}")
+                print(f"  Chunks: {file_metadata['chunks']}")
+                print("\nDownloading file...")
+                return
+            
+            # Regular progress updates
             percent = (current / total * 100) if total > 0 else 0
-            if percent - last_progress[0] >= 2 or current == total:
+            if percent - last_progress[0] >= 5 or current == total:
                 bar = format_progress_bar(current, total)
                 print(
                     f"\r{status.capitalize()}: {bar} "
@@ -255,15 +270,32 @@ async def run_client(
                 last_progress[0] = percent
 
         try:
-            file_data = await dag.fetch_file(
-                root_cid,
-                peer_id=peer_info.peer_id,
-                timeout=timeout,
-                progress_callback=progress_callback,
-            )
+            # Just provide the root CID - everything else is automatic!
+            with trio.fail_after(timeout * 100):  # Generous timeout for large files
+                file_data = await dag.fetch_file(
+                    root_cid,
+                    peer_id=peer_info.peer_id,
+                    timeout=timeout,
+                    progress_callback=progress_callback,
+                )
             print()  # New line after progress
+
+            print(f"\n✓ Download completed!")
+            print(f"  Received: {format_size(len(file_data))} bytes")
+            
+            # Verify we got the expected size if we have metadata
+            if 'size' in file_metadata and len(file_data) != file_metadata['size']:
+                logger.warning(
+                    f"Size mismatch: expected {file_metadata['size']}, "
+                    f"got {len(file_data)}"
+                )
+        except trio.TooSlowError:
+            logger.error(f"Timeout while fetching file")
+            print(f"\n✗ Download failed: Timeout")
+            sys.exit(1)
         except Exception as e:
-            logger.error(f"\nFailed to fetch file: {e}")
+            logger.error(f"Error fetching file: {e}")
+            print(f"\n✗ Download failed: {e}")
             sys.exit(1)
 
         # Save to file
@@ -281,6 +313,7 @@ async def run_client(
         from libp2p.bitswap.cid import verify_cid
 
         # For chunked files, verify the root CID
+        num_chunks = file_metadata.get('chunks', 0)
         if num_chunks > 1:
             print("✓ Multi-chunk file fetched successfully")
         else:
@@ -368,6 +401,10 @@ def main():
     if args.debug:
         logging.getLogger("libp2p").setLevel(logging.DEBUG)
         logging.getLogger(__name__).setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.bitswap").setLevel(logging.DEBUG)
+    else:
+        # Set bitswap to INFO to see what's happening
+        logging.getLogger("libp2p.bitswap").setLevel(logging.INFO)
 
     # Run appropriate mode
     if args.mode == "provider":
