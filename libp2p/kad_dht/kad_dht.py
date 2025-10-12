@@ -614,8 +614,8 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
-                    value = self.value_store.get(key)
-                    if value:
+                    value_record = self.value_store.get(key)
+                    if value_record:
                         logger.debug(f"Found value for key {key.hex()}")
 
                         # Create response using protobuf
@@ -624,9 +624,7 @@ class KadDHT(Service):
 
                         # Create record
                         response.key = key
-                        response.record.key = key
-                        response.record.value = value
-                        response.record.timeReceived = str(time.time())
+                        response.record.CopyFrom(value_record)
 
                         # Create sender_signed_peer_record
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -773,11 +771,13 @@ class KadDHT(Service):
             # Dont allow local users to put bad values
             self.validator.validate(key.decode("utf-8"), value)
 
-            old = self.value_store.get(key)
-            if old is not None and old != value:
+            old_value_record = self.value_store.get(key)
+            if old_value_record is not None and old_value_record.value != value:
                 # Select which value is better
                 try:
-                    index = self.validator.select(key.decode("utf-8"), [value, old])
+                    index = self.validator.select(
+                        key.decode("utf-8"), [value, old_value_record.value]
+                    )
                     if index != 0:
                         raise ValueError(
                             "Refusing to replace newer value with the older one"
@@ -836,10 +836,10 @@ class KadDHT(Service):
         logger.debug(f"Getting value for key: {key.hex()}")
 
         # 1. Check local store first
-        value = self.value_store.get(key)
-        if value:
+        value_record = self.value_store.get(key)
+        if value_record:
             logger.debug("Found value locally")
-            return value
+            return value_record.value
 
         # 2. Get closest peers, excluding self
         closest_peers = [
