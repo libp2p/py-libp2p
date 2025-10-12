@@ -23,6 +23,7 @@ from .client import BitswapClient
 from .dag_pb import (
     create_file_node,
     decode_dag_pb,
+    is_directory_node,
     is_file_node,
 )
 
@@ -104,6 +105,7 @@ class MerkleDag:
         file_path: str,
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        wrap_with_directory: bool = True,
     ) -> bytes:
         """
         Add a file to the DAG.
@@ -115,9 +117,11 @@ class MerkleDag:
             file_path: Path to file
             chunk_size: Optional chunk size (auto-selected if None)
             progress_callback: Optional callback(current, total, status)
+            wrap_with_directory: If True, wraps file in a directory node with filename
+                                 (IPFS-standard way, enables filename preservation)
 
         Returns:
-            Root CID of the file
+            Root CID of the file (or wrapping directory if wrap_with_directory=True)
 
         Raises:
             FileNotFoundError: If file doesn't exist
@@ -155,6 +159,22 @@ class MerkleDag:
                 )
 
             logger.info(f"Added file as single block: {cid.hex()[:16]}...")
+            
+            # Wrap in directory if requested
+            if wrap_with_directory:
+                import os
+                from .dag_pb import create_directory_node
+                
+                filename = os.path.basename(file_path)
+                logger.info(f"Wrapping single-block file in directory with name: {filename}")
+                
+                dir_data = create_directory_node([(filename, cid, file_size)])
+                dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
+                await self.bitswap.add_block(dir_cid, dir_data)
+                
+                logger.info(f"Created directory wrapper. Directory CID: {dir_cid.hex()[:16]}...")
+                return dir_cid
+            
             return cid
 
         # Chunk the file
@@ -228,6 +248,22 @@ class MerkleDag:
             await _call_progress_callback(
                 progress_callback, file_size, file_size, "completed"
             )
+
+        # Wrap in directory if requested (IPFS-standard way for filename preservation)
+        if wrap_with_directory:
+            import os
+            from .dag_pb import create_directory_node
+            
+            filename = os.path.basename(file_path)
+            logger.info(f"Wrapping file in directory with name: {filename}")
+            
+            # Create directory node with single entry pointing to the file
+            dir_data = create_directory_node([(filename, root_cid, file_size)])
+            dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
+            await self.bitswap.add_block(dir_cid, dir_data)
+            
+            logger.info(f"Created directory wrapper. Directory CID: {dir_cid.hex()[:16]}...")
+            return dir_cid
 
         return root_cid
 
@@ -308,7 +344,7 @@ class MerkleDag:
         peer_id: Optional[object] = None,
         timeout: float = 30.0,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ) -> bytes:
+    ) -> tuple[bytes, Optional[str]]:
         """
         Fetch a file from the DAG.
 
@@ -317,6 +353,7 @@ class MerkleDag:
         automatically - just provide the root CID!
 
         The method automatically:
+        - Detects directory wrappers and extracts filename
         - Fetches and decodes the root block
         - Determines file size and number of chunks
         - Fetches all chunks in sequence
@@ -324,14 +361,14 @@ class MerkleDag:
         - Reconstructs the complete file
 
         Args:
-            root_cid: Root CID of the file (this is all you need!)
+            root_cid: Root CID of the file (or directory wrapper)
             peer_id: Optional specific peer to fetch from
             timeout: Timeout per block in seconds
             progress_callback: Optional callback(current, total, status)
                               Receives metadata automatically in first call
 
         Returns:
-            Complete file data as bytes
+            Tuple of (file_data, filename) where filename is None if not wrapped in directory
 
         Raises:
             BlockNotFoundError: If any block cannot be found
@@ -339,14 +376,15 @@ class MerkleDag:
 
         Example:
             >>> # Simple usage - just provide root CID
-            >>> data = await dag.fetch_file(root_cid)
-            >>> open('downloaded_movie.mp4', 'wb').write(data)
+            >>> data, filename = await dag.fetch_file(root_cid)
+            >>> save_path = filename or 'downloaded_file'
+            >>> open(save_path, 'wb').write(data)
             
             >>> # With progress tracking
             >>> def progress(current, total, status):
             ...     percent = (current / total) * 100 if total > 0 else 0
             ...     print(f"{status}: {percent:.1f}%")
-            >>> data = await dag.fetch_file(root_cid, progress_callback=progress)
+            >>> data, filename = await dag.fetch_file(root_cid, progress_callback=progress)
 
         """
         logger.info(f"Fetching file: {root_cid.hex()[:16]}...")
@@ -359,12 +397,37 @@ class MerkleDag:
         if not verify_cid(root_cid, root_data):
             raise ValueError(f"Root block verification failed: {root_cid.hex()}")
 
+        # Check if it's a directory wrapper (IPFS-standard way for filename)
+        filename = None
+        actual_file_cid = root_cid
+        actual_file_data = root_data
+        
+        if is_directory_node(root_data):
+            logger.info("Root is a directory node, extracting file entry...")
+            links, _ = decode_dag_pb(root_data)
+            
+            if links:
+                # Get the first (and typically only) file entry
+                first_link = links[0]
+                filename = first_link.name if first_link.name else None
+                actual_file_cid = first_link.cid
+                
+                logger.info(f"Extracted filename: {filename}")
+                logger.info(f"Actual file CID: {actual_file_cid.hex()[:16]}...")
+                
+                # Fetch the actual file block
+                actual_file_data = await self.bitswap.get_block(actual_file_cid, peer_id, timeout)
+                
+                if not verify_cid(actual_file_cid, actual_file_data):
+                    raise ValueError(f"File block verification failed: {actual_file_cid.hex()}")
+        
+        # Now process the actual file data
         # Check if it's a DAG-PB file node
-        if is_file_node(root_data):
+        if is_file_node(actual_file_data):
             logger.debug("Root is a DAG-PB file node, resolving chunks...")
 
             # Decode to get links and metadata
-            links, unixfs_data = decode_dag_pb(root_data)
+            links, unixfs_data = decode_dag_pb(actual_file_data)
 
             if not links:
                 # File with inline data (small file)
@@ -380,7 +443,7 @@ class MerkleDag:
                         f"metadata: size={len(file_data)}, chunks=0"
                     )
                 
-                return file_data
+                return file_data, filename
 
             # File with multiple chunks
             total_size = unixfs_data.filesize if unixfs_data else 0
@@ -451,11 +514,11 @@ class MerkleDag:
             logger.info(f"All {len(links)} chunks verified successfully")
             logger.info("=" * 50)
             logger.info(f"Fetched file: {len(file_data)} bytes")
-            return file_data
+            return file_data, filename
 
         # Not a DAG-PB file node - return as raw data
         logger.debug("Root is a raw block, returning directly")
-        return root_data
+        return actual_file_data, filename
 
     async def get_file_info(
         self, root_cid: bytes, peer_id: Optional[object] = None, timeout: float = 30.0

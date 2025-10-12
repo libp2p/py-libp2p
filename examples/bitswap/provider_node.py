@@ -2,19 +2,12 @@
 """
 Provider Node - Shares a file via Bitswap
 
-This script:
-1. Reads configuration from provider_config.json
-2. Creates a libp2p host and starts Bitswap
-3. Adds the file to Merkle DAG
-4. Saves connection info to shared_config.json for the client
-5. Keeps running to serve blocks to clients
+Usage: python provider_node.py <file_path> [port]
+Example: python provider_node.py /path/to/file.pdf 8000
 """
 
 import argparse
-import asyncio
-import json
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -51,42 +44,29 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes:.1f} TB"
 
 
-async def run_provider():
+async def run_provider(file_path: str, port: int = 0):
     """Run the provider node."""
+    file_path_obj = Path(file_path)
     
-    # Load provider configuration from Desktop
-    desktop_path = Path.home() / "Desktop"
-    config_file = desktop_path / "provider_config.json"
-    if not config_file.exists():
-        logger.error(f"Configuration file not found: {config_file}")
-        logger.error("Please create provider_config.json with your settings")
-        logger.error('Example: {"file_path": "/path/to/your/file.txt", "port": 0}')
-        return
-    
-    with open(config_file, "r") as f:
-        config = json.load(f)
-    
-    file_path = Path(config["file_path"])
-    port = config.get("port", 0)  # 0 = random port
-    
-    if not file_path.exists():
+    if not file_path_obj.exists():
         logger.error(f"File not found: {file_path}")
         return
     
-    file_size = file_path.stat().st_size
-    logger.info("=" * 60)
+    file_size = file_path_obj.stat().st_size
+    logger.info("=" * 70)
     logger.info("PROVIDER NODE STARTING")
-    logger.info("=" * 60)
+    logger.info("=" * 70)
     logger.info(f"File: {file_path}")
     logger.info(f"Size: {format_size(file_size)}")
-    logger.info(f"Port: {port if port > 0 else 'random'}")
-    logger.info("=" * 60)
+    logger.info(f"Port: {port if port > 0 else 'auto'}")
+    logger.info("=" * 70)
     
     # Create host
     host = new_host()
     
     async with host.run(listen_addrs=[Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")]):
-        logger.info(f"Host created with Peer ID: {host.get_id()}")
+        peer_id = host.get_id()
+        logger.info(f"Peer ID: {peer_id}")
         
         # Get actual listening addresses
         addrs = host.get_addrs()
@@ -97,77 +77,79 @@ async def run_provider():
         # Start Bitswap
         bitswap = BitswapClient(host)
         await bitswap.start()
-        logger.info("Bitswap started")
+        logger.info("✓ Bitswap started")
         
         # Create Merkle DAG
         dag = MerkleDag(bitswap)
         
-        # Add file to DAG
         logger.info("")
-        logger.info("=" * 60)
-        logger.info("ADDING FILE TO MERKLE DAG")
-        logger.info("=" * 60)
-        logger.info("This may take a moment for large files...")
-        logger.info("")
+        logger.info("Adding file to DAG...")
+        
+        # Track chunks/blocks created
+        chunks_created = []
         
         # Track progress
         def progress_callback(current: int, total: int, status: str):
-            logger.info(f"{status}: {current}/{total} bytes")
+            if total > 0:
+                percent = (current / total * 100)
+                logger.info(f"  📤 {status}: {percent:.1f}% ({format_size(current)}/{format_size(total)})")
         
-        root_cid = await dag.add_file(str(file_path), progress_callback=progress_callback)
+        # Add file with directory wrapper for filename preservation
+        root_cid = await dag.add_file(
+            file_path,
+            progress_callback=progress_callback,
+            wrap_with_directory=True
+        )
+        
+        # Get all blocks that were stored
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("BLOCKS CREATED:")
+        logger.info("=" * 70)
+        all_cids = list(bitswap.block_store._blocks.keys())
+        logger.info(f"Total blocks stored: {len(all_cids)}")
+        for i, cid in enumerate(all_cids, 1):
+            block_size = len(bitswap.block_store._blocks[cid])
+            logger.info(f"  {i}. {cid.hex()} ({format_size(block_size)})")
         
         logger.info("")
-        logger.info("=" * 60)
-        logger.info("FILE SUCCESSFULLY ADDED!")
-        logger.info("=" * 60)
-        logger.info(f"Root CID: {root_cid.hex()}")
-        logger.info("=" * 60)
+        logger.info("=" * 70)
+        logger.info("FILE READY TO SHARE!")
+        logger.info("=" * 70)
         
-        # Save connection info for client
-        # Use the first address (usually the best one)
-        provider_addr = str(addrs[0]) if addrs else None
-        
-        if not provider_addr:
-            logger.error("No listening addresses available!")
-            return
-        
-        shared_config = {
-            "provider_multiaddr": provider_addr,
-            "root_cid": root_cid.hex(),
-            "file_name": file_path.name,
-            "file_size": file_size,
-        }
-        
-        shared_config_file = desktop_path / "shared_config.json"
-        with open(shared_config_file, "w") as f:
-            json.dump(shared_config, f, indent=2)
-        
+        # Get the first address (clean multiaddr without duplicate /p2p/)
+        provider_addr = host.get_addrs()[0]
+        logger.info(f"Root CID:  {root_cid.hex()}")
         logger.info("")
-        logger.info("=" * 60)
-        logger.info("CONNECTION INFO SAVED")
-        logger.info("=" * 60)
-        logger.info(f"Config file: {shared_config_file}")
-        logger.info(f"Provider address: {provider_addr}")
-        logger.info(f"Root CID: {root_cid.hex()}")
-        logger.info("=" * 60)
+        logger.info("=" * 70)
+        logger.info("📋 COPY THIS COMMAND TO RUN CLIENT:")
+        logger.info("=" * 70)
+        logger.info(f"python client_node.py \"{provider_addr}\" \"{root_cid.hex()}\"")
+        logger.info("=" * 70)
         logger.info("")
-        logger.info("✓ Provider is ready! You can now run client_node.py")
-        logger.info("")
-        logger.info("Press Ctrl+C to stop the provider...")
+        logger.info("Provider is running. Press Ctrl+C to stop...")
         
-        # Keep running to serve blocks
+        # Keep running
         try:
             await trio.sleep_forever()
         except KeyboardInterrupt:
-            logger.info("\nShutting down provider...")
+            logger.info("\nShutting down...")
         finally:
             await bitswap.stop()
-            logger.info("Provider stopped")
 
 
 def main():
     """Main entry point."""
-    trio.run(run_provider)
+    parser = argparse.ArgumentParser(description="Share files over Bitswap")
+    parser.add_argument("file_path", help="Path to file to share")
+    parser.add_argument("port", type=int, nargs="?", default=0, help="TCP port (default: random)")
+    
+    args = parser.parse_args()
+    
+    try:
+        trio.run(run_provider, args.file_path, args.port)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

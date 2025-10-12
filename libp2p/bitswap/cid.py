@@ -136,8 +136,16 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         True if data matches CID, False otherwise
 
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Compute hash of data
     digest = hashlib.sha256(data).digest()
+    
+    logger.info(f"      verify_cid:")
+    logger.info(f"        CID: {cid.hex()}")
+    logger.info(f"        Data size: {len(data)} bytes")
+    logger.info(f"        Computed digest: {digest.hex()}")
 
     # For CIDv0 (multihash)
     if len(cid) >= 2 and cid[0] == HASH_SHA256:
@@ -145,17 +153,28 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         hash_length = cid[1]
         if len(cid) >= 2 + hash_length:
             cid_digest = cid[2 : 2 + hash_length]
-            return digest == cid_digest
+            match = digest == cid_digest
+            logger.info(f"        CIDv0 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.info(f"        Expected digest: {cid_digest.hex()}")
+            return match
 
     # For CIDv1
     if len(cid) >= 4 and cid[0] == CID_V1:
         # Extract digest from CIDv1
         # Format: <version><codec><hash-type><hash-length><digest>
+        codec = cid[1]
+        hash_type = cid[2]
         hash_length = cid[3]
+        logger.info(f"        CIDv1: codec={hex(codec)}, hash_type={hex(hash_type)}, length={hash_length}")
         if len(cid) >= 4 + hash_length:
             cid_digest = cid[4 : 4 + hash_length]
-            return digest == cid_digest
+            match = digest == cid_digest
+            logger.info(f"        CIDv1 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.info(f"        Expected digest: {cid_digest.hex()}")
+            logger.info(f"        Computed digest: {digest.hex()}")
+            return match
 
+    logger.info(f"        No valid CID format detected")
     return False
 
 

@@ -13,7 +13,7 @@ from typing import Callable, Iterator, List, Optional
 DEFAULT_CHUNK_SIZE = 256 * 1024
 
 # Minimum chunk size: 64 KB
-MIN_CHUNK_SIZE = 64 * 1024
+MIN_CHUNK_SIZE = 50 * 1024
 
 # Maximum chunk size: 1 MB
 MAX_CHUNK_SIZE = 1024 * 1024
@@ -144,11 +144,11 @@ def optimal_chunk_size(file_size: int) -> int:
         raise ValueError(f"file_size must be non-negative, got {file_size}")
 
     if file_size < 1024 * 1024:  # < 1 MB
-        return 64 * 1024  # 64 KB
+        return 60 * 1024  # 64 KB
     elif file_size < 100 * 1024 * 1024:  # < 100 MB
-        return 256 * 1024  # 256 KB (IPFS default)
+        return 60 * 1024  # 256 KB (IPFS default)
     else:  # >= 100 MB
-        return 1024 * 1024  # 1 MB
+        return 60 * 1024  # 1 MB
 
 
 def estimate_chunk_count(file_size: int, chunk_size: Optional[int] = None) -> int:
