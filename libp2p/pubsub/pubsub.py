@@ -41,6 +41,10 @@ from libp2p.exceptions import (
 )
 from libp2p.io.exceptions import (
     IncompleteReadError,
+    IOException,
+)
+from libp2p.network.connection.exceptions import (
+    RawConnError,
 )
 from libp2p.network.exceptions import (
     SwarmException,
@@ -319,6 +323,14 @@ class Pubsub(Service, IPubsub):
             logger.debug(
                 f"Stream closed for peer {peer_id}, exiting read loop cleanly."
             )
+        except StreamError as e:
+            # Socket closed during read - this is normal during shutdown
+            logger.debug(
+                f"Stream error for peer {peer_id} (normal during shutdown): {e}"
+            )
+        except (IOException, RawConnError) as e:
+            # Connection closed - normal during teardown
+            logger.debug(f"Connection closed for peer {peer_id} during read: {e}")
 
     def set_topic_validator(
         self, topic: str, validator: ValidatorFn, is_async_validator: bool
@@ -904,7 +916,8 @@ class Pubsub(Service, IPubsub):
         Write an RPC message to a stream with proper error handling.
 
         Implements WriteMsg similar to go-msgio which is used in go-libp2p
-        Ref: https://github.com/libp2p/go-msgio/blob/master/protoio/uvarint_writer.go#L56
+        Ref: https://github.com/libp2p/go-msgio/blob/master/protoio/
+             uvarint_writer.go#L56
 
 
         :param stream: stream to write the message to
