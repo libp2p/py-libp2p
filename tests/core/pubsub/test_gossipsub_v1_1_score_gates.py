@@ -59,8 +59,27 @@ class TestScoreGates:
 
             # Initially, peer should have low score and be blocked
             peer_id = host1.get_id()
-            if gsub0.scorer:
-                assert not gsub0.scorer.allow_publish(peer_id, [topic])
+
+            # Ensure scorer exists and reset any existing scores
+            assert gsub0.scorer is not None, "Scorer should not be None"
+            scorer = gsub0.scorer
+
+            # Reset any existing scores to ensure clean state
+            if peer_id in scorer.time_in_mesh:
+                for t in list(scorer.time_in_mesh[peer_id].keys()):
+                    scorer.time_in_mesh[peer_id][t] = 0.0
+
+            # Verify initial score is below threshold
+            initial_score = scorer.topic_score(peer_id, topic)
+            assert initial_score < score_params.publish_threshold, (
+                f"Initial score {initial_score} should be < "
+                f"{score_params.publish_threshold}"
+            )
+
+            # Now test that peer is blocked
+            assert not scorer.allow_publish(peer_id, [topic]), (
+                "Peer with low score should not be allowed to publish"
+            )
 
             # Publish message - should be blocked for low-scoring peer
             await gsub0.publish(host0.get_id(), msg)
@@ -69,10 +88,21 @@ class TestScoreGates:
             mock_write_msg.assert_not_called()
 
             # Increase peer's score
-            if gsub0.scorer:
-                gsub0.scorer.on_join_mesh(peer_id, topic)
-                # Don't call heartbeat to avoid decay
-                assert gsub0.scorer.allow_publish(peer_id, [topic])
+            # Add enough score to exceed threshold
+            scorer.on_join_mesh(peer_id, topic)
+            # Add more score to ensure it's above threshold
+            scorer.on_join_mesh(peer_id, topic)
+
+            # Verify the score is now above threshold
+            new_score = scorer.topic_score(peer_id, topic)
+            assert new_score >= score_params.publish_threshold, (
+                f"New score {new_score} should be >= {score_params.publish_threshold}"
+            )
+
+            # Now peer should be allowed to publish
+            assert scorer.allow_publish(peer_id, [topic]), (
+                "Peer with high score should be allowed to publish"
+            )
 
             # Publish message again - should now be sent
             await gsub0.publish(host0.get_id(), msg)
