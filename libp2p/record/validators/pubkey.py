@@ -39,7 +39,7 @@ class PublicKeyValidator(Validator):
         if peer_id.to_bytes() != keyhash:
             raise ErrInvalidRecordType("public key does not match storage key")
     
-    def select(self, key: str, values: list[Record]) -> int:
+    def select(self, key: str, values: list[Record]) -> Record | None:
         """
         Select a value from a list of public key records.
 
@@ -51,4 +51,6 @@ class PublicKeyValidator(Validator):
             int: Always returns 0 as all public keys are treated identically.
 
         """
-        return 0  # All public keys are treated identical
+        if not values:
+            return None
+        return values[0]  # All public keys are treated identical

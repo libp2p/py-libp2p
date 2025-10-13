@@ -22,7 +22,7 @@ class Validator(ABC):
         pass
 
     @abstractmethod
-    def select(self, key: str, values: List[Record]) -> int:
+    def select(self, key: str, values: List[Record]) -> Record | None:
         """
         Select the best record from the set of records (e.g., the newest).
         Returns (index, error).
@@ -51,7 +51,7 @@ class NamespacedValidator(Validator):
             raise ErrInvalidRecordType()
         return vi.validate(rec)
 
-    def select(self, key: str, values: List[Record]) -> int:
+    def select(self, key: str, values: List[Record]) -> Record | None:
         if not values:
             raise ValueError("can't select from no values")
         vi = self.validator_by_key(key)

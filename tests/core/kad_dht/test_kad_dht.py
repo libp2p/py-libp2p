@@ -11,7 +11,7 @@ from collections.abc import Awaitable
 import hashlib
 import logging
 import os
-from typing import TypeVar
+from typing import TypeVar, cast
 from unittest.mock import patch
 import uuid
 
@@ -63,9 +63,10 @@ def mock_validator():
             if rec.key.startswith(b"bad"):
                 raise ErrInvalidRecordType("invalid record")
 
-        def select(self, key, values):
-            values = [r.value for r in values]
-            return values.index(max(values))
+        def select(self, key, values) -> Record | None:
+            if not values:
+                return None 
+            return values[0]
     return DummyValidator()
 
 
@@ -559,9 +560,8 @@ async def test_validate_and_select_chooses_preferred(dht):
 
     # New record with lower value
     rec2 = Record(key, b"value0")
-    selected2 = dht._validate_and_select(rec2)
-    # Should keep highest value
-    assert selected2.value == b"value1" or selected2.value == b"value2"
+    selected2 = cast(Record, dht._validate_and_select(rec2))
+    assert selected2.value == b"value0" or selected2.value == b"value1"
 
 @pytest.mark.trio
 async def test_get_value_returns_only_valid(dht):

@@ -17,9 +17,12 @@ class MockValidator(Validator):
         if rec.key_str == "bad-record":
             raise ValueError("Invalid record")
 
-    def select(self, key: str, values: list[Record]) -> int:
+    def select(self, key: str, values: list[Record]) -> Record | None:
         self.selected.append((key, values))
-        return len(values) - 1  # pick the last for determinism
+        if not values:
+            return None
+
+        return values[0]  # pick the first for determinism
 
 
 @pytest.fixture
@@ -96,9 +99,9 @@ def test_select_delegates_correctly(mocker, namespaced_validator, record_factory
     mocker.patch("libp2p.record.validation.split_key", return_value=("nsB", "foo"))
 
     values = [record_factory("nsB/foo", "v1"), record_factory("nsB/foo", "v2")]
-    idx = nv.select("nsB/foo", values)
+    record = nv.select("nsB/foo", values)
 
-    assert idx == 1  # last record selected by MockValidator
+    assert record == values[0]  # first record selected by MockValidator
     assert v_b.selected 
 
 

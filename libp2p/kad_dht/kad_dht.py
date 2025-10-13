@@ -40,6 +40,7 @@ from libp2p.record.record import Record
 from libp2p.tools.async_service import (
     Service,
 )
+from typing import cast
 
 from .common import (
     ALPHA,
@@ -871,8 +872,7 @@ class KadDHT(Service):
         # select preferred record if multiple candidates
         if len(candidates) > 1:
             try:
-                selected_index = self.validator.select(new_record.key_str, candidates)
-                new_record = candidates[selected_index]
+                new_record = cast(Record, self.validator.select(new_record.key_str, candidates))
             except Exception as e:
                 logger.warning(f"Record selection failed for key {new_record.key.hex()}: {e}")
                 return None
