@@ -35,6 +35,7 @@ dependencies = [
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
     "zeroconf (>=0.147.0,<0.148.0)",
+    "miniupnpc>=2.0"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -99,8 +100,6 @@ test = [
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
 ]
-
-upnp = ["miniupnpc>=2.0"]
 
 [tool.setuptools]
 include-package-data = true
@@ -290,4 +289,5 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "libp2p/discovery/upnp.py",
 ]

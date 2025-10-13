@@ -2,9 +2,10 @@ import ipaddress
 import logging
 
 try:
-    import miniupnpc  # type: ignore[import-error]
-except ImportError:
+    import miniupnpc
+except Exception:  # pragma: no cover - optional dependency
     miniupnpc = None
+
 import trio
 
 logger = logging.getLogger("libp2p.discovery.upnp")

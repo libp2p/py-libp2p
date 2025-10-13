@@ -88,11 +88,10 @@ class BasicHost(IHost):
     _network: INetworkService
     peerstore: IPeerStore
 
-    mDNS: MDNSDiscovery | None
-    upnp: UpnpManager | None
-
     multiselect: Multiselect
     multiselect_client: MultiselectClient
+    mDNS: MDNSDiscovery | None
+    upnp: Optional["UpnpManager"]
 
     def __init__(
         self,
@@ -196,10 +195,10 @@ class BasicHost(IHost):
             network = self.get_network()
             async with background_trio_service(network):
                 await network.listen(*listen_addrs)
-                if hasattr(self, "mDNS") and self.mDNS is not None:
+                if self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()
-                if self.upnp:
+                if self.upnp is not None:
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
