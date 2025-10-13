@@ -1,0 +1,8 @@
+### Enhancement: Introduce `record` module with validators, selectors, and DHT integration
+
+- Implements new `record` module providing a unified `Record` abstraction  
+- Adds `Validator` and `Selector` interfaces for record verification and conflict resolution  
+- Integrates record creation, validation, and selection into the DHT value store  
+- Ensures only valid records are stored and retrieved across peers  
+- Rejects invalid or malformed records to maintain DHT data integrity  
+- Aligns module design and behavior with Go and JS `libp2p-record` implementations
