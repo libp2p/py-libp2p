@@ -21,6 +21,11 @@ from libp2p.bitswap import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from multiaddr import Multiaddr
+from libp2p.utils.address_validation import (
+    find_free_port,
+    get_available_interfaces,
+    get_optimal_binding_address,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +54,8 @@ async def run_client(provider_multiaddr_str: str, root_cid_hex: str, output_dir:
     """Run the client node."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    
+    port = find_free_port()
+    listen_addr = get_available_interfaces(port)
     try:
         provider_multiaddr = Multiaddr(provider_multiaddr_str)
         root_cid = bytes.fromhex(root_cid_hex)
@@ -68,7 +74,7 @@ async def run_client(provider_multiaddr_str: str, root_cid_hex: str, output_dir:
     # Create host
     host = new_host()
     
-    async with host.run(listen_addrs=[Multiaddr("/ip4/0.0.0.0/tcp/0")]):
+    async with host.run(listen_addrs=listen_addr):
         logger.info(f"Client Peer ID: {host.get_id()}")
         
         # Start Bitswap

@@ -20,6 +20,11 @@ from libp2p import new_host
 from libp2p.bitswap import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from multiaddr import Multiaddr
+from libp2p.utils.address_validation import (
+    find_free_port,
+    get_available_interfaces,
+    get_optimal_binding_address,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -47,6 +52,8 @@ def format_size(size_bytes: int) -> str:
 async def run_provider(file_path: str, port: int = 0):
     """Run the provider node."""
     file_path_obj = Path(file_path)
+    port = find_free_port()
+    listen_addr = get_available_interfaces(port)
     
     if not file_path_obj.exists():
         logger.error(f"File not found: {file_path}")
@@ -64,7 +71,7 @@ async def run_provider(file_path: str, port: int = 0):
     # Create host
     host = new_host()
     
-    async with host.run(listen_addrs=[Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")]):
+    async with host.run(listen_addrs=listen_addr):
         peer_id = host.get_id()
         logger.info(f"Peer ID: {peer_id}")
         
