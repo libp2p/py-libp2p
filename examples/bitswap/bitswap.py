@@ -33,6 +33,12 @@ from libp2p.bitswap.dag import MerkleDag
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from multiaddr import Multiaddr
 
+from libp2p.utils.address_validation import (
+    find_free_port,
+    get_available_interfaces,
+    get_optimal_binding_address,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -79,10 +85,13 @@ async def run_provider(file_path: str, port: int = 0):
     logger.info(f"Port: {port if port > 0 else 'auto'}")
     logger.info("=" * 70)
     
+    if port <= 0:
+        port = find_free_port()
+    listen_addrs = get_available_interfaces(port)
     # Create host
     host = new_host()
     
-    async with host.run(listen_addrs=[Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")]):
+    async with host.run(listen_addrs=listen_addrs):
         peer_id = host.get_id()
         logger.info(f"Peer ID: {peer_id}")
         
@@ -180,11 +189,15 @@ async def run_client(provider_multiaddr_str: str, root_cid_hex: str, output_dir:
     logger.info(f"Root CID:   {root_cid_hex}")
     logger.info(f"Output dir: {output_path}")
     logger.info("=" * 70)
-    
+
+    if port <= 0:
+        port = find_free_port()
+    listen_addrs = get_available_interfaces(port)
+
     # Create host
     host = new_host()
     
-    async with host.run(listen_addrs=[Multiaddr("/ip4/0.0.0.0/tcp/0")]):
+    async with host.run(listen_addrs=listen_addrs):
         logger.info(f"Client Peer ID: {host.get_id()}")
         
         # Start Bitswap
