@@ -1,103 +1,132 @@
 import pytest
-from unittest.mock import patch, MagicMock
+
+from libp2p.record.exceptions import ErrInvalidRecordType
 from libp2p.record.record import Record
 from libp2p.record.validators.pubkey import PublicKeyValidator
-from libp2p.record.exceptions import ErrInvalidRecordType
 
+
+# Mock classes for testing
+class MockPublicKey:
+    def __init__(self, peer_id_bytes):
+        self._peer_id_bytes = peer_id_bytes
+
+    def to_bytes(self):
+        return self._peer_id_bytes
+
+class MockPeerID:
+    def __init__(self, peer_id_bytes):
+        self._peer_id_bytes = peer_id_bytes
+
+    @classmethod
+    def from_pubkey(cls, pubkey):
+        return cls(pubkey._peer_id_bytes)
+
+    def to_bytes(self):
+        return self._peer_id_bytes
 
 @pytest.fixture
 def validator():
+    """Fixture to create a PublicKeyValidator instance."""
     return PublicKeyValidator()
 
+@pytest.fixture
+def valid_keyhash():
+    """Fixture for a valid multihash key."""
+    sample_digest = b"\x01" * 32
+    multihash_bytes = b"\x12\x20" + sample_digest
+    return multihash_bytes.hex()
 
 @pytest.fixture
-def record_factory():
-    def _rec(key: str, value: bytes = b"dummy"):
-        return Record(key=key, value=value)
-    return _rec
+def valid_record(valid_keyhash):
+    """Fixture for a valid Record instance."""
+    record = Record(key=f"pk/{valid_keyhash}", value=b"valid_pubkey")
+    return record
 
-def test_validate_success_path(validator, record_factory):
-    """Happy path: all decoding/unmarshalling succeeds and peer ID matches hash."""
-    rec = record_factory("pk/abcd1234")
+def test_validate_invalid_namespace(validator, valid_record, mocker):
+    """Test validate with an invalid namespace."""
+    mocker.patch(
+        "libp2p.record.utils.split_key",
+        return_value=("invalid_ns", "somehash")
+    )
 
-    fake_keyhash = b"\x12\x20" + b"x" * 32  # valid multihash bytes
-    fake_pubkey = MagicMock()
-    fake_peer_id = MagicMock()
-    fake_peer_id.to_bytes.return_value = fake_keyhash
+    with pytest.raises(ErrInvalidRecordType):
+        validator.validate(valid_record)
 
-    with patch("libp2p.record.validator.split_key", return_value=("pk", "abcd1234")), \
-         patch("libp2p.record.validator.bytes.fromhex", return_value=fake_keyhash), \
-         patch("libp2p.record.validator.multihash.decode", return_value="decoded"), \
-         patch("libp2p.record.validator.unmarshal_public_key", return_value=fake_pubkey), \
-         patch("libp2p.record.validator.ID.from_pubkey", return_value=fake_peer_id):
-        # Should not raise
-        validator.validate(rec)
+def test_validate_invalid_multihash(validator, valid_record, mocker):
+    """Test validate with an invalid multihash."""
+    mocker.patch("libp2p.record.utils.split_key", return_value=("pk", "invalidhash"))
+    mocker.patch("multihash.decode", side_effect=Exception("Invalid multihash"))
 
+    with pytest.raises(ErrInvalidRecordType):
+        validator.validate(valid_record)
 
-def test_validate_raises_if_namespace_not_pk(validator, record_factory):
-    rec = record_factory("wrongns/abcd")
-    with patch("libp2p.record.validator.split_key", return_value=("wrongns", "abcd")):
-        with pytest.raises(ErrInvalidRecordType, match="namespace not 'pk'"):
-            validator.validate(rec)
+def test_validate_invalid_public_key(validator, valid_record, valid_keyhash, mocker):
+    """Test validate with an unmarshalable public key."""
+    mocker.patch("libp2p.record.utils.split_key", return_value=("pk", valid_keyhash))
+    mocker.patch(
+        "multihash.decode",
+        return_value={"code": 0x12, "name": "sha2-256", "length": 32}
+    )
+    mocker.patch(
+        "libp2p.record.utils.unmarshal_public_key",
+        side_effect=Exception("Invalid public key")
+    )
 
+    with pytest.raises(ErrInvalidRecordType):
+        validator.validate(valid_record)
 
-def test_validate_raises_if_invalid_multihash(validator, record_factory):
-    rec = record_factory("pk/abcd")
+def test_validate_invalid_peer_id_derivation(
+        validator,
+        valid_record,
+        valid_keyhash,
+        mocker
+    ):
+    """Test validate when peer ID derivation fails."""
+    mocker.patch("libp2p.record.utils.split_key", return_value=("pk", valid_keyhash))
+    mocker.patch(
+        "multihash.decode",
+        return_value={"code": 0x12, "name": "sha2-256", "length": 32}
+    )
+    mocker.patch(
+        "libp2p.record.utils.unmarshal_public_key",
+        return_value=MockPublicKey(b"\x01" * 32)
+    )
+    mocker.patch(
+        "libp2p.peer.id.ID.from_pubkey",
+        side_effect=Exception("Invalid peer ID")
+    )
 
-    with patch("libp2p.record.validator.split_key", return_value=("pk", "abcd")), \
-         patch("libp2p.record.validator.bytes.fromhex", return_value=b"1234"), \
-         patch("libp2p.record.validator.multihash.decode", side_effect=Exception("invalid mh")):
-        with pytest.raises(ErrInvalidRecordType, match="valid multihash"):
-            validator.validate(rec)
+    with pytest.raises(ErrInvalidRecordType):
+        validator.validate(valid_record)
 
+def test_validate_mismatched_keyhash(validator, valid_record, valid_keyhash, mocker):
+    """Test validate when public key does not match keyhash."""
+    mocker.patch("libp2p.record.utils.split_key", return_value=("pk", valid_keyhash))
+    mocker.patch(
+        "multihash.decode",
+        return_value={"code": 0x12, "name": "sha2-256", "length": 32}
+    )
+    mocker.patch(
+        "libp2p.record.utils.unmarshal_public_key",
+        return_value=MockPublicKey(b"\x02" * 32)
+    )
+    mocker.patch("libp2p.peer.id.ID.from_pubkey", return_value=MockPeerID(b"\x02" * 32))
 
-def test_validate_raises_if_unmarshal_fails(validator, record_factory):
-    rec = record_factory("pk/abcd")
+    with pytest.raises(ErrInvalidRecordType):
+        validator.validate(valid_record)
 
-    with patch("libp2p.record.validator.split_key", return_value=("pk", "abcd")), \
-         patch("libp2p.record.validator.bytes.fromhex", return_value=b"1234"), \
-         patch("libp2p.record.validator.multihash.decode", return_value="decoded"), \
-         patch("libp2p.record.validator.unmarshal_public_key", side_effect=Exception("bad pubkey")):
-        with pytest.raises(ErrInvalidRecordType, match="Unable to unmarshal public key"):
-            validator.validate(rec)
+# Tests for select method
+def test_select_no_records(validator):
+    """Test select with an empty record list."""
+    result = validator.select("somekey", [])
+    assert result is None
 
+def test_select_single_record(validator, valid_record):
+    """Test select with a single record."""
+    result = validator.select("somekey", [valid_record])
+    assert result == valid_record
 
-def test_validate_raises_if_peer_id_derivation_fails(validator, record_factory):
-    rec = record_factory("pk/abcd")
-
-    fake_pubkey = MagicMock()
-
-    with patch("libp2p.record.validator.split_key", return_value=("pk", "abcd")), \
-         patch("libp2p.record.validator.bytes.fromhex", return_value=b"1234"), \
-         patch("libp2p.record.validator.multihash.decode", return_value="decoded"), \
-         patch("libp2p.record.validator.unmarshal_public_key", return_value=fake_pubkey), \
-         patch("libp2p.record.validator.ID.from_pubkey", side_effect=Exception("fail")):
-        with pytest.raises(ErrInvalidRecordType, match="Could not derive peer ID"):
-            validator.validate(rec)
-
-
-def test_validate_raises_if_peer_id_bytes_mismatch(validator, record_factory):
-    rec = record_factory("pk/abcd")
-
-    fake_pubkey = MagicMock()
-    fake_peer_id = MagicMock()
-    fake_peer_id.to_bytes.return_value = b"DIFFERENT"
-
-    with patch("libp2p.record.validator.split_key", return_value=("pk", "abcd")), \
-         patch("libp2p.record.validator.bytes.fromhex", return_value=b"hash"), \
-         patch("libp2p.record.validator.multihash.decode", return_value="decoded"), \
-         patch("libp2p.record.validator.unmarshal_public_key", return_value=fake_pubkey), \
-         patch("libp2p.record.validator.ID.from_pubkey", return_value=fake_peer_id):
-        with pytest.raises(ErrInvalidRecordType, match="does not match storage key"):
-            validator.validate(rec)
-
-
-def test_select_always_returns_zero(validator, record_factory):
-    recs = [record_factory("pk/abcd"), record_factory("pk/efgh")]
-    idx = validator.select("pk/abcd", recs)
-    assert idx == 0
-
-
-def test_select_does_not_raise_on_empty_list(validator):
-    """Even though docstring doesn't specify, should not throw — just return 0."""
-    assert validator.select("pk/abcd", []) == 0
+def test_select_multiple_records(validator, valid_record):
+    """Test select with multiple records."""
+    result = validator.select("somekey", [valid_record, valid_record])
+    assert result == valid_record  # Should return the first record

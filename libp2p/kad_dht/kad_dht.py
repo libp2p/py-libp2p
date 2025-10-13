@@ -35,12 +35,11 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.record.exceptions import ErrInvalidRecordType
-from libp2p.record.validator import NamespacedValidator
 from libp2p.record.record import Record
+from libp2p.record.validator import NamespacedValidator
 from libp2p.tools.async_service import (
     Service,
 )
-from typing import cast
 
 from .common import (
     ALPHA,
@@ -97,9 +96,9 @@ class KadDHT(Service):
     """
 
     def __init__(
-        self, 
-        host: IHost, 
-        mode: DHTMode, 
+        self,
+        host: IHost,
+        mode: DHTMode,
         validator: NamespacedValidator,
         enable_random_walk: bool = False
     ):
@@ -163,7 +162,7 @@ class KadDHT(Service):
             Callable that takes target_key bytes and returns list of peer IDs
 
         """
-        
+
         async def query_function(target_key: bytes) -> list[ID]:
             """Query for closest peers to target key."""
             return await self.peer_routing.find_closest_peers_network(target_key)
@@ -859,7 +858,9 @@ class KadDHT(Service):
         try:
             self.validator.validate(new_record)
         except (ErrInvalidRecordType, ValueError) as e:
-            logger.warning(f"Record validation failed for key {new_record.key.hex()}: {e}")
+            logger.warning(
+                f"Record validation failed for key {new_record.key.hex()}: {e}"
+            )
             return None
 
         # prepare candidates with old record if it exists
@@ -872,9 +873,17 @@ class KadDHT(Service):
         # select preferred record if multiple candidates
         if len(candidates) > 1:
             try:
-                new_record = cast(Record, self.validator.select(new_record.key_str, candidates))
+                selected = self.validator.select(new_record.key_str, candidates)
+                if not selected:
+                    logger.warning(
+                        f"Record selection failed for key {new_record.key.hex()}"
+                    )
+                    return None
+                return selected
             except Exception as e:
-                logger.warning(f"Record selection failed for key {new_record.key.hex()}: {e}")
+                logger.warning(
+                    f"Record selection failed for key {new_record.key.hex()}: {e}"
+                )
                 return None
-            
+
         return new_record

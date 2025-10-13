@@ -1,7 +1,8 @@
 from __future__ import annotations
-from curses import raw
-import libp2p.record.pb.record_pb2 as pb
+
 from typing import Optional, Union
+
+import libp2p.record.pb.record_pb2 as pb
 
 
 class Record:
@@ -38,7 +39,7 @@ class Record:
     @property
     def value(self) -> bytes:
         return self.raw_record.value
-    
+
     @property
     def value_str(self) -> str:
         return self.raw_record.value.decode("utf-8")

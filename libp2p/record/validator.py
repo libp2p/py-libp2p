@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 from libp2p.record.record import Record
 
 from .exceptions import (
     ErrInvalidRecordType,
 )
-from .utils import (
-    split_key
-)
+from .utils import split_key
+
 
 class Validator(ABC):
     """Interface that should be implemented by record validators."""
@@ -45,7 +44,7 @@ class NamespacedValidator(Validator):
             return None
         return self.validators.get(ns)
 
-    def validate(self, rec: Record) -> None:  
+    def validate(self, rec: Record) -> None:
         vi = self.validator_by_key(rec.key_str)
         if vi is None:
             raise ErrInvalidRecordType()

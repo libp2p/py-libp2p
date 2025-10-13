@@ -17,7 +17,6 @@ import uuid
 
 import pytest
 import multiaddr
-from tomlkit import value
 import trio
 
 from libp2p.crypto.rsa import create_new_key_pair
@@ -35,17 +34,15 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.record.exceptions import ErrInvalidRecordType
+from libp2p.record.record import Record
+from libp2p.record.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
-from tests.core.record.test_validator import MockValidator
 from tests.utils.factories import (
     host_pair_factory,
 )
-from libp2p.record.exceptions import ErrInvalidRecordType
-from libp2p.record.validator import Validator
-from libp2p.record.record import Record
-from unittest.mock import AsyncMock, Mock
 
 # Configure logger
 logger = logging.getLogger("test.kad_dht")
@@ -65,7 +62,7 @@ def mock_validator():
 
         def select(self, key, values) -> Record | None:
             if not values:
-                return None 
+                return None
             return values[0]
     return DummyValidator()
 
@@ -101,12 +98,12 @@ async def dht_pair(security_protocol, mock_validator):
 
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
         dht_a: KadDHT = KadDHT(
-            host_a, 
+            host_a,
             validator=mock_validator,
             mode=DHTMode.SERVER
         )
         dht_b: KadDHT = KadDHT(
-            host_b, 
+            host_b,
             validator=mock_validator,
             mode=DHTMode.SERVER
         )
@@ -582,7 +579,10 @@ async def test_get_value_returns_only_valid(dht):
 
 @pytest.mark.trio
 async def test_put_and_get_value_with_validation_and_selection(dht_pair):
-    """Ensure both DHTs obey record validation and selection, invalid records not received."""
+    """
+    Ensure both DHTs obey record validation and selection,
+    invalid records not received.
+    """
     dht_a, dht_b = dht_pair
 
     # Add each other to routing table

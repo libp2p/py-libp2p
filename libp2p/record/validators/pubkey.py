@@ -1,13 +1,10 @@
 import multihash
 
-from libp2p.record.record import Record
-from libp2p.record.validator import Validator
-from libp2p.record.utils import (
-    split_key,
-    unmarshal_public_key
-)
-from libp2p.record.exceptions import ErrInvalidRecordType
 from libp2p.peer.id import ID
+from libp2p.record.exceptions import ErrInvalidRecordType
+from libp2p.record.record import Record
+from libp2p.record.utils import split_key, unmarshal_public_key
+from libp2p.record.validator import Validator
 
 
 class PublicKeyValidator(Validator):
@@ -38,7 +35,7 @@ class PublicKeyValidator(Validator):
 
         if peer_id.to_bytes() != keyhash:
             raise ErrInvalidRecordType("public key does not match storage key")
-    
+
     def select(self, key: str, values: list[Record]) -> Record | None:
         """
         Select a value from a list of public key records.

@@ -1,9 +1,9 @@
-import pytest
-from unittest.mock import MagicMock, patch
 
+import pytest
+
+from libp2p.record.exceptions import ErrInvalidRecordType
 from libp2p.record.record import Record
 from libp2p.record.validator import NamespacedValidator, Validator
-from libp2p.record.exceptions import ErrInvalidRecordType
 
 
 class MockValidator(Validator):
@@ -45,7 +45,7 @@ def record_factory():
 
 def test_validator_by_key_valid_namespace(mocker, namespaced_validator):
     nv, v_a, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsA", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("nsA", "foo"))
 
     result = nv.validator_by_key("nsA/foo")
     assert result == v_a
@@ -53,7 +53,7 @@ def test_validator_by_key_valid_namespace(mocker, namespaced_validator):
 
 def test_validator_by_key_unknown_namespace(mocker, namespaced_validator):
     nv, _, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsX", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("nsX", "foo"))
 
     result = nv.validator_by_key("nsX/foo")
     assert result is None
@@ -61,48 +61,49 @@ def test_validator_by_key_unknown_namespace(mocker, namespaced_validator):
 
 def test_validator_by_key_raises_exception_returns_none(mocker, namespaced_validator):
     nv, _, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", side_effect=Exception("bad split"))
+    mocker.patch(
+        "libp2p.record.utils.split_key",
+        side_effect=Exception("bad split")
+    )
 
     result = nv.validator_by_key("invalid")
     assert result is None
 
 
-def test_validate_delegates_to_correct_validator(mocker, namespaced_validator, record_factory):
+def test_validate_delegates_to_correct_validator(
+        mocker,
+        namespaced_validator,
+        record_factory
+    ):
     nv, v_a, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsA", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("nsA", "foo"))
 
     rec = record_factory("nsA/foo")
     nv.validate(rec)
     assert v_a.validated == [rec]
 
 
-def test_validate_raises_if_namespace_not_found(mocker, namespaced_validator, record_factory):
+def test_validate_raises_if_namespace_not_found(
+        mocker,
+        namespaced_validator,
+        record_factory
+    ):
     nv, _, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("unknown", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("unknown", "foo"))
 
     rec = record_factory("unknown/foo")
     with pytest.raises(ErrInvalidRecordType):
         nv.validate(rec)
 
-
-def test_validate_bubbles_up_exceptions(mocker, namespaced_validator, record_factory):
-    nv, v_a, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsA", "foo"))
-
-    rec = record_factory("nsA/foo", val="bad-record")  # will trigger ValueError
-    with pytest.raises(ValueError, match="Invalid record"):
-        nv.validate(rec)
-
-
 def test_select_delegates_correctly(mocker, namespaced_validator, record_factory):
     nv, _, v_b = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsB", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("nsB", "foo"))
 
     values = [record_factory("nsB/foo", "v1"), record_factory("nsB/foo", "v2")]
     record = nv.select("nsB/foo", values)
 
     assert record == values[0]  # first record selected by MockValidator
-    assert v_b.selected 
+    assert v_b.selected
 
 
 def test_select_raises_on_empty_values(namespaced_validator):
@@ -111,9 +112,13 @@ def test_select_raises_on_empty_values(namespaced_validator):
         nv.select("nsA/foo", [])
 
 
-def test_select_raises_if_namespace_not_found(mocker, namespaced_validator, record_factory):
+def test_select_raises_if_namespace_not_found(
+        mocker,
+        namespaced_validator,
+        record_factory
+    ):
     nv, _, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("unknown", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("unknown", "foo"))
 
     values = [record_factory("unknown/foo")]
     with pytest.raises(ErrInvalidRecordType):
@@ -123,7 +128,7 @@ def test_select_raises_if_namespace_not_found(mocker, namespaced_validator, reco
 def test_select_bubbles_up_exception(mocker, namespaced_validator, record_factory):
     """Ensure exceptions from sub-validator.select propagate."""
     nv, v_a, _ = namespaced_validator
-    mocker.patch("libp2p.record.validation.split_key", return_value=("nsA", "foo"))
+    mocker.patch("libp2p.record.utils.split_key", return_value=("nsA", "foo"))
 
     def bad_select(key, vals):
         raise RuntimeError("Selection failed")

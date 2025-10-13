@@ -1,9 +1,11 @@
 import pytest
-from libp2p.record.utils import split_key, unmarshal_public_key
-from libp2p.crypto.pb import crypto_pb2
+
 from libp2p.crypto.ed25519 import Ed25519PublicKey
+from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.rsa import RSAPublicKey
 from libp2p.crypto.secp256k1 import Secp256k1PublicKey
+from libp2p.record.utils import split_key, unmarshal_public_key
+
 
 def test_split_key_valid():
     ns, rest = split_key("ns/foo/bar")
@@ -22,7 +24,10 @@ def test_split_key_invalid():
         split_key("no_slash_key")
 
 
-def make_serialized_pb_key(key_type: crypto_pb2.KeyType.ValueType, key_data: bytes) -> bytes:
+def make_serialized_pb_key(
+        key_type: crypto_pb2.KeyType.ValueType,
+        key_data: bytes
+    ) -> bytes:
     """Helper to create a serialized PublicKey proto."""
     pb_key = crypto_pb2.PublicKey(key_type=key_type, data=key_data)
     return pb_key.SerializeToString()

@@ -1,12 +1,17 @@
 import pytest
 from google.protobuf.message import DecodeError
+
 from libp2p.record.pb import record_pb2 as pb
-from libp2p.record.record import Record 
+from libp2p.record.record import Record
 
 
 @pytest.fixture
 def mock_record():
-    return Record(key="test-key", value=b"test-value", time_received="2025-10-10T00:00:00Z")
+    return Record(
+        key="test-key",
+        value=b"test-value",
+        time_received="2025-10-10T00:00:00Z"
+    )
 
 def test_init_with_str_key(mock_record):
     assert isinstance(mock_record.key, bytes)
@@ -40,12 +45,16 @@ def test_unmarshal_invalid_data():
         Record.unmarshal(b"not a valid protobuf")
 
 def test_equality(mock_record):
-    rec2 = Record(key="test-key", value=b"test-value", time_received="2025-10-10T00:00:00Z")
+    rec2 = Record(
+        key="test-key",
+        value=b"test-value",
+        time_received="2025-10-10T00:00:00Z"
+    )
     rec3 = Record(key="other-key", value=b"diff-value")
     assert mock_record == rec2
     assert not (mock_record != rec2)
     assert mock_record != rec3
-    assert not mock_record.__eq__(object()) 
+    assert not mock_record.__eq__(object())
 
 
 def test_repr_contains_all_fields(mock_record):

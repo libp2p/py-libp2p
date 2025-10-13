@@ -1,9 +1,11 @@
 from typing import Tuple
+
 from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PublicKey
 from libp2p.crypto.pb import crypto_pb2
 from libp2p.crypto.rsa import RSAPublicKey
 from libp2p.crypto.secp256k1 import Secp256k1PublicKey
+
 
 def split_key(key: str) -> Tuple[str, str]:
     """

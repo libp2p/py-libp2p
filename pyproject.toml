@@ -81,6 +81,7 @@ dev = [
     "pytest-trio>=0.5.2",
     "pytest-timeout>=2.4.0",
     "pytest-rerunfailures>=12.0",
+    "pytest-mock>=3.15.1",
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
@@ -238,6 +239,7 @@ replace = 'version = "{new_version}"'
 line-length = 88
 exclude = ["__init__.py", "*_pb2*.py", "*.pyi"]
 
+
 [tool.ruff.lint]
 select = [
     "F", # Pyflakes
@@ -278,6 +280,9 @@ force-to-top = ["pytest"]
 [tool.ruff.format]
 # Using Ruff's Black-compatible formatter.
 # Options like quote-style = "double" or indent-style = "space" can be set here if needed.
+
+[tool.ruff.per-file-ignores]
+"tests/*.py" = ["F821"]  # undefined name (e.g., pytest fixtures like mocker)
 
 [tool.pyrefly]
 project_includes = ["libp2p", "examples", "tests"]
