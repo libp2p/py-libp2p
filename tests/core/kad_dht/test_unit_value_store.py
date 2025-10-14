@@ -22,6 +22,7 @@ from libp2p.kad_dht.value_store import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.records.record import make_put_record
 
 mock_host = Mock()
 peer_id = ID.from_base58("QmTest123")
@@ -54,8 +55,8 @@ class TestValueStore:
         store.put(key, value)
 
         assert key in store.store
-        stored_value, validity = store.store[key]
-        assert stored_value == value
+        stored_value_record, validity = store.store[key]
+        assert stored_value_record.value == value
         assert validity is not None
         assert validity > time.time()  # Should be in the future
 
@@ -69,7 +70,7 @@ class TestValueStore:
         store.put(key, value, validity=custom_validity)
 
         stored_value, validity = store.store[key]
-        assert stored_value == value
+        assert stored_value.value == value
         assert validity == custom_validity
 
     def test_put_overwrite_existing(self):
@@ -84,7 +85,7 @@ class TestValueStore:
 
         assert len(store.store) == 1
         stored_value, _ = store.store[key]
-        assert stored_value == value2
+        assert stored_value.value == value2
 
     def test_get_existing_valid_value(self):
         """Test retrieving an existing, non-expired value."""
@@ -95,7 +96,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_get_nonexistent_key(self):
         """Test retrieving a non-existent key returns None."""
@@ -114,7 +116,8 @@ class TestValueStore:
         expired_validity = time.time() - 1  # 1 second ago
 
         # Manually insert expired value
-        store.store[key] = (value, expired_validity)
+        record = make_put_record(key.decode("utf-8"), value)
+        store.store[key] = (record, expired_validity)
 
         retrieved_value = store.get(key)
 
@@ -169,8 +172,9 @@ class TestValueStore:
         value = b"test_value"
         expired_validity = time.time() - 1
 
+        record = make_put_record(key.decode("utf-8"), value)
         # Manually insert expired value
-        store.store[key] = (value, expired_validity)
+        store.store[key] = (record, expired_validity)
 
         result = store.has(key)
 
@@ -201,9 +205,12 @@ class TestValueStore:
         value = b"value"
         expired_validity = time.time() - 1
 
+        record2 = make_put_record(key2.decode("utf-8"), value)
+        record3 = make_put_record(key3.decode("utf-8"), value)
+
         store.put(key1, value)  # Valid
-        store.store[key2] = (value, expired_validity)  # Expired
-        store.store[key3] = (value, expired_validity)  # Expired
+        store.store[key2] = (record2, expired_validity)  # Expired
+        store.store[key3] = (record3, expired_validity)  # Expired
 
         expired_count = store.cleanup_expired()
 
@@ -226,7 +233,8 @@ class TestValueStore:
         # Valid expiration
         store.put(key2, value, validity=time.time() + 3600)
         # Expired
-        store.store[key3] = (value, time.time() - 1)
+        record3 = make_put_record(key3.decode("utf-8"), value)
+        store.store[key3] = (record3, time.time() - 1)
 
         expired_count = store.cleanup_expired()
 
@@ -254,7 +262,9 @@ class TestValueStore:
 
         store.put(key1, value)
         store.put(key2, value)
-        store.store[key3] = (value, time.time() - 1)  # Expired
+
+        record3 = make_put_record(key3.decode("utf-8"), value)
+        store.store[key3] = (record3, time.time() - 1)  # Expired
 
         keys = store.get_keys()
 
@@ -281,7 +291,9 @@ class TestValueStore:
 
         store.put(key1, value)
         store.put(key2, value)
-        store.store[key3] = (value, time.time() - 1)  # Expired
+
+        record3 = make_put_record(key3.decode("utf-8"), value)
+        store.store[key3] = (record3, time.time() - 1)  # Expired
 
         size = store.size()
 
@@ -296,7 +308,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_empty_value(self):
         """Test handling of empty value."""
@@ -307,7 +320,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_large_key_value(self):
         """Test handling of large keys and values."""
@@ -318,7 +332,8 @@ class TestValueStore:
         store.put(key, value)
         retrieved_value = store.get(key)
 
-        assert retrieved_value == value
+        assert retrieved_value is not None
+        assert retrieved_value.value == value
 
     def test_edge_case_negative_validity(self):
         """Test handling of negative validity time."""
@@ -382,12 +397,15 @@ class TestValueStore:
         value = b"value"
         current_time = time.time()
 
+        record1 = make_put_record(key1.decode("utf-8"), value)
+        record2 = make_put_record(key2.decode("utf-8"), value)
+        record3 = make_put_record(key3.decode("utf-8"), value)
         # Just expired
-        store.store[key1] = (value, current_time - 0.001)
+        store.store[key1] = (record1, current_time - 0.001)
         # Valid for a longer time to account for test execution time
-        store.store[key2] = (value, current_time + 1.0)
+        store.store[key2] = (record2, current_time + 1.0)
         # Exactly current time (should be expired)
-        store.store[key3] = (value, current_time)
+        store.store[key3] = (record3, current_time)
 
         # Small delay to ensure time has passed
         time.sleep(0.002)
@@ -411,7 +429,7 @@ class TestValueStore:
         stored_tuple = store.store[key]
         assert isinstance(stored_tuple, tuple)
         assert len(stored_tuple) == 2
-        assert stored_tuple[0] == value
+        assert stored_tuple[0].value == value
         assert stored_tuple[1] == validity
 
     @pytest.mark.trio
@@ -483,7 +501,11 @@ class TestValueStore:
 
         for i, key in enumerate(keys):
             expected_value = f"value_{i}".encode()
-            assert store.get(key) == expected_value
+
+            retrieved_value = store.get(key)
+
+            assert retrieved_value is not None
+            assert retrieved_value.value == expected_value
 
     def test_unicode_key_handling(self):
         """Test handling of unicode content in keys."""
@@ -501,4 +523,8 @@ class TestValueStore:
         for i, key in enumerate(unicode_keys):
             value = f"value_{i}".encode()
             store.put(key, value)
-            assert store.get(key) == value
+
+            retrieved_value = store.get(key)
+
+            assert retrieved_value is not None
+            assert retrieved_value.value == value
