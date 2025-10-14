@@ -88,14 +88,14 @@ class PeerRouting(IPeerRouting):
         # First check if the peer is in our routing table
         peer_info = self.routing_table.get_peer_info(peer_id)
         if peer_info:
-            logger.debug(f"Found peer {peer_id} in routing table")
+            logger.debug("Found peer %s in routing table", peer_id)
             return peer_info
 
         # Then check if the peer is in our peerstore
         try:
             addrs = self.host.get_peerstore().addrs(peer_id)
             if addrs:
-                logger.debug(f"Found peer {peer_id} in peerstore")
+                logger.debug("Found peer %s in peerstore", peer_id)
                 return PeerInfo(peer_id, addrs)
         except Exception:
             pass
@@ -103,7 +103,7 @@ class PeerRouting(IPeerRouting):
         # If not found locally, search the network
         try:
             closest_peers = await self.find_closest_peers_network(peer_id.to_bytes())
-            logger.info(f"Closest peers found: {closest_peers}")
+            logger.info("Closest peers found: %s", closest_peers)
 
             # Check if we found the peer we're looking for
             for found_peer in closest_peers:
@@ -116,10 +116,10 @@ class PeerRouting(IPeerRouting):
                         pass
 
         except Exception as e:
-            logger.error(f"Error searching for peer {peer_id}: {e}")
+            logger.error("Error searching for peer %s: %s", peer_id, e)
 
         # Not found
-        logger.info(f"Peer {peer_id} not found")
+        logger.info("Peer %s not found", peer_id)
         return None
 
     async def _query_single_peer_for_closest(
@@ -149,7 +149,7 @@ class PeerRouting(IPeerRouting):
                 len([p for p in result if p not in new_peers[: -len(result)]]),
             )
         except Exception as e:
-            logger.debug(f"Query to peer {peer} failed: {e}")
+            logger.debug("Query to peer %s failed: %s", peer, e)
 
     async def find_closest_peers_network(
         self, target_key: bytes, count: int = 20
@@ -179,7 +179,7 @@ class PeerRouting(IPeerRouting):
         # Iterative lookup until convergence
         while rounds < MAX_PEER_LOOKUP_ROUNDS:
             rounds += 1
-            logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
+            logger.debug("Lookup round %d/%d", rounds, MAX_PEER_LOOKUP_ROUNDS)
 
             # Find peers we haven't queried yet
             peers_to_query = [p for p in closest_peers if p not in queried_peers]
@@ -214,7 +214,7 @@ class PeerRouting(IPeerRouting):
             closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
                 :count
             ]
-            logger.debug(f"Updated closest peers count: {len(closest_peers)}")
+            logger.debug("Updated closest peers count: %d", len(closest_peers))
 
             # Check if we made any progress (found closer peers)
             if closest_peers == old_closest_peers:
@@ -222,8 +222,9 @@ class PeerRouting(IPeerRouting):
                 break
 
         logger.info(
-            f"Network lookup completed after {rounds} rounds, "
-            f"found {len(closest_peers)} peers"
+            "Network lookup completed after %d rounds, found %d peers",
+            rounds,
+            len(closest_peers),
         )
         return closest_peers
 
@@ -242,15 +243,15 @@ class PeerRouting(IPeerRouting):
                     peer_info = PeerInfo(peer, addrs)
                     await self.routing_table.add_peer(peer_info)
             except Exception as e:
-                logger.debug(f"Failed to add peer {peer} to routing table: {e}")
+                logger.debug("Failed to add peer %s to routing table: %s", peer, e)
 
             # Open a stream to the peer using the Kademlia protocol
-            logger.debug(f"Opening stream to {peer} for closest peers query")
+            logger.debug("Opening stream to %s for closest peers query", peer)
             try:
                 stream = await self.host.new_stream(peer, [PROTOCOL_ID])
-                logger.debug(f"Stream opened to {peer}")
+                logger.debug("Stream opened to %s", peer)
             except Exception as e:
-                logger.warning(f"Failed to open stream to {peer}: {e}")
+                logger.warning("Failed to open stream to %s: %s", peer, e)
                 return []
 
             # Create and send FIND_NODE request using protobuf
@@ -265,7 +266,7 @@ class PeerRouting(IPeerRouting):
             # Serialize and send the protobuf message with varint length prefix
             proto_bytes = find_node_msg.SerializeToString()
             logger.debug(
-                f"Sending FIND_NODE: {proto_bytes.hex()} (len={len(proto_bytes)})"
+                "Sending FIND_NODE: %s (len=%d)", proto_bytes.hex(), len(proto_bytes)
             )
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
@@ -283,17 +284,30 @@ class PeerRouting(IPeerRouting):
                 if b[0] & 0x80 == 0:
                     break
             response_length = varint.decode_bytes(length_bytes)
+            if response_length is None or response_length <= 0:
+                logger.warning("Invalid response length received from peer")
+                return []
 
             # Read response data
             response_bytes = b""
-            remaining = response_length
+            remaining = int(response_length)  # Explicit int conversion after None check
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
-                    logger.debug(f"Connection closed by peer {peer} while reading data")
+                    logger.debug(
+                        "Connection closed by peer %s while reading data",
+                        peer,
+                    )
                     return []
+                chunk_len = len(chunk)
+                if chunk_len == 0:
+                    break
                 response_bytes += chunk
-                remaining -= len(chunk)
+                # Defensive programming: ensure we have valid integers
+                if not isinstance(remaining, int) or not isinstance(chunk_len, int):
+                    logger.error("Invalid type in remaining calculation")
+                    return []
+                remaining -= chunk_len
 
             # Parse the protobuf response
             response_msg = Message()
@@ -334,7 +348,7 @@ class PeerRouting(IPeerRouting):
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
 
         except Exception as e:
-            logger.debug(f"Error querying peer {peer} for closest: {e}")
+            logger.debug("Error querying peer %s for closest: %s", peer, e)
 
         finally:
             if stream:
@@ -427,10 +441,10 @@ class PeerRouting(IPeerRouting):
                     await stream.write(response_bytes)
 
             except Exception as parse_err:
-                logger.error(f"Failed to parse protocol buffer message: {parse_err}")
+                logger.error("Failed to parse protocol buffer message: %s", parse_err)
 
         except Exception as e:
-            logger.debug(f"Error handling Kademlia stream: {e}")
+            logger.debug("Error handling Kademlia stream: %s", e)
         finally:
             await stream.close()
 
@@ -457,4 +471,4 @@ class PeerRouting(IPeerRouting):
                     peer_info = PeerInfo(peer_id, addrs)
                     await self.routing_table.add_peer(peer_info)
             except Exception as e:
-                logger.debug(f"Failed to add discovered peer {peer_id}: {e}")
+                logger.debug("Failed to add discovered peer %s: %s", peer_id, e)
