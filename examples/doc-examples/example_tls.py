@@ -2,8 +2,8 @@
 """
 TLS Server Example
 
-This example demonstrates how to create a TLS-enabled py-libp2p host that accepts 
-connections and responds to messages from clients. The server will print out its 
+This example demonstrates how to create a TLS-enabled py-libp2p host that accepts
+connections and responds to messages from clients. The server will print out its
 listen addresses, which can be used by clients to connect.
 
 Usage:
@@ -11,14 +11,14 @@ Usage:
 """
 
 import argparse
-import trio
 from datetime import datetime
-import multiaddr
 
-from libp2p import new_host, generate_new_rsa_identity
+import multiaddr
+import trio
+
+from libp2p import generate_new_rsa_identity, new_host
 from libp2p.security.tls.transport import TLSTransport
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID
-
 
 # Define a protocol ID for our example
 PROTOCOL_ID = "/tls-example/1.0.0"
@@ -27,28 +27,32 @@ PROTOCOL_ID = "/tls-example/1.0.0"
 async def handle_echo(stream):
     """
     Handle an incoming stream from a client.
-    
+
     Args:
         stream: The incoming stream
+
     """
     peer_id = stream.muxed_conn.peer_id
     remote_addr = stream.muxed_conn.remote_multiaddr
     timestamp = datetime.now().strftime("%H:%M:%S")
-    
+
     print(f"[{timestamp}] Received new stream from peer: {peer_id} at {remote_addr}")
-    
+
     # Get connection security details if available
     conn = stream.muxed_conn
     if hasattr(conn, "secured_conn") and hasattr(conn.secured_conn, "tls_version"):
         print(f"[{timestamp}] Connection secured with: {conn.secured_conn.tls_version}")
-    
+
     try:
         # Read the client's message
         message = await stream.read(4096)
         print(f"[{timestamp}] Received message: {message.decode()}")
-        
+
         # Send a response back
-        response = f"Server received your message of length {len(message)}. Your message was: {message.decode()}".encode()
+        response = (
+            f"Server received your message of length {len(message)}. "
+            f"Your message was: {message.decode()}"
+        ).encode()
         await stream.write(response)
         print(f"[{timestamp}] Sent response to peer: {peer_id}")
     except Exception as e:
@@ -62,29 +66,30 @@ async def handle_echo(stream):
 async def main(host_str="0.0.0.0", port=8000) -> None:
     """
     Run a TLS-enabled server that accepts connections and handles messages.
-    
+
     Args:
         host_str: The host address to listen on (0.0.0.0 for all interfaces)
         port: The port to listen on (0 for random port)
+
     """
     # Generate a new key pair for this host
     key_pair = generate_new_rsa_identity()
-    
+
     # Create a listen address with specified host and port
     listen_addr = multiaddr.Multiaddr(f"/ip4/{host_str}/tcp/{port}")
     listen_addrs = [listen_addr]
-    
+
     # Also create a 127.0.0.1 address for loopback testing
     if host_str == "0.0.0.0":
         loopback_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
         listen_addrs.append(loopback_addr)
-    
+
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] Starting TLS-enabled libp2p host...")
-    
+
     # Create a TLS transport with our key pair and explicit muxer preference
     tls_transport = TLSTransport(key_pair, muxers=[MPLEX_PROTOCOL_ID])
-    
+
     # Create a host with TLS security transport
     host = new_host(
         key_pair=key_pair,
@@ -98,22 +103,22 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
     async with host.run(listen_addrs=listen_addrs):
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] Host started with Peer ID: {host.get_id()}")
-        
+
         # Create a connection string with our configured host/port
         peer_id = host.get_id()
         connection_addr = f"/ip4/{host_str}/tcp/{port}/p2p/{peer_id}"
-        
+
         print(f"Server listening on: {host_str}:{port}")
         print(f"Server peer ID: {peer_id}")
-        
+
         print(f"\nProtocol: {PROTOCOL_ID}")
         print("Security: TLS 1.3")
         print("Stream Multiplexing: MPLEX")
-            
+
         print("\nUse example_tls_client.py to connect to this server:")
         print(f"  python example_tls_client.py --server {connection_addr}")
-        
-        print("\nTLS is now active for this peer. Waiting for connections. Press Ctrl+C to stop.")
+
+        print("\nTLS is now active. Waiting for connections. Press Ctrl+C to stop.")
         try:
             # Keep the server running until interrupted
             await trio.sleep_forever()
@@ -127,17 +132,19 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
 def parse_args():
     parser = argparse.ArgumentParser(description="TLS Server Example")
     parser.add_argument("--host", default="0.0.0.0", help="Host address to listen on")
-    parser.add_argument("-p", "--port", type=int, default=8000, help="Port to listen on")
+    parser.add_argument(
+        "-p", "--port", type=int, default=8000, help="Port to listen on"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    
+
     # Set up logging if debug is enabled
     if args.debug:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
     trio.run(main, args.host, args.port)

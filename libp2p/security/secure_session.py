@@ -81,7 +81,11 @@ class SecureSession(BaseSession):
             if len(data_from_buffer) > 0:
                 return data_from_buffer
 
-            print(f"[SecureSession] Reading message from connection (requested: {n if n is not None else 'all'})")
+            requested = n if n is not None else "all"
+            msg1 = "[SecureSession] Reading message from connection"
+            msg2 = f"(requested: {requested})"
+            message = f"{msg1} {msg2}"
+            print(message)
             msg = await self.conn.read_msg()
             print(f"[SecureSession] Read message: length={len(msg)} bytes")
 
@@ -93,7 +97,7 @@ class SecureSession(BaseSession):
                 return self._drain(n)
             else:
                 return msg
-                
+
         except Exception as e:
             print(f"[SecureSession] Error reading data: {e}")
             # Re-raise to maintain proper error handling flow
@@ -103,7 +107,7 @@ class SecureSession(BaseSession):
         try:
             print(f"[SecureSession] Writing message: length={len(data)} bytes")
             await self.conn.write_msg(data)
-            print(f"[SecureSession] Write completed successfully")
+            print("[SecureSession] Write completed successfully")
         except Exception as e:
             print(f"[SecureSession] Error writing data: {e}")
             # Re-raise to maintain proper error handling flow

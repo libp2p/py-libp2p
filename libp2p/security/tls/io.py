@@ -84,9 +84,16 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         MAX_HANDSHAKE_TIME = 30  # 30 seconds max for handshake
         handshake_attempts = 0
         MAX_ATTEMPTS = 100  # Prevent infinite loops
-        
-        print(f"[TLS] Starting handshake: server_side={self.server_side}, hostname={self.server_hostname}")
-        print(f"[TLS] SSL Context: {self.ssl_context.protocol}, verify_mode={self.ssl_context.verify_mode}, check_hostname={self.ssl_context.check_hostname}")
+
+        print(
+            f"[TLS] Starting handshake: server_side={self.server_side}, "
+            f"hostname={self.server_hostname}"
+        )
+        print(
+            f"[TLS] SSL Context: {self.ssl_context.protocol}, "
+            f"verify_mode={self.ssl_context.verify_mode}, "
+            f"check_hostname={self.ssl_context.check_hostname}"
+        )
 
         with trio.move_on_after(MAX_HANDSHAKE_TIME):
             while handshake_attempts < MAX_ATTEMPTS:
@@ -94,15 +101,17 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 try:
                     print(f"[TLS] Attempting handshake step {handshake_attempts}...")
                     ssl_obj.do_handshake()
-                    
+
                     # Verify TLS version after handshake
                     version = ssl_obj.version()
                     cipher = ssl_obj.cipher()
                     print(f"[TLS] Handshake successful! Version: {version}")
                     print(f"[TLS] Negotiated cipher: {cipher}")
-                    print(f"[TLS] Peer certificate: {'Present' if ssl_obj.getpeercert() else 'None'}")
+                    cert_status = "Present" if ssl_obj.getpeercert() else "None"
+                    message = f"[TLS] Peer certificate: {cert_status}"
+                    print(message)
                     print(f"[TLS] Handshake successful! Negotiated version: {version}")
-                    
+
                     if version is None or not version.startswith("TLSv1.3"):
                         print(f"[TLS] Warning: Unexpected TLS version: {version}")
                         # Continue anyway for testing - relax version check
@@ -115,7 +124,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                         await self.raw_connection.write(data)
                     else:
                         print("[TLS] No outgoing data to write after SSLWantReadError")
-                        
+
                     # read more from wire with timeout
                     try:
                         print("[TLS] Waiting for peer data...")
@@ -134,8 +143,9 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                     data = out_bio.read()
                     if data:
                         try:
-                            print(f"[TLS] Sending {len(data)} bytes after SSLWantWriteError")
-                            with trio.move_on_after(5):  # 5 second write timeout
+                            print(f"[TLS] Sending {len(data)} bytes")
+                            # Use a timeout to prevent hanging
+                            with trio.move_on_after(5):
                                 await self.raw_connection.write(data)
                         except trio.TooSlowError:
                             print("[TLS] Write timeout during handshake")
@@ -145,7 +155,9 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 except ssl.SSLCertVerificationError as e:
                     # Ignore built-in verification errors;
                     # we verify manually afterwards.
-                    print(f"[TLS] Certificate verification error (expected, will verify later): {e}")
+                    # Certificate errors are expected and handled later
+                    print("[TLS] Certificate verification error (expected)")
+                    print(f"[TLS] Will verify manually: {e}")
                     break
                 except ssl.SSLError as e:
                     print(f"[TLS] SSL error during handshake: {e}")
@@ -191,18 +203,21 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         # Ensure handshake was called
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
-            
+
         print(f"[TLS] Starting to write message of {len(msg)} bytes")
-            
+
         # write plaintext into SSL object and flush ciphertext to transport
         remaining = msg
         write_attempts = 0
         max_write_attempts = 20  # Prevent infinite loops
-        
+
         while remaining and write_attempts < max_write_attempts:
             write_attempts += 1
             try:
-                print(f"[TLS] Writing chunk of {len(remaining)} bytes (attempt {write_attempts})")
+                msg1 = f"[TLS] Writing chunk of {len(remaining)} bytes"
+                msg2 = f"(attempt {write_attempts})"
+                message = f"{msg1} {msg2}"
+                print(message)
                 n = self._ssl_socket.write(remaining)
                 print(f"[TLS] Successfully wrote {n} bytes to SSL socket")
                 remaining = remaining[n:]
@@ -215,7 +230,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             except Exception as e:
                 print(f"[TLS] Unexpected error during write: {e}")
                 raise
-                
+
             # flush any TLS records produced
             flush_count = 0
             while flush_count < 10:  # Prevent infinite loop
@@ -224,7 +239,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 if not data:
                     print("[TLS] No more data to flush")
                     break
-                    
+
                 print(f"[TLS] Flushing {len(data)} bytes to raw connection")
                 try:
                     await self.raw_connection.write(data)
@@ -232,9 +247,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 except Exception as e:
                     print(f"[TLS] Error flushing data to raw connection: {e}")
                     raise
-                    
+
         if remaining:
-            print(f"[TLS] WARNING: Failed to write entire message. {len(remaining)} bytes remaining after {max_write_attempts} attempts")
+            print("[TLS] WARNING: Failed to write entire message.")
+            print(f"{len(remaining)} bytes remaining after {max_write_attempts}")
         else:
             print("[TLS] Successfully wrote entire message")
 
@@ -256,19 +272,20 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         attempt = 0
 
         print("[TLS] Starting to read message...")
-        
+
         while attempt < max_attempts:
             attempt += 1
             try:
                 print(f"[TLS] Attempt {attempt} to read data")
                 data = self._ssl_socket.read(65536)
                 if data:
-                    print(f"[TLS] Successfully read {len(data)} bytes of application data")
+                    print(f"[TLS] Successfully read {len(data)} bytes")
                     return data
+
                 # If we get here, ssl_socket.read() returned empty data
                 # Check if connection is closed by trying to read from raw connection
                 try:
-                    print("[TLS] SSL socket read returned no data, trying to read from raw connection")
+                    print("[TLS] SSL socket read returned no data")
                     incoming = await self.raw_connection.read(4096)
                     if not incoming:
                         print("[TLS] Raw connection closed (EOF)")
@@ -284,7 +301,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 # flush any pending TLS data
                 pending = self._out_bio.read()
                 if pending:
-                    print(f"[TLS] Flushing {len(pending)} bytes of pending data to peer")
+                    print(f"[TLS] Flushing {len(pending)} bytes of pending data")
                     await self.raw_connection.write(pending)
                 # get more ciphertext
                 try:
@@ -349,7 +366,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                 try:
                     print("[TLS] Unwrapping SSL socket")
                     self._ssl_socket.unwrap()
-                    
+
                     # Flush any pending close_notify alerts
                     data = self._out_bio.read()
                     if data:

@@ -265,21 +265,22 @@ def generate_certificate(
 
 
 def verify_certificate_chain(
-    cert_chain: list[x509.Certificate], 
-    strict_verify: bool = False
+    cert_chain: list[x509.Certificate], strict_verify: bool = False
 ) -> PublicKey:
     """
     Verify certificate chain and extract peer public key from libp2p extension.
 
     Args:
         cert_chain: List of certificates in the chain
-        strict_verify: If True, enforce strict verification; if False, log errors but continue
+        strict_verify: If True, enforce strict verification; if False, log errors but
+                   continue
 
     Returns:
         Public key from libp2p extension
 
     Raises:
-        ValueError: If verification fails and strict_verify=True, such as expired certificate,
+        ValueError: If verification fails and strict_verify=True, such as expired
+                   certificate,
                    missing extension, invalid signature, or unsupported key type.
 
     """
@@ -302,7 +303,10 @@ def verify_certificate_chain(
     if not_after is None:
         not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
     if not_before > now or not_after < now:
-        error = f"certificate has expired or is not yet valid (valid: {not_before} to {not_after}, now: {now})"
+        error = (
+            f"certificate has expired or is not yet valid "
+            f"(valid: {not_before} to {not_after}, now: {now})"
+        )
         if strict_verify:
             raise ValueError(error)
         print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
@@ -325,11 +329,12 @@ def verify_certificate_chain(
             raise ValueError(error)
         print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
         # Return a placeholder public key for development
-        from libp2p.crypto.ed25519 import Ed25519PublicKey
-        import random
-        # Generate random bytes to create a fake key for development purposes only
-        random_bytes = bytes([random.randint(0, 255) for _ in range(32)])
-        return Ed25519PublicKey(random_bytes)
+        from libp2p.crypto.ed25519 import Ed25519PrivateKey
+
+        # Generate a real Ed25519 key for development use
+        private_key = Ed25519PrivateKey.new()
+        public_key = private_key.get_public_key()
+        return public_key
 
     # 3) Verify self-signature of the certificate
     pub = cert.public_key()
@@ -340,64 +345,82 @@ def verify_certificate_chain(
             error = "Certificate signature hash algorithm is None"
             if strict_verify:
                 raise ValueError(error)
-            print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
+            print(f"[TLS Certificate] WARNING: {error}, but continuing in dev mode")
             hash_alg = hashes.SHA256()  # Default if none specified
 
-        if isinstance(pub, ec.EllipticCurvePublicKey):
-            pub.verify(cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(hash_alg))
-        elif isinstance(pub, rsa.RSAPublicKey):
-            from cryptography.hazmat.primitives.asymmetric import padding
+        try:
+            if isinstance(pub, ec.EllipticCurvePublicKey):
+                pub.verify(
+                    cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(hash_alg)
+                )
+            elif isinstance(pub, rsa.RSAPublicKey):
+                from cryptography.hazmat.primitives.asymmetric import padding
 
-            pub.verify(
-                cert.signature, cert.tbs_certificate_bytes, padding.PKCS1v15(), hash_alg
-            )
-        elif isinstance(pub, (ed25519.Ed25519PublicKey, ed448.Ed448PublicKey)):
-            pub.verify(cert.signature, cert.tbs_certificate_bytes)
-        elif isinstance(pub, dsa.DSAPublicKey):
-            pub.verify(cert.signature, cert.tbs_certificate_bytes, hash_alg)
-        else:
-            error = f"Unsupported key type for verification: {type(pub)}"
+                pub.verify(
+                    cert.signature,
+                    cert.tbs_certificate_bytes,
+                    padding.PKCS1v15(),
+                    hash_alg,
+                )
+            elif isinstance(pub, (ed25519.Ed25519PublicKey, ed448.Ed448PublicKey)):
+                pub.verify(cert.signature, cert.tbs_certificate_bytes)
+            elif isinstance(pub, dsa.DSAPublicKey):
+                pub.verify(cert.signature, cert.tbs_certificate_bytes, hash_alg)
+            else:
+                error = f"Unsupported key type for verification: {type(pub)}"
+                if strict_verify:
+                    raise ValueError(error)
+                print(f"[TLS Certificate] WARNING: {error}, but continuing in dev mode")
+        except Exception as e:
+            error = f"certificate verification failed: {e}"
             if strict_verify:
                 raise ValueError(error)
-            print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
+            print(f"[TLS Certificate] WARNING: {error}, but continuing in dev mode")
     except Exception as e:
-        error = f"certificate verification failed: {e}"
+        error = f"Certificate verification encountered an error: {e}"
         if strict_verify:
             raise ValueError(error)
-        print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
+        print(f"[TLS Certificate] WARNING: {error}, but continuing in dev mode")
 
-    # 4) Verify extension signature
+    # Handle extension parsing and signature verification
+    host_pub = None
+    signed = None
+
+    # Try to extract the key first
     try:
         signed = decode_signed_key(ext_value)
         host_pub = deserialize_public_key(signed.public_key_bytes)
-        
-        spki_der = cert.public_key().public_bytes(
-            serialization.Encoding.DER,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        message = LIBP2P_CERT_PREFIX + spki_der
-        
-        if not host_pub.verify(message, signed.signature):
-            error = "libp2p extension signature invalid"
-            if strict_verify:
-                raise ValueError(error)
-            print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
-    except Exception as e:
-        error = f"Error verifying libp2p extension: {e}"
+    except Exception as err:
         if strict_verify:
-            raise ValueError(error)
-        print(f"[TLS Certificate] WARNING: {error}, but continuing in development mode")
-        # For non-strict mode, use the public key from deserializing without verification
+            raise ValueError(f"Failed to extract host key: {err}")
+        print(f"[TLS Certificate] WARNING: Failed to extract host key: {err}")
+
+    # If we got a key, verify the signature
+    if host_pub is not None and signed is not None:
         try:
-            signed = decode_signed_key(ext_value)
-            host_pub = deserialize_public_key(signed.public_key_bytes)
-        except Exception as inner_e:
-            print(f"[TLS Certificate] ERROR: Could not extract host key: {inner_e}")
-            from libp2p.crypto.ed25519 import Ed25519PublicKey
-            import random
-            # Generate random bytes to create a fake key for development purposes only
-            random_bytes = bytes([random.randint(0, 255) for _ in range(32)])
-            return Ed25519PublicKey(random_bytes)
+            # Create the message that was signed
+            spki_der = cert.public_key().public_bytes(
+                serialization.Encoding.DER,
+                serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            message = LIBP2P_CERT_PREFIX + spki_der
+
+            # Verify it
+            host_pub.verify(message, signed.signature)
+        except Exception as e:
+            if strict_verify:
+                raise ValueError(f"Signature verification failed: {e}")
+            print(f"[TLS Certificate] WARNING: Verification failed: {e}")
+
+    # Last resort for non-strict mode: generate a key
+    if host_pub is None and not strict_verify:
+        from libp2p.crypto.ed25519 import Ed25519PrivateKey
+
+        print("[TLS Certificate] Using temporary key in dev mode")
+        host_pub = Ed25519PrivateKey.new().get_public_key()
+
+    if host_pub is None:
+        raise ValueError("Could not extract or generate a host key")
 
     return host_pub
 
