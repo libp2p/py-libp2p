@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser-to-Backend P2P Sync - Collaborative Notepad</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .controls {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .control-group label {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        input, button, select {
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #4facfe;
+            box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+        }
+        
+        button {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 172, 254, 0.3);
+        }
+        
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .status {
+            padding: 15px 20px;
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            margin: 0 20px 20px 20px;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .status.connected {
+            background: #e8f5e8;
+            border-left-color: #4caf50;
+        }
+        
+        .status.error {
+            background: #ffebee;
+            border-left-color: #f44336;
+        }
+        
+        .main-content {
+            display: flex;
+            min-height: 500px;
+        }
+        
+        .notepad-section {
+            flex: 1;
+            padding: 20px;
+        }
+        
+        .sidebar {
+            width: 300px;
+            background: #f8f9fa;
+            border-left: 1px solid #e9ecef;
+            padding: 20px;
+        }
+        
+        .notepad {
+            width: 100%;
+            height: 400px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: vertical;
+            transition: border-color 0.3s ease;
+        }
+        
+        .notepad:focus {
+            outline: none;
+            border-color: #4facfe;
+            box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+        }
+        
+        .sidebar h3 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 1.2em;
+        }
+        
+        .peer-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .peer-item {
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border-left: 3px solid #4facfe;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .peer-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .peer-info {
+            flex: 1;
+        }
+        
+        .peer-name {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .peer-status {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        
+        .stats {
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+        }
+        
+        .stat-value {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .footer {
+            padding: 20px;
+            background: #f8f9fa;
+            text-align: center;
+            color: #6c757d;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .footer a {
+            color: #4facfe;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid #e9ecef;
+            }
+            
+            .control-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Browser-to-Backend P2P Sync</h1>
+            <p>Real-time collaborative editing powered by py-libp2p</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="backendUrl">Backend URL:</label>
+                <input type="text" id="backendUrl" value="ws://localhost:8001" placeholder="ws://localhost:8001">
+                
+                <label for="clientId">Client ID:</label>
+                <input type="text" id="clientId" placeholder="Auto-generated">
+                
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+        </div>
+        
+        <div id="status" class="status">
+            <strong>Status:</strong> <span id="statusText">Disconnected</span>
+        </div>
+        
+        <div class="main-content">
+            <div class="notepad-section">
+                <h3>📝 Collaborative Notepad</h3>
+                <textarea id="notepad" class="notepad" placeholder="Start typing to collaborate in real-time..."></textarea>
+            </div>
+            
+            <div class="sidebar">
+                <h3>👥 Connected Peers</h3>
+                <ul id="peerList" class="peer-list">
+                    <li class="peer-item">
+                        <div class="peer-avatar">?</div>
+                        <div class="peer-info">
+                            <div class="peer-name">No peers connected</div>
+                            <div class="peer-status">Waiting for connection...</div>
+                        </div>
+                    </li>
+                </ul>
+                
+                <div class="stats">
+                    <h3>📊 Statistics</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Operations Sent:</span>
+                        <span id="opsSent" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Operations Received:</span>
+                        <span id="opsReceived" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Connected Time:</span>
+                        <span id="connectedTime" class="stat-value">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Built with <a href="https://github.com/libp2p/py-libp2p" target="_blank">py-libp2p</a> | 
+            <a href="https://github.com/libp2p/py-libp2p/issues/879" target="_blank">ETH-Delhi Hackathon</a></p>
+        </div>
+    </div>
+
+    <script>
+        class BrowserSyncClient {
+            constructor() {
+                this.ws = null;
+                this.connected = false;
+                this.clientId = this.generateClientId();
+                this.stats = {
+                    operationsSent: 0,
+                    operationsReceived: 0,
+                    connectedAt: null
+                };
+                this.peers = new Map();
+                this.setupEventListeners();
+            }
+
+            generateClientId() {
+                return 'browser_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            setupEventListeners() {
+                document.getElementById('connectBtn').addEventListener('click', () => this.connect());
+                document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnect());
+                document.getElementById('notepad').addEventListener('input', (e) => this.handleTextChange(e));
+                document.getElementById('clientId').value = this.clientId;
+            }
+
+            async connect() {
+                const backendUrl = document.getElementById('backendUrl').value;
+                if (!backendUrl) {
+                    this.updateStatus('Please enter a backend URL', 'error');
+                    return;
+                }
+
+                try {
+                    this.ws = new WebSocket(backendUrl, 'sync-protocol');
+                    
+                    this.ws.onopen = () => {
+                        this.connected = true;
+                        this.stats.connectedAt = Date.now();
+                        this.updateStatus('Connected to backend peer', 'connected');
+                        this.updateButtons();
+                        this.startHeartbeat();
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        this.handleMessage(JSON.parse(event.data));
+                    };
+
+                    this.ws.onclose = () => {
+                        this.connected = false;
+                        this.updateStatus('Disconnected from backend peer', 'error');
+                        this.updateButtons();
+                        this.stopHeartbeat();
+                    };
+
+                    this.ws.onerror = (error) => {
+                        this.updateStatus('Connection error: ' + error, 'error');
+                    };
+
+                } catch (error) {
+                    this.updateStatus('Failed to connect: ' + error.message, 'error');
+                }
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                }
+            }
+
+            handleMessage(data) {
+                this.stats.operationsReceived++;
+                this.updateStats();
+
+                if (data.operation === 'PEER_JOIN') {
+                    this.addPeer(data.client_id, data.data);
+                } else if (data.operation === 'PEER_LEAVE') {
+                    this.removePeer(data.data.peer_id);
+                } else if (data.operation === 'INSERT') {
+                    this.handleInsertOperation(data);
+                } else if (data.operation === 'DELETE') {
+                    this.handleDeleteOperation(data);
+                } else if (data.operation === 'UPDATE') {
+                    this.handleUpdateOperation(data);
+                }
+            }
+
+            handleInsertOperation(data) {
+                const notepad = document.getElementById('notepad');
+                const position = data.data.position || 0;
+                const content = data.data.content || '';
+                
+                const currentValue = notepad.value;
+                const newValue = currentValue.slice(0, position) + content + currentValue.slice(position);
+                notepad.value = newValue;
+            }
+
+            handleDeleteOperation(data) {
+                const notepad = document.getElementById('notepad');
+                const position = data.data.position || 0;
+                const length = data.data.length || 1;
+                
+                const currentValue = notepad.value;
+                const newValue = currentValue.slice(0, position) + currentValue.slice(position + length);
+                notepad.value = newValue;
+            }
+
+            handleUpdateOperation(data) {
+                const notepad = document.getElementById('notepad');
+                if (data.data.document !== undefined) {
+                    notepad.value = data.data.document;
+                }
+            }
+
+            handleTextChange(event) {
+                if (!this.connected) return;
+
+                const notepad = event.target;
+                const cursorPosition = notepad.selectionStart;
+                
+                // Simple implementation: send the entire document as update
+                // In a real implementation, you'd want to track changes more granularly
+                this.sendOperation('UPDATE', {
+                    document: notepad.value,
+                    cursor_position: cursorPosition
+                });
+            }
+
+            sendOperation(operation, data) {
+                if (!this.connected) return;
+
+                const message = {
+                    type: 'operation',
+                    operation: operation,
+                    id: this.clientId + '_' + Date.now(),
+                    timestamp: Date.now() / 1000,
+                    client_id: this.clientId,
+                    data: data
+                };
+
+                this.ws.send(JSON.stringify(message));
+                this.stats.operationsSent++;
+                this.updateStats();
+            }
+
+            addPeer(peerId, peerData) {
+                this.peers.set(peerId, {
+                    id: peerId,
+                    name: peerData.peer_id || peerId,
+                    type: peerData.type || 'unknown',
+                    connectedAt: peerData.connected_at || Date.now() / 1000
+                });
+                this.updatePeerList();
+            }
+
+            removePeer(peerId) {
+                this.peers.delete(peerId);
+                this.updatePeerList();
+            }
+
+            updatePeerList() {
+                const peerList = document.getElementById('peerList');
+                peerList.innerHTML = '';
+
+                if (this.peers.size === 0) {
+                    peerList.innerHTML = `
+                        <li class="peer-item">
+                            <div class="peer-avatar">?</div>
+                            <div class="peer-info">
+                                <div class="peer-name">No peers connected</div>
+                                <div class="peer-status">Waiting for peers...</div>
+                            </div>
+                        </li>
+                    `;
+                    return;
+                }
+
+                for (const [peerId, peer] of this.peers) {
+                    const peerItem = document.createElement('li');
+                    peerItem.className = 'peer-item';
+                    peerItem.innerHTML = `
+                        <div class="peer-avatar">${peer.name.charAt(0).toUpperCase()}</div>
+                        <div class="peer-info">
+                            <div class="peer-name">${peer.name}</div>
+                            <div class="peer-status">${peer.type} • ${new Date(peer.connectedAt * 1000).toLocaleTimeString()}</div>
+                        </div>
+                    `;
+                    peerList.appendChild(peerItem);
+                }
+            }
+
+            updateStatus(message, type = '') {
+                const statusElement = document.getElementById('status');
+                const statusText = document.getElementById('statusText');
+                
+                statusText.textContent = message;
+                statusElement.className = 'status ' + type;
+            }
+
+            updateButtons() {
+                const connectBtn = document.getElementById('connectBtn');
+                const disconnectBtn = document.getElementById('disconnectBtn');
+                
+                connectBtn.disabled = this.connected;
+                disconnectBtn.disabled = !this.connected;
+            }
+
+            updateStats() {
+                document.getElementById('opsSent').textContent = this.stats.operationsSent;
+                document.getElementById('opsReceived').textContent = this.stats.operationsReceived;
+                
+                if (this.stats.connectedAt) {
+                    const connectedTime = Math.floor((Date.now() - this.stats.connectedAt) / 1000);
+                    document.getElementById('connectedTime').textContent = connectedTime + 's';
+                }
+            }
+
+            startHeartbeat() {
+                this.heartbeatInterval = setInterval(() => {
+                    if (this.connected) {
+                        this.sendOperation('HEARTBEAT', { status: 'alive' });
+                    }
+                }, 10000); // Send heartbeat every 10 seconds
+            }
+
+            stopHeartbeat() {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                }
+            }
+        }
+
+        // Initialize the client when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            window.syncClient = new BrowserSyncClient();
+        });
+    </script>
+</body>
+</html>
