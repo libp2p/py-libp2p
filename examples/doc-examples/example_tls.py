@@ -23,6 +23,7 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.utils import get_available_interfaces, get_optimal_binding_address
 
 # Define a protocol ID for our example
 PROTOCOL_ID = TProtocol("/tls-example/1.0.0")
@@ -79,14 +80,13 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
     # Generate a new key pair for this host
     key_pair = generate_new_rsa_identity()
 
-    # Create a listen address with specified host and port
-    listen_addr = multiaddr.Multiaddr(f"/ip4/{host_str}/tcp/{port}")
-    listen_addrs = [listen_addr]
-
-    # Also create a 127.0.0.1 address for loopback testing
+    # Use the new address paradigm to get optimal binding addresses
     if host_str == "0.0.0.0":
-        loopback_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
-        listen_addrs.append(loopback_addr)
+        # Use available interfaces for wildcard binding
+        listen_addrs = get_available_interfaces(port, "tcp")
+    else:
+        # Use optimal binding address for specific host
+        listen_addrs = [get_optimal_binding_address(port, "tcp")]
 
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] Starting TLS-enabled libp2p host...")

@@ -50,6 +50,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_complete = False
         self._negotiated_protocol: str | None = None
+        self._closed = False
 
     async def handshake(self) -> None:
         """
@@ -200,6 +201,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             msg: Message to encrypt and send
 
         """
+        # Check if connection is closed
+        if self._closed:
+            raise ConnectionError("Connection is closed")
+
         # Ensure handshake was called
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
@@ -262,6 +267,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             Decrypted message bytes
 
         """
+        # Check if connection is closed
+        if self._closed:
+            raise ConnectionError("Connection is closed")
+
         # Ensure handshake was called
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
@@ -289,13 +298,13 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                     incoming = await self.raw_connection.read(4096)
                     if not incoming:
                         print("[TLS] Raw connection closed (EOF)")
-                        return b""  # Connection closed
+                        raise ConnectionError("Connection closed")
                     print(f"[TLS] Read {len(incoming)} bytes from raw connection")
                     self._in_bio.write(incoming)
                     continue  # Try reading again with new data
                 except Exception as e:
                     print(f"[TLS] Error reading from raw connection: {e}")
-                    return b""  # Connection error
+                    raise ConnectionError("Connection error") from e
             except ssl.SSLWantReadError:
                 print("[TLS] SSLWantReadError - need more data from peer")
                 # flush any pending TLS data
@@ -309,13 +318,13 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                     incoming = await self.raw_connection.read(4096)
                     if not incoming:
                         print("[TLS] Raw connection closed during read (EOF)")
-                        return b""
+                        raise ConnectionError("Connection closed")
                     print(f"[TLS] Read {len(incoming)} bytes from raw connection")
                     self._in_bio.write(incoming)
                     continue
                 except Exception as e:
                     print(f"[TLS] Error reading from raw connection: {e}")
-                    return b""
+                    raise ConnectionError("Connection error") from e
             except ssl.SSLError as e:
                 print(f"[TLS] SSL error during read: {e}")
                 return b""
@@ -360,6 +369,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
 
     async def close(self) -> None:
         """Close the TLS connection."""
+        if self._closed:
+            return  # Already closed
+
+        self._closed = True
         print("[TLS] Closing TLS connection")
         try:
             if self._ssl_socket is not None:

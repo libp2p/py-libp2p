@@ -29,6 +29,7 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
+from libp2p.utils import get_available_interfaces, get_optimal_binding_address
 
 # Protocol IDs for different services
 ECHO_PROTOCOL_ID = TProtocol("/tls-example/1.0.0")  # For backwards compatibility
