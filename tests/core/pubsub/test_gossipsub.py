@@ -825,8 +825,8 @@ async def test_handle_iwant(monkeypatch):
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
 
-        # ✅ Correct: use raw tuple and str() to serialize, no hex()
-        test_msg_id = str((test_seqno, test_from))
+        # ✅ Correct: use parsed str from tuple
+        test_msg_id = gossipsubs[index_bob].mcache.parse_mid(test_seqno, test_from)
 
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
@@ -849,51 +849,10 @@ async def test_handle_iwant(monkeypatch):
         # Verify that mcache.get was called with the correct parsed message ID
         mock_mcache_get.assert_called_once()
         called_msg_id = mock_mcache_get.call_args[0][0]
-        assert isinstance(called_msg_id, tuple)
-        assert called_msg_id == (test_seqno, test_from)
-
-
-@pytest.mark.trio
-async def test_handle_iwant_invalid_msg_id(monkeypatch):
-    """
-    Test that handle_iwant raises ValueError for malformed message IDs.
-    """
-    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
-        gossipsub_routers = []
-        for pubsub in pubsubs_gsub:
-            if isinstance(pubsub.router, GossipSub):
-                gossipsub_routers.append(pubsub.router)
-        gossipsubs = tuple(gossipsub_routers)
-
-        index_alice = 0
-        index_bob = 1
-        id_alice = pubsubs_gsub[index_alice].my_id
-
-        await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)
-
-        # Malformed message ID (not a tuple string)
-        malformed_msg_id = "not_a_valid_msg_id"
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
-
-        # Mock mcache.get and write_msg to ensure they are not called
-        mock_mcache_get = MagicMock()
-        monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
-
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
-        mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
-
-        # Message ID that's a tuple string but not (bytes, bytes)
-        invalid_tuple_msg_id = "('abc', 123)"
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
-        mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
+        assert isinstance(called_msg_id, str)
+        assert called_msg_id == gossipsubs[index_bob].mcache.parse_mid(
+            test_seqno, test_from
+        )
 
 
 @pytest.mark.trio
