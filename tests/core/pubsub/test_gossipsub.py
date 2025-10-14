@@ -832,16 +832,20 @@ async def test_handle_iwant(monkeypatch):
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
 
         # Mock write_msg to capture the sent packet
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+        mock_send_rpc = AsyncMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         # Simulate Alice sending IWANT to Bob
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[test_msg_id])
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
         # Check if write_msg was called with the correct packet
-        mock_write_msg.assert_called_once()
-        packet = mock_write_msg.call_args[0][1]
+        mock_send_rpc.assert_called_once()
+        to_peer, packet = (
+            mock_send_rpc.call_args.kwargs["to_peer"],
+            mock_send_rpc.call_args.kwargs["rpc"],
+        )
+        assert to_peer == id_alice
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
