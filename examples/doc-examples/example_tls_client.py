@@ -17,7 +17,6 @@ Examples:
 import argparse
 from datetime import datetime
 import sys
-from typing import Optional
 
 import multiaddr
 import trio
@@ -45,7 +44,7 @@ async def read_data(
     stream,
     max_size: int = 4096,
     timeout_seconds: int = 10,
-) -> Optional[bytes]:
+) -> bytes | None:
     """
     Read data from a stream with a timeout.
 

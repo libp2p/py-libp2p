@@ -98,7 +98,7 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
     host = new_host(
         key_pair=key_pair,
         sec_opt={TLS_PROTOCOL_ID: tls_transport},
-        muxer_opt={MPLEX_PROTOCOL_ID: Mplex}  # Using MPLEX for stream multiplexing
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},  # Using MPLEX for stream multiplexing
     )
 
     # Set up a handler for the echo protocol
@@ -149,6 +149,7 @@ if __name__ == "__main__":
     # Set up logging if debug is enabled
     if args.debug:
         import logging
+
         logging.basicConfig(level=logging.DEBUG)
 
     trio.run(main, args.host, args.port)
