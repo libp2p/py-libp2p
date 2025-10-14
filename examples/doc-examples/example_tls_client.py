@@ -17,18 +17,23 @@ Examples:
 import argparse
 from datetime import datetime
 import sys
+from typing import Optional
 
 import multiaddr
 import trio
 
 from libp2p import generate_new_rsa_identity, new_host
+from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.security.tls.transport import TLSTransport
-from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
 
 # Protocol IDs for different services
-ECHO_PROTOCOL_ID = "/tls-example/1.0.0"  # For backwards compatibility
-CHAT_PROTOCOL_ID = "/tls-chat/1.0.0"  # For chat functionality
+ECHO_PROTOCOL_ID = TProtocol("/tls-example/1.0.0")  # For backwards compatibility
+CHAT_PROTOCOL_ID = TProtocol("/tls-chat/1.0.0")  # For chat functionality
 
 
 def current_time():
@@ -36,7 +41,11 @@ def current_time():
     return datetime.now().strftime("%H:%M:%S")
 
 
-async def read_data(stream, max_size=4096, timeout_seconds=10):
+async def read_data(
+    stream,
+    max_size: int = 4096,
+    timeout_seconds: int = 10,
+) -> Optional[bytes]:
     """
     Read data from a stream with a timeout.
 
@@ -53,6 +62,9 @@ async def read_data(stream, max_size=4096, timeout_seconds=10):
         with trio.move_on_after(timeout_seconds):
             response = await stream.read(max_size)
             return response
+    except trio.TooSlowError:
+        print(f"[{current_time()}] Read timeout after {timeout_seconds} seconds")
+        return None
     except Exception as e:
         print(f"[{current_time()}] Error reading from stream: {e}")
         return None
@@ -135,7 +147,7 @@ async def run_echo_mode(host, peer_info, message):
         print(f"[{current_time()}] Waiting for response...")
         response = await read_data(stream)
 
-        if response:
+        if response is not None:
             print(f"[{current_time()}] Received response: {response.decode()}")
         else:
             print(f"[{current_time()}] No response received or timed out")
@@ -282,19 +294,23 @@ async def run_client(server_addr, mode="echo", message="Hello"):
 
     host = new_host(
         key_pair=client_key_pair,
-        sec_opt={"/tls/1.0.0": tls_transport},
-        muxer_opt={MPLEX_PROTOCOL_ID: None},  # Using MPLEX for stream multiplexing
+        sec_opt={TLS_PROTOCOL_ID: tls_transport},
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},  # Using MPLEX for stream multiplexing
     )
 
     # Add the server's address to the peerstore with a longer TTL
     # First try to extract IP and port components
     try:
-        address_components = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
-        port = int(maddr.value_for_protocol(multiaddr.protocols.P_TCP))
-        server_maddr = multiaddr.Multiaddr(f"/ip4/{address_components}/tcp/{port}")
-        print(f"[{current_time()}] Adding server address to peerstore")
-        print(message)
-        host.get_peerstore().add_addr(peer_info.peer_id, server_maddr, 3600)
+        address_components = maddr.value_for_protocol("ip4")
+        port_str = maddr.value_for_protocol("tcp")
+        if address_components and port_str:
+            port = int(port_str)
+            server_maddr = multiaddr.Multiaddr(f"/ip4/{address_components}/tcp/{port}")
+            print(f"[{current_time()}] Adding server address to peerstore")
+            print(message)
+            host.get_peerstore().add_addr(peer_info.peer_id, server_maddr, 3600)
+        else:
+            raise ValueError("Could not extract IP or port from multiaddr")
 
         # Also add the original multiaddr to be safe
         print(f"[{current_time()}] Also adding original multiaddr: {maddr}")

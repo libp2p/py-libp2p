@@ -17,11 +17,15 @@ import multiaddr
 import trio
 
 from libp2p import generate_new_rsa_identity, new_host
-from libp2p.security.tls.transport import TLSTransport
-from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID
+from libp2p.custom_types import TProtocol
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID, Mplex
 
 # Define a protocol ID for our example
-PROTOCOL_ID = "/tls-example/1.0.0"
+PROTOCOL_ID = TProtocol("/tls-example/1.0.0")
 
 
 async def handle_echo(stream):
@@ -93,8 +97,8 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
     # Create a host with TLS security transport
     host = new_host(
         key_pair=key_pair,
-        sec_opt={"/tls/1.0.0": tls_transport},
-        muxer_opt={MPLEX_PROTOCOL_ID: None}  # Using MPLEX for stream multiplexing
+        sec_opt={TLS_PROTOCOL_ID: tls_transport},
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex}  # Using MPLEX for stream multiplexing
     )
 
     # Set up a handler for the echo protocol
