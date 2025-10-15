@@ -294,8 +294,8 @@ async def run_client(server_addr, mode="echo", message="Hello"):
 
     host = new_host(
         key_pair=client_key_pair,
-        sec_opt={TLS_PROTOCOL_ID: tls_transport},
-        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},  # Using MPLEX for stream multiplexing
+        sec_opt={TLS_PROTOCOL_ID: tls_transport},  # type: ignore
+        muxer_opt={MPLEX_PROTOCOL_ID: Mplex},  # type: ignore
     )
 
     # Add the server's address to the peerstore with a longer TTL
@@ -304,7 +304,7 @@ async def run_client(server_addr, mode="echo", message="Hello"):
         address_components = maddr.value_for_protocol("ip4")
         port_str = maddr.value_for_protocol("tcp")
         if address_components and port_str:
-            port = int(port_str)
+            port = int(port_str) if port_str else 0
             server_maddr = multiaddr.Multiaddr(f"/ip4/{address_components}/tcp/{port}")
             print(f"[{current_time()}] Adding server address to peerstore")
             print(message)

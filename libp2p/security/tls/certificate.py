@@ -267,22 +267,18 @@ def generate_certificate(
 def verify_certificate_chain(
     cert_chain: list[x509.Certificate], strict_verify: bool = False
 ) -> PublicKey:
-    """
-    Verify certificate chain and extract peer public key from libp2p extension.
+    """Verify certificate chain and extract peer public key from libp2p extension.
 
     Args:
         cert_chain: List of certificates in the chain
-        strict_verify: If True, enforce strict verification; if False, log errors but
-                   continue
+        strict_verify: If True, enforce strict verification; if False, log errors but continue
 
     Returns:
         Public key from libp2p extension
 
     Raises:
-        ValueError: If verification fails and strict_verify=True, such as expired
-                   certificate,
-                   missing extension, invalid signature, or unsupported key type.
-
+        ValueError: If verification fails and strict_verify=True, such as expired certificate,
+            missing extension, invalid signature, or unsupported key type.
     """
     if len(cert_chain) != 1:
         error = "expected one certificates in the chain"

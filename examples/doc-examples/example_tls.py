@@ -96,12 +96,12 @@ async def main(host_str="0.0.0.0", port=8000) -> None:
     # Create a host with TLS security transport
     host = new_host(
         key_pair=key_pair,
-        sec_opt={TLS_PROTOCOL_ID: tls_transport},
+        sec_opt={TLS_PROTOCOL_ID: tls_transport},  # type: ignore
         muxer_opt={MPLEX_PROTOCOL_ID: Mplex},  # Using MPLEX for stream multiplexing
     )
 
     # Set up a handler for the echo protocol
-    host.set_stream_handler(PROTOCOL_ID, handle_echo)
+    host.set_stream_handler(PROTOCOL_ID, handle_echo)  # type: ignore
 
     async with host.run(listen_addrs=listen_addrs):
         timestamp = datetime.now().strftime("%H:%M:%S")
