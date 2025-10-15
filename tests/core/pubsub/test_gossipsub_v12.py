@@ -222,3 +222,60 @@ async def test_mixed_protocol_versions():
         # Verify that the method completed without error
         # (In a real implementation, we'd verify the actual message sending,
         # but that would require more complex mocking)
+
+
+@pytest.mark.trio
+async def test_max_idontwant_messages_limit():
+    """Test that max_idontwant_messages limit is enforced."""
+    max_limit = 5  # Small limit for testing
+
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2, protocols=[PROTOCOL_ID_V12], max_idontwant_messages=max_limit
+    ) as pubsubs_gsub:
+        router = pubsubs_gsub[0].router
+        assert isinstance(router, GossipSub)
+
+        # Connect peers
+        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
+        await trio.sleep(0.1)
+
+        sender_peer_id = pubsubs_gsub[1].host.get_id()
+
+        # First batch - should be accepted completely
+        first_batch = [f"msg{i}".encode() for i in range(max_limit)]
+        first_idontwant = rpc_pb2.ControlIDontWant()
+        first_idontwant.messageIDs.extend(first_batch)
+
+        await router.handle_idontwant(first_idontwant, sender_peer_id)
+
+        # Verify all messages were stored
+        assert len(router.dont_send_message_ids[sender_peer_id]) == max_limit
+        for msg_id in first_batch:
+            assert msg_id in router.dont_send_message_ids[sender_peer_id]
+
+        # Second batch - should cause older entries to be dropped
+        second_batch = [f"new_msg{i}".encode() for i in range(3)]
+        second_idontwant = rpc_pb2.ControlIDontWant()
+        second_idontwant.messageIDs.extend(second_batch)
+
+        await router.handle_idontwant(second_idontwant, sender_peer_id)
+
+        # Verify total count stays at or below the limit
+        assert len(router.dont_send_message_ids[sender_peer_id]) <= max_limit
+
+        # Verify some of the new messages are present
+        found_new = False
+        for msg_id in second_batch:
+            if msg_id in router.dont_send_message_ids[sender_peer_id]:
+                found_new = True
+                break
+
+        assert found_new, "None of the new messages were stored"
+
+        # Verify some of the old messages were dropped
+        found_old = 0
+        for msg_id in first_batch:
+            if msg_id in router.dont_send_message_ids[sender_peer_id]:
+                found_old += 1
+
+        assert found_old < len(first_batch), "None of the old messages were dropped"

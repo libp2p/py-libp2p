@@ -101,7 +101,9 @@ class GossipSub(IPubsubRouter, Service):
 
     # Gossipsub v1.2 features
     dont_send_message_ids: dict[ID, set[bytes]]
-    max_idontwant_messages: int
+    max_idontwant_messages: (
+        int  # Maximum number of message IDs to track per peer in IDONTWANT lists
+    )
 
     def __init__(
         self,
@@ -1134,6 +1136,10 @@ class GossipSub(IPubsubRouter, Service):
         Handle incoming IDONTWANT control message by adding message IDs
         to the peer's dont_send_message_ids set.
 
+        This method enforces max_idontwant_messages limit to prevent memory exhaustion
+        from peers sending excessive IDONTWANT messages. When the limit is reached,
+        older entries may be dropped to make room for new ones.
+
         :param idontwant_msg: The IDONTWANT control message
         :param sender_peer_id: ID of the peer who sent the message
         """
@@ -1141,12 +1147,42 @@ class GossipSub(IPubsubRouter, Service):
         if sender_peer_id not in self.dont_send_message_ids:
             self.dont_send_message_ids[sender_peer_id] = set()
 
-        # Add all message IDs to the peer's dont_send set
-        for msg_id in idontwant_msg.messageIDs:
-            self.dont_send_message_ids[sender_peer_id].add(msg_id)
+        # Check if we need to enforce the limit
+        current_count = len(self.dont_send_message_ids[sender_peer_id])
+        new_count = len(idontwant_msg.messageIDs)
+
+        # If adding all new message IDs would exceed the limit, we need to enforce it
+        if current_count + new_count > self.max_idontwant_messages:
+            # If we're already at or over the limit, we need to drop some entries
+            if current_count >= self.max_idontwant_messages:
+                # Convert to list to allow removal of specific elements
+                current_ids = list(self.dont_send_message_ids[sender_peer_id])
+                # Calculate how many old entries to drop to make room for new ones
+                # while staying under the limit
+                to_drop = min(new_count, current_count)
+                # Drop the oldest entries (assuming they're the first in the set)
+                self.dont_send_message_ids[sender_peer_id] = set(current_ids[to_drop:])
+
+                logger.debug(
+                    "IDONTWANT limit reached for peer %s. Dropped %d oldest entries.",
+                    sender_peer_id,
+                    to_drop,
+                )
+
+            # Add new entries up to the limit
+            remaining_capacity = self.max_idontwant_messages - len(
+                self.dont_send_message_ids[sender_peer_id]
+            )
+            for msg_id in list(idontwant_msg.messageIDs)[:remaining_capacity]:
+                self.dont_send_message_ids[sender_peer_id].add(msg_id)
+        else:
+            # We have room for all new entries
+            for msg_id in idontwant_msg.messageIDs:
+                self.dont_send_message_ids[sender_peer_id].add(msg_id)
 
         logger.debug(
-            "Added %d message IDs to dont_send list for peer %s",
-            len(idontwant_msg.messageIDs),
+            "Added message IDs to dont_send list for peer %s (current count: %d/%d)",
             sender_peer_id,
+            len(self.dont_send_message_ids[sender_peer_id]),
+            self.max_idontwant_messages,
         )
