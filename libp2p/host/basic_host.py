@@ -205,14 +205,16 @@ class BasicHost(IHost):
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(port, "TCP")
-                if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                if hasattr(self, "bootstrap"):
+                    logger.debug("Starting Bootstrap Discovery")
+                    await self.bootstrap.start()
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
 
                 try:
                     yield
                 finally:
-                    if hasattr(self, "mDNS") and self.mDNS is not None:
+                    if self.mDNS is not None:
                         self.mDNS.stop()
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
