@@ -13,6 +13,7 @@ import hashlib
 import os
 import time
 
+from libp2p.abc import IPeerStore
 from libp2p.peer.id import (
     ID,
 )
@@ -22,7 +23,6 @@ from .pb.circuit_pb2 import Reservation as PbReservation
 
 RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
 TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
-
 
 # Reservation status enum
 class ReservationStatus(Enum):
@@ -61,7 +61,7 @@ class Reservation:
         self.peer_id = peer_id
         self.limits = limits
         self.created_at = time.time()
-        self.expires_at = self.created_at + limits.duration
+        self.expires_at = int(self.created_at + limits.duration)
         self.data_used = 0
         self.active_connections = 0
         self.voucher = self._generate_voucher()
@@ -137,7 +137,7 @@ class RelayResourceManager:
     - Managing connection quotas
     """
 
-    def __init__(self, limits: RelayLimits):
+    def __init__(self, limits: RelayLimits, peer_store: IPeerStore):
         """
         Initialize the resource manager.
 
@@ -145,10 +145,13 @@ class RelayResourceManager:
         ----------
         limits : RelayLimits
             The resource limits to enforce
+        peer_store : IPeerStore
+            Peer store for retrieving public keys and peer metadata
 
         """
         self.limits = limits
         self._reservations: dict[ID, Reservation] = {}
+        self.peer_store = peer_store
 
     def can_accept_reservation(self, peer_id: ID) -> bool:
         """
@@ -212,13 +215,27 @@ class RelayResourceManager:
             True if the reservation is valid
 
         """
-        # TODO: Implement voucher and signature verification
+        # Fetch the reservation
         reservation = self._reservations.get(peer_id)
-        return (
-            reservation is not None
-            and not reservation.is_expired()
-            and reservation.expires_at == proto_res.expire
-        )
+
+        # Reject if reservation is missing, expired, or mismatched
+        if (
+            reservation is None
+            or reservation.is_expired()
+            or reservation.voucher != proto_res.voucher
+            or reservation.expires_at != proto_res.expire
+        ):
+            return False
+
+        # verify signature
+        try:
+            public_key = self.peer_store.pubkey(peer_id)
+            if public_key is None:
+                return False
+
+            return public_key.verify(proto_res.voucher, proto_res.signature)
+        except Exception:
+            return False
 
     def can_accept_connection(self, peer_id: ID) -> bool:
         """
