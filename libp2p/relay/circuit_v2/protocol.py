@@ -162,7 +162,10 @@ class CircuitV2Protocol(Service):
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self.close_timeout = close_timeout
-        self.resource_manager = RelayResourceManager(self.limits)
+        self.resource_manager = RelayResourceManager(
+            self.limits,
+            self.host.get_peerstore()
+        )
         self._active_relays: dict[ID, tuple[INetStream, INetStream | None]] = {}
         self.event_started = trio.Event()
 
