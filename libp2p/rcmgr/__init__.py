@@ -28,13 +28,6 @@ from .manager import ResourceManager, new_resource_manager
 from .metrics import Metrics, ResourceMetrics
 from .scope import (
     BaseResourceScope,
-    SystemScope,
-    TransientScope,
-    PeerScope,
-    ProtocolScope,
-    ServiceScope,
-    ConnectionScope,
-    StreamScope,
 )
 
 __all__ = [
@@ -43,13 +36,6 @@ __all__ = [
     "new_resource_manager",
     # Scopes
     "BaseResourceScope",
-    "SystemScope",
-    "TransientScope",
-    "PeerScope",
-    "ProtocolScope",
-    "ServiceScope",
-    "ConnectionScope",
-    "StreamScope",
     # Limits
     "BaseLimit",
     "FixedLimiter",
