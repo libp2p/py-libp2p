@@ -91,7 +91,8 @@ class BasicHost(IHost):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
     mDNS: MDNSDiscovery | None
-    upnp: Optional["UpnpManager"]
+    upnp: "UpnpManager" | None
+    bootstrap: BootstrapDiscovery | None
 
     def __init__(
         self,
@@ -113,6 +114,10 @@ class BasicHost(IHost):
         self.mDNS = None
         if enable_mDNS:
             self.mDNS = MDNSDiscovery(network)
+
+        # Initialize bootstrap discovery container. Keep attribute defined so
+        # we can avoid hasattr checks elsewhere.
+        self.bootstrap = None
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
 
@@ -205,9 +210,7 @@ class BasicHost(IHost):
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(port, "TCP")
-                if hasattr(self, "bootstrap"):
-                    logger.debug("Starting Bootstrap Discovery")
-                    await self.bootstrap.start()
+                if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
 
@@ -222,7 +225,7 @@ class BasicHost(IHost):
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(port, "TCP")
-                    if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                    if self.bootstrap is not None:
                         self.bootstrap.stop()
 
         return _run()
