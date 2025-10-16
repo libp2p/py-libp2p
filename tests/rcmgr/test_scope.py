@@ -87,15 +87,14 @@ def test_resources_stream_management():
 
 
 def test_resources_stream_limits():
-    """Test stream limit checking."""
     limit = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
     resources = Resources(limit)
 
-    # First inbound stream should succeed
+    # First stream succeeds
     resources.check_streams(Direction.INBOUND)
     resources.add_stream(Direction.INBOUND)
 
-    # Second inbound stream should fail
+    # Second stream fails
     with pytest.raises(StreamOrConnLimitExceeded) as exc_info:
         resources.check_streams(Direction.INBOUND)
     assert "streams_inbound" in str(exc_info.value)

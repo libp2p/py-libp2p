@@ -49,18 +49,16 @@ class ResourceManager:
         allowlist: Allowlist | None = None,
         metrics: Metrics | None = None,
         allowlist_config: AllowlistConfig | None = None,
-        enable_metrics: bool = False,
+        enable_metrics: bool = True,
     ) -> None:
-        # Default limiter for the resource manager (can be overridden)
-        custom_limiter = FixedLimiter(
-            system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),  # 512MB
-            peer_default=BaseLimit(
-                streams=10, memory=16 * 1024 * 1024
-            ),  # 16MB per peer
-        )
-
-        # Support custom limiter implementing the required interface
-        self.limiter = custom_limiter
+        # Use the provided limiter; if None, fall back to a sensible default
+        if limiter is not None:
+            self.limiter = limiter
+        else:
+            self.limiter = FixedLimiter(
+                system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),
+                peer_default=BaseLimit(streams=10, memory=16 * 1024 * 1024),
+            )
 
         # Allowlist setup: prefer provided allowlist, otherwise construct from
         # allowlist_config or use an empty Allowlist.
