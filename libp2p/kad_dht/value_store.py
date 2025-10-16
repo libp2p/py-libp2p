@@ -20,14 +20,13 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.record import make_put_record
 
 from .common import (
     DEFAULT_TTL,
     PROTOCOL_ID,
 )
-from .pb.kademlia_pb2 import (
-    Message,
-)
+from .pb.kademlia_pb2 import Message, Record
 
 # logger = logging.getLogger("libp2p.kademlia.value_store")
 logger = logging.getLogger("kademlia-example.value_store")
@@ -49,7 +48,7 @@ class ValueStore:
 
         """
         # Store format: {key: (value, validity)}
-        self.store: dict[bytes, tuple[bytes, float]] = {}
+        self.store: dict[bytes, tuple[Record, float]] = {}
         # Store references to the host and local peer ID for making requests
         self.host = host
         self.local_peer_id = local_peer_id
@@ -73,7 +72,10 @@ class ValueStore:
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex(), validity
         )
-        self.store[key] = (value, validity)
+        record = make_put_record(key.decode("utf-8"), value)
+        record.timeReceived = str(time.time)
+
+        self.store[key] = (record, validity)
         logger.debug(f"Stored value for key {key.hex()}")
 
     async def _store_at_peer(self, peer_id: ID, key: bytes, value: bytes) -> bool:
@@ -180,7 +182,7 @@ class ValueStore:
                 await stream.close()
             return result
 
-    def get(self, key: bytes) -> bytes | None:
+    def get(self, key: bytes) -> Record | None:
         """
         Retrieve a value from the DHT.
 
@@ -196,7 +198,7 @@ class ValueStore:
         if key not in self.store:
             return None
 
-        value, validity = self.store[key]
+        record, validity = self.store[key]
         logger.debug(
             "Found value for key %s... with validity %s",
             key.hex(),
@@ -211,7 +213,7 @@ class ValueStore:
             self.remove(key)
             return None
 
-        return value
+        return record
 
     async def _get_from_peer(self, peer_id: ID, key: bytes) -> bytes | None:
         """
