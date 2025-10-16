@@ -34,6 +34,11 @@ from .scope import (
     TransientScope,
 )
 
+# Create custom limits
+limiter = FixedLimiter(
+    system=BaseLimit(streams=1000, memory=512*1024*1024),  # 512MB
+    peer_default=BaseLimit(streams=10, memory=16*1024*1024)  # 16MB per peer
+)
 
 class ResourceManager:
     """
@@ -51,7 +56,8 @@ class ResourceManager:
         allowlist_config: AllowlistConfig | None = None,
         enable_metrics: bool = False,
     ) -> None:
-        self.limiter: FixedLimiter = limiter
+        # Support custom limiter implementing the required interface
+        self.limiter = limiter
 
         # Allowlist configuration is not yet integrated; skip allowlist setup
 
