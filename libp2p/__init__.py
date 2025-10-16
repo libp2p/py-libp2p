@@ -317,7 +317,7 @@ def new_host(
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
-    quic_transport_opt:  QUICTransportConfig | None = None,
+    quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
 ) -> IHost:

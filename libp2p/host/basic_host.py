@@ -91,7 +91,7 @@ class BasicHost(IHost):
     multiselect: Multiselect
     multiselect_client: MultiselectClient
     mDNS: MDNSDiscovery | None
-    upnp: "UpnpManager" | None
+    upnp: UpnpManager | None
     bootstrap: BootstrapDiscovery | None
 
     def __init__(
