@@ -6,6 +6,7 @@ allowing peers to establish connections through relay nodes.
 """
 
 import logging
+from re import A
 
 import multiaddr
 import trio
@@ -98,6 +99,8 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self._last_relay_index = -1
+        self._relay_list = []
 
     async def dial(  # type: ignore[override]
         self,
@@ -287,20 +290,36 @@ class CircuitV2Transport(ITransport):
 
         """
         # Try to find a relay
-        attempts = 0
-        while attempts < self.client_config.max_auto_relay_attempts:
-            # Get a relay from the list of discovered relays
-            relays = self.discovery.get_relays()
-            if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+        for _ in range(self.client_config.max_auto_relay_attempts):
+            relays = self.discovery.get_relays() or []
+            if not relays:
+                await trio.sleep(1)
+                continue
 
-            # Wait and try discovery
-            await trio.sleep(1)
-            attempts += 1
+            # Cache and sort unique relays
+            self._relay_list = sorted({*self._relay_list, *relays}, key=lambda r: r.to_string())
+
+            # Filter only available ones
+            available = [r for r in self._relay_list if await self._is_relay_available(r)]
+            if not available:
+                await trio.sleep(1)
+                continue
+
+            # Round-robin selection
+            self._last_relay_index = (self._last_relay_index + 1) % len(available)
+            return available[self._last_relay_index]
 
         return None
+    
+    async def _is_relay_available(self, relay_peer_id: ID) -> bool:
+        """Check if the relay is currently reachable."""
+        try:
+            # try opening a shortlived stream
+            stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+            await stream.close()
+            return True 
+        except Exception:
+            return False
 
     async def _make_reservation(
         self,
