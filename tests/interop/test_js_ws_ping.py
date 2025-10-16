@@ -25,8 +25,12 @@ PLAINTEXT_PROTOCOL_ID = "/plaintext/2.0.0"
 
 @pytest.mark.trio
 async def test_ping_with_js_node():
-    # Skip this test due to JavaScript dependency issues
-    pytest.skip("Skipping JS interop test due to dependency issues")
+    """Test WebSocket ping between Python and JavaScript libp2p nodes."""
+    # Check if Node.js is available
+    try:
+        subprocess.run(["node", "--version"], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("Node.js not available for interop testing")
     js_node_dir = os.path.join(os.path.dirname(__file__), "js_libp2p", "js_node", "src")
     script_name = "./ws_ping_node.mjs"
 

@@ -18,6 +18,7 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.websocket.multiaddr_utils import (
     is_valid_websocket_multiaddr,
     parse_websocket_multiaddr,
@@ -30,36 +31,46 @@ PING_LENGTH = 32
 @pytest.mark.trio
 async def test_websocket_p2p_plaintext():
     """Test Python-to-Python WebSocket communication with plaintext security."""
+    from libp2p.host.basic_host import BasicHost
+    from libp2p.network.swarm import Swarm
+    from libp2p.peer.id import ID
+    from libp2p.peer.peerstore import PeerStore
+    from libp2p.transport.upgrader import TransportUpgrader
+    from libp2p.transport.websocket.transport import WebsocketTransport
+
     # Create two hosts with plaintext security
     key_pair_a = create_new_key_pair()
     key_pair_b = create_new_key_pair()
 
-    # Host A (listener) - use only plaintext security
-    security_options_a = {
-        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
-            local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
-        )
-    }
-    host_a = new_host(
-        key_pair=key_pair_a,
-        sec_opt=security_options_a,
-        muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
-    )
+    # Create Host A (listener) with explicit WebSocket transport
+    peer_id_a = ID.from_pubkey(key_pair_a.public_key)
+    peer_store_a = PeerStore()
+    peer_store_a.add_key_pair(peer_id_a, key_pair_a)
 
-    # Host B (dialer) - use only plaintext security
-    security_options_b = {
-        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
-            local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
-        )
-    }
-    host_b = new_host(
-        key_pair=key_pair_b,
-        sec_opt=security_options_b,
-        muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
-        # transport
+    upgrader_a = TransportUpgrader(
+        secure_transports_by_protocol={
+            PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair_a)
+        },
+        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
     )
+    transport_a = WebsocketTransport(upgrader_a)
+    swarm_a = Swarm(peer_id_a, peer_store_a, upgrader_a, transport_a)
+    host_a = BasicHost(swarm_a)
+
+    # Create Host B (dialer) with explicit WebSocket transport
+    peer_id_b = ID.from_pubkey(key_pair_b.public_key)
+    peer_store_b = PeerStore()
+    peer_store_b.add_key_pair(peer_id_b, key_pair_b)
+
+    upgrader_b = TransportUpgrader(
+        secure_transports_by_protocol={
+            PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair_b)
+        },
+        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
+    )
+    transport_b = WebsocketTransport(upgrader_b)
+    swarm_b = Swarm(peer_id_b, peer_store_b, upgrader_b, transport_b)
+    host_b = BasicHost(swarm_b)
 
     # Test data
     test_data = b"Hello WebSocket P2P!"
@@ -137,7 +148,6 @@ async def test_websocket_p2p_noise():
         key_pair=key_pair_a,
         sec_opt=security_options_a,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],
     )
 
     # Host B (dialer)
@@ -153,8 +163,6 @@ async def test_websocket_p2p_noise():
         key_pair=key_pair_b,
         sec_opt=security_options_b,
         muxer_opt=create_yamux_muxer_option(),
-        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/ws")],  # Ensure WebSocket
-        # transport
     )
 
     # Test data
