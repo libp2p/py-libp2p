@@ -21,7 +21,7 @@ from libp2p.peer.id import ID
 
 from .allowlist import Allowlist, AllowlistConfig
 from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
-from .limits import Direction, FixedLimiter
+from .limits import BaseLimit, Direction, FixedLimiter
 from .metrics import Metrics
 from .scope import (
     BaseResourceScope,
@@ -51,7 +51,6 @@ class ResourceManager:
         allowlist_config: AllowlistConfig | None = None,
         enable_metrics: bool = False,
     ) -> None:
-
         # Default limiter for the resource manager (can be overridden)
         custom_limiter = FixedLimiter(
             system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),  # 512MB
@@ -62,9 +61,18 @@ class ResourceManager:
 
         # Support custom limiter implementing the required interface
         self.limiter = custom_limiter
-        # Allowlist configuration is not yet integrated; skip allowlist setup
+
+        # Allowlist setup: prefer provided allowlist, otherwise construct from
+        # allowlist_config or use an empty Allowlist.
+        if allowlist is not None:
+            self.allowlist = allowlist
+        elif allowlist_config is not None:
+            self.allowlist = Allowlist(allowlist_config)
+        else:
+            self.allowlist = Allowlist()
 
         # Handle metrics configuration
+        self.metrics: Metrics | None
         if enable_metrics:
             self.metrics = Metrics()
         else:
@@ -104,7 +112,7 @@ class ResourceManager:
 
     def open_connection(
         self,
-        direction: Direction,
+        direction: "libp2p.rcmgr.limits.Direction",
         use_fd: bool = True,
         endpoint: Multiaddr | None = None,
     ) -> ConnectionScope:
@@ -112,12 +120,12 @@ class ResourceManager:
         Open a new connection scope.
 
         Args:
-            direction: Direction of the connection (inbound/outbound)
+            direction (libp2p.rcmgr.limits.Direction): Direction of the connection (inbound/outbound)
             use_fd: Whether this connection uses a file descriptor
             endpoint: Remote endpoint (optional)
 
         Returns:
-            ConnectionScope: New connection scope
+            :class:`libp2p.rcmgr.scope.ConnectionScope`: New connection scope
 
         Raises:
             ResourceLimitExceeded: If connection would exceed limits
@@ -140,16 +148,16 @@ class ResourceManager:
                 raise
             return conn_scope
 
-    def open_stream(self, peer_id: ID, direction: Direction) -> StreamScope:
+    def open_stream(self, peer_id: ID, direction: "libp2p.rcmgr.limits.Direction") -> StreamScope:
         """
         Open a new stream scope.
 
         Args:
             peer_id: Peer ID for the stream
-            direction: Direction of the stream (inbound/outbound)
+            direction (libp2p.rcmgr.limits.Direction): Direction of the stream (inbound/outbound)
 
         Returns:
-            StreamScope: New stream scope
+            :class:`libp2p.rcmgr.scope.StreamScope`: New stream scope
 
         Raises:
             ResourceLimitExceeded: If stream would exceed limits

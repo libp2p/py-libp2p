@@ -21,7 +21,6 @@ from .exceptions import (
 )
 from .limits import (
     BaseLimit,
-    Direction,
     FixedLimiter,
     ScopeStat,
 )
@@ -53,7 +52,6 @@ __all__ = [
     "StreamScope",
     # Limits
     "BaseLimit",
-    "Direction",
     "FixedLimiter",
     "ScopeStat",
     # Allowlist

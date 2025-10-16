@@ -73,9 +73,11 @@ class BaseLimit:
         return int(self.fd)
 
 
-
 class FixedLimiter:
-    """A limiter with fixed limits for all scopes, including allowlist-specific limits."""
+    """
+    A limiter with fixed limits for all scopes,
+    including allowlist-specific limits.
+    """
 
     def __init__(
         self,

@@ -26,29 +26,21 @@ from .metrics import Metrics
 class ResourceScope(Protocol):
     """Interface for resource scopes."""
 
-    def reserve_memory(self, size: int, priority: int = 1) -> None:
-        ...
+    def reserve_memory(self, size: int, priority: int = 1) -> None: ...
 
-    def release_memory(self, size: int) -> None:
-        ...
+    def release_memory(self, size: int) -> None: ...
 
-    def add_stream(self, direction: Direction) -> None:
-        ...
+    def add_stream(self, direction: "libp2p.rcmgr.limits.Direction") -> None: ...
 
-    def remove_stream(self, direction: Direction) -> None:
-        ...
+    def remove_stream(self, direction: "libp2p.rcmgr.limits.Direction") -> None: ...
 
-    def add_conn(self, direction: Direction, use_fd: bool = True) -> None:
-        ...
+    def add_conn(self, direction: "libp2p.rcmgr.limits.Direction", use_fd: bool = True) -> None: ...
 
-    def remove_conn(self, direction: Direction, use_fd: bool = True) -> None:
-        ...
+    def remove_conn(self, direction: "libp2p.rcmgr.limits.Direction", use_fd: bool = True) -> None: ...
 
-    def stat(self) -> ScopeStat:
-        ...
+    def stat(self) -> ScopeStat: ...
 
-    def done(self) -> None:
-        ...
+    def done(self) -> None: ...
 
 
 @dataclass
@@ -187,7 +179,7 @@ class BaseResourceScope:
     def __init__(
         self,
         limit: BaseLimit,
-        edges: list["BaseResourceScope"] | None = None,
+        edges: list[BaseResourceScope] | None = None,
         name: str = "",
         metrics: Metrics | None = None,
     ):
@@ -460,9 +452,7 @@ class StreamScope(BaseResourceScope):
             transient = next(
                 edge for edge in self.edges if isinstance(edge, TransientScope)
             )
-            system = next(
-                edge for edge in self.edges if isinstance(edge, SystemScope)
-            )
+            system = next(edge for edge in self.edges if isinstance(edge, SystemScope))
             stats = self.stat()
             protocol_scope = ProtocolScope(protocol, self.limit, system, self.metrics)
         try:
@@ -471,7 +461,8 @@ class StreamScope(BaseResourceScope):
                 transient.release_memory(stats.memory)
             for direction in (Direction.INBOUND, Direction.OUTBOUND):
                 stream_count = (
-                    stats.num_streams_inbound if direction == Direction.INBOUND
+                    stats.num_streams_inbound
+                    if direction == Direction.INBOUND
                     else stats.num_streams_outbound
                 )
                 if stream_count > 0:
@@ -492,9 +483,7 @@ class StreamScope(BaseResourceScope):
             transient = next(
                 edge for edge in self.edges if isinstance(edge, TransientScope)
             )
-            system = next(
-                edge for edge in self.edges if isinstance(edge, SystemScope)
-            )
+            system = next(edge for edge in self.edges if isinstance(edge, SystemScope))
             stats = self.stat()
             service_scope = ServiceScope(service, self.limit, system, self.metrics)
         try:
@@ -503,7 +492,8 @@ class StreamScope(BaseResourceScope):
                 transient.release_memory(stats.memory)
             for direction in (Direction.INBOUND, Direction.OUTBOUND):
                 stream_count = (
-                    stats.num_streams_inbound if direction == Direction.INBOUND
+                    stats.num_streams_inbound
+                    if direction == Direction.INBOUND
                     else stats.num_streams_outbound
                 )
                 if stream_count > 0:

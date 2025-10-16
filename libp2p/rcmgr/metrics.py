@@ -138,7 +138,7 @@ class Metrics:
         total = int(self.get(f"streams_{scope_name}_total"))
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
-    def add_stream(self, scope_name: str, direction: "libp2p.rcmgr.limits.Direction") -> None:
+    def add_stream(self, scope_name: str, direction: Direction) -> None:
         """
         Add a stream to the specified scope.
 
@@ -159,13 +159,12 @@ class Metrics:
         # Update timestamp
         self.record(f"streams_{scope_name}_time", time.time())
 
-    def remove_stream(self, *args: str | "libp2p.rcmgr.limits.Direction") -> None:
+    def remove_stream(self, *args: str | Direction) -> None:
         """
         Remove a stream - supports both global and scope-specific removal.
 
         Args:
-            args: Either (direction_str,) for global removal or
-                (scope_name, direction (libp2p.rcmgr.limits.Direction)) for scope-specific removal
+            args: Either (direction_str,) for global removal or (scope_name, direction (libp2p.rcmgr.limits.Direction)) for scope-specific removal
 
         """
         if len(args) == 1:
@@ -267,7 +266,7 @@ class Metrics:
         self.record(f"connections_{scope_name}_total", total)
         self.record(f"connections_{scope_name}_time", time.time())
 
-    def add_connection(self, scope_name: str, direction: "libp2p.rcmgr.limits.Direction") -> None:
+    def add_connection(self, scope_name: str, direction: Direction) -> None:
         """
         Add a connection to the specified scope.
 
@@ -295,13 +294,13 @@ class Metrics:
         total = int(self.get(f"connections_{scope_name}_total"))
         return {"inbound": inbound, "outbound": outbound, "total": total}
 
-    def remove_connection(self, scope_name: str, direction: "libp2p.rcmgr.limits.Direction") -> None:
+    def remove_connection(self, scope_name: str, direction: Direction) -> None:
         """
         Remove a connection from the specified scope.
 
         Args:
             scope_name: The name of the scope to remove the connection from
-            direction (libp2p.rcmgr.limits.Direction): The connection direction (inbound/outbound)
+            direction (libp2p.rcmgr.limits.Direction): The connection direction (inbound/outbound).
 
         """
         direction_str = direction.value.lower()
