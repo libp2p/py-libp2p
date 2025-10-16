@@ -15,7 +15,7 @@ from libp2p.rcmgr.manager import ResourceManager, new_resource_manager
 def test_resource_manager_creation():
     """Test ResourceManager creation."""
     limiter = FixedLimiter()
-    rm = ResourceManager(limiter)
+    rm = ResourceManager(limiter, enable_metrics=True)
 
     assert rm.limiter == limiter
     assert rm.system is not None
@@ -265,7 +265,7 @@ def test_allowlist_access():
 def test_metrics_access():
     """Test metrics access."""
     limiter = FixedLimiter()
-    rm = ResourceManager(limiter)
+    rm = ResourceManager(limiter, enable_metrics=True)
 
     metrics = rm.get_metrics()
     assert metrics is not None

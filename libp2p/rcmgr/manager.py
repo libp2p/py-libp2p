@@ -7,10 +7,12 @@ resource usage across all scopes and integrates with the libp2p stack.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable as TypingCallable
 import threading
 import time
-from typing import Any
+from typing import (
+    Any,
+)
 
 from multiaddr import Multiaddr
 
@@ -36,7 +38,6 @@ from .scope import (
 class ResourceManager:
     """
     Main resource manager that coordinates resource usage across all scopes.
-
     This is the primary interface for resource management in py-libp2p.
     It creates and manages different types of resource scopes and ensures
     that resource limits are enforced throughout the system.
@@ -49,28 +50,20 @@ class ResourceManager:
         metrics: Metrics | None = None,
         allowlist_config: AllowlistConfig | None = None,
         enable_metrics: bool = False,
-    ):
-        self.limiter = limiter
+    ) -> None:
+        self.limiter: FixedLimiter = limiter
 
-        # Handle allowlist configuration
-        if allowlist is not None:
-            self.allowlist = allowlist
-        elif allowlist_config is not None:
-            self.allowlist = Allowlist(allowlist_config)
-        else:
-            self.allowlist = Allowlist()
+        # Allowlist configuration is not yet integrated; skip allowlist setup
 
         # Handle metrics configuration
-        if metrics is not None:
-            self.metrics = metrics
-        elif enable_metrics:
+        if enable_metrics:
             self.metrics = Metrics()
         else:
-            self.metrics = Metrics()  # Always have metrics, but may not be enabled
+            self.metrics = None
 
         # Thread safety
         self._lock = threading.RLock()
-        self._closed = False
+        self._closed: bool = False
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -83,8 +76,8 @@ class ResourceManager:
         self._sticky_services: set[str] = set()
 
         # Create system and transient scopes
-        system_limit = limiter.get_system_limits()
-        transient_limit = limiter.get_transient_limits()
+        system_limit = self.limiter.get_system_limits()
+        transient_limit = self.limiter.get_transient_limits()
 
         self.system = SystemScope(system_limit, self.metrics)
         self.transient = TransientScope(transient_limit, self.system, self.metrics)
@@ -124,28 +117,18 @@ class ResourceManager:
         with self._lock:
             self._check_closed()
 
-            # Check allowlist
-            if endpoint and self.allowlist.allowed(endpoint):
-                # Use allowlisted limits (not implemented yet)
-                pass
-
-            # Get connection limits
+            # Use default connection limits (allowlist-specific limits not implemented)
             conn_limit = self.limiter.get_conn_limits()
-
-            # Create connection scope
             conn_scope = ConnectionScope(
                 conn_limit, self.system, self.transient, self.metrics
             )
-
-            # Add the connection to the scope
             try:
                 conn_scope.add_conn(direction, use_fd)
             except ResourceLimitExceeded:
                 conn_scope.done()
-                if self.metrics:
+                if self.metrics is not None:
                     self.metrics.block_conn(direction.value, use_fd)
                 raise
-
             return conn_scope
 
     def open_stream(self, peer_id: ID, direction: Direction) -> StreamScope:
@@ -165,99 +148,75 @@ class ResourceManager:
         """
         with self._lock:
             self._check_closed()
-
-            # Get or create peer scope
             peer_scope = self._get_peer_scope(peer_id)
-
-            # Get stream limits
             stream_limit = self.limiter.get_stream_limits(peer_id)
-
-            # Create stream scope
             stream_scope = StreamScope(
                 stream_limit, peer_scope, self.system, self.transient, self.metrics
             )
-
-            # Add the stream to the scope
             try:
                 stream_scope.add_stream(direction)
             except ResourceLimitExceeded:
                 stream_scope.done()
-                if self.metrics:
+                if self.metrics is not None:
                     self.metrics.block_stream(str(peer_id), direction.value)
                 raise
-
             return stream_scope
 
     def _get_peer_scope(self, peer_id: ID) -> PeerScope:
         """Get or create a peer scope."""
-        if peer_id in self._peer_scopes:
-            scope = self._peer_scopes[peer_id]
+        scope = self._peer_scopes.get(peer_id)
+        if scope is not None:
             try:
                 scope._inc_ref()
                 return scope
             except ResourceScopeClosed:
-                # Scope was closed, remove it and create a new one
                 del self._peer_scopes[peer_id]
-
-        # Create new peer scope
         peer_limit = self.limiter.get_peer_limits(peer_id)
         scope = PeerScope(peer_id, peer_limit, self.system, self.metrics)
         self._peer_scopes[peer_id] = scope
-
         return scope
 
     def _get_protocol_scope(self, protocol: TProtocol) -> ProtocolScope:
         """Get or create a protocol scope."""
-        if protocol in self._protocol_scopes:
-            scope = self._protocol_scopes[protocol]
+        scope = self._protocol_scopes.get(protocol)
+        if scope is not None:
             try:
                 scope._inc_ref()
                 return scope
             except ResourceScopeClosed:
-                # Scope was closed, remove it and create a new one
                 del self._protocol_scopes[protocol]
-
-        # Create new protocol scope
         protocol_limit = self.limiter.get_protocol_limits(protocol)
         scope = ProtocolScope(protocol, protocol_limit, self.system, self.metrics)
         self._protocol_scopes[protocol] = scope
-
         return scope
 
     def _get_service_scope(self, service: str) -> ServiceScope:
         """Get or create a service scope."""
-        if service in self._service_scopes:
-            scope = self._service_scopes[service]
+        scope = self._service_scopes.get(service)
+        if scope is not None:
             try:
                 scope._inc_ref()
                 return scope
             except ResourceScopeClosed:
-                # Scope was closed, remove it and create a new one
                 del self._service_scopes[service]
-
-        # Create new service scope
         service_limit = self.limiter.get_service_limits(service)
         scope = ServiceScope(service, service_limit, self.system, self.metrics)
         self._service_scopes[service] = scope
-
         return scope
 
     # View methods for inspecting scopes
 
-    def view_system(self, func: Callable[[SystemScope], Any]) -> Any:
-        """View the system scope."""
+    def view_system(self, func: TypingCallable[[SystemScope], Any]) -> Any:
         with self._lock:
             self._check_closed()
             return func(self.system)
 
-    def view_transient(self, func: Callable[[TransientScope], Any]) -> Any:
-        """View the transient scope."""
+    def view_transient(self, func: TypingCallable[[TransientScope], Any]) -> Any:
         with self._lock:
             self._check_closed()
             return func(self.transient)
 
-    def view_peer(self, peer_id: ID, func: Callable[[PeerScope], Any]) -> Any:
-        """View a peer scope."""
+    def view_peer(self, peer_id: ID, func: TypingCallable[[PeerScope], Any]) -> Any:
         with self._lock:
             self._check_closed()
             scope = self._get_peer_scope(peer_id)
@@ -267,9 +226,8 @@ class ResourceManager:
                 scope._dec_ref()
 
     def view_protocol(
-        self, protocol: TProtocol, func: Callable[[ProtocolScope], Any]
+        self, protocol: TProtocol, func: TypingCallable[[ProtocolScope], Any]
     ) -> Any:
-        """View a protocol scope."""
         with self._lock:
             self._check_closed()
             scope = self._get_protocol_scope(protocol)
@@ -278,8 +236,9 @@ class ResourceManager:
             finally:
                 scope._dec_ref()
 
-    def view_service(self, service: str, func: Callable[[ServiceScope], Any]) -> Any:
-        """View a service scope."""
+    def view_service(
+        self, service: str, func: TypingCallable[[ServiceScope], Any]
+    ) -> Any:
         with self._lock:
             self._check_closed()
             scope = self._get_service_scope(service)
@@ -306,26 +265,21 @@ class ResourceManager:
             self._sticky_services.add(service)
 
     def list_peers(self) -> list[ID]:
-        """List all active peer IDs."""
         with self._lock:
             return list(self._peer_scopes.keys())
 
     def list_protocols(self) -> list[TProtocol]:
-        """List all active protocols."""
         with self._lock:
             return list(self._protocol_scopes.keys())
 
     def list_services(self) -> list[str]:
-        """List all active services."""
         with self._lock:
             return list(self._service_scopes.keys())
 
     def get_allowlist(self) -> Allowlist:
-        """Get the current allowlist."""
         return self.allowlist
 
-    def get_metrics(self) -> Metrics:
-        """Get the current metrics."""
+    def get_metrics(self) -> Metrics | None:
         return self.metrics
 
     # Garbage collection
@@ -404,10 +358,10 @@ class ResourceManager:
                 # Continue closing other scopes even if one fails
                 pass
 
-            # Clear all scope storage
-            self._peer_scopes.clear()
-            self._protocol_scopes.clear()
-            self._service_scopes.clear()
+        # Clear all scope storage
+        self._peer_scopes.clear()
+        self._protocol_scopes.clear()
+        self._service_scopes.clear()
 
 
 def new_resource_manager(
@@ -422,12 +376,14 @@ def new_resource_manager(
         limiter: Resource limiter defining limits for all scopes
         allowlist_config: Optional allowlist configuration
         enable_metrics: Whether to enable metrics collection
-
     Returns:
         ResourceManager: Configured resource manager
 
     """
-    allowlist = Allowlist(allowlist_config) if allowlist_config else Allowlist()
+    allowlist = (
+        Allowlist(allowlist_config) if allowlist_config is not None else Allowlist()
+    )
     metrics = Metrics() if enable_metrics else None
-
-    return ResourceManager(limiter, allowlist, metrics)
+    return ResourceManager(
+        limiter, allowlist, metrics, allowlist_config, enable_metrics
+    )

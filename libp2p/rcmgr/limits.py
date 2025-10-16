@@ -73,8 +73,9 @@ class BaseLimit:
         return int(self.fd)
 
 
+
 class FixedLimiter:
-    """A limiter with fixed limits for all scopes."""
+    """A limiter with fixed limits for all scopes, including allowlist-specific limits."""
 
     def __init__(
         self,
@@ -85,6 +86,7 @@ class FixedLimiter:
         peer_default: BaseLimit | None = None,
         stream_default: BaseLimit | None = None,
         conn_default: BaseLimit | None = None,
+        allowlist_conn_limit: BaseLimit | None = None,
     ):
         self.system = system or BaseLimit(
             streams=16000,
@@ -143,6 +145,13 @@ class FixedLimiter:
             fd=1,
             memory=1 << 20,  # 1MB
         )
+        self.allowlist_conn_limit = allowlist_conn_limit or BaseLimit(
+            conns=10000,
+            conns_inbound=9000,
+            conns_outbound=1000,
+            fd=16384,
+            memory=2 << 30,  # 2GB
+        )
 
         # Custom limits
         self.service_limits: dict[str, BaseLimit] = {}
@@ -170,3 +179,6 @@ class FixedLimiter:
 
     def get_conn_limits(self) -> BaseLimit:
         return self.conn_default
+
+    def get_allowlist_conn_limits(self) -> BaseLimit:
+        return self.allowlist_conn_limit

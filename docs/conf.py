@@ -17,14 +17,9 @@
 import doctest
 import os
 import sys
+
+sys.path.insert(0, os.path.abspath('..'))
 from unittest.mock import MagicMock
-
-# Add the parent directory to sys.path to enable importing libp2p
-# This handles both running from docs/ directory and from root directory
-docs_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(docs_dir)
-sys.path.insert(0, root_dir)
-
 
 try:
     import tomllib
@@ -32,8 +27,8 @@ except ModuleNotFoundError:
     # For Python < 3.11
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
-# Path to pyproject.toml (works from both docs/ and root directory)
-pyproject_path = os.path.join(root_dir, "pyproject.toml")
+# Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
+pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)
@@ -339,7 +334,6 @@ MOCK_MODULES = [
     "fastecdsa",
     "fastecdsa.encoding",
     "fastecdsa.encoding.sec1",
-    # Add any other problematic imports if needed
 ]
 sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 # -- Extension configuration -------------------------------------------------
@@ -351,17 +345,6 @@ todo_include_todos = True
 
 # -- Options for autodoc extension ------------------------------------------
 
-# Allow duplicate object descriptions and suppress Direction warnings
+# Allow duplicate object descriptions
 nitpicky = False
-nitpick_ignore = [
-    ("py:class", "type"),
-    # Ignore ambiguous Direction references
-    ("py:class", "Direction"),
-    ("py:class", "libp2p.rcmgr.limits.Direction"),
-    ("py:class", "libp2p.rcmgr.Direction"),
-]
-
-# Suppress specific warning types that are causing issues
-suppress_warnings = [
-    'ref.python',  # Suppress Python reference warnings including Direction cross-ref
-]
+nitpick_ignore = [("py:class", "type")]
