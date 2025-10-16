@@ -13,7 +13,6 @@ Key components:
 - Metrics: Resource usage tracking and observability
 """
 
-from .allowlist import Allowlist, AllowlistConfig, new_allowlist, new_allowlist_with_config
 from .exceptions import (
     ResourceLimitExceeded,
     MemoryLimitExceeded,
@@ -43,7 +42,6 @@ __all__ = [
     # Main classes
     "ResourceManager",
     "new_resource_manager",
-
     # Scopes
     "BaseResourceScope",
     "SystemScope",
@@ -53,23 +51,19 @@ __all__ = [
     "ServiceScope",
     "ConnectionScope",
     "StreamScope",
-
     # Limits
     "BaseLimit",
     "Direction",
     "FixedLimiter",
     "ScopeStat",
-
     # Allowlist
     "Allowlist",
     "AllowlistConfig",
     "new_allowlist",
     "new_allowlist_with_config",
-
     # Metrics
     "Metrics",
     "ResourceMetrics",
-
     # Exceptions
     "ResourceLimitExceeded",
     "MemoryLimitExceeded",
