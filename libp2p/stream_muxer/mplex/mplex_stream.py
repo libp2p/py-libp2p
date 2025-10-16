@@ -12,6 +12,7 @@ from libp2p.abc import (
 )
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
+    MuxedStreamError,
 )
 from libp2p.stream_muxer.rw_lock import ReadWriteLock
 
@@ -90,8 +91,13 @@ class MplexStream(IMuxedStream):
         return self.stream_id.is_initiator
 
     async def _read_until_eof(self) -> bytes:
-        async for data in self.incoming_data_channel:
-            self._buf.extend(data)
+        if self.read_deadline is not None:
+            with trio.fail_after(self.read_deadline):
+                async for data in self.incoming_data_channel:
+                    self._buf.extend(data)
+        else:
+            async for data in self.incoming_data_channel:
+                self._buf.extend(data)
         payload = self._buf
         self._buf = self._buf[len(payload) :]
         return bytes(payload)
@@ -138,8 +144,16 @@ class MplexStream(IMuxedStream):
                     # We know `receive` will be blocked here. Wait for data here with
                     # `receive` and catch all kinds of errors here.
                     try:
-                        data = await self.incoming_data_channel.receive()
-                        self._buf.extend(data)
+                        # Apply read deadline if set
+                        if self.read_deadline is not None:
+                            with trio.fail_after(self.read_deadline):
+                                data = await self.incoming_data_channel.receive()
+                                self._buf.extend(data)
+                        else:
+                            data = await self.incoming_data_channel.receive()
+                            self._buf.extend(data)
+                    except trio.TooSlowError:
+                        raise MuxedStreamError("Read operation timed out")
                     except trio.EndOfChannel:
                         if self.event_reset.is_set():
                             raise MplexStreamReset
@@ -173,7 +187,15 @@ class MplexStream(IMuxedStream):
                 if self.is_initiator
                 else HeaderTags.MessageReceiver
             )
-            await self.muxed_conn.send_message(flag, data, self.stream_id)
+            try:
+                # Apply write deadline if set
+                if self.write_deadline is not None:
+                    with trio.fail_after(self.write_deadline):
+                        await self.muxed_conn.send_message(flag, data, self.stream_id)
+                else:
+                    await self.muxed_conn.send_message(flag, data, self.stream_id)
+            except trio.TooSlowError:
+                raise MuxedStreamError("Write operation timed out")
 
     async def close(self) -> None:
         """
@@ -241,34 +263,48 @@ class MplexStream(IMuxedStream):
             if self.muxed_conn.streams is not None:
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
-    # TODO deadline not in use
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the stream in seconds
+        :raises MuxedStreamError: if setting the deadline fails
         """
-        self.read_deadline = ttl
-        self.write_deadline = ttl
-        return True
+        try:
+            if ttl < 0:
+                raise ValueError("Deadline cannot be negative")
+            self.read_deadline = ttl
+            self.write_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set deadline: {e}") from e
 
-    def set_read_deadline(self, ttl: int) -> bool:
+    def set_read_deadline(self, ttl: int) -> None:
         """
         Set read deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the read deadline in seconds
+        :raises MuxedStreamError: if setting the read deadline fails
         """
-        self.read_deadline = ttl
-        return True
+        try:
+            if ttl < 0:
+                raise ValueError("Read deadline cannot be negative")
+            self.read_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set read deadline: {e}") from e
 
-    def set_write_deadline(self, ttl: int) -> bool:
+    def set_write_deadline(self, ttl: int) -> None:
         """
         Set write deadline for muxed stream.
 
-        :return: True if successful
+        :param ttl: Time-to-live for the write deadline in seconds
+        :raises MuxedStreamError: if setting the write deadline fails
         """
-        self.write_deadline = ttl
-        return True
+        try:
+            if ttl < 0:
+                raise ValueError("Write deadline cannot be negative")
+            self.write_deadline = ttl
+        except Exception as e:
+            raise MuxedStreamError(f"Failed to set write deadline: {e}") from e
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""

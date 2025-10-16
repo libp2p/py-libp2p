@@ -258,7 +258,7 @@ async def test_yamux_deadlines_raise_not_implemented(yamux_pair):
     stream = await client_yamux.open_stream()
     with trio.move_on_after(2):
         with pytest.raises(
-            NotImplementedError, match="Yamux does not support setting read deadlines"
+            NotImplementedError, match="Yamux does not support setting deadlines"
         ):
             stream.set_deadline(60)
     logging.debug("test_yamux_deadlines_raise_not_implemented complete")
