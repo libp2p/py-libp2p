@@ -70,11 +70,14 @@ jobs:
           ./scripts/setup_nim_echo.sh
 
       - run: |
+          uv venv venv
+          source venv/bin/activate
           uv pip install --upgrade pip
           uv pip install tox
 
       - name: Run Tests or Generate Docs
         run: |
+          source venv/bin/activate
           if [[ "${{ matrix.toxenv }}" == 'docs' ]]; then
             export TOXENV=docs
           else
@@ -106,11 +109,14 @@ jobs:
           version: "latest"
       - name: Install dependencies
         run: |
+          uv venv venv
+          source venv/bin/activate
           uv pip install --upgrade pip
           uv pip install tox
       - name: Test with tox
         shell: bash
         run: |
+          source venv/bin/activate
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
             python -m tox run -e windows-wheel
           else
