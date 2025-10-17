@@ -23,9 +23,10 @@ class RoutedHost(BasicHost):
         network: INetworkService,
         router: IPeerRouting,
         enable_mDNS: bool = False,
+        enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
     ):
-        super().__init__(network, enable_mDNS, bootstrap)
+        super().__init__(network, enable_mDNS, enable_upnp, bootstrap)
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:
