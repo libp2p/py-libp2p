@@ -12,7 +12,8 @@ def create_venv(parent_path: Path) -> Path:
     venv_path = parent_path / "package-smoke-test"
     venv.create(venv_path, with_pip=True)
     subprocess.run(
-        [venv_path / "bin" / "pip", "install", "-U", "pip", "setuptools"], check=True
+        [venv_path / "bin" / "uv", "pip", "install", "-U", "pip", "setuptools"],
+        check=True,
     )
     return venv_path
 
@@ -31,7 +32,7 @@ def find_wheel(project_path: Path) -> Path:
 
 def install_wheel(venv_path: Path, wheel_path: Path) -> None:
     subprocess.run(
-        [venv_path / "bin" / "pip", "install", f"{wheel_path}"],
+        [venv_path / "bin" / "uv", "pip", "install", f"{wheel_path}"],
         check=True,
     )
 
