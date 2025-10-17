@@ -15,6 +15,7 @@ from typing import (
     Any,
 )
 
+import multiaddr
 from multiaddr import Multiaddr
 
 from libp2p.custom_types import TProtocol
@@ -25,6 +26,8 @@ from .connection_lifecycle import ConnectionLifecycleManager
 from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_tracker import ConnectionTracker
 from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
+from .lifecycle_events import ConnectionEventBus, ConnectionEventType
+from .lifecycle_handler import ConnectionLifecycleHandler
 from .limits import BaseLimit, Direction, FixedLimiter
 from .memory_limits import (
     MemoryConnectionLimits,
@@ -63,6 +66,7 @@ class ResourceManager:
         enable_connection_tracking: bool = True,
         memory_limits: MemoryConnectionLimits | None = None,
         enable_memory_limits: bool = True,
+        enable_lifecycle_events: bool = True,
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
@@ -120,6 +124,20 @@ class ResourceManager:
             # Use the memory stats cache from memory limits if available
             if self._memory_limits.memory_stats_cache is None:
                 self._memory_limits.memory_stats_cache = self._memory_stats_cache
+
+        # Lifecycle events (Phase 3)
+        self._event_bus: ConnectionEventBus | None = None
+        self._lifecycle_handler: ConnectionLifecycleHandler | None = None
+
+        if enable_lifecycle_events:
+            self._event_bus = ConnectionEventBus()
+            if self._connection_lifecycle_manager and self._connection_tracker:
+                self._lifecycle_handler = ConnectionLifecycleHandler(
+                    connection_tracker=self._connection_tracker,
+                    connection_lifecycle_manager=self._connection_lifecycle_manager,
+                    memory_limits=self._memory_limits,
+                    event_bus=self._event_bus,
+                )
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -495,6 +513,147 @@ class ResourceManager:
         if self._memory_limits:
             self._memory_limits.check_memory_limits(force_refresh)
 
+    # Lifecycle events (Phase 3)
+
+    def get_event_bus(self) -> ConnectionEventBus | None:
+        """Get the connection event bus."""
+        return self._event_bus
+
+    def get_lifecycle_handler(self) -> ConnectionLifecycleHandler | None:
+        """Get the connection lifecycle handler."""
+        return self._lifecycle_handler
+
+    async def publish_connection_established(
+        self,
+        connection_id: str,
+        peer_id: ID,
+        direction: str,
+        local_addr: multiaddr.Multiaddr | None = None,
+        remote_addr: multiaddr.Multiaddr | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Publish a connection established event.
+
+        Args:
+            connection_id: Connection identifier
+            peer_id: Peer ID
+            direction: Connection direction ("inbound" or "outbound")
+            local_addr: Local address
+            remote_addr: Remote address
+            metadata: Additional event metadata
+
+        """
+        if self._lifecycle_handler:
+            await self._lifecycle_handler.publish_connection_established(
+                connection_id, peer_id, direction, local_addr, remote_addr, metadata
+            )
+
+    async def publish_connection_closed(
+        self,
+        connection_id: str,
+        peer_id: ID | None = None,
+        reason: str = "unknown",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Publish a connection closed event.
+
+        Args:
+            connection_id: Connection identifier
+            peer_id: Peer ID if known
+            reason: Reason for connection closure
+            metadata: Additional event metadata
+
+        """
+        if self._lifecycle_handler:
+            await self._lifecycle_handler.publish_connection_closed(
+                connection_id, peer_id, reason, metadata
+            )
+
+    async def publish_resource_limit_exceeded(
+        self,
+        limit_type: str,
+        limit_value: int | float,
+        current_value: int | float,
+        connection_id: str | None = None,
+        peer_id: ID | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Publish a resource limit exceeded event.
+
+        Args:
+            limit_type: Type of limit exceeded
+            limit_value: Limit value
+            current_value: Current value
+            connection_id: Connection identifier if applicable
+            peer_id: Peer ID if applicable
+            metadata: Additional event metadata
+
+        """
+        if self._lifecycle_handler:
+            await self._lifecycle_handler.publish_resource_limit_exceeded(
+                limit_type, limit_value, current_value, connection_id, peer_id, metadata
+            )
+
+    async def publish_stream_event(
+        self,
+        event_type: ConnectionEventType,
+        connection_id: str,
+        peer_id: ID,
+        stream_id: str | None = None,
+        protocol: str | None = None,
+        direction: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Publish a stream lifecycle event.
+
+        Args:
+            event_type: Type of stream event
+            connection_id: Connection identifier
+            peer_id: Peer ID
+            stream_id: Stream identifier
+            protocol: Stream protocol
+            direction: Stream direction
+            metadata: Additional event metadata
+
+        """
+        if self._lifecycle_handler:
+            await self._lifecycle_handler.publish_stream_event(
+                event_type, connection_id, peer_id, stream_id, protocol, direction,
+                metadata
+            )
+
+    async def publish_peer_event(
+        self,
+        action: str,
+        peer_id: ID,
+        connection_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Publish a peer-related event.
+
+        Args:
+            action: Peer action ("connected", "disconnected", "bypassed", "unbypassed")
+            peer_id: Peer ID
+            connection_id: Connection identifier if applicable
+            metadata: Additional event metadata
+
+        """
+        if self._lifecycle_handler:
+            await self._lifecycle_handler.publish_peer_event(
+                action, peer_id, connection_id, metadata
+            )
+
+    def get_lifecycle_stats(self) -> dict[str, Any]:
+        """Get lifecycle event statistics."""
+        if self._lifecycle_handler:
+            return self._lifecycle_handler.get_stats()
+        return {}
+
     # Garbage collection
 
     def _background_gc(self) -> None:
@@ -585,6 +744,7 @@ def new_resource_manager(
     enable_connection_tracking: bool = True,
     memory_limits: MemoryConnectionLimits | None = None,
     enable_memory_limits: bool = True,
+    enable_lifecycle_events: bool = True,
 ) -> ResourceManager:
     """
     Create a new resource manager with the given configuration.
@@ -597,6 +757,7 @@ def new_resource_manager(
         enable_connection_tracking: Whether to enable connection tracking
         memory_limits: Memory limits configuration
         enable_memory_limits: Whether to enable memory limits
+        enable_lifecycle_events: Whether to enable lifecycle events
     Returns:
         ResourceManager: Configured resource manager
 
@@ -608,5 +769,5 @@ def new_resource_manager(
     return ResourceManager(
         limiter, allowlist, metrics, allowlist_config, enable_metrics,
         connection_limits, enable_connection_tracking,
-        memory_limits, enable_memory_limits
+        memory_limits, enable_memory_limits, enable_lifecycle_events
     )
