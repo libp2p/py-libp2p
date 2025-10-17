@@ -162,6 +162,15 @@ class GossipSub(IPubsubRouter, Service):
         # Scoring
         self.scorer: PeerScorer | None = PeerScorer(score_params or ScoreParams())
 
+    def supports_scoring(self, peer_id: ID) -> bool:
+        """
+        Check if peer supports Gossipsub v1.1 scoring features.
+
+        :param peer_id: The peer to check
+        :return: True if peer supports v1.1 features, False otherwise
+        """
+        return self.peer_protocol.get(peer_id) == PROTOCOL_ID_V11
+
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
         if len(self.direct_peers) > 0:
@@ -578,20 +587,37 @@ class GossipSub(IPubsubRouter, Service):
             if self.scorer is not None and num_mesh_peers_in_topic >= self.degree_low:
                 try:
                     scorer = self.scorer
-                    scores = [scorer.score(p, [topic]) for p in self.mesh[topic]]
-                    if scores:
-                        median_score = statistics.median(scores)
-                        # Find higher-than-median peers outside mesh
-                        candidates = self._get_in_topic_gossipsub_peers_from_minus(
-                            topic, self.degree, self.mesh[topic], True
-                        )
-                        for cand in candidates:
-                            if scorer.score(cand, [topic]) > median_score:
-                                self.mesh[topic].add(cand)
-                                peers_to_graft[cand].append(topic)
-                                break
-                except Exception:
-                    pass
+                    # Only consider v1.1 peers for scoring-based opportunistic grafting
+                    v11_mesh_peers = [
+                        p for p in self.mesh[topic] if self.supports_scoring(p)
+                    ]
+                    if v11_mesh_peers:
+                        scores = [scorer.score(p, [topic]) for p in v11_mesh_peers]
+                        if scores:
+                            median_score = statistics.median(scores)
+                            # Find higher-than-median peers outside mesh
+                            candidates = self._get_in_topic_gossipsub_peers_from_minus(
+                                topic, self.degree, self.mesh[topic], True
+                            )
+                            # Only consider v1.1 candidates for scoring-based selection
+                            v11_candidates = [
+                                c for c in candidates if self.supports_scoring(c)
+                            ]
+                            for cand in v11_candidates:
+                                if scorer.score(cand, [topic]) > median_score:
+                                    self.mesh[topic].add(cand)
+                                    peers_to_graft[cand].append(topic)
+                                    break
+                except (ValueError, KeyError) as e:
+                    logger.warning(
+                        "Opportunistic grafting failed for topic %s: %s", topic, e
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Unexpected error in opportunistic grafting for topic %s: %s",
+                        topic,
+                        e,
+                    )
 
             if num_mesh_peers_in_topic > self.degree_high:
                 # Select |mesh[topic]| - D peers from mesh[topic]

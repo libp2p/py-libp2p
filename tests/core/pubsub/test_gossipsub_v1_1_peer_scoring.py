@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 import trio
 
-from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.gossipsub import PROTOCOL_ID_V11, GossipSub
 from libp2p.pubsub.score import PeerScorer, ScoreParams, TopicScoreParams
 from libp2p.tools.utils import connect
 from tests.utils.factories import IDFactory, PubsubFactory
@@ -704,3 +704,164 @@ class TestGossipSubScoringIntegration:
             # Score should decrease due to penalty
             expected_penalty = (1.5 - 1.0) * 2.0  # (penalty - threshold) * weight
             assert penalty_score == initial_score - expected_penalty
+
+    @pytest.mark.trio
+    async def test_supports_scoring_protocol_detection(self):
+        """Test supports_scoring method for protocol version detection."""
+        score_params = ScoreParams()
+
+        async with PubsubFactory.create_batch_with_gossipsub(
+            2, score_params=score_params, heartbeat_interval=0.1
+        ) as pubsubs:
+            gsub0 = cast(GossipSub, pubsubs[0].router)
+            host0, host1 = pubsubs[0].host, pubsubs[1].host
+
+            # Connect hosts
+            await connect(host0, host1)
+            await trio.sleep(0.2)
+
+            peer_id = host1.get_id()
+
+            # Initially, peer should not be in peer_protocol mapping
+            assert not gsub0.supports_scoring(peer_id)
+
+            # Subscribe to a topic to trigger protocol negotiation
+            topic = "test_protocol_detection"
+            await pubsubs[0].subscribe(topic)
+            await pubsubs[1].subscribe(topic)
+            await trio.sleep(0.2)
+
+            # After subscription, peer should be in peer_protocol mapping
+            # The exact protocol depends on the factory implementation
+            # but we can test that the method works correctly
+            assert peer_id in gsub0.peer_protocol
+            protocol = gsub0.peer_protocol[peer_id]
+
+            # Test the method returns correct result based on protocol
+            expected_supports_scoring = protocol == PROTOCOL_ID_V11
+            assert gsub0.supports_scoring(peer_id) == expected_supports_scoring
+
+    @pytest.mark.trio
+    async def test_supports_scoring_with_unknown_peer(self):
+        """Test supports_scoring with unknown peer ID."""
+        score_params = ScoreParams()
+
+        async with PubsubFactory.create_batch_with_gossipsub(
+            1, score_params=score_params, heartbeat_interval=0.1
+        ) as pubsubs:
+            gsub0 = cast(GossipSub, pubsubs[0].router)
+
+            # Create a peer ID that's not connected
+            unknown_peer = IDFactory()
+
+            # Should return False for unknown peer
+            assert not gsub0.supports_scoring(unknown_peer)
+
+    def test_get_score_stats(self):
+        """Test get_score_stats method for observability."""
+        params = ScoreParams(
+            p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=1.0),
+            p2_first_message_deliveries=TopicScoreParams(
+                weight=2.0, cap=5.0, decay=1.0
+            ),
+            p3_mesh_message_deliveries=TopicScoreParams(weight=1.5, cap=8.0, decay=1.0),
+            p4_invalid_messages=TopicScoreParams(weight=3.0, cap=3.0, decay=1.0),
+            p5_behavior_penalty_weight=2.0,
+            p5_behavior_penalty_threshold=1.0,
+            p5_behavior_penalty_decay=1.0,
+        )
+        scorer = PeerScorer(params)
+        peer_id = IDFactory()
+        topic = "test_topic"
+
+        # Set up some activity
+        scorer.on_join_mesh(peer_id, topic)
+        scorer.on_first_delivery(peer_id, topic)
+        scorer.on_mesh_delivery(peer_id, topic)
+        scorer.on_invalid_message(peer_id, topic)
+        scorer.penalize_behavior(peer_id, 2.0)
+
+        # Get stats
+        stats = scorer.get_score_stats(peer_id, topic)
+
+        # Verify all components are present
+        expected_keys = {
+            "time_in_mesh",
+            "first_deliveries",
+            "mesh_deliveries",
+            "invalid_messages",
+            "behavior_penalty",
+            "total_score",
+        }
+        assert set(stats.keys()) == expected_keys
+
+        # Verify values match expected
+        assert stats["time_in_mesh"] == 1.0
+        assert stats["first_deliveries"] == 1.0
+        assert stats["mesh_deliveries"] == 1.0
+        assert stats["invalid_messages"] == 1.0
+        assert stats["behavior_penalty"] == 2.0
+
+        # Verify total score calculation
+        expected_score = (
+            1.0 * 1.0  # P1: time_in_mesh
+            + 1.0 * 2.0  # P2: first_deliveries
+            + 1.0 * 1.5  # P3: mesh_deliveries
+            - 1.0 * 3.0  # P4: invalid_messages (penalty)
+            - (2.0 - 1.0) * 2.0
+        )  # P5: behavior penalty
+        assert stats["total_score"] == expected_score
+
+    def test_get_all_peer_scores(self):
+        """Test get_all_peer_scores method for observability."""
+        params = ScoreParams(
+            p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=1.0),
+        )
+        scorer = PeerScorer(params)
+
+        # Create multiple peers with different activities
+        peer1 = IDFactory()
+        peer2 = IDFactory()
+        peer3 = IDFactory()
+        topic = "test_topic"
+
+        # Set up different activities for each peer
+        scorer.on_join_mesh(peer1, topic)  # Score = 1.0
+        scorer.on_join_mesh(peer2, topic)  # Score = 1.0
+        scorer.on_join_mesh(peer2, topic)  # Score = 2.0
+        # Add peer3 to behavior_penalty to ensure it's tracked
+        scorer.penalize_behavior(peer3, 0.0)  # Score = 0.0
+
+        # Get all peer scores
+        all_scores = scorer.get_all_peer_scores([topic])
+
+        # Verify all peers are included
+        assert str(peer1) in all_scores
+        assert str(peer2) in all_scores
+        assert str(peer3) in all_scores
+
+        # Verify scores are correct
+        assert all_scores[str(peer1)] == 1.0
+        assert all_scores[str(peer2)] == 2.0
+        assert all_scores[str(peer3)] == 0.0
+
+    def test_get_all_peer_scores_multiple_topics(self):
+        """Test get_all_peer_scores with multiple topics."""
+        params = ScoreParams(
+            p1_time_in_mesh=TopicScoreParams(weight=1.0, cap=10.0, decay=1.0),
+        )
+        scorer = PeerScorer(params)
+
+        peer = IDFactory()
+        topic1 = "topic1"
+        topic2 = "topic2"
+
+        # Set up activity in both topics
+        scorer.on_join_mesh(peer, topic1)  # Score in topic1 = 1.0
+        scorer.on_join_mesh(peer, topic2)  # Score in topic2 = 1.0
+
+        # Get scores for both topics
+        all_scores = scorer.get_all_peer_scores([topic1, topic2])
+
+        # Should be sum of both topic scores
+        assert all_scores[str(peer)] == 2.0  # 1.0 + 1.0

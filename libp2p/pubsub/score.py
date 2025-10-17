@@ -41,7 +41,13 @@ class ScoreParams:
 
     p7_ip_colocation_weight: float = 0.0
 
-    # Acceptance thresholds
+    # Acceptance thresholds (permissive defaults for initial implementation)
+    # These defaults allow all messages initially. In production environments,
+    # consider tuning based on network conditions and attack models:
+    # - publish_threshold: Minimum score to accept published messages (e.g., 0.0)
+    # - gossip_threshold: Minimum score to gossip about peer (e.g., -1.0)
+    # - graylist_threshold: Score below which peer is ignored (e.g., -10.0)
+    # - accept_px_threshold: Minimum score to accept PX from peer (e.g., 0.0)
     publish_threshold: float = -math.inf
     gossip_threshold: float = -math.inf
     graylist_threshold: float = -math.inf
@@ -151,8 +157,11 @@ class PeerScorer:
                 self.behavior_penalty[peer] - self.params.p5_behavior_penalty_threshold
             ) * self.params.p5_behavior_penalty_weight
 
-        # TODO: P6/P7 placeholders: app-specific and IP-colocation
-        # terms (not implemented).
+        # TODO: P6 (Application-specific penalty) and P7 (IP colocation penalty)
+        # These require application-specific logic and will be implemented
+        # when concrete use cases are identified.
+        # P6: App-specific scoring based on custom application metrics
+        # P7: IP colocation penalty to prevent Sybil attacks from same IP ranges
         return score
 
     # ---- Gates ----
@@ -247,3 +256,44 @@ class PeerScorer:
         # For PX acceptance, we always use the combined score
         # as it's a more conservative approach
         return self.score(peer, topics) >= self.params.accept_px_threshold
+
+    # ---- Observability ----
+    def get_score_stats(self, peer: ID, topic: str) -> dict[str, float]:
+        """
+        Get detailed score statistics for a peer in a specific topic.
+
+        Useful for debugging, monitoring, and understanding peer behavior.
+
+        :param peer: The peer ID to get stats for
+        :param topic: The topic to get stats for
+        :return: Dictionary containing all score components and total score
+        """
+        return {
+            "time_in_mesh": self.time_in_mesh[peer][topic],
+            "first_deliveries": self.first_message_deliveries[peer][topic],
+            "mesh_deliveries": self.mesh_message_deliveries[peer][topic],
+            "invalid_messages": self.invalid_messages[peer][topic],
+            "behavior_penalty": self.behavior_penalty[peer],
+            "total_score": self.score(peer, [topic]),
+        }
+
+    def get_all_peer_scores(self, topics: list[str]) -> dict[str, float]:
+        """
+        Get scores for all tracked peers across specified topics.
+
+        :param topics: List of topics to calculate scores for
+        :return: Dictionary mapping peer ID strings to their scores
+        """
+        all_peers: set[ID] = set()
+        for topic_dict in [
+            self.time_in_mesh,
+            self.first_message_deliveries,
+            self.mesh_message_deliveries,
+            self.invalid_messages,
+        ]:
+            all_peers.update(topic_dict.keys())
+
+        # Also include peers from behavior_penalty dict
+        all_peers.update(self.behavior_penalty.keys())
+
+        return {str(peer): self.score(peer, topics) for peer in all_peers}
