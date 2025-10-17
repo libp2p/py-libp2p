@@ -26,6 +26,11 @@ from .connection_limits import ConnectionLimits, new_connection_limits_with_defa
 from .connection_tracker import ConnectionTracker
 from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
 from .limits import BaseLimit, Direction, FixedLimiter
+from .memory_limits import (
+    MemoryConnectionLimits,
+    new_memory_connection_limits_with_defaults,
+)
+from .memory_stats import MemoryStatsCache
 from .metrics import Metrics
 from .scope import (
     BaseResourceScope,
@@ -56,6 +61,8 @@ class ResourceManager:
         enable_metrics: bool = True,
         connection_limits: ConnectionLimits | None = None,
         enable_connection_tracking: bool = True,
+        memory_limits: MemoryConnectionLimits | None = None,
+        enable_memory_limits: bool = True,
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
@@ -101,6 +108,18 @@ class ResourceManager:
             self._connection_lifecycle_manager = ConnectionLifecycleManager(
                 self._connection_tracker, self._connection_limits
             )
+
+        # Memory limits (Phase 2)
+        self._memory_limits = (
+            memory_limits or new_memory_connection_limits_with_defaults()
+        )
+        self._memory_stats_cache: MemoryStatsCache | None = None
+
+        if enable_memory_limits:
+            self._memory_stats_cache = MemoryStatsCache()
+            # Use the memory stats cache from memory limits if available
+            if self._memory_limits.memory_stats_cache is None:
+                self._memory_limits.memory_stats_cache = self._memory_stats_cache
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -247,10 +266,32 @@ class ResourceManager:
             return 0
 
     def _process_memory_exceeded(self) -> bool:
-        if self._max_process_memory_bytes is None:
-            return False
-        current = self._current_process_memory_bytes()
-        return current > self._max_process_memory_bytes
+        """
+        Check if process memory usage exceeds configured limits.
+
+        This method checks both the legacy memory limit and the new memory limits.
+
+        Returns:
+            bool: True if memory limits are exceeded, False otherwise
+
+        """
+        # Check legacy memory limit
+        if self._max_process_memory_bytes is not None:
+            current = self._current_process_memory_bytes()
+            if current > self._max_process_memory_bytes:
+                return True
+
+        # Check new memory limits (Phase 2)
+        if self._memory_limits is not None:
+            try:
+                self._memory_limits.check_memory_limits()
+            except ResourceLimitExceeded:
+                return True
+            except Exception:
+                # Don't fail on monitoring errors, allow resource allocation
+                pass
+
+        return False
 
     def _get_peer_scope(self, peer_id: ID) -> PeerScope:
         """Get or create a peer scope."""
@@ -417,6 +458,43 @@ class ResourceManager:
             return self._connection_tracker.get_stats()
         return {}
 
+    # Memory management (Phase 2)
+
+    def get_memory_limits(self) -> MemoryConnectionLimits:
+        """Get the memory limits configuration."""
+        return self._memory_limits
+
+    def set_memory_limits(self, limits: MemoryConnectionLimits) -> None:
+        """Update memory limits configuration."""
+        with self._lock:
+            self._memory_limits = limits
+            if self._memory_stats_cache:
+                self._memory_limits.memory_stats_cache = self._memory_stats_cache
+
+    def get_memory_stats_cache(self) -> MemoryStatsCache | None:
+        """Get the memory statistics cache."""
+        return self._memory_stats_cache
+
+    def get_memory_summary(self, force_refresh: bool = False) -> dict[str, Any]:
+        """Get comprehensive memory summary."""
+        if self._memory_limits:
+            return self._memory_limits.get_memory_summary(force_refresh)
+        return {}
+
+    def check_memory_limits(self, force_refresh: bool = False) -> None:
+        """
+        Check if current memory usage exceeds configured limits.
+
+        Args:
+            force_refresh: Force refresh of memory statistics
+
+        Raises:
+            ResourceLimitExceeded: If memory limits are exceeded
+
+        """
+        if self._memory_limits:
+            self._memory_limits.check_memory_limits(force_refresh)
+
     # Garbage collection
 
     def _background_gc(self) -> None:
@@ -505,6 +583,8 @@ def new_resource_manager(
     enable_metrics: bool = True,
     connection_limits: ConnectionLimits | None = None,
     enable_connection_tracking: bool = True,
+    memory_limits: MemoryConnectionLimits | None = None,
+    enable_memory_limits: bool = True,
 ) -> ResourceManager:
     """
     Create a new resource manager with the given configuration.
@@ -515,6 +595,8 @@ def new_resource_manager(
         enable_metrics: Whether to enable metrics collection
         connection_limits: Connection limits configuration
         enable_connection_tracking: Whether to enable connection tracking
+        memory_limits: Memory limits configuration
+        enable_memory_limits: Whether to enable memory limits
     Returns:
         ResourceManager: Configured resource manager
 
@@ -525,5 +607,6 @@ def new_resource_manager(
     metrics = Metrics() if enable_metrics else None
     return ResourceManager(
         limiter, allowlist, metrics, allowlist_config, enable_metrics,
-        connection_limits, enable_connection_tracking
+        connection_limits, enable_connection_tracking,
+        memory_limits, enable_memory_limits
     )
