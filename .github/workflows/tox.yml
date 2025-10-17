@@ -110,13 +110,13 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv venv
-          venv/Scripts/activate
+          source venv/Scripts/activate
           uv pip install --upgrade pip
           uv pip install tox
       - name: Test with tox
         shell: bash
         run: |
-          venv/Scripts/activate
+          source venv/Scripts/activate
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
             python -m tox run -e windows-wheel
           else
