@@ -21,6 +21,9 @@ from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 
 from .allowlist import Allowlist, AllowlistConfig
+from .connection_lifecycle import ConnectionLifecycleManager
+from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
+from .connection_tracker import ConnectionTracker
 from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
 from .limits import BaseLimit, Direction, FixedLimiter
 from .metrics import Metrics
@@ -51,6 +54,8 @@ class ResourceManager:
         metrics: Metrics | None = None,
         allowlist_config: AllowlistConfig | None = None,
         enable_metrics: bool = True,
+        connection_limits: ConnectionLimits | None = None,
+        enable_connection_tracking: bool = True,
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
@@ -83,6 +88,19 @@ class ResourceManager:
 
         # Optional process memory guard (bytes). If set, deny new scopes when exceeded.
         self._max_process_memory_bytes: int | None = None
+
+        # Connection tracking (Phase 1)
+        self._connection_limits = (
+            connection_limits or new_connection_limits_with_defaults()
+        )
+        self._connection_tracker: ConnectionTracker | None = None
+        self._connection_lifecycle_manager: ConnectionLifecycleManager | None = None
+
+        if enable_connection_tracking:
+            self._connection_tracker = ConnectionTracker(self._connection_limits)
+            self._connection_lifecycle_manager = ConnectionLifecycleManager(
+                self._connection_tracker, self._connection_limits
+            )
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -354,6 +372,51 @@ class ResourceManager:
     def get_metrics(self) -> Metrics | None:
         return self.metrics
 
+    # Connection lifecycle management (Phase 1)
+
+    def get_connection_lifecycle_manager(self) -> ConnectionLifecycleManager | None:
+        """Get the connection lifecycle manager."""
+        return self._connection_lifecycle_manager
+
+    def get_connection_tracker(self) -> ConnectionTracker | None:
+        """Get the connection tracker."""
+        return self._connection_tracker
+
+    def get_connection_limits(self) -> ConnectionLimits:
+        """Get the connection limits configuration."""
+        return self._connection_limits
+
+    def set_connection_limits(self, limits: ConnectionLimits) -> None:
+        """Update connection limits configuration."""
+        with self._lock:
+            self._connection_limits = limits
+            if self._connection_tracker:
+                self._connection_tracker.limits = limits
+            if self._connection_lifecycle_manager:
+                self._connection_lifecycle_manager.limits = limits
+
+    def add_bypass_peer(self, peer_id: ID) -> None:
+        """Add a peer to the connection bypass list."""
+        if self._connection_tracker:
+            self._connection_tracker.add_bypass_peer(peer_id)
+
+    def remove_bypass_peer(self, peer_id: ID) -> None:
+        """Remove a peer from the connection bypass list."""
+        if self._connection_tracker:
+            self._connection_tracker.remove_bypass_peer(peer_id)
+
+    def is_peer_bypassed(self, peer_id: ID) -> bool:
+        """Check if a peer is bypassed for connection limits."""
+        if self._connection_tracker:
+            return self._connection_tracker.is_bypassed(peer_id)
+        return False
+
+    def get_connection_stats(self) -> dict[str, Any]:
+        """Get connection tracking statistics."""
+        if self._connection_tracker:
+            return self._connection_tracker.get_stats()
+        return {}
+
     # Garbage collection
 
     def _background_gc(self) -> None:
@@ -440,6 +503,8 @@ def new_resource_manager(
     limiter: FixedLimiter,
     allowlist_config: AllowlistConfig | None = None,
     enable_metrics: bool = True,
+    connection_limits: ConnectionLimits | None = None,
+    enable_connection_tracking: bool = True,
 ) -> ResourceManager:
     """
     Create a new resource manager with the given configuration.
@@ -448,6 +513,8 @@ def new_resource_manager(
         limiter: Resource limiter defining limits for all scopes
         allowlist_config: Optional allowlist configuration
         enable_metrics: Whether to enable metrics collection
+        connection_limits: Connection limits configuration
+        enable_connection_tracking: Whether to enable connection tracking
     Returns:
         ResourceManager: Configured resource manager
 
@@ -457,5 +524,6 @@ def new_resource_manager(
     )
     metrics = Metrics() if enable_metrics else None
     return ResourceManager(
-        limiter, allowlist, metrics, allowlist_config, enable_metrics
+        limiter, allowlist, metrics, allowlist_config, enable_metrics,
+        connection_limits, enable_connection_tracking
     )
