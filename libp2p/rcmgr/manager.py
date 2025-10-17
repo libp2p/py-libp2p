@@ -72,7 +72,7 @@ class ResourceManager:
 
     def __init__(
         self,
-        limiter: FixedLimiter,
+        limiter: FixedLimiter | None = None,
         allowlist: Allowlist | None = None,
         metrics: Metrics | None = None,
         allowlist_config: AllowlistConfig | None = None,
@@ -87,10 +87,7 @@ class ResourceManager:
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
-            self.limiter = FixedLimiter(
-                system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),
-                peer_default=BaseLimit(streams=10, memory=16 * 1024 * 1024),
-            )
+            self.limiter = limiter
         else:
             self.limiter = FixedLimiter(
                 system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),
@@ -1070,7 +1067,7 @@ class ResourceManager:
 
 
 def new_resource_manager(
-    limiter: FixedLimiter,
+    limiter: FixedLimiter | None = None,
     allowlist_config: AllowlistConfig | None = None,
     enable_metrics: bool = True,
     connection_limits: ConnectionLimits | None = None,
