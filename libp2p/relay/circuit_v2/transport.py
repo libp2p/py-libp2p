@@ -10,6 +10,7 @@ from re import A
 
 import multiaddr
 import trio
+import time
 
 from libp2p.abc import (
     IHost,
@@ -58,7 +59,7 @@ from .utils import (
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
-
+TOP_N = 3
 
 class CircuitV2Transport(ITransport):
     """
@@ -101,6 +102,7 @@ class CircuitV2Transport(ITransport):
         )
         self._last_relay_index = -1
         self._relay_list = []
+        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
 
     async def dial(  # type: ignore[override]
         self,
@@ -278,39 +280,93 @@ class CircuitV2Transport(ITransport):
         """
         Select an appropriate relay for the given peer.
 
-        Parameters
-        ----------
-        peer_info : PeerInfo
-            The peer to connect to
+        - Gather relays (preserve insertion order, dedupe by to_string()).
+        - Measure relays concurrently to collect scores.
+        - Take top TOP_N relays by score (desc, tie-break by to_string()).
+        - Pick one from top list using round-robin across invocations.
 
-        Returns
-        -------
-        Optional[ID]
-            Selected relay peer ID, or None if no suitable relay found
-
+        Returns:
+            Selected relay ID or None if none found.
         """
-        # Try to find a relay
-        for _ in range(self.client_config.max_auto_relay_attempts):
-            relays = self.discovery.get_relays() or []
-            if not relays:
-                await trio.sleep(1)
+        if not self.client_config.enable_auto_relay:
+            logger.warning("Auto-relay disabled, skipping relay selection")
+            return None
+
+        for attempt in range(self.client_config.max_auto_relay_attempts):
+            # Fetch relays if _relay_list is empty — preserve order and dedupe
+            if not self._relay_list:
+                relays = self.discovery.get_relays() or []
+                # preserve current order and append new ones (dedupe by to_string)
+                seen = {r.to_string() for r in self._relay_list}
+                for r in relays:
+                    if r.to_string() not in seen:
+                        self._relay_list.append(r)
+                        seen.add(r.to_string())
+
+            if not self._relay_list:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
                 continue
 
-            # Cache and sort unique relays
-            self._relay_list = sorted({*self._relay_list, *relays}, key=lambda r: r.to_string())
+            # Measure all relays concurrently. scored_relays will be filled by _measure_relay.
+            scored_relays: list[tuple[ID, float]] = []
+            async with trio.open_nursery() as nursery:
+                for relay_id in list(self._relay_list):
+                    nursery.start_soon(self._measure_relay, relay_id, scored_relays)
 
-            # Filter only available ones
-            available = [r for r in self._relay_list if await self._is_relay_available(r)]
-            if not available:
-                await trio.sleep(1)
+            # If no scored relays, backoff and retry
+            if not scored_relays:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
                 continue
 
-            # Round-robin selection
-            self._last_relay_index = (self._last_relay_index + 1) % len(available)
-            return available[self._last_relay_index]
+            # Filter by minimum score
+            filtered = [(rid, score) for (rid, score) in scored_relays if score >= self.client_config.min_relay_score]
+            if not filtered:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
 
+            # Sort by score desc, tie-break by to_string() to be deterministic
+            filtered.sort(key=lambda x: (x[1], x[0].to_string()), reverse=True)
+
+            # Take top N
+            top_relays = [rid for (rid, _) in filtered[:TOP_N]]
+
+            # Defensive: if top_relays empty (shouldn't be), backoff
+            if not top_relays:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
+
+            # Round-robin selection across the top_relays list
+            # Ensure _last_relay_index cycles relative to top_relays length.
+            #self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
+            #chosen = top_relays[self._last_relay_index]
+            # Round-robin selection across the top_relays list
+            if self._last_relay_index == -1:
+                # First selection: pick best relay
+                self._last_relay_index = 0
+            else:
+                # Next selections: cycle through top N
+                self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
+            chosen = top_relays[self._last_relay_index]
+
+            # Ensure metrics access uses the actual relay object (or insert if missing)
+            if chosen not in self._relay_metrics:
+                self._relay_metrics[chosen] = {"latency": 0, "failures": 0, "last_seen": 0}
+
+            logger.debug(
+                "Selected relay %s from top %d candidates (lat=%.3fs)", 
+                chosen,
+                len(top_relays),
+                self._relay_metrics[chosen].get("latency", 0),
+            )
+            return chosen
+
+        logger.warning("No suitable relay found after %d attempts", self.client_config.max_auto_relay_attempts)
         return None
-    
+
     async def _is_relay_available(self, relay_peer_id: ID) -> bool:
         """Check if the relay is currently reachable."""
         try:
@@ -320,6 +376,25 @@ class CircuitV2Transport(ITransport):
             return True 
         except Exception:
             return False
+        
+    async def _measure_relay(self, relay_id: ID, scored_relays: list):
+        metrics = self._relay_metrics.setdefault(relay_id, {"latency": 0, "failures": 0, "last_seen": 0})
+        start = time.monotonic()
+        available = await self._is_relay_available(relay_id)
+        latency = time.monotonic() - start
+    
+        if not available:
+            metrics["failures"] += 1
+            return
+    
+        metrics.update({
+            "latency": latency,
+            "failures": max(0, metrics["failures"] - 1),
+            "last_seen": time.time()
+        })
+        
+        score = 1000 - (metrics["failures"] * 10) - (latency * 100) - ((time.time() - metrics["last_seen"]) * 0.1)
+        scored_relays.append((relay_id, score))
 
     async def _make_reservation(
         self,
