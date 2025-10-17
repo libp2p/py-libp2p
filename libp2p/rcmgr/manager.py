@@ -13,6 +13,7 @@ import threading
 import time
 from typing import (
     Any,
+    Dict,
 )
 
 import multiaddr
@@ -43,6 +44,12 @@ from .memory_limits import (
 )
 from .memory_stats import MemoryStatsCache
 from .metrics import Metrics
+from .protocol_rate_limiter import ProtocolRateLimiter, create_protocol_rate_limiter
+from .rate_limiter import (
+    RateLimiter,
+    create_global_rate_limiter,
+    create_per_peer_rate_limiter,
+)
 from .scope import (
     BaseResourceScope,
     ConnectionScope,
@@ -76,10 +83,14 @@ class ResourceManager:
         enable_memory_limits: bool = True,
         enable_lifecycle_events: bool = True,
         enable_enhanced_errors: bool = True,
+        enable_rate_limiting: bool = True,
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
-            self.limiter = limiter
+            self.limiter = FixedLimiter(
+                system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),
+                peer_default=BaseLimit(streams=10, memory=16 * 1024 * 1024),
+            )
         else:
             self.limiter = FixedLimiter(
                 system=BaseLimit(streams=1000, memory=512 * 1024 * 1024),
@@ -153,6 +164,27 @@ class ResourceManager:
 
         if enable_enhanced_errors:
             self._error_collector = ErrorContextCollector()
+
+        # Rate limiting (Phase 5)
+        self._global_rate_limiter: RateLimiter | None = None
+        self._per_peer_rate_limiter: RateLimiter | None = None
+        self._protocol_rate_limiters: Dict[str, ProtocolRateLimiter] = {}
+
+        if enable_rate_limiting:
+            # Create global rate limiter
+            self._global_rate_limiter = create_global_rate_limiter(
+                refill_rate=100.0,  # 100 requests per second
+                capacity=1000.0,   # 1000 burst capacity
+                initial_tokens=100.0,  # Start with some tokens
+            )
+
+            # Create per-peer rate limiter
+            self._per_peer_rate_limiter = create_per_peer_rate_limiter(
+                refill_rate=10.0,   # 10 requests per second per peer
+                capacity=100.0,    # 100 burst capacity per peer
+                initial_tokens=10.0,  # Start with some tokens per peer
+                max_peers=1000,    # Track up to 1000 peers
+            )
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -755,6 +787,206 @@ class ResourceManager:
         """Create a new error context builder."""
         return ErrorContextBuilder()
 
+    # Rate limiting (Phase 5)
+
+    def get_global_rate_limiter(self) -> RateLimiter | None:
+        """Get the global rate limiter."""
+        return self._global_rate_limiter
+
+    def get_per_peer_rate_limiter(self) -> RateLimiter | None:
+        """Get the per-peer rate limiter."""
+        return self._per_peer_rate_limiter
+
+    def get_protocol_rate_limiter(
+        self, protocol_name: str
+    ) -> ProtocolRateLimiter | None:
+        """Get the protocol rate limiter for a specific protocol."""
+        return self._protocol_rate_limiters.get(protocol_name)
+
+    def create_protocol_rate_limiter(
+        self,
+        protocol_name: str,
+        protocol_version: str | None = None,
+        refill_rate: float = 10.0,
+        capacity: float = 100.0,
+        initial_tokens: float = 0.0,
+        allow_burst: bool = True,
+        burst_multiplier: float = 1.0,
+        max_concurrent_requests: int = 10,
+        request_timeout_seconds: float = 30.0,
+        backoff_factor: float = 2.0,
+    ) -> ProtocolRateLimiter:
+        """
+        Create a protocol rate limiter.
+
+        Args:
+            protocol_name: Name of the protocol
+            protocol_version: Version of the protocol (optional)
+            refill_rate: Tokens per second
+            capacity: Maximum tokens in bucket
+            initial_tokens: Initial tokens in bucket
+            allow_burst: Allow burst up to capacity
+            burst_multiplier: Burst capacity multiplier
+            max_concurrent_requests: Maximum concurrent requests
+            request_timeout_seconds: Request timeout in seconds
+            backoff_factor: Backoff factor for retries
+
+        Returns:
+            ProtocolRateLimiter: Created protocol rate limiter
+
+        """
+        rate_limiter = create_protocol_rate_limiter(
+            protocol_name=protocol_name,
+            protocol_version=protocol_version,
+            refill_rate=refill_rate,
+            capacity=capacity,
+            initial_tokens=initial_tokens,
+            allow_burst=allow_burst,
+            burst_multiplier=burst_multiplier,
+            max_concurrent_requests=max_concurrent_requests,
+            request_timeout_seconds=request_timeout_seconds,
+            backoff_factor=backoff_factor,
+        )
+
+        # Store the rate limiter
+        self._protocol_rate_limiters[protocol_name] = rate_limiter
+
+        return rate_limiter
+
+    def try_allow_request(
+        self,
+        tokens: float = 1.0,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol_name: str | None = None,
+        current_time: float | None = None,
+    ) -> bool:
+        """
+        Try to allow a request based on rate limiting.
+
+        Args:
+            tokens: Number of tokens to consume
+            peer_id: Peer ID (optional)
+            connection_id: Connection ID (optional)
+            protocol_name: Protocol name (optional)
+            current_time: Current timestamp (optional)
+
+        Returns:
+            True if request is allowed, False otherwise
+
+        """
+        if current_time is None:
+            current_time = time.time()
+
+        # Check global rate limiting
+        if self._global_rate_limiter:
+            if not self._global_rate_limiter.try_allow(
+                tokens, None, None, None, None, current_time
+            ):
+                return False
+
+        # Check per-peer rate limiting
+        if self._per_peer_rate_limiter and peer_id:
+            if not self._per_peer_rate_limiter.try_allow(
+                tokens, peer_id, None, None, None, current_time
+            ):
+                return False
+
+        # Check protocol rate limiting
+        if protocol_name and protocol_name in self._protocol_rate_limiters:
+            protocol_limiter = self._protocol_rate_limiters[protocol_name]
+            if not protocol_limiter.try_allow_request(
+                tokens, peer_id, connection_id, current_time
+            ):
+                return False
+
+        return True
+
+    def allow_request(
+        self,
+        tokens: float = 1.0,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol_name: str | None = None,
+        current_time: float | None = None,
+    ) -> None:
+        """
+        Allow a request based on rate limiting (raises exception if denied).
+
+        Args:
+            tokens: Number of tokens to consume
+            peer_id: Peer ID (optional)
+            connection_id: Connection ID (optional)
+            protocol_name: Protocol name (optional)
+            current_time: Current timestamp (optional)
+
+        Raises:
+            ValueError: If request is denied by rate limiting
+
+        """
+        if not self.try_allow_request(
+            tokens, peer_id, connection_id, protocol_name, current_time
+        ):
+            raise ValueError("Request denied by rate limiting")
+
+    def finish_protocol_request(
+        self,
+        protocol_name: str,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        current_time: float | None = None,
+    ) -> None:
+        """
+        Finish a protocol request.
+
+        Args:
+            protocol_name: Name of the protocol
+            peer_id: Peer ID (optional)
+            connection_id: Connection ID (optional)
+            current_time: Current timestamp (optional)
+
+        """
+        if protocol_name in self._protocol_rate_limiters:
+            protocol_limiter = self._protocol_rate_limiters[protocol_name]
+            protocol_limiter.finish_request(peer_id, connection_id, current_time)
+
+    def get_rate_limiting_stats(self) -> Dict[str, Any]:
+        """Get rate limiting statistics."""
+        stats: Dict[str, Any] = {
+            "global_rate_limiter": None,
+            "per_peer_rate_limiter": None,
+            "protocol_rate_limiters": {},
+        }
+
+        if self._global_rate_limiter:
+            stats["global_rate_limiter"] = (
+                self._global_rate_limiter.get_stats().to_dict()
+            )
+
+        if self._per_peer_rate_limiter:
+            stats["per_peer_rate_limiter"] = (
+                self._per_peer_rate_limiter.get_stats().to_dict()
+            )
+
+        for protocol_name, protocol_limiter in self._protocol_rate_limiters.items():
+            if "protocol_rate_limiters" in stats:
+                stats["protocol_rate_limiters"][protocol_name] = (
+                    protocol_limiter.get_stats().to_dict()
+                )
+
+        return stats
+
+    def reset_rate_limiting(self) -> None:
+        """Reset all rate limiters to initial state."""
+        if self._global_rate_limiter:
+            self._global_rate_limiter.reset()
+
+        if self._per_peer_rate_limiter:
+            self._per_peer_rate_limiter.reset()
+
+        for protocol_limiter in self._protocol_rate_limiters.values():
+            protocol_limiter.reset()
+
     # Garbage collection
 
     def _background_gc(self) -> None:
@@ -847,6 +1079,7 @@ def new_resource_manager(
     enable_memory_limits: bool = True,
     enable_lifecycle_events: bool = True,
     enable_enhanced_errors: bool = True,
+    enable_rate_limiting: bool = True,
 ) -> ResourceManager:
     """
     Create a new resource manager with the given configuration.
@@ -861,6 +1094,7 @@ def new_resource_manager(
         enable_memory_limits: Whether to enable memory limits
         enable_lifecycle_events: Whether to enable lifecycle events
         enable_enhanced_errors: Whether to enable enhanced error reporting
+        enable_rate_limiting: Whether to enable rate limiting
     Returns:
         ResourceManager: Configured resource manager
 
@@ -873,5 +1107,5 @@ def new_resource_manager(
         limiter, allowlist, metrics, allowlist_config, enable_metrics,
         connection_limits, enable_connection_tracking,
         memory_limits, enable_memory_limits, enable_lifecycle_events,
-        enable_enhanced_errors
+        enable_enhanced_errors, enable_rate_limiting
     )
