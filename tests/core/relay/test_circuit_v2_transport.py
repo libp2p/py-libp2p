@@ -1,14 +1,17 @@
 """Tests for the Circuit Relay v2 transport functionality."""
 
+import itertools
 import logging
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from multiaddr import Multiaddr
 import trio
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from libp2p.abc import IHost
 from libp2p.custom_types import TProtocol
+from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamReset,
@@ -25,7 +28,11 @@ from libp2p.relay.circuit_v2.protocol import (
     RelayLimits,
 )
 from libp2p.relay.circuit_v2.transport import (
+    ID,
+    PROTOCOL_ID,
+    CircuitV2Listener,
     CircuitV2Transport,
+    PeerInfo,
 )
 from libp2p.tools.constants import (
     MAX_READ_LEN,
@@ -36,13 +43,6 @@ from libp2p.tools.utils import (
 from tests.utils.factories import (
     HostFactory,
 )
-from libp2p.relay.circuit_v2.transport import (
-  ID, 
-  PeerInfo, 
-  PROTOCOL_ID
-)
-from libp2p.peer.peerinfo import PeerInfo
-from libp2p.abc import IHost
 
 logger = logging.getLogger(__name__)
 
@@ -483,15 +483,6 @@ async def test_circuit_v2_transport_relay_limits():
 
         # Test successful - transports were initialized with the correct limits
         logger.info("Transport limit test successful")
-        
-# tests/core/relay/test_circuit_v2_transport.py (patched)
-import time
-import logging
-from unittest.mock import AsyncMock, MagicMock
-import pytest
-import trio
-from libp2p.peer.id import ID
-import itertools
 
 TOP_N = 5
 
@@ -508,7 +499,7 @@ def circuit_v2_transport():
     host = MagicMock(spec=IHost)
     protocol = MagicMock(spec=CircuitV2Protocol)
     config = MagicMock(spec=RelayConfig)
-    
+
     # Mock RelayConfig attributes used by RelayDiscovery
     config.enable_client = True
     config.discovery_interval = 60
@@ -516,18 +507,21 @@ def circuit_v2_transport():
     config.timeouts = MagicMock()
     config.timeouts.discovery_stream_timeout = 30
     config.timeouts.peer_protocol_timeout = 30
-    
+
     # Initialize CircuitV2Transport
     transport = CircuitV2Transport(host=host, protocol=protocol, config=config)
-    
+
     # Replace discovery with a mock to avoid real initialization
     transport.discovery = MagicMock(spec=RelayDiscovery)
-    
+
     return transport
 
 
 def _metrics_for(transport, relay):
-    """Find metric dict for a relay by comparing to_string() to avoid identity issues."""
+    """
+    Find metric dict for a relay by comparing
+    to_string() to avoid identity issues.
+    """
     for k, v in transport._relay_metrics.items():
         # some tests set relay.to_string.return_value
         try:
@@ -550,13 +544,19 @@ async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
-    
+
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result is None
-    assert circuit_v2_transport.discovery.get_relays.call_count == circuit_v2_transport.client_config.max_auto_relay_attempts
+    assert (
+        circuit_v2_transport.discovery.get_relays.call_count
+        == circuit_v2_transport.client_config.max_auto_relay_attempts
+    )
     assert circuit_v2_transport._relay_list == []
-    assert mock_sleep.call_count == circuit_v2_transport.client_config.max_auto_relay_attempts
+    assert (
+        mock_sleep.call_count
+        == circuit_v2_transport.client_config.max_auto_relay_attempts
+    )
 
 @pytest.mark.trio
 async def test_select_relay_all_unavailable(circuit_v2_transport, peer_info, mocker):
@@ -566,17 +566,29 @@ async def test_select_relay_all_unavailable(circuit_v2_transport, peer_info, moc
     circuit_v2_transport.discovery.get_relays.return_value = [relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=False))
+    mocker.patch.object(
+        circuit_v2_transport, "_is_relay_available",
+        AsyncMock(return_value=False)
+    )
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
-    
+
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result is None
-    assert circuit_v2_transport._is_relay_available.call_count == circuit_v2_transport.client_config.max_auto_relay_attempts
+    assert (
+        circuit_v2_transport._is_relay_available.call_count
+        == circuit_v2_transport.client_config.max_auto_relay_attempts
+    )
     assert circuit_v2_transport._relay_list == [relay1]
     metrics = _metrics_for(circuit_v2_transport, relay1)
-    assert metrics["failures"] == circuit_v2_transport.client_config.max_auto_relay_attempts
-    assert mock_sleep.call_count == circuit_v2_transport.client_config.max_auto_relay_attempts
+    assert (
+        metrics["failures"]
+        == circuit_v2_transport.client_config.max_auto_relay_attempts
+    )
+    assert (
+        mock_sleep.call_count
+        == circuit_v2_transport.client_config.max_auto_relay_attempts
+    )
 
 @pytest.mark.trio
 async def test_select_relay_round_robin(circuit_v2_transport, peer_info, mocker):
@@ -592,21 +604,25 @@ async def test_select_relay_round_robin(circuit_v2_transport, peer_info, mocker)
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay2]
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = [relay1, relay2]
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True))
-    
+    mocker.patch.object(
+        circuit_v2_transport,
+        "_is_relay_available",
+        AsyncMock(return_value=True)
+    )
+
     circuit_v2_transport._last_relay_index = -1
     result1 = await circuit_v2_transport._select_relay(peer_info)
     assert result1.to_string() == relay2.to_string()
     assert circuit_v2_transport._last_relay_index == 0
-    
+
     result2 = await circuit_v2_transport._select_relay(peer_info)
     assert result2.to_string() == relay1.to_string()
     assert circuit_v2_transport._last_relay_index == 1
-    
+
     result3 = await circuit_v2_transport._select_relay(peer_info)
     assert result3.to_string() == relay2.to_string()
     assert circuit_v2_transport._last_relay_index == 0
-    
+
     assert mock_sleep.call_count == 0
     # check metrics by looking up via helper
     metrics1 = _metrics_for(circuit_v2_transport, relay1)
@@ -619,24 +635,38 @@ async def test_is_relay_available_success(circuit_v2_transport, mocker):
     """Test _is_relay_available when the relay is reachable."""
     relay_id = MagicMock(spec=ID)
     stream = AsyncMock()
-    mocker.patch.object(circuit_v2_transport.host, "new_stream", AsyncMock(return_value=stream))
-    
+    mocker.patch.object(
+        circuit_v2_transport.host,
+        "new_stream",
+        AsyncMock(return_value=stream)
+    )
+
     result = await circuit_v2_transport._is_relay_available(relay_id)
-    
+
     assert result is True
-    circuit_v2_transport.host.new_stream.assert_called_once_with(relay_id, [PROTOCOL_ID])
+    circuit_v2_transport.host.new_stream.assert_called_once_with(
+        relay_id,
+        [PROTOCOL_ID],
+    )
     stream.close.assert_called_once()
 
 @pytest.mark.trio
 async def test_is_relay_available_failure(circuit_v2_transport, mocker):
     """Test _is_relay_available when the relay is unreachable."""
     relay_id = MagicMock(spec=ID)
-    mocker.patch.object(circuit_v2_transport.host, "new_stream", AsyncMock(side_effect=Exception("Connection failed")))
-    
+    mocker.patch.object(
+        circuit_v2_transport.host,
+        "new_stream",
+        AsyncMock(side_effect=Exception("Connection failed"))
+    )
+
     result = await circuit_v2_transport._is_relay_available(relay_id)
-    
+
     assert result is False
-    circuit_v2_transport.host.new_stream.assert_called_once_with(relay_id, [PROTOCOL_ID])
+    circuit_v2_transport.host.new_stream.assert_called_once_with(
+        relay_id,
+        [PROTOCOL_ID]
+    )
 
 @pytest.mark.trio
 async def test_select_relay_scoring_priority(circuit_v2_transport, peer_info, mocker):
@@ -648,9 +678,11 @@ async def test_select_relay_scoring_priority(circuit_v2_transport, peer_info, mo
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay2]
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = [relay1, relay2]
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True))
-    #mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1, 0, 0.2]))
-    #mocker.patch("time.time", return_value=1000.0)
+    mocker.patch.object(
+        circuit_v2_transport,
+        "_is_relay_available",
+        AsyncMock(return_value=True)
+    )
     async def fake_measure_relay(relay_id, scored):
         if relay_id is relay1:
             scored.append((relay_id, 0.8))  # better score
@@ -659,15 +691,19 @@ async def test_select_relay_scoring_priority(circuit_v2_transport, peer_info, mo
             scored.append((relay_id, 0.5))  # worse score
             circuit_v2_transport._relay_metrics[relay_id]["failures"] = 1
 
-    mocker.patch.object(circuit_v2_transport, "_measure_relay", side_effect=fake_measure_relay)
+    mocker.patch.object(
+        circuit_v2_transport,
+        "_measure_relay",
+        side_effect=fake_measure_relay
+    )
     circuit_v2_transport._relay_metrics = {
         relay1: {"latency": 0.1, "failures": 0, "last_seen": 999.9},
         relay2: {"latency": 0.2, "failures": 2, "last_seen": 900.0}
     }
-    
+
     circuit_v2_transport._last_relay_index = -1
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result.to_string() == relay1.to_string()
     m1 = _metrics_for(circuit_v2_transport, relay1)
     m2 = _metrics_for(circuit_v2_transport, relay2)
@@ -684,13 +720,17 @@ async def test_select_relay_fewer_than_top_n(circuit_v2_transport, peer_info, mo
     circuit_v2_transport.discovery.get_relays.return_value = [relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True))
+    mocker.patch.object(
+        circuit_v2_transport,
+        "_is_relay_available",
+        AsyncMock(return_value=True)
+    )
     mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
     mocker.patch("time.time", return_value=1000.0)
-    
+
     circuit_v2_transport._last_relay_index = -1
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result.to_string() == relay1.to_string()
     assert circuit_v2_transport._last_relay_index == 0
     assert len(circuit_v2_transport._relay_list) == 1
@@ -703,18 +743,26 @@ async def test_select_relay_duplicate_relays(circuit_v2_transport, peer_info, mo
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
     circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True))
+    mocker.patch.object(
+        circuit_v2_transport,
+        "_is_relay_available",
+        AsyncMock(return_value=True)
+    )
     mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
     mocker.patch("time.time", return_value=1000.0)
-    
+
     circuit_v2_transport._last_relay_index = -1
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result.to_string() == relay1.to_string()
     assert len(circuit_v2_transport._relay_list) == 1
 
 @pytest.mark.trio
-async def test_select_relay_metrics_persistence(circuit_v2_transport, peer_info, mocker):
+async def test_select_relay_metrics_persistence(
+    circuit_v2_transport,
+    peer_info,
+    mocker
+):
     """Test _select_relay persists and updates metrics across multiple calls."""
     relay1 = MagicMock(spec=ID)
     relay1.to_string.return_value = "relay1"
@@ -725,7 +773,7 @@ async def test_select_relay_metrics_persistence(circuit_v2_transport, peer_info,
     mocker.patch("time.time", side_effect=itertools.cycle([1000.0, 1001.0]))
     async_mock = AsyncMock(side_effect=[False, True])
     mocker.patch.object(circuit_v2_transport, "_is_relay_available", async_mock)
-    
+
     circuit_v2_transport._last_relay_index = -1
     result = await circuit_v2_transport._select_relay(peer_info)
     # first attempt should not select (False), but metrics should exist
@@ -735,9 +783,13 @@ async def test_select_relay_metrics_persistence(circuit_v2_transport, peer_info,
     assert relay1.to_string() == "relay1"
     assert relay1.to_string() == circuit_v2_transport._relay_list[0].to_string()
     assert relay1.to_string()  # metrics object should be created
-    assert relay1.to_string() in (r.to_string() for r in circuit_v2_transport._relay_list)
+    assert (
+        relay1.to_string()
+        in (r.to_string()
+        for r in circuit_v2_transport._relay_list)
+    )
     assert _metrics_for(circuit_v2_transport, relay1)  # metrics dict present
-    
+
     circuit_v2_transport._last_relay_index = -1
     # ensure next call returns True
     async_mock.side_effect = [True]
@@ -755,18 +807,89 @@ async def test_select_relay_backoff_timing(circuit_v2_transport, peer_info, mock
     circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
     circuit_v2_transport.client_config.max_auto_relay_attempts = 3
-    
+
     await circuit_v2_transport._select_relay(peer_info)
-    
+
     expected_backoffs = [min(2 ** i, 10) for i in range(3)]
-    assert mock_sleep.call_args_list == [((backoff,), {}) for backoff in expected_backoffs]
-    
+    assert (
+        mock_sleep.call_args_list
+        == [((backoff,), {}) for backoff in expected_backoffs]
+    )
+
 @pytest.mark.trio
-async def test_select_relay_disabled_auto_relay(circuit_v2_transport, peer_info, mocker):
+async def test_select_relay_disabled_auto_relay(
+    circuit_v2_transport,
+    peer_info
+):
     """Test _select_relay when auto_relay is disabled."""
     circuit_v2_transport.client_config.enable_auto_relay = False
 
     result = await circuit_v2_transport._select_relay(peer_info)
-    
+
     assert result is None
     assert circuit_v2_transport.discovery.get_relays.call_count == 0
+
+@pytest.mark.trio
+async def test_run_registers_stream_handler():
+    host = MagicMock()
+    handler_function = AsyncMock()
+    listener = CircuitV2Listener(
+        host,
+        handler_function,
+        protocol=MagicMock(),
+        config=MagicMock(enable_stop=True)
+    )
+
+    # Patch the manager.wait_finished property
+    with patch.object(
+        type(listener),
+        "manager",
+        new_callable=MagicMock
+    ) as mock_manager:
+        mock_manager.wait_finished = AsyncMock(return_value=None)
+        await listener.run()
+
+    # Assert that host.set_stream_handler was called with PROTOCOL_ID
+    host.set_stream_handler.assert_called_once()
+    protocol_arg, func_arg = host.set_stream_handler.call_args[0]
+    assert protocol_arg == PROTOCOL_ID
+    assert callable(func_arg)
+
+@pytest.mark.trio
+async def test_stream_handler_calls_handler_function():
+    host = MagicMock()
+    handler_function = AsyncMock()
+    listener = CircuitV2Listener(
+        host,
+        handler_function,
+        protocol=MagicMock(),
+        config=MagicMock(enable_stop=True)
+    )
+
+    with patch.object(
+        type(listener),
+        "manager",
+        new_callable=MagicMock
+    ) as mock_manager:
+        mock_manager.wait_finished = AsyncMock(return_value=None)
+        await listener.run()
+
+    # Extract the registered stream handler
+    _, stream_handler = host.set_stream_handler.call_args[0]
+
+    # Create a fake stream with get_remote_peer_id
+    fake_stream = MagicMock()
+    fake_stream.get_remote_peer_id = MagicMock(return_value=ID(b"12345"))
+
+    # Patch handle_incoming_connection to return a dummy RawConnection
+    listener.handle_incoming_connection = AsyncMock(
+        return_value=RawConnection(
+            stream=fake_stream,
+            initiator=False
+        )
+    )
+
+    await stream_handler(fake_stream)
+
+    # Assert that handler_function was called with the RawConnection
+    handler_function.assert_awaited_once()

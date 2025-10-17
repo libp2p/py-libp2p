@@ -6,11 +6,11 @@ allowing peers to establish connections through relay nodes.
 """
 
 import logging
-from re import A
+import time
+from typing import cast
 
 import multiaddr
 import trio
-import time
 
 from libp2p.abc import (
     IHost,
@@ -50,6 +50,7 @@ from .protocol import (
     PROTOCOL_ID,
     STREAM_READ_TIMEOUT,
     CircuitV2Protocol,
+    INetStreamWithExtras,
 )
 from .protocol_buffer import (
     StatusCode,
@@ -287,6 +288,7 @@ class CircuitV2Transport(ITransport):
 
         Returns:
             Selected relay ID or None if none found.
+
         """
         if not self.client_config.enable_auto_relay:
             logger.warning("Auto-relay disabled, skipping relay selection")
@@ -308,7 +310,8 @@ class CircuitV2Transport(ITransport):
                 await trio.sleep(backoff)
                 continue
 
-            # Measure all relays concurrently. scored_relays will be filled by _measure_relay.
+            # Measure all relays concurrently.
+            # scored_relays will be filled by _measure_relay.
             scored_relays: list[tuple[ID, float]] = []
             async with trio.open_nursery() as nursery:
                 for relay_id in list(self._relay_list):
@@ -321,7 +324,11 @@ class CircuitV2Transport(ITransport):
                 continue
 
             # Filter by minimum score
-            filtered = [(rid, score) for (rid, score) in scored_relays if score >= self.client_config.min_relay_score]
+            filtered = [
+                (rid, score) for (rid, score)
+                in scored_relays
+                if score >= self.client_config.min_relay_score
+            ]
             if not filtered:
                 backoff = min(2 ** attempt, 10)
                 await trio.sleep(backoff)
@@ -341,9 +348,6 @@ class CircuitV2Transport(ITransport):
 
             # Round-robin selection across the top_relays list
             # Ensure _last_relay_index cycles relative to top_relays length.
-            #self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
-            #chosen = top_relays[self._last_relay_index]
-            # Round-robin selection across the top_relays list
             if self._last_relay_index == -1:
                 # First selection: pick best relay
                 self._last_relay_index = 0
@@ -354,17 +358,25 @@ class CircuitV2Transport(ITransport):
 
             # Ensure metrics access uses the actual relay object (or insert if missing)
             if chosen not in self._relay_metrics:
-                self._relay_metrics[chosen] = {"latency": 0, "failures": 0, "last_seen": 0}
+                self._relay_metrics[chosen] = {
+                    "latency": 0,
+                    "failures": 0,
+                    "last_seen": 0
+                }
 
             logger.debug(
-                "Selected relay %s from top %d candidates (lat=%.3fs)", 
+                "Selected relay %s from top %d candidates (lat=%.3fs)",
                 chosen,
                 len(top_relays),
                 self._relay_metrics[chosen].get("latency", 0),
             )
             return chosen
 
-        logger.warning("No suitable relay found after %d attempts", self.client_config.max_auto_relay_attempts)
+        logger.warning(
+            "No suitable relay found after %d attempts",
+            self.client_config.max_auto_relay_attempts
+        )
+
         return None
 
     async def _is_relay_available(self, relay_peer_id: ID) -> bool:
@@ -373,27 +385,38 @@ class CircuitV2Transport(ITransport):
             # try opening a shortlived stream
             stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
             await stream.close()
-            return True 
+            return True
         except Exception:
             return False
-        
+
     async def _measure_relay(self, relay_id: ID, scored_relays: list):
-        metrics = self._relay_metrics.setdefault(relay_id, {"latency": 0, "failures": 0, "last_seen": 0})
+        metrics = self._relay_metrics.setdefault(
+            relay_id, {
+                "latency": 0,
+                "failures": 0,
+                "last_seen": 0
+            }
+        )
         start = time.monotonic()
         available = await self._is_relay_available(relay_id)
         latency = time.monotonic() - start
-    
+
         if not available:
             metrics["failures"] += 1
             return
-    
+
         metrics.update({
             "latency": latency,
             "failures": max(0, metrics["failures"] - 1),
             "last_seen": time.time()
         })
-        
-        score = 1000 - (metrics["failures"] * 10) - (latency * 100) - ((time.time() - metrics["last_seen"]) * 0.1)
+
+        score = (
+            1000
+            - (metrics["failures"] * 10)
+            - (latency * 100)
+            - ((time.time() - metrics["last_seen"]) * 0.1)
+        )
         scored_relays.append((relay_id, score))
 
     async def _make_reservation(
@@ -498,7 +521,12 @@ class CircuitV2Transport(ITransport):
             A listener instance.
 
         """
-        return CircuitV2Listener(self.host, self.protocol, self.config)
+        return CircuitV2Listener(
+            self.host,
+            handler_function,
+            self.protocol,
+            self.config
+        )
 
 
 class CircuitV2Listener(Service, IListener):
@@ -507,6 +535,7 @@ class CircuitV2Listener(Service, IListener):
     def __init__(
         self,
         host: IHost,
+        handler_function: Callable[[ReadWriteCloser], Awaitable[None]],
         protocol: CircuitV2Protocol,
         config: RelayConfig,
     ) -> None:
@@ -517,6 +546,8 @@ class CircuitV2Listener(Service, IListener):
         ----------
         host : IHost
             The libp2p host this listener is running on
+        handler_function: Callable[[ReadWriteCloser], Awaitable[None]]
+            The handler function for new connections
         protocol : CircuitV2Protocol
             The Circuit v2 protocol instance
         config : RelayConfig
@@ -530,10 +561,46 @@ class CircuitV2Listener(Service, IListener):
         self.multiaddrs: list[
             multiaddr.Multiaddr
         ] = []  # Store multiaddrs as Multiaddr objects
+        self.handler_function = handler_function
 
     async def run(self) -> None:
         """Run the listener service."""
-        # Implementation would go here
+        if not self.config.enable_stop:
+            logger.warning(
+                "Stop role is disabled, listener will not process incoming connections"
+            )
+            return
+
+        async def stream_handler(stream: INetStream) -> None:
+            """Handle incoming streams for the Circuit v2 protocol."""
+            stream_with_peer_id = cast(INetStreamWithExtras, stream)
+            remote_peer_id = stream_with_peer_id.get_remote_peer_id()
+
+            try:
+                connection = await self.handle_incoming_connection(
+                    stream, remote_peer_id
+                )
+
+                await self.handler_function(connection)
+            except ConnectionError as e:
+                logger.error(
+                    "Failed to handle incoming connection from %s: %s",
+                    remote_peer_id, str(e)
+                )
+                await stream.close()
+            except Exception as e:
+                logger.error(
+                    "Unexpected error handling stream from %s: %s",
+                    remote_peer_id, str(e)
+                )
+                await stream.close()
+
+
+        self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
+        try:
+            await self.manager.wait_finished()
+        finally:
+            logger.debug("CircuitV2Listener stopped")
 
     async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
         """
