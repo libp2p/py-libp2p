@@ -1,7 +1,11 @@
 import ipaddress
 import logging
 
-import miniupnpc
+try:
+    import miniupnpc  # type: ignore[import-untyped]
+except ImportError:
+    miniupnpc = None
+
 import trio
 
 logger = logging.getLogger("libp2p.discovery.upnp")
@@ -10,10 +14,15 @@ logger = logging.getLogger("libp2p.discovery.upnp")
 class UpnpManager:
     """
     A simple, self-contained manager for UPnP port mapping that can be used
-    alongside a libp2p Host.
+    alongside a libp2p Host.s
     """
 
     def __init__(self) -> None:
+        if miniupnpc is None:
+            raise ImportError(
+                "miniupnpc is required for UPnP functionality. "
+                "Please install it with: pip install miniupnpc"
+            )
         self._gateway = miniupnpc.UPnP()
         self._lan_addr: str | None = None
         self._external_ip: str | None = None
