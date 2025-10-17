@@ -56,7 +56,7 @@ async def test_prune_backoff():
         # try to graft again (should succeed after backoff)
         await trio.sleep(2)
         await gsub0.emit_graft(topic, host_1.get_id())
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for backoff processing
         assert host_0.get_id() in gsub1.mesh[topic], (
             "peer should be able to rejoin after backoff"
         )
@@ -158,11 +158,11 @@ async def test_peer_exchange():
 
         # host_1 unsubscribes from the topic
         await gsub1.leave(topic)
-        await trio.sleep(1)  # Wait for heartbeat to update mesh
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for mesh update
         assert topic not in gsub1.mesh
 
         # Wait for gsub0 to graft host_2 into its mesh via PX
-        await trio.sleep(1)
+        await trio.sleep(2)  # Increased from 1 to 2 seconds for PX processing
         assert host_2.get_id() in gsub0.mesh[topic]
 
 

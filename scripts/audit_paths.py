@@ -117,7 +117,7 @@ def generate_migration_suggestions(issues: dict[str, list[dict[str, Any]]]) -> s
                 suggestions.append("# Suggested fix:")
                 suggestions.append("from libp2p.utils.paths import join_paths")
                 suggestions.append(
-                    "# Replace os.path.join(a, b, c) with join_paths(a, b, c)"
+                    "# Replace os.path.join with join_paths function"
                 )
                 suggestions.append("```")
             elif issue_type == "temp_hardcode":
@@ -137,8 +137,7 @@ def generate_migration_suggestions(issues: dict[str, list[dict[str, Any]]]) -> s
                 suggestions.append("# Suggested fix:")
                 suggestions.append("from libp2p.utils.paths import get_script_dir")
                 script_dir_fix_msg = (
-                    "# Replace os.path.dirname(os.path.abspath(__file__)) with "
-                    "get_script_dir(__file__)"
+                    "# Replace dirname and abspath with get_script_dir function"
                 )
                 suggestions.append(script_dir_fix_msg)
                 suggestions.append("```")
