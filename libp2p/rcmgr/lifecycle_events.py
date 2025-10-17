@@ -79,11 +79,11 @@ class ConnectionEvent:
 @dataclass
 class ConnectionEstablishedEvent(ConnectionEvent):
     """Event fired when a connection is established."""
-    
+
     event_type: ConnectionEventType = ConnectionEventType.ESTABLISHED_INBOUND
     direction: str = "inbound"  # "inbound" or "outbound"
     endpoint: str | None = None
-    
+
     def __post_init__(self) -> None:
         """Set event type based on direction."""
         if self.direction == "inbound":
@@ -95,7 +95,7 @@ class ConnectionEstablishedEvent(ConnectionEvent):
 @dataclass
 class ConnectionClosedEvent(ConnectionEvent):
     """Event fired when a connection is closed."""
-    
+
     event_type: ConnectionEventType = ConnectionEventType.CONNECTION_CLOSED
     reason: str = "unknown"
     duration: float | None = None
@@ -104,13 +104,13 @@ class ConnectionClosedEvent(ConnectionEvent):
 @dataclass
 class ResourceLimitEvent(ConnectionEvent):
     """Event fired when resource limits are exceeded or recovered."""
-    
+
     event_type: ConnectionEventType = ConnectionEventType.RESOURCE_LIMIT_EXCEEDED
     limit_type: str = "connection"  # "connection", "memory", "stream", etc.
     limit_value: int | float = 0
     current_value: int | float = 0
     recovered: bool = False
-    
+
     def __post_init__(self) -> None:
         """Set event type based on limit type and recovery status."""
         if self.limit_type == "memory":
@@ -128,7 +128,7 @@ class ResourceLimitEvent(ConnectionEvent):
 @dataclass
 class StreamEvent(ConnectionEvent):
     """Event fired for stream lifecycle changes."""
-    
+
     event_type: ConnectionEventType = ConnectionEventType.STREAM_OPENED
     stream_id: str | None = None
     protocol: str | None = None
@@ -138,10 +138,10 @@ class StreamEvent(ConnectionEvent):
 @dataclass
 class PeerEvent(ConnectionEvent):
     """Event fired for peer-related changes."""
-    
+
     event_type: ConnectionEventType = ConnectionEventType.PEER_CONNECTED
     action: str = "connected"  # "connected", "disconnected", "bypassed", "unbypassed"
-    
+
     def __post_init__(self) -> None:
         """Set event type based on action."""
         if self.action == "connected":

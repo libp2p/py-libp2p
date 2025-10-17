@@ -25,6 +25,14 @@ from .allowlist import Allowlist, AllowlistConfig
 from .connection_lifecycle import ConnectionLifecycleManager
 from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_tracker import ConnectionTracker
+from .enhanced_errors import (
+    ErrorCategory,
+    ErrorCode,
+    ErrorContext,
+    ErrorSeverity,
+    create_memory_limit_error,
+)
+from .error_context_builder import ErrorContextBuilder, ErrorContextCollector
 from .exceptions import ResourceLimitExceeded, ResourceScopeClosed
 from .lifecycle_events import ConnectionEventBus, ConnectionEventType
 from .lifecycle_handler import ConnectionLifecycleHandler
@@ -67,6 +75,7 @@ class ResourceManager:
         memory_limits: MemoryConnectionLimits | None = None,
         enable_memory_limits: bool = True,
         enable_lifecycle_events: bool = True,
+        enable_enhanced_errors: bool = True,
     ) -> None:
         # Use the provided limiter; if None, fall back to a sensible default
         if limiter is not None:
@@ -138,6 +147,12 @@ class ResourceManager:
                     memory_limits=self._memory_limits,
                     event_bus=self._event_bus,
                 )
+
+        # Enhanced errors (Phase 4)
+        self._error_collector: ErrorContextCollector | None = None
+
+        if enable_enhanced_errors:
+            self._error_collector = ErrorContextCollector()
 
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
@@ -297,13 +312,46 @@ class ResourceManager:
         if self._max_process_memory_bytes is not None:
             current = self._current_process_memory_bytes()
             if current > self._max_process_memory_bytes:
+                # Enhanced error reporting (Phase 4)
+                if self._error_collector:
+                    try:
+                        error = create_memory_limit_error(
+                            limit_type="process_bytes",
+                            limit_value=self._max_process_memory_bytes,
+                            current_value=current,
+                            message=(
+                                f"Process memory limit exceeded: "
+                                f"{current} > {self._max_process_memory_bytes}"
+                            ),
+                        )
+                        self._error_collector.add_error(error.error_context)
+                    except Exception:
+                        # Don't fail on error reporting
+                        pass
                 return True
 
         # Check new memory limits (Phase 2)
         if self._memory_limits is not None:
             try:
                 self._memory_limits.check_memory_limits()
-            except ResourceLimitExceeded:
+            except ResourceLimitExceeded as e:
+                # Enhanced error reporting (Phase 4)
+                if self._error_collector:
+                    try:
+                        # Create enhanced error context
+                        builder = ErrorContextBuilder()
+                        builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+                        builder.with_error_category(ErrorCategory.MEMORY_LIMIT)
+                        builder.with_severity(ErrorSeverity.CRITICAL)
+                        builder.with_message(str(e))
+                        builder.with_original_exception(e)
+                        builder.with_stack_trace()
+
+                        error_context = builder.build_context()
+                        self._error_collector.add_error(error_context)
+                    except Exception:
+                        # Don't fail on error reporting
+                        pass
                 return True
             except Exception:
                 # Don't fail on monitoring errors, allow resource allocation
@@ -654,6 +702,59 @@ class ResourceManager:
             return self._lifecycle_handler.get_stats()
         return {}
 
+    # Enhanced errors (Phase 4)
+
+    def get_error_collector(self) -> ErrorContextCollector | None:
+        """Get the error context collector."""
+        return self._error_collector
+
+    def get_error_statistics(self) -> dict[str, Any]:
+        """Get error statistics."""
+        if self._error_collector:
+            return self._error_collector.get_error_statistics()
+        return {}
+
+    def get_error_summary(self) -> dict[str, Any]:
+        """Get error summary for monitoring."""
+        if self._error_collector:
+            return self._error_collector.get_error_summary()
+        return {}
+
+    def get_errors(
+        self,
+        error_code: ErrorCode | None = None,
+        severity: ErrorSeverity | None = None,
+        category: ErrorCategory | None = None,
+        limit: int | None = None,
+    ) -> list[ErrorContext]:
+        """
+        Get errors matching the specified criteria.
+
+        Args:
+            error_code: Filter by error code
+            severity: Filter by severity
+            category: Filter by category
+            limit: Maximum number of errors to return
+
+        Returns:
+            List of matching error contexts
+
+        """
+        if self._error_collector:
+            return self._error_collector.get_errors(
+                error_code, severity, category, limit
+            )
+        return []
+
+    def clear_errors(self) -> None:
+        """Clear all collected errors."""
+        if self._error_collector:
+            self._error_collector.clear_errors()
+
+    def create_error_context_builder(self) -> ErrorContextBuilder:
+        """Create a new error context builder."""
+        return ErrorContextBuilder()
+
     # Garbage collection
 
     def _background_gc(self) -> None:
@@ -745,6 +846,7 @@ def new_resource_manager(
     memory_limits: MemoryConnectionLimits | None = None,
     enable_memory_limits: bool = True,
     enable_lifecycle_events: bool = True,
+    enable_enhanced_errors: bool = True,
 ) -> ResourceManager:
     """
     Create a new resource manager with the given configuration.
@@ -758,6 +860,7 @@ def new_resource_manager(
         memory_limits: Memory limits configuration
         enable_memory_limits: Whether to enable memory limits
         enable_lifecycle_events: Whether to enable lifecycle events
+        enable_enhanced_errors: Whether to enable enhanced error reporting
     Returns:
         ResourceManager: Configured resource manager
 
@@ -769,5 +872,6 @@ def new_resource_manager(
     return ResourceManager(
         limiter, allowlist, metrics, allowlist_config, enable_metrics,
         connection_limits, enable_connection_tracking,
-        memory_limits, enable_memory_limits, enable_lifecycle_events
+        memory_limits, enable_memory_limits, enable_lifecycle_events,
+        enable_enhanced_errors
     )
