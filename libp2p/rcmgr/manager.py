@@ -8,6 +8,7 @@ resource usage across all scopes and integrates with the libp2p stack.
 from __future__ import annotations
 
 from collections.abc import Callable as TypingCallable
+import resource
 import threading
 import time
 from typing import (
@@ -80,6 +81,9 @@ class ResourceManager:
         self._lock = threading.RLock()
         self._closed: bool = False
 
+        # Optional process memory guard (bytes). If set, deny new scopes when exceeded.
+        self._max_process_memory_bytes: int | None = None
+
         # Scope storage
         self._peer_scopes: dict[ID, PeerScope] = {}
         self._protocol_scopes: dict[TProtocol, ProtocolScope] = {}
@@ -110,17 +114,19 @@ class ResourceManager:
 
     def open_connection(
         self,
-        direction: "libp2p.rcmgr.limits.Direction",
+        direction: Direction,
         use_fd: bool = True,
         endpoint: Multiaddr | None = None,
+        peer_id: ID | None = None,
     ) -> ConnectionScope:
         """
         Open a new connection scope.
 
         Args:
-            direction (libp2p.rcmgr.limits.Direction): Direction of the connection (inbound/outbound)
+            direction: Direction of the connection (inbound/outbound)
             use_fd: Whether this connection uses a file descriptor
             endpoint: Remote endpoint (optional)
+            peer_id: Remote peer id if known (for allowlist checks)
 
         Returns:
             :class:`libp2p.rcmgr.scope.ConnectionScope`: New connection scope
@@ -132,8 +138,24 @@ class ResourceManager:
         with self._lock:
             self._check_closed()
 
-            # Use default connection limits (allowlist-specific limits not implemented)
-            conn_limit = self.limiter.get_conn_limits()
+            # Enforce optional process memory guard
+            if self._process_memory_exceeded():
+                raise ResourceLimitExceeded(
+                    message="Process memory limit exceeded; denying new connection"
+                )
+
+            # Select connection limits; allowlisted peer+endpoint
+            # or endpoint get relaxed limits
+            if endpoint is not None and (
+                (
+                    peer_id is not None
+                    and self.allowlist.allowed_peer_and_multiaddr(peer_id, endpoint)
+                )
+                or self.allowlist.allowed(endpoint)
+            ):
+                conn_limit = self.limiter.get_allowlist_conn_limits()
+            else:
+                conn_limit = self.limiter.get_conn_limits()
             conn_scope = ConnectionScope(
                 conn_limit, self.system, self.transient, self.metrics
             )
@@ -146,13 +168,13 @@ class ResourceManager:
                 raise
             return conn_scope
 
-    def open_stream(self, peer_id: ID, direction: "libp2p.rcmgr.limits.Direction") -> StreamScope:
+    def open_stream(self, peer_id: ID, direction: Direction) -> StreamScope:
         """
         Open a new stream scope.
 
         Args:
             peer_id: Peer ID for the stream
-            direction (libp2p.rcmgr.limits.Direction): Direction of the stream (inbound/outbound)
+            direction: Direction of the stream (inbound/outbound)
 
         Returns:
             :class:`libp2p.rcmgr.scope.StreamScope`: New stream scope
@@ -163,8 +185,19 @@ class ResourceManager:
         """
         with self._lock:
             self._check_closed()
+            # Enforce optional process memory guard
+            if self._process_memory_exceeded():
+                raise ResourceLimitExceeded(
+                    message="Process memory limit exceeded; denying new stream"
+                )
+
             peer_scope = self._get_peer_scope(peer_id)
-            stream_limit = self.limiter.get_stream_limits(peer_id)
+            # Allowlisted peers get relaxed limits (reuse allowlist connection limits
+            # which default to very high values for streams as well).
+            if self.allowlist.allowed_peer(peer_id):
+                stream_limit = self.limiter.get_allowlist_conn_limits()
+            else:
+                stream_limit = self.limiter.get_stream_limits(peer_id)
             stream_scope = StreamScope(
                 stream_limit, peer_scope, self.system, self.transient, self.metrics
             )
@@ -176,6 +209,30 @@ class ResourceManager:
                     self.metrics.block_stream(str(peer_id), direction.value)
                 raise
             return stream_scope
+
+    def set_max_process_memory_bytes(self, max_bytes: int | None) -> None:
+        """Configure an optional process memory cap for opening new scopes."""
+        with self._lock:
+            self._max_process_memory_bytes = max_bytes
+
+    def _current_process_memory_bytes(self) -> int:
+        """Best-effort current process RSS in bytes (Unix)."""
+        try:
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            rss = getattr(usage, "ru_maxrss", 0)
+            # ru_maxrss unit varies: on Linux it's kilobytes, on macOS bytes.
+            # Heuristic: treat small values as kilobytes.
+            if rss < 1 << 20:  # very small, likely kilobytes
+                return int(rss) * 1024
+            return int(rss)
+        except Exception:
+            return 0
+
+    def _process_memory_exceeded(self) -> bool:
+        if self._max_process_memory_bytes is None:
+            return False
+        current = self._current_process_memory_bytes()
+        return current > self._max_process_memory_bytes
 
     def _get_peer_scope(self, peer_id: ID) -> PeerScope:
         """Get or create a peer scope."""

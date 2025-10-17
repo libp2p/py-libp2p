@@ -144,7 +144,7 @@ class Metrics:
 
         Args:
             scope_name: The name of the scope to track the stream under
-            direction (libp2p.rcmgr.limits.Direction): The stream direction (inbound/outbound)
+            direction: The stream direction (inbound/outbound)
 
         """
         direction_str = direction.value.lower()
@@ -164,7 +164,8 @@ class Metrics:
         Remove a stream - supports both global and scope-specific removal.
 
         Args:
-            args: Either (direction_str,) for global removal or (scope_name, direction (libp2p.rcmgr.limits.Direction)) for scope-specific removal
+            args: Either (direction_str,) for global removal or
+                  (scope_name, direction) for scope-specific removal
 
         """
         if len(args) == 1:
@@ -272,7 +273,7 @@ class Metrics:
 
         Args:
             scope_name: The name of the scope to track the connection under
-            direction (libp2p.rcmgr.limits.Direction): The connection direction (inbound/outbound)
+            direction: The connection direction (inbound/outbound)
 
         """
         direction_str = direction.value.lower()
@@ -300,7 +301,7 @@ class Metrics:
 
         Args:
             scope_name: The name of the scope to remove the connection from
-            direction (libp2p.rcmgr.limits.Direction): The connection direction (inbound/outbound).
+            direction: The connection direction (inbound/outbound).
 
         """
         direction_str = direction.value.lower()
