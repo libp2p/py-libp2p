@@ -25,7 +25,7 @@ class PeerRecord(IPeerRecord):
     - `peer_id`: The peer's globally unique indentifier.
     - `addrs`: A list of the peer's publicly reachable multiaddrs.
     - `seq`: A strictly monotonically increasing timestamp used
-            to order records over time.
+    to order records over time.
 
     PeerRecords are designed to be signed and transmitted in libp2p routing Envelopes.
     """
