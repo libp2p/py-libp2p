@@ -294,8 +294,7 @@ class ConnectionLifecycleManager:
         """Equality based on tracker identity and limits."""
         if not isinstance(other, ConnectionLifecycleManager):
             return False
-        return (self.tracker is other.tracker and
-                self.limits == other.limits)
+        return self.tracker is other.tracker and self.limits == other.limits
 
     def __deepcopy__(self, memo: dict[Any, Any]) -> ConnectionLifecycleManager:
         """Deep copy that handles threading locks."""
@@ -309,8 +308,12 @@ class ConnectionLifecycleManager:
         # Copy connection data from original tracker
         new_manager.tracker.pending_inbound = self.tracker.pending_inbound.copy()
         new_manager.tracker.pending_outbound = self.tracker.pending_outbound.copy()
-        new_manager.tracker.established_inbound = self.tracker.established_inbound.copy()
-        new_manager.tracker.established_outbound = self.tracker.established_outbound.copy()
+        new_manager.tracker.established_inbound = (
+            self.tracker.established_inbound.copy()
+        )
+        new_manager.tracker.established_outbound = (
+            self.tracker.established_outbound.copy()
+        )
         new_manager.tracker.established_per_peer = {
             peer_id: conns.copy()
             for peer_id, conns in self.tracker.established_per_peer.items()

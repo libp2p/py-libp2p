@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import threading
 import time
-from typing import Any
 
 import psutil
 
@@ -69,7 +68,7 @@ class MemoryStatsCache:
         self._lock = threading.RLock()
         self._cached_stats: MemoryStats | None = None
         self._last_update: float = 0.0
-        self._cached_summary: dict[str, Any] | None = None
+        self._cached_summary: dict[str, object] | None = None
 
         # Process object for monitoring
         try:
@@ -228,7 +227,7 @@ class MemoryStatsCache:
         stats = self.get_memory_stats(force_refresh)
         return stats.system_memory_available >= required_bytes
 
-    def get_memory_summary(self, force_refresh: bool = False) -> dict[str, Any]:
+    def get_memory_summary(self, force_refresh: bool = False) -> dict[str, object]:
         """
         Get comprehensive memory summary.
 
@@ -255,7 +254,7 @@ class MemoryStatsCache:
                 stats = self.get_memory_stats(force_refresh)
                 cache_age = current_time - stats.timestamp
 
-                summary = {
+                summary: dict[str, object] = {
                     "process_memory_bytes": stats.process_memory_bytes,
                     "process_memory_mb": stats.process_memory_mb,
                     "process_memory_percent": stats.process_memory_percent,
@@ -306,7 +305,7 @@ class MemoryStatsCache:
         """Create a shallow copy of the memory stats cache."""
         return MemoryStatsCache(cache_duration=self.cache_duration)
 
-    def __deepcopy__(self, memo: dict) -> MemoryStatsCache:
+    def __deepcopy__(self, memo: dict[str, object]) -> MemoryStatsCache:
         """Create a deep copy of the memory stats cache."""
         return MemoryStatsCache(cache_duration=self.cache_duration)
 

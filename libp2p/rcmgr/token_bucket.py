@@ -178,7 +178,9 @@ class TokenBucket:
 
         # Clean up request history by size limit
         if len(self._request_history) > self.config.max_history_size:
-            self._request_history = self._request_history[-self.config.max_history_size:]
+            self._request_history = self._request_history[
+                -self.config.max_history_size :
+            ]
 
         # Clean up refill history by time window
         self._refill_history = [
@@ -189,7 +191,7 @@ class TokenBucket:
 
         # Clean up refill history by size limit
         if len(self._refill_history) > self.config.max_history_size:
-            self._refill_history = self._refill_history[-self.config.max_history_size:]
+            self._refill_history = self._refill_history[-self.config.max_history_size :]
 
     def try_consume(
         self, tokens: float = 1.0, current_time: float | None = None

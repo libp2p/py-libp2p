@@ -403,15 +403,17 @@ class ConnectionTracker:
     def __hash__(self) -> int:
         """Hash based on limits and current state."""
         with self._lock:
-            return hash((
-                id(self.limits),
-                len(self.pending_inbound),
-                len(self.pending_outbound),
-                len(self.established_inbound),
-                len(self.established_outbound),
-                len(self.established_per_peer),
-                len(self.bypass_peers)
-            ))
+            return hash(
+                (
+                    id(self.limits),
+                    len(self.pending_inbound),
+                    len(self.pending_outbound),
+                    len(self.established_inbound),
+                    len(self.established_outbound),
+                    len(self.established_per_peer),
+                    len(self.bypass_peers),
+                )
+            )
 
     def __eq__(self, other: Any) -> bool:
         """Equality based on limits and current state."""
@@ -421,13 +423,13 @@ class ConnectionTracker:
         with self._lock:
             with other._lock:
                 return (
-                    self.limits == other.limits and
-                    self.pending_inbound == other.pending_inbound and
-                    self.pending_outbound == other.pending_outbound and
-                    self.established_inbound == other.established_inbound and
-                    self.established_outbound == other.established_outbound and
-                    self.established_per_peer == other.established_per_peer and
-                    self.bypass_peers == other.bypass_peers
+                    self.limits == other.limits
+                    and self.pending_inbound == other.pending_inbound
+                    and self.pending_outbound == other.pending_outbound
+                    and self.established_inbound == other.established_inbound
+                    and self.established_outbound == other.established_outbound
+                    and self.established_per_peer == other.established_per_peer
+                    and self.bypass_peers == other.bypass_peers
                 )
 
     def __copy__(self) -> ConnectionTracker:

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import Any
 
 from .exceptions import ResourceLimitExceeded
 from .memory_stats import MemoryStats, MemoryStatsCache, get_global_memory_cache
@@ -125,7 +124,9 @@ class MemoryConnectionLimits:
         try:
             if self.memory_stats_cache is None:
                 return
-            stats = self.memory_stats_cache.get_memory_stats(force_refresh=force_refresh)
+            stats = self.memory_stats_cache.get_memory_stats(
+                force_refresh=force_refresh
+            )
 
             # Check process memory bytes limit
             if self.max_process_memory_bytes is not None:
@@ -198,12 +199,12 @@ class MemoryConnectionLimits:
             raise RuntimeError("Memory stats cache not configured")
         return self.memory_stats_cache.get_memory_stats(force_refresh)
 
-    def get_limits_summary(self) -> dict[str, Any]:
+    def get_limits_summary(self) -> dict[str, object]:
         """
         Get memory limits configuration summary.
 
         Returns:
-            dict: Memory limits configuration
+            dict[str, object]: Memory limits configuration
 
         """
         return {
@@ -213,7 +214,7 @@ class MemoryConnectionLimits:
             "has_limits_configured": self._has_limits_configured(),
         }
 
-    def get_memory_summary(self, force_refresh: bool = False) -> dict[str, Any]:
+    def get_memory_summary(self, force_refresh: bool = False) -> dict[str, object]:
         """
         Get comprehensive memory summary including current usage.
 
@@ -229,7 +230,9 @@ class MemoryConnectionLimits:
             return limits
 
         try:
-            current = self.memory_stats_cache.get_memory_summary(force_refresh=force_refresh)
+            current = self.memory_stats_cache.get_memory_summary(
+                force_refresh=force_refresh
+            )
             return {
                 **limits,
                 "current": current,
@@ -266,24 +269,27 @@ class MemoryConnectionLimits:
         if not isinstance(other, MemoryConnectionLimits):
             return False
         return (
-            self.max_process_memory_bytes == other.max_process_memory_bytes and
-            self.max_process_memory_percent == other.max_process_memory_percent and
-            self.max_system_memory_percent == other.max_system_memory_percent
+            self.max_process_memory_bytes == other.max_process_memory_bytes
+            and self.max_process_memory_percent == other.max_process_memory_percent
+            and self.max_system_memory_percent == other.max_system_memory_percent
             # Don't compare cache as it's not part of the configuration
         )
 
     def __hash__(self) -> int:
         """Hash memory connection limits based on configuration."""
-        return hash((
-            self.max_process_memory_bytes,
-            self.max_process_memory_percent,
-            self.max_system_memory_percent,
-            # Don't include cache in hash as it's not part of the configuration
-        ))
+        return hash(
+            (
+                self.max_process_memory_bytes,
+                self.max_process_memory_percent,
+                self.max_system_memory_percent,
+                # Don't include cache in hash as it's not part of the configuration
+            )
+        )
 
-    def __deepcopy__(self, memo: dict) -> MemoryConnectionLimits:
+    def __deepcopy__(self, memo: dict[str, object]) -> "MemoryConnectionLimits":
         """Deep copy memory connection limits, creating new cache."""
         from .memory_stats import MemoryStatsCache
+
         return MemoryConnectionLimits(
             max_process_memory_bytes=self.max_process_memory_bytes,
             max_process_memory_percent=self.max_process_memory_percent,
