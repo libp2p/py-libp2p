@@ -267,15 +267,13 @@ class TestTokenBucket:
 
     def test_token_bucket_edge_cases(self) -> None:
         """Test TokenBucket edge cases."""
-        # Test with zero capacity
-        config = TokenBucketConfig(refill_rate=10.0, capacity=0.0)
-        with pytest.raises(ValueError):
-            TokenBucket(config)
+        # Test with zero capacity - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="capacity must be positive"):
+            TokenBucketConfig(refill_rate=10.0, capacity=0.0)
 
-        # Test with negative refill rate
-        config = TokenBucketConfig(refill_rate=-1.0, capacity=100.0)
-        with pytest.raises(ValueError):
-            TokenBucket(config)
+        # Test with negative refill rate - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="refill_rate must be positive"):
+            TokenBucketConfig(refill_rate=-1.0, capacity=100.0)
 
     def test_token_bucket_performance(self) -> None:
         """Test TokenBucket performance."""
@@ -408,7 +406,8 @@ class TestTokenBucketIntegration:
         # Check history
         history = bucket.get_history()
         assert history["enabled"] is True
-        assert history["total_requests"] == 10
+        # Due to max_history_size=5, only the last 5 requests are kept
+        assert history["total_requests"] == 5
 
     def test_token_bucket_without_monitoring(self) -> None:
         """Test TokenBucket with monitoring disabled."""

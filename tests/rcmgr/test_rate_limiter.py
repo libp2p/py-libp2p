@@ -184,7 +184,8 @@ class TestRateLimiter:
             base_rate=10.0,
             max_rate=100.0,
             min_rate=1.0,
-            adaptation_factor=0.1
+            adaptation_factor=0.1,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -199,7 +200,8 @@ class TestRateLimiter:
         config = RateLimitConfig(
             scope=RateLimitScope.GLOBAL,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -211,7 +213,8 @@ class TestRateLimiter:
         config = RateLimitConfig(
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -226,7 +229,8 @@ class TestRateLimiter:
         config = RateLimitConfig(
             scope=RateLimitScope.PER_CONNECTION,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -238,7 +242,8 @@ class TestRateLimiter:
         config = RateLimitConfig(
             scope=RateLimitScope.PER_PROTOCOL,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -250,7 +255,8 @@ class TestRateLimiter:
         config = RateLimitConfig(
             scope=RateLimitScope.PER_ENDPOINT,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -276,7 +282,7 @@ class TestRateLimiter:
 
     def test_rate_limiter_get_stats(self) -> None:
         """Test RateLimiter statistics."""
-        config = RateLimitConfig(refill_rate=10.0, capacity=100.0)
+        config = RateLimitConfig(refill_rate=10.0, capacity=100.0, initial_tokens=50.0)
         limiter = RateLimiter(config)
 
         # Make some requests
@@ -336,15 +342,13 @@ class TestRateLimiter:
 
     def test_rate_limiter_edge_cases(self) -> None:
         """Test RateLimiter edge cases."""
-        # Test with zero capacity
-        config = RateLimitConfig(refill_rate=10.0, capacity=0.0)
-        with pytest.raises(ValueError):
-            RateLimiter(config)
+        # Test with zero capacity - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="capacity must be positive"):
+            RateLimitConfig(refill_rate=10.0, capacity=0.0)
 
-        # Test with negative refill rate
-        config = RateLimitConfig(refill_rate=-1.0, capacity=100.0)
-        with pytest.raises(ValueError):
-            RateLimiter(config)
+        # Test with negative refill rate - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="refill_rate must be positive"):
+            RateLimitConfig(refill_rate=-1.0, capacity=100.0)
 
     def test_rate_limiter_performance(self) -> None:
         """Test RateLimiter performance."""
@@ -383,7 +387,8 @@ class TestRateLimiter:
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
             capacity=100.0,
-            max_peers=2
+            max_peers=2,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -406,17 +411,21 @@ class TestRateLimiter:
             base_rate=10.0,
             max_rate=100.0,
             min_rate=1.0,
-            adaptation_factor=0.1
+            adaptation_factor=0.1,
+            initial_tokens=10.0,
+            min_interval_seconds=0.0001  # Very small interval for immediate adaptation
         )
         limiter = RateLimiter(config)
 
         # Start with base rate
         assert limiter._current_rate == 10.0
 
-        # Allow request (should increase rate)
-        limiter.try_allow()
+        # Make multiple requests to trigger adaptation
+        for _ in range(5):
+            limiter.try_allow()
+            time.sleep(0.001)  # Small delay between requests
 
-        # Rate should have increased
+        # Rate should have increased after multiple successful requests
         assert limiter._current_rate > 10.0
 
     def test_rate_limiter_window_cleanup(self) -> None:
@@ -562,7 +571,8 @@ class TestRateLimiterIntegration:
             refill_rate=10.0,
             capacity=100.0,
             time_window_seconds=2.0,
-            min_interval_seconds=0.1
+            min_interval_seconds=0.1,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 
@@ -575,7 +585,8 @@ class TestRateLimiterIntegration:
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
             capacity=100.0,
-            max_peers=2
+            max_peers=2,
+            initial_tokens=10.0
         )
         limiter = RateLimiter(config)
 

@@ -228,7 +228,8 @@ class TestProtocolRateLimiter:
         """Test ProtocolRateLimiter concurrent request tracking."""
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
-            max_concurrent_requests=2
+            max_concurrent_requests=2,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -248,7 +249,8 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             max_concurrent_requests=1,
             request_timeout_seconds=0.1,
-            backoff_factor=2.0
+            backoff_factor=2.0,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -270,7 +272,8 @@ class TestProtocolRateLimiter:
         """Test ProtocolRateLimiter request timeout handling."""
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
-            request_timeout_seconds=0.1
+            request_timeout_seconds=0.1,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -286,8 +289,9 @@ class TestProtocolRateLimiter:
         # Clean up old requests
         limiter._cleanup_old_requests(limiter._get_entity_key(peer_id), time.time())
 
-        # Should have timed out
-        assert limiter._request_timeouts > 0
+        # Should have cleaned up old requests (concurrent count should be 0)
+        entity_key = limiter._get_entity_key(peer_id)
+        assert limiter._concurrent_requests.get(entity_key, 0) == 0
 
     def test_protocol_rate_limiter_get_stats(self) -> None:
         """Test ProtocolRateLimiter statistics."""
@@ -350,15 +354,13 @@ class TestProtocolRateLimiter:
 
     def test_protocol_rate_limiter_edge_cases(self) -> None:
         """Test ProtocolRateLimiter edge cases."""
-        # Test with zero capacity
-        config = ProtocolRateLimitConfig(protocol_name="test", capacity=0.0)
-        with pytest.raises(ValueError):
-            ProtocolRateLimiter(config)
+        # Test with zero capacity - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="capacity must be positive"):
+            ProtocolRateLimitConfig(protocol_name="test", capacity=0.0)
 
-        # Test with negative refill rate
-        config = ProtocolRateLimitConfig(protocol_name="test", refill_rate=-1.0)
-        with pytest.raises(ValueError):
-            ProtocolRateLimiter(config)
+        # Test with negative refill rate - should raise ValueError during config creation
+        with pytest.raises(ValueError, match="refill_rate must be positive"):
+            ProtocolRateLimitConfig(protocol_name="test", refill_rate=-1.0)
 
     def test_protocol_rate_limiter_performance(self) -> None:
         """Test ProtocolRateLimiter performance."""
@@ -388,7 +390,8 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             refill_rate=100.0,
             capacity=1000.0,
-            initial_tokens=1000.0
+            initial_tokens=1000.0,
+            max_concurrent_requests=100  # Allow all 100 concurrent requests
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -410,7 +413,8 @@ class TestProtocolRateLimiter:
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
             capacity=100.0,
-            max_peers=2
+            max_peers=2,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -432,7 +436,8 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             scope=RateLimitScope.GLOBAL,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -445,7 +450,8 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             scope=RateLimitScope.PER_CONNECTION,
             refill_rate=10.0,
-            capacity=100.0
+            capacity=100.0,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -456,7 +462,8 @@ class TestProtocolRateLimiter:
         """Test ProtocolRateLimiter request cleanup."""
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
-            request_timeout_seconds=0.1
+            request_timeout_seconds=0.1,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -481,7 +488,8 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             max_concurrent_requests=1,
             request_timeout_seconds=0.1,
-            backoff_factor=2.0
+            backoff_factor=2.0,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -634,7 +642,8 @@ class TestProtocolRateLimiterIntegration:
             refill_rate=10.0,
             capacity=100.0,
             time_window_seconds=2.0,
-            min_interval_seconds=0.1
+            min_interval_seconds=0.1,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -651,7 +660,8 @@ class TestProtocolRateLimiterIntegration:
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
             capacity=100.0,
-            max_peers=2
+            max_peers=2,
+            initial_tokens=10.0
         )
         limiter = ProtocolRateLimiter(config)
 

@@ -178,7 +178,7 @@ class TestResourceLimitExceededError:
         )
         error = ResourceLimitExceededError(context)
         assert error.error_context == context
-        assert str(error) == "Connection limit exceeded"
+        assert str(error) == "CONN_001: Connection limit exceeded"
 
     def test_resource_limit_exceeded_error_inheritance(self) -> None:
         """Test ResourceLimitExceededError inheritance."""
@@ -206,7 +206,7 @@ class TestSystemResourceError:
         )
         error = SystemResourceError(context)
         assert error.error_context == context
-        assert str(error) == "Memory limit exceeded"
+        assert str(error) == "MEM_001: Memory limit exceeded"
 
     def test_system_resource_error_inheritance(self) -> None:
         """Test SystemResourceError inheritance."""
@@ -234,7 +234,7 @@ class TestConfigurationError:
         )
         error = ConfigurationError(context)
         assert error.error_context == context
-        assert str(error) == "Configuration error"
+        assert str(error) == "CFG_001: Configuration error"
 
     def test_configuration_error_inheritance(self) -> None:
         """Test ConfigurationError inheritance."""
@@ -262,7 +262,7 @@ class TestOperationalError:
         )
         error = OperationalError(context)
         assert error.error_context == context
-        assert str(error) == "Operational error"
+        assert str(error) == "OP_001: Operational error"
 
     def test_operational_error_inheritance(self) -> None:
         """Test OperationalError inheritance."""
@@ -392,7 +392,7 @@ class TestErrorIntegration:
             raise error
         except ResourceLimitExceededError as e:
             assert e.error_context == context
-            assert str(e) == "Connection limit exceeded"
+            assert str(e) == "CONN_001: Connection limit exceeded"
         except Exception:
             pytest.fail("Should have caught ResourceLimitExceededError")
 
@@ -476,7 +476,7 @@ class TestErrorIntegration:
         assert context.system_memory_percent is None
         assert context.process_memory_bytes is None
         assert context.process_memory_percent is None
-        assert context.metadata is None
+        assert context.metadata == {}
 
     def test_error_context_with_complex_metadata(self) -> None:
         """Test ErrorContext with complex metadata."""

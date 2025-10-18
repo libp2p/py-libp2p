@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Self
 
+from libp2p.rcmgr.exceptions import ResourceLimitExceeded
+
 
 @dataclass
 class ConnectionLimits:
@@ -121,41 +123,47 @@ class ConnectionLimits:
         self.max_established_total = limit
         return self
 
-    def check_pending_inbound_limit(self, current: int) -> bool:
+    def check_pending_inbound_limit(self, current: int) -> None:
         """Check if pending inbound limit would be exceeded."""
-        if self.max_pending_inbound is None:
-            return True
-        return current < self.max_pending_inbound
+        if self.max_pending_inbound is not None and current >= self.max_pending_inbound:
+            raise ResourceLimitExceeded(
+                message=f"Pending inbound limit exceeded: {current} >= {self.max_pending_inbound}"
+            )
 
-    def check_pending_outbound_limit(self, current: int) -> bool:
+    def check_pending_outbound_limit(self, current: int) -> None:
         """Check if pending outbound limit would be exceeded."""
-        if self.max_pending_outbound is None:
-            return True
-        return current < self.max_pending_outbound
+        if self.max_pending_outbound is not None and current >= self.max_pending_outbound:
+            raise ResourceLimitExceeded(
+                message=f"Pending outbound limit exceeded: {current} >= {self.max_pending_outbound}"
+            )
 
-    def check_established_inbound_limit(self, current: int) -> bool:
+    def check_established_inbound_limit(self, current: int) -> None:
         """Check if established inbound limit would be exceeded."""
-        if self.max_established_inbound is None:
-            return True
-        return current < self.max_established_inbound
+        if self.max_established_inbound is not None and current >= self.max_established_inbound:
+            raise ResourceLimitExceeded(
+                message=f"Established inbound limit exceeded: {current} >= {self.max_established_inbound}"
+            )
 
-    def check_established_outbound_limit(self, current: int) -> bool:
+    def check_established_outbound_limit(self, current: int) -> None:
         """Check if established outbound limit would be exceeded."""
-        if self.max_established_outbound is None:
-            return True
-        return current < self.max_established_outbound
+        if self.max_established_outbound is not None and current >= self.max_established_outbound:
+            raise ResourceLimitExceeded(
+                message=f"Established outbound limit exceeded: {current} >= {self.max_established_outbound}"
+            )
 
-    def check_established_per_peer_limit(self, current: int) -> bool:
+    def check_established_per_peer_limit(self, current: int) -> None:
         """Check if established per-peer limit would be exceeded."""
-        if self.max_established_per_peer is None:
-            return True
-        return current < self.max_established_per_peer
+        if self.max_established_per_peer is not None and current >= self.max_established_per_peer:
+            raise ResourceLimitExceeded(
+                message=f"Established per peer limit exceeded: {current} >= {self.max_established_per_peer}"
+            )
 
-    def check_established_total_limit(self, current: int) -> bool:
+    def check_established_total_limit(self, current: int) -> None:
         """Check if established total limit would be exceeded."""
-        if self.max_established_total is None:
-            return True
-        return current < self.max_established_total
+        if self.max_established_total is not None and current >= self.max_established_total:
+            raise ResourceLimitExceeded(
+                message=f"Established total limit exceeded: {current} >= {self.max_established_total}"
+            )
 
     def get_limits_summary(self) -> dict[str, int | None]:
         """Get a summary of all configured limits."""
@@ -167,6 +175,17 @@ class ConnectionLimits:
             "max_established_per_peer": self.max_established_per_peer,
             "max_established_total": self.max_established_total,
         }
+
+    def __hash__(self) -> int:
+        """Hash based on all limit values."""
+        return hash((
+            self.max_pending_inbound,
+            self.max_pending_outbound,
+            self.max_established_inbound,
+            self.max_established_outbound,
+            self.max_established_per_peer,
+            self.max_established_total,
+        ))
 
     def __str__(self) -> str:
         """String representation of connection limits."""
@@ -198,10 +217,10 @@ def new_connection_limits_with_defaults() -> ConnectionLimits:
 
     """
     return ConnectionLimits(
-        max_pending_inbound=100,
-        max_pending_outbound=50,
-        max_established_inbound=1000,
-        max_established_outbound=500,
-        max_established_per_peer=10,
-        max_established_total=1500,
+        max_pending_inbound=64,
+        max_pending_outbound=64,
+        max_established_inbound=256,
+        max_established_outbound=256,
+        max_established_per_peer=8,
+        max_established_total=1024,
     )

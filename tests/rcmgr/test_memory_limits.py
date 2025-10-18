@@ -14,7 +14,7 @@ from libp2p.rcmgr.memory_limits import (
     MemoryConnectionLimits,
     new_memory_connection_limits_with_defaults,
 )
-from libp2p.rcmgr.memory_stats import MemoryStatsCache
+from libp2p.rcmgr.memory_stats import MemoryStats, MemoryStatsCache
 
 
 class TestMemoryConnectionLimits:
@@ -27,7 +27,7 @@ class TestMemoryConnectionLimits:
         assert limits.max_process_memory_bytes is None
         assert limits.max_process_memory_percent == 80.0
         assert limits.max_system_memory_percent == 90.0
-        assert limits.memory_stats_cache is None
+        assert limits.memory_stats_cache is not None  # Cache is auto-created
 
     def test_memory_connection_limits_creation_with_custom_values(self):
         """Test MemoryConnectionLimits creation with custom values."""
@@ -89,14 +89,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 2*1024*1024*1024,  # 2GB
-                "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
-                "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,  # 3GB
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=2*1024*1024*1024,  # 2GB
+                process_memory_percent=50.0,
+                system_memory_total=8*1024*1024*1024,  # 8GB
+                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_percent=60.0,
+                timestamp=1234567890,
+            )
 
             with pytest.raises(ResourceLimitExceeded) as exc_info:
                 limits.check_memory_limits()
@@ -135,14 +135,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
-                "process_memory_percent": 85.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
-                "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,  # 3GB
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_percent=85.0,
+                system_memory_total=8*1024*1024*1024,  # 8GB
+                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_percent=60.0,
+                timestamp=1234567890,
+            )
 
             with pytest.raises(ResourceLimitExceeded) as exc_info:
                 limits.check_memory_limits()
@@ -181,14 +181,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
-                "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
-                "system_memory_percent": 95.0,
-                "available_memory_bytes": 400*1024*1024,  # 400MB
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_percent=50.0,
+                system_memory_total=8*1024*1024*1024,  # 8GB
+                system_memory_available=400*1024*1024,  # 400MB
+                system_memory_percent=95.0,
+                timestamp=1234567890,
+            )
 
             with pytest.raises(ResourceLimitExceeded) as exc_info:
                 limits.check_memory_limits()
@@ -208,14 +208,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 2*1024*1024*1024,  # 2GB
-                "process_memory_percent": 85.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
-                "system_memory_percent": 95.0,
-                "available_memory_bytes": 400*1024*1024,  # 400MB
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=2*1024*1024*1024,  # 2GB
+                process_memory_percent=85.0,
+                system_memory_total=8*1024*1024*1024,  # 8GB
+                system_memory_available=400*1024*1024,  # 400MB
+                system_memory_percent=95.0,
+                timestamp=1234567890,
+            )
 
             with pytest.raises(ResourceLimitExceeded) as exc_info:
                 limits.check_memory_limits()
@@ -232,14 +232,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
-                "process_memory_percent": 70.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
-                "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,  # 3GB
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_percent=70.0,
+                system_memory_total=8*1024*1024*1024,  # 8GB
+                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_percent=60.0,
+                timestamp=1234567890,
+            )
 
             # Should not raise exception
             limits.check_memory_limits(force_refresh=True)
@@ -302,9 +302,11 @@ class TestMemoryConnectionLimits:
             summary = limits.get_memory_summary()
 
             assert summary is not None
-            assert "process" in summary
-            assert "system" in summary
-            assert "timestamp" in summary
+            assert "current" in summary
+            assert "max_process_memory_bytes" in summary
+            assert "max_process_memory_percent" in summary
+            assert "max_system_memory_percent" in summary
+            assert "has_limits_configured" in summary
 
     def test_get_memory_summary_with_force_refresh(self):
         """Test getting memory summary with force refresh."""
@@ -321,11 +323,18 @@ class TestMemoryConnectionLimits:
 
     def test_get_memory_summary_cache_none(self):
         """Test getting memory summary when cache is None."""
-        limits = MemoryConnectionLimits(memory_stats_cache=None)
+        # Create limits and manually set cache to None after initialization
+        limits = MemoryConnectionLimits()
+        limits.memory_stats_cache = None
 
-        # Should return empty dict when cache is None
+        # Should return limits summary when cache is None
         summary = limits.get_memory_summary()
-        assert summary == {}
+        assert summary is not None
+        assert "max_process_memory_bytes" in summary
+        assert "max_process_memory_percent" in summary
+        assert "max_system_memory_percent" in summary
+        assert "has_limits_configured" in summary
+        assert "current" not in summary  # No current data when cache is None
 
     def test_get_memory_summary_cache_error(self):
         """Test getting memory summary when cache raises error."""
@@ -335,9 +344,14 @@ class TestMemoryConnectionLimits:
         with patch.object(cache, 'get_memory_summary') as mock_get_summary:
             mock_get_summary.side_effect = Exception("Cache error")
 
-            # Should return empty dict when cache raises error
+            # Should return limits summary when cache raises error
             summary = limits.get_memory_summary()
-            assert summary == {}
+            assert summary is not None
+            assert "max_process_memory_bytes" in summary
+            assert "max_process_memory_percent" in summary
+            assert "max_system_memory_percent" in summary
+            assert "has_limits_configured" in summary
+            assert "current" not in summary  # No current data when cache raises error
 
     def test_memory_limits_equality(self):
         """Test memory limits equality comparison."""
@@ -367,8 +381,8 @@ class TestMemoryConnectionLimits:
         # Different values
         assert limits1 != limits3
 
-        # Same values, different cache
-        assert limits1 != limits4
+        # Same values, different cache - should be equal since cache is not part of configuration
+        assert limits1 == limits4
 
     def test_memory_limits_string_representation(self):
         """Test string representation of memory limits."""
@@ -380,7 +394,7 @@ class TestMemoryConnectionLimits:
 
         str_repr = str(limits)
         assert "MemoryConnectionLimits" in str_repr
-        assert "1024" in str_repr  # max_process_memory_bytes
+        assert "1073741824" in str_repr  # max_process_memory_bytes (1024*1024*1024)
         assert "80" in str_repr    # max_process_memory_percent
         assert "90" in str_repr    # max_system_memory_percent
 
@@ -509,14 +523,14 @@ class TestMemoryConnectionLimits:
         )
 
         with patch.object(cache, 'get_memory_stats') as mock_get_stats:
-            mock_get_stats.return_value = {
-                "process_memory_bytes": 1,  # Any non-zero value
-                "process_memory_percent": 0.1,  # Any non-zero value
-                "system_memory_bytes": 8*1024*1024*1024,
-                "system_memory_percent": 0.1,  # Any non-zero value
-                "available_memory_bytes": 4*1024*1024*1024,
-                "timestamp": 1234567890,
-            }
+            mock_get_stats.return_value = MemoryStats(
+                process_memory_bytes=1,  # Any non-zero value
+                process_memory_percent=0.1,  # Any non-zero value
+                system_memory_total=8*1024*1024*1024,
+                system_memory_available=4*1024*1024*1024,
+                system_memory_percent=0.1,  # Any non-zero value
+                timestamp=1234567890,
+            )
 
             # Should raise exception for any non-zero usage
             with pytest.raises(ResourceLimitExceeded):
@@ -726,7 +740,7 @@ class TestMemoryConnectionLimits:
 
         str_repr = str(limits)
         assert "MemoryConnectionLimits" in str_repr
-        assert "1024" in str_repr
+        assert "1073741824" in str_repr  # 1024*1024*1024
 
     def test_memory_limits_repr_with_cache(self):
         """Test repr representation with cache."""

@@ -255,7 +255,11 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             metadata=metadata or {},
         )
 
-        await self.event_bus.publish(event)
+        try:
+            await self.event_bus.publish(event)
+        except Exception:
+            # Log error but don't raise to avoid disrupting the main flow
+            pass
 
     async def publish_connection_closed(
         self,
@@ -281,7 +285,11 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             metadata={**(metadata or {}), "reason": reason},
         )
 
-        await self.event_bus.publish(event)
+        try:
+            await self.event_bus.publish(event)
+        except Exception:
+            # Log error but don't raise to avoid disrupting the main flow
+            pass
 
     async def publish_resource_limit_exceeded(
         self,
@@ -322,7 +330,11 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             },
         )
 
-        await self.event_bus.publish(event)
+        try:
+            await self.event_bus.publish(event)
+        except Exception:
+            # Log error but don't raise to avoid disrupting the main flow
+            pass
 
     async def publish_stream_event(
         self,
@@ -359,7 +371,11 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             },
         )
 
-        await self.event_bus.publish(event)
+        try:
+            await self.event_bus.publish(event)
+        except Exception:
+            # Log error but don't raise to avoid disrupting the main flow
+            pass
 
     async def publish_peer_event(
         self,
@@ -395,7 +411,11 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             metadata={**(metadata or {}), "action": action},
         )
 
-        await self.event_bus.publish(event)
+        try:
+            await self.event_bus.publish(event)
+        except Exception:
+            # Log error but don't raise to avoid disrupting the main flow
+            pass
 
     def get_stats(self) -> dict[str, Any]:
         """

@@ -358,12 +358,6 @@ def create_server_config_from_base(
                 if server_tls_config.alpn_protocols:
                     server_config.alpn_protocols = server_tls_config.alpn_protocols
                 server_tls_config.request_client_certificate = True
-                if getattr(server_tls_config, "request_client_certificate", False):
-                    server_config._libp2p_request_client_cert = True
-                else:
-                    logger.error(
-                        "🔧 Failed to set request_client_certificate in server config"
-                    )
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")

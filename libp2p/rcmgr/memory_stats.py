@@ -69,9 +69,14 @@ class MemoryStatsCache:
         self._lock = threading.RLock()
         self._cached_stats: MemoryStats | None = None
         self._last_update: float = 0.0
+        self._cached_summary: dict[str, Any] | None = None
 
         # Process object for monitoring
-        self._process: psutil.Process = psutil.Process()
+        try:
+            self._process: psutil.Process = psutil.Process()
+        except Exception:
+            # If psutil fails, we'll handle it in get_memory_stats
+            self._process = None  # type: ignore
 
     def get_memory_stats(self, force_refresh: bool = False) -> MemoryStats:
         """
@@ -109,6 +114,17 @@ class MemoryStatsCache:
             MemoryStats: Current memory statistics
 
         """
+        if self._process is None:
+            # Return default values if psutil failed
+            return MemoryStats(
+                process_memory_bytes=0,
+                process_memory_percent=0.0,
+                system_memory_total=0,
+                system_memory_available=0,
+                system_memory_percent=0.0,
+                timestamp=time.time(),
+            )
+
         # Process memory
         process_memory_info = self._process.memory_info()  # type: ignore
         process_memory_bytes = process_memory_info.rss  # Resident Set Size
@@ -223,25 +239,44 @@ class MemoryStatsCache:
             dict: Memory summary with all statistics
 
         """
-        stats = self.get_memory_stats(force_refresh)
+        with self._lock:
+            current_time = time.time()
 
-        return {
-            "process_memory_bytes": stats.process_memory_bytes,
-            "process_memory_mb": stats.process_memory_mb,
-            "process_memory_percent": stats.process_memory_percent,
-            "system_memory_total": stats.system_memory_total,
-            "system_memory_total_gb": stats.system_memory_total_gb,
-            "system_memory_available": stats.system_memory_available,
-            "system_memory_available_gb": stats.system_memory_available_gb,
-            "system_memory_percent": stats.system_memory_percent,
-            "timestamp": stats.timestamp,
-            "cache_age": time.time() - stats.timestamp,
-        }
+            # Check if we should use cached data
+            if (
+                not force_refresh
+                and self._cached_summary is not None
+                and (current_time - self._last_update) < self.cache_duration
+            ):
+                # Return cached summary
+                return self._cached_summary
+            else:
+                # Get fresh data
+                stats = self.get_memory_stats(force_refresh)
+                cache_age = current_time - stats.timestamp
+
+                summary = {
+                    "process_memory_bytes": stats.process_memory_bytes,
+                    "process_memory_mb": stats.process_memory_mb,
+                    "process_memory_percent": stats.process_memory_percent,
+                    "system_memory_total": stats.system_memory_total,
+                    "system_memory_total_gb": stats.system_memory_total_gb,
+                    "system_memory_available": stats.system_memory_available,
+                    "system_memory_available_gb": stats.system_memory_available_gb,
+                    "system_memory_percent": stats.system_memory_percent,
+                    "timestamp": stats.timestamp,
+                    "cache_age": cache_age,
+                }
+
+                # Cache the summary
+                self._cached_summary = summary
+                return summary
 
     def clear_cache(self) -> None:
         """Clear cached memory statistics."""
         with self._lock:
             self._cached_stats = None
+            self._cached_summary = None
             self._last_update = 0.0
 
     def __str__(self) -> str:
@@ -256,6 +291,24 @@ class MemoryStatsCache:
             )
         except Exception:
             return "MemoryStatsCache(unknown)"
+
+    def __eq__(self, other: object) -> bool:
+        """Compare memory stats cache based on configuration."""
+        if not isinstance(other, MemoryStatsCache):
+            return False
+        return self.cache_duration == other.cache_duration
+
+    def __hash__(self) -> int:
+        """Hash memory stats cache based on configuration."""
+        return hash(self.cache_duration)
+
+    def __copy__(self) -> MemoryStatsCache:
+        """Create a shallow copy of the memory stats cache."""
+        return MemoryStatsCache(cache_duration=self.cache_duration)
+
+    def __deepcopy__(self, memo: dict) -> MemoryStatsCache:
+        """Create a deep copy of the memory stats cache."""
+        return MemoryStatsCache(cache_duration=self.cache_duration)
 
 
 # Global memory stats cache instance

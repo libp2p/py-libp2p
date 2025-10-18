@@ -8,6 +8,7 @@ states and per-peer connection counting.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import threading
 import time
@@ -394,3 +395,74 @@ class ConnectionTracker:
             f"established_total={stats['current_established_total']}, "
             f"peers={stats['current_peers_with_connections']})"
         )
+
+    def __repr__(self) -> str:
+        """Repr representation of connection tracker."""
+        return self.__str__()
+
+    def __hash__(self) -> int:
+        """Hash based on limits and current state."""
+        with self._lock:
+            return hash((
+                id(self.limits),
+                len(self.pending_inbound),
+                len(self.pending_outbound),
+                len(self.established_inbound),
+                len(self.established_outbound),
+                len(self.established_per_peer),
+                len(self.bypass_peers)
+            ))
+
+    def __eq__(self, other: Any) -> bool:
+        """Equality based on limits and current state."""
+        if not isinstance(other, ConnectionTracker):
+            return False
+
+        with self._lock:
+            with other._lock:
+                return (
+                    self.limits == other.limits and
+                    self.pending_inbound == other.pending_inbound and
+                    self.pending_outbound == other.pending_outbound and
+                    self.established_inbound == other.established_inbound and
+                    self.established_outbound == other.established_outbound and
+                    self.established_per_peer == other.established_per_peer and
+                    self.bypass_peers == other.bypass_peers
+                )
+
+    def __copy__(self) -> ConnectionTracker:
+        """Shallow copy of connection tracker."""
+        new_tracker = ConnectionTracker(self.limits)
+        with self._lock:
+            new_tracker.pending_inbound = self.pending_inbound.copy()
+            new_tracker.pending_outbound = self.pending_outbound.copy()
+            new_tracker.established_inbound = self.established_inbound.copy()
+            new_tracker.established_outbound = self.established_outbound.copy()
+            new_tracker.established_per_peer = {
+                peer_id: conns.copy()
+                for peer_id, conns in self.established_per_peer.items()
+            }
+            new_tracker.bypass_peers = self.bypass_peers.copy()
+            new_tracker._connections = self._connections.copy()
+            new_tracker._stats = self._stats.copy()
+        return new_tracker
+
+    def __deepcopy__(self, memo: dict[Any, Any]) -> ConnectionTracker:
+        """Deep copy of connection tracker."""
+        new_tracker = ConnectionTracker(self.limits)
+        with self._lock:
+            new_tracker.pending_inbound = self.pending_inbound.copy()
+            new_tracker.pending_outbound = self.pending_outbound.copy()
+            new_tracker.established_inbound = self.established_inbound.copy()
+            new_tracker.established_outbound = self.established_outbound.copy()
+            new_tracker.established_per_peer = {
+                peer_id: conns.copy()
+                for peer_id, conns in self.established_per_peer.items()
+            }
+            new_tracker.bypass_peers = self.bypass_peers.copy()
+            new_tracker._connections = {
+                conn_id: copy.deepcopy(conn_info, memo)
+                for conn_id, conn_info in self._connections.items()
+            }
+            new_tracker._stats = self._stats.copy()
+        return new_tracker

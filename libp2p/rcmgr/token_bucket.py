@@ -169,19 +169,27 @@ class TokenBucket:
         current_time = time.time()
         cutoff_time = current_time - self.config.time_window_seconds
 
-        # Clean up request history
+        # Clean up request history by time window
         self._request_history = [
             (timestamp, allowed)
             for timestamp, allowed in self._request_history
             if timestamp > cutoff_time
         ]
 
-        # Clean up refill history
+        # Clean up request history by size limit
+        if len(self._request_history) > self.config.max_history_size:
+            self._request_history = self._request_history[-self.config.max_history_size:]
+
+        # Clean up refill history by time window
         self._refill_history = [
             (timestamp, tokens)
             for timestamp, tokens in self._refill_history
             if timestamp > cutoff_time
         ]
+
+        # Clean up refill history by size limit
+        if len(self._refill_history) > self.config.max_history_size:
+            self._refill_history = self._refill_history[-self.config.max_history_size:]
 
     def try_consume(
         self, tokens: float = 1.0, current_time: float | None = None

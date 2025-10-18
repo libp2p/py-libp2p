@@ -207,6 +207,7 @@ class TestConnectionTracker:
         # Add some connections
         tracker.add_pending_inbound("conn_1", ID(b"peer1"))
         tracker.add_pending_outbound("conn_2", ID(b"peer2"))
+        tracker.add_pending_inbound("conn_3", ID(b"peer3"))
         tracker.move_to_established_inbound("conn_3", ID(b"peer3"))
 
         connections = tracker.get_all_connections()

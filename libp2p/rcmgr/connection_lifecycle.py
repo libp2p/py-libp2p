@@ -8,6 +8,7 @@ behavior.
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -17,7 +18,6 @@ from libp2p.peer.id import ID
 
 from .connection_limits import ConnectionLimits
 from .connection_tracker import ConnectionId, ConnectionTracker
-from .exceptions import ResourceLimitExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +93,7 @@ class ConnectionLifecycleManager:
 
         # Check pending inbound limit
         current_pending = self.tracker.get_connection_count("pending_inbound")
-        if not self.limits.check_pending_inbound_limit(current_pending):
-            raise ResourceLimitExceeded(
-                f"Pending inbound connection limit exceeded: "
-                f"current={current_pending}, limit={self.limits.max_pending_inbound}"
-            )
+        self.limits.check_pending_inbound_limit(current_pending)
 
         # Add to tracking
         self.tracker.add_pending_inbound(connection_id, peer_id)
@@ -141,29 +137,15 @@ class ConnectionLifecycleManager:
         current_established_inbound = self.tracker.get_connection_count(
             "established_inbound"
         )
-        if not self.limits.check_established_inbound_limit(current_established_inbound):
-            raise ResourceLimitExceeded(
-                f"Established inbound connection limit exceeded: "
-                f"current={current_established_inbound}, "
-                f"limit={self.limits.max_established_inbound}"
-            )
+        self.limits.check_established_inbound_limit(current_established_inbound)
 
         # Check per-peer limit
         current_per_peer = self.tracker.get_peer_connection_count(peer_id)
-        if not self.limits.check_established_per_peer_limit(current_per_peer):
-            raise ResourceLimitExceeded(
-                f"Established per-peer connection limit exceeded for peer {peer_id}: "
-                f"current={current_per_peer}, "
-                f"limit={self.limits.max_established_per_peer}"
-            )
+        self.limits.check_established_per_peer_limit(current_per_peer)
 
         # Check total established limit
         current_total = self.tracker.get_connection_count("established_total")
-        if not self.limits.check_established_total_limit(current_total):
-            raise ResourceLimitExceeded(
-                f"Established total connection limit exceeded: "
-                f"current={current_total}, limit={self.limits.max_established_total}"
-            )
+        self.limits.check_established_total_limit(current_total)
 
         # Move to established
         self.tracker.move_to_established_inbound(connection_id, peer_id)
@@ -202,11 +184,7 @@ class ConnectionLifecycleManager:
 
         # Check pending outbound limit
         current_pending = self.tracker.get_connection_count("pending_outbound")
-        if not self.limits.check_pending_outbound_limit(current_pending):
-            raise ResourceLimitExceeded(
-                f"Pending outbound connection limit exceeded: "
-                f"current={current_pending}, limit={self.limits.max_pending_outbound}"
-            )
+        self.limits.check_pending_outbound_limit(current_pending)
 
         # Add to tracking
         self.tracker.add_pending_outbound(connection_id, peer_id)
@@ -250,31 +228,15 @@ class ConnectionLifecycleManager:
         current_established_outbound = self.tracker.get_connection_count(
             "established_outbound"
         )
-        if not self.limits.check_established_outbound_limit(
-            current_established_outbound
-        ):
-            raise ResourceLimitExceeded(
-                f"Established outbound connection limit exceeded: "
-                f"current={current_established_outbound}, "
-                f"limit={self.limits.max_established_outbound}"
-            )
+        self.limits.check_established_outbound_limit(current_established_outbound)
 
         # Check per-peer limit
         current_per_peer = self.tracker.get_peer_connection_count(peer_id)
-        if not self.limits.check_established_per_peer_limit(current_per_peer):
-            raise ResourceLimitExceeded(
-                f"Established per-peer connection limit exceeded for peer {peer_id}: "
-                f"current={current_per_peer}, "
-                f"limit={self.limits.max_established_per_peer}"
-            )
+        self.limits.check_established_per_peer_limit(current_per_peer)
 
         # Check total established limit
         current_total = self.tracker.get_connection_count("established_total")
-        if not self.limits.check_established_total_limit(current_total):
-            raise ResourceLimitExceeded(
-                f"Established total connection limit exceeded: "
-                f"current={current_total}, limit={self.limits.max_established_total}"
-            )
+        self.limits.check_established_total_limit(current_total)
 
         # Move to established
         self.tracker.move_to_established_outbound(connection_id, peer_id)
@@ -323,6 +285,44 @@ class ConnectionLifecycleManager:
 
         """
         return self.limits.get_limits_summary()
+
+    def __hash__(self) -> int:
+        """Hash based on tracker and limits."""
+        return hash((id(self.tracker), id(self.limits)))
+
+    def __eq__(self, other: Any) -> bool:
+        """Equality based on tracker identity and limits."""
+        if not isinstance(other, ConnectionLifecycleManager):
+            return False
+        return (self.tracker is other.tracker and
+                self.limits == other.limits)
+
+    def __deepcopy__(self, memo: dict[Any, Any]) -> ConnectionLifecycleManager:
+        """Deep copy that handles threading locks."""
+        # Create new instances without copying the lock
+        new_tracker = ConnectionTracker(self.limits)
+        new_limits = copy.deepcopy(self.limits, memo)
+
+        # Create new manager with copied data
+        new_manager = ConnectionLifecycleManager(new_tracker, new_limits)
+
+        # Copy connection data from original tracker
+        new_manager.tracker.pending_inbound = self.tracker.pending_inbound.copy()
+        new_manager.tracker.pending_outbound = self.tracker.pending_outbound.copy()
+        new_manager.tracker.established_inbound = self.tracker.established_inbound.copy()
+        new_manager.tracker.established_outbound = self.tracker.established_outbound.copy()
+        new_manager.tracker.established_per_peer = {
+            peer_id: conns.copy()
+            for peer_id, conns in self.tracker.established_per_peer.items()
+        }
+        new_manager.tracker.bypass_peers = self.tracker.bypass_peers.copy()
+        new_manager.tracker._connections = {
+            conn_id: copy.deepcopy(conn_info, memo)
+            for conn_id, conn_info in self.tracker._connections.items()
+        }
+        new_manager.tracker._stats = self.tracker._stats.copy()
+
+        return new_manager
 
     def __str__(self) -> str:
         """String representation of lifecycle manager."""

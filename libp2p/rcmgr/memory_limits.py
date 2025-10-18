@@ -125,13 +125,13 @@ class MemoryConnectionLimits:
         try:
             if self.memory_stats_cache is None:
                 return
-            stats = self.memory_stats_cache.get_memory_stats(force_refresh)
+            stats = self.memory_stats_cache.get_memory_stats(force_refresh=force_refresh)
 
             # Check process memory bytes limit
             if self.max_process_memory_bytes is not None:
                 if stats.process_memory_bytes >= self.max_process_memory_bytes:
                     raise ResourceLimitExceeded(
-                        f"Process memory limit exceeded: "
+                        message=f"Process memory limit exceeded: "
                         f"current={stats.process_memory_bytes} bytes, "
                         f"limit={self.max_process_memory_bytes} bytes"
                     )
@@ -140,7 +140,7 @@ class MemoryConnectionLimits:
             if self.max_process_memory_percent is not None:
                 if stats.process_memory_percent >= self.max_process_memory_percent:
                     raise ResourceLimitExceeded(
-                        f"Process memory percentage limit exceeded: "
+                        message=f"Process memory percentage limit exceeded: "
                         f"current={stats.process_memory_percent:.2f}%, "
                         f"limit={self.max_process_memory_percent:.2f}%"
                     )
@@ -149,7 +149,7 @@ class MemoryConnectionLimits:
             if self.max_system_memory_percent is not None:
                 if stats.system_memory_percent >= self.max_system_memory_percent:
                     raise ResourceLimitExceeded(
-                        f"System memory percentage limit exceeded: "
+                        message=f"System memory percentage limit exceeded: "
                         f"current={stats.system_memory_percent:.2f}%, "
                         f"limit={self.max_system_memory_percent:.2f}%"
                     )
@@ -227,12 +227,16 @@ class MemoryConnectionLimits:
         limits = self.get_limits_summary()
         if self.memory_stats_cache is None:
             return limits
-        current = self.memory_stats_cache.get_memory_summary(force_refresh)
 
-        return {
-            **limits,
-            "current": current,
-        }
+        try:
+            current = self.memory_stats_cache.get_memory_summary(force_refresh=force_refresh)
+            return {
+                **limits,
+                "current": current,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get memory summary: {e}")
+            return limits
 
     def __str__(self) -> str:
         """String representation of memory connection limits."""
@@ -256,6 +260,36 @@ class MemoryConnectionLimits:
             return "MemoryConnectionLimits(no_limits)"
 
         return f"MemoryConnectionLimits({', '.join(limit_strs)})"
+
+    def __eq__(self, other: object) -> bool:
+        """Compare memory connection limits based on configuration."""
+        if not isinstance(other, MemoryConnectionLimits):
+            return False
+        return (
+            self.max_process_memory_bytes == other.max_process_memory_bytes and
+            self.max_process_memory_percent == other.max_process_memory_percent and
+            self.max_system_memory_percent == other.max_system_memory_percent
+            # Don't compare cache as it's not part of the configuration
+        )
+
+    def __hash__(self) -> int:
+        """Hash memory connection limits based on configuration."""
+        return hash((
+            self.max_process_memory_bytes,
+            self.max_process_memory_percent,
+            self.max_system_memory_percent,
+            # Don't include cache in hash as it's not part of the configuration
+        ))
+
+    def __deepcopy__(self, memo: dict) -> MemoryConnectionLimits:
+        """Deep copy memory connection limits, creating new cache."""
+        from .memory_stats import MemoryStatsCache
+        return MemoryConnectionLimits(
+            max_process_memory_bytes=self.max_process_memory_bytes,
+            max_process_memory_percent=self.max_process_memory_percent,
+            max_system_memory_percent=self.max_system_memory_percent,
+            memory_stats_cache=MemoryStatsCache() if self.memory_stats_cache else None,
+        )
 
 
 def new_memory_connection_limits() -> MemoryConnectionLimits:
