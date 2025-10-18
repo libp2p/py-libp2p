@@ -7,6 +7,8 @@ allowing peers to establish connections through relay nodes.
 
 from collections.abc import Awaitable, Callable
 import logging
+import time
+from typing import cast
 
 import multiaddr
 import trio
@@ -45,13 +47,16 @@ from .pb.circuit_pb2 import (
 from .protocol import (
     PROTOCOL_ID,
     CircuitV2Protocol,
+    INetStreamWithExtras,
 )
 from .protocol_buffer import (
     StatusCode,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
-
+TOP_N = 3
+RESERVATION_REFRESH_INTERVAL = 10 # seconds
+RESERVATION_REFRESH_MARGIN = 30 # seconds
 
 class CircuitV2Transport(ITransport):
     """
@@ -92,6 +97,11 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self._last_relay_index = -1
+        self._relay_list = []
+        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
+        self._reservations: dict[ID, float] = {}
+        self._refreshing = False
 
     async def dial(
         self,
@@ -168,11 +178,12 @@ class CircuitV2Transport(ITransport):
         try:
             # First try to make a reservation if enabled
             if self.config.enable_client:
-                success = await self._make_reservation(relay_stream, relay_peer_id)
-                if not success:
-                    logger.warning(
-                        "Failed to make reservation with relay %s", relay_peer_id
-                    )
+                async with trio.open_nursery() as nursery:
+                    success = await self.reserve(relay_stream, relay_peer_id, nursery)
+                    if not success:
+                        logger.warning(
+                            "Failed to make reservation with relay %s", relay_peer_id
+                        )
 
             # Send HOP CONNECT message
             hop_msg = HopMessage(
@@ -204,32 +215,164 @@ class CircuitV2Transport(ITransport):
         """
         Select an appropriate relay for the given peer.
 
-        Parameters
-        ----------
-        peer_info : PeerInfo
-            The peer to connect to
+        - Gather relays (preserve insertion order, dedupe by to_string()).
+        - Measure relays concurrently to collect scores.
+        - Take top TOP_N relays by score (desc, tie-break by to_string()).
+        - Pick one from top list using round-robin across invocations.
 
-        Returns
-        -------
-        Optional[ID]
-            Selected relay peer ID, or None if no suitable relay found
+        Returns:
+            Selected relay ID or None if none found.
 
         """
-        # Try to find a relay
-        attempts = 0
-        while attempts < self.client_config.max_auto_relay_attempts:
-            # Get a relay from the list of discovered relays
-            relays = self.discovery.get_relays()
-            if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+        if not self.client_config.enable_auto_relay:
+            logger.warning("Auto-relay disabled, skipping relay selection")
+            return None
 
-            # Wait and try discovery
-            await trio.sleep(1)
-            attempts += 1
+        for attempt in range(self.client_config.max_auto_relay_attempts):
+            # Fetch relays if _relay_list is empty — preserve order and dedupe
+            if not self._relay_list:
+                relays = self.discovery.get_relays() or []
+                # preserve current order and append new ones (dedupe by to_string)
+                seen = {r.to_string() for r in self._relay_list}
+                for r in relays:
+                    if r.to_string() not in seen:
+                        self._relay_list.append(r)
+                        seen.add(r.to_string())
+
+            if not self._relay_list:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
+
+            # Measure all relays concurrently.
+            # scored_relays will be filled by _measure_relay.
+            scored_relays: list[tuple[ID, float]] = []
+            async with trio.open_nursery() as nursery:
+                for relay_id in list(self._relay_list):
+                    nursery.start_soon(self._measure_relay, relay_id, scored_relays)
+
+            # If no scored relays, backoff and retry
+            if not scored_relays:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
+
+            # Filter by minimum score
+            filtered = [
+                (rid, score) for (rid, score)
+                in scored_relays
+                if score >= self.client_config.min_relay_score
+            ]
+            if not filtered:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
+
+            # Sort by score desc, tie-break by to_string() to be deterministic
+            filtered.sort(key=lambda x: (x[1], x[0].to_string()), reverse=True)
+
+            # Take top N
+            top_relays = [rid for (rid, _) in filtered[:TOP_N]]
+
+            # Defensive: if top_relays empty (shouldn't be), backoff
+            if not top_relays:
+                backoff = min(2 ** attempt, 10)
+                await trio.sleep(backoff)
+                continue
+
+            # Round-robin selection across the top_relays list
+            # Ensure _last_relay_index cycles relative to top_relays length.
+            if self._last_relay_index == -1:
+                # First selection: pick best relay
+                self._last_relay_index = 0
+            else:
+                # Next selections: cycle through top N
+                self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
+            chosen = top_relays[self._last_relay_index]
+
+            # Ensure metrics access uses the actual relay object (or insert if missing)
+            if chosen not in self._relay_metrics:
+                self._relay_metrics[chosen] = {
+                    "latency": 0,
+                    "failures": 0,
+                    "last_seen": 0
+                }
+
+            logger.debug(
+                "Selected relay %s from top %d candidates (lat=%.3fs)",
+                chosen,
+                len(top_relays),
+                self._relay_metrics[chosen].get("latency", 0),
+            )
+            return chosen
+
+        logger.warning(
+            "No suitable relay found after %d attempts",
+            self.client_config.max_auto_relay_attempts
+        )
 
         return None
+
+    async def _is_relay_available(self, relay_peer_id: ID) -> bool:
+        """Check if the relay is currently reachable."""
+        try:
+            # try opening a shortlived stream
+            stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+            await stream.close()
+            return True
+        except Exception:
+            return False
+
+    async def _measure_relay(self, relay_id: ID, scored_relays: list):
+        metrics = self._relay_metrics.setdefault(
+            relay_id, {
+                "latency": 0,
+                "failures": 0,
+                "last_seen": 0
+            }
+        )
+        start = time.monotonic()
+        available = await self._is_relay_available(relay_id)
+        latency = time.monotonic() - start
+
+        if not available:
+            metrics["failures"] += 1
+            return
+
+        metrics.update({
+            "latency": latency,
+            "failures": max(0, metrics["failures"] - 1),
+            "last_seen": time.time()
+        })
+
+        score = (
+            1000
+            - (metrics["failures"] * 10)
+            - (latency * 100)
+            - ((time.time() - metrics["last_seen"]) * 0.1)
+        )
+        scored_relays.append((relay_id, score))
+
+    async def reserve(
+            self,
+            stream: INetStream,
+            relay_peer_id: ID,
+            nursery: trio.Nursery
+    ) -> bool:
+        """
+        Public method to create a reservation and start refresher if needed.
+        """
+        success = await self._make_reservation(stream, relay_peer_id)
+        if not success:
+            return False
+
+        # Start refresher if this is the first reservation
+        if not self._refreshing:
+            self._refreshing = True
+            nursery.start_soon(
+                self._refresh_reservations_worker
+            )
+        return True
 
     async def _make_reservation(
         self,
@@ -268,6 +411,7 @@ class CircuitV2Transport(ITransport):
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
             status_msg = getattr(resp.status, "message", "Unknown error")
+            expires = getattr(resp.reservation, "expire", 0)
 
             if status_code != StatusCode.OK:
                 logger.warning(
@@ -277,13 +421,81 @@ class CircuitV2Transport(ITransport):
                 )
                 return False
 
-            # Store reservation info
-            # TODO: Implement reservation storage and refresh mechanism
+            self._reservations[relay_peer_id] = expires
+            logger.info("Reserved peer %s (ttl=%.1fs)", relay_peer_id, expires)
+
             return True
 
         except Exception as e:
             logger.error("Error making reservation: %s", str(e))
             return False
+
+    async def _refresh_reservations_worker(self) -> None:
+        """Periodically refresh all active reservations."""
+        logger.info("Started reservation refresh loop")
+        try:
+            while self._reservations:
+                now = time.time()
+                expired = [
+                    relay_peer_id for relay_peer_id,
+                    exp in self._reservations.items()
+                    if exp <= now
+                ]
+
+                # Remove expired reservations
+                for relay_peer_id in expired:
+                    logger.info("Reservation expired for peer %s", relay_peer_id)
+                    del self._reservations[relay_peer_id]
+
+
+                to_refresh = [
+                    relay_peer_id
+                    for relay_peer_id, exp in self._reservations.items()
+                    if exp - now <= RESERVATION_REFRESH_MARGIN
+                ]
+
+
+                for relay_peer_id in to_refresh:
+                  try:
+                       # Open a fresh stream per refresh
+                        stream = await self.host.new_stream(
+                            relay_peer_id,
+                            [PROTOCOL_ID]
+                        )
+                        success = await self._make_reservation(stream, relay_peer_id)
+                        await stream.close()
+                        if success:
+                            logger.info(
+                                "Refreshed reservation for relay %s", relay_peer_id
+                            )
+                        else:
+                            logger.warning(
+                                "Failed to refresh reservation for relay %s",
+                                relay_peer_id
+                            )
+                  except Exception as e:
+                      logger.error(
+                            "Error refreshing reservation for relay %s: %s",
+                            relay_peer_id, str(e)
+                        )
+
+                # Calculate next wake-up dynamically
+                now = time.time()
+                next_exp = min(
+                    self._reservations.values(),
+                    default=now + RESERVATION_REFRESH_INTERVAL
+                )
+                sleep_time = max(0, next_exp - now - RESERVATION_REFRESH_MARGIN)
+                await trio.sleep(sleep_time)
+
+        except trio.Cancelled:
+            self._refreshing = False
+            logger.info("Reservation refresher cancelled")
+        finally:
+            self._refreshing = False
+            logger.info("Stopped reservation refresher")
+
+
 
     def create_listener(
         self,
@@ -303,7 +515,12 @@ class CircuitV2Transport(ITransport):
             The created listener
 
         """
-        return CircuitV2Listener(self.host, self.protocol, self.config)
+        return CircuitV2Listener(
+            self.host,
+            handler_function,
+            self.protocol,
+            self.config
+        )
 
 
 class CircuitV2Listener(Service, IListener):
@@ -312,6 +529,7 @@ class CircuitV2Listener(Service, IListener):
     def __init__(
         self,
         host: IHost,
+        handler_function: Callable[[ReadWriteCloser], Awaitable[None]],
         protocol: CircuitV2Protocol,
         config: RelayConfig,
     ) -> None:
@@ -322,6 +540,8 @@ class CircuitV2Listener(Service, IListener):
         ----------
         host : IHost
             The libp2p host this listener is running on
+        handler_function: Callable[[ReadWriteCloser], Awaitable[None]]
+            The handler function for new connections
         protocol : CircuitV2Protocol
             The Circuit v2 protocol instance
         config : RelayConfig
@@ -335,6 +555,7 @@ class CircuitV2Listener(Service, IListener):
         self.multiaddrs: list[
             multiaddr.Multiaddr
         ] = []  # Store multiaddrs as Multiaddr objects
+        self.handler_function = handler_function
 
     async def handle_incoming_connection(
         self,
@@ -383,7 +604,42 @@ class CircuitV2Listener(Service, IListener):
 
     async def run(self) -> None:
         """Run the listener service."""
-        # Implementation would go here
+        if not self.config.enable_stop:
+            logger.warning(
+                "Stop role is disabled, listener will not process incoming connections"
+            )
+            return
+
+        async def stream_handler(stream: INetStream) -> None:
+            """Handle incoming streams for the Circuit v2 protocol."""
+            stream_with_peer_id = cast(INetStreamWithExtras, stream)
+            remote_peer_id = stream_with_peer_id.get_remote_peer_id()
+
+            try:
+                connection = await self.handle_incoming_connection(
+                    stream, remote_peer_id
+                )
+
+                await self.handler_function(connection)
+            except ConnectionError as e:
+                logger.error(
+                    "Failed to handle incoming connection from %s: %s",
+                    remote_peer_id, str(e)
+                )
+                await stream.close()
+            except Exception as e:
+                logger.error(
+                    "Unexpected error handling stream from %s: %s",
+                    remote_peer_id, str(e)
+                )
+                await stream.close()
+
+
+        self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
+        try:
+            await self.manager.wait_finished()
+        finally:
+            logger.debug("CircuitV2Listener stopped")
 
     async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
         """
