@@ -24,7 +24,7 @@ from libp2p.rcmgr.error_context_builder import (
 class TestErrorContextBuilder:
     """Test suite for ErrorContextBuilder class."""
 
-    def test_error_context_builder_creation(self):
+    def test_error_context_builder_creation(self) -> None:
         """Test ErrorContextBuilder creation."""
         builder = ErrorContextBuilder()
 
@@ -41,7 +41,7 @@ class TestErrorContextBuilder:
         assert hasattr(builder, "with_metadata")
         assert hasattr(builder, "build_context")
 
-    def test_error_context_builder_with_error_code(self):
+    def test_error_context_builder_with_error_code(self) -> None:
         """Test ErrorContextBuilder with_error_code method."""
         builder = ErrorContextBuilder()
 
@@ -51,7 +51,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.error_code == ErrorCode.MEMORY_LIMIT_EXCEEDED
 
-    def test_error_context_builder_with_error_category(self):
+    def test_error_context_builder_with_error_category(self) -> None:
         """Test ErrorContextBuilder with_error_category method."""
         builder = ErrorContextBuilder()
 
@@ -61,7 +61,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.error_category == ErrorCategory.MEMORY_LIMIT
 
-    def test_error_context_builder_with_severity(self):
+    def test_error_context_builder_with_severity(self) -> None:
         """Test ErrorContextBuilder with_severity method."""
         builder = ErrorContextBuilder()
 
@@ -71,7 +71,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.severity == ErrorSeverity.CRITICAL
 
-    def test_error_context_builder_with_message(self):
+    def test_error_context_builder_with_message(self) -> None:
         """Test ErrorContextBuilder with_message method."""
         builder = ErrorContextBuilder()
 
@@ -81,7 +81,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.message == "Memory limit exceeded"
 
-    def test_error_context_builder_with_timestamp(self):
+    def test_error_context_builder_with_timestamp(self) -> None:
         """Test ErrorContextBuilder with_timestamp method."""
         builder = ErrorContextBuilder()
         timestamp = 1234567890.0
@@ -92,7 +92,7 @@ class TestErrorContextBuilder:
         # Should be able to access timestamp
         assert builder._context.timestamp == timestamp
 
-    def test_error_context_builder_with_connection_id(self):
+    def test_error_context_builder_with_connection_id(self) -> None:
         """Test ErrorContextBuilder with_connection_id method."""
         builder = ErrorContextBuilder()
 
@@ -102,7 +102,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.connection_id == "conn_1"
 
-    def test_error_context_builder_with_peer_id(self):
+    def test_error_context_builder_with_peer_id(self) -> None:
         """Test ErrorContextBuilder with_peer_id method."""
         builder = ErrorContextBuilder()
         peer_id = ID(b"test_peer")
@@ -113,7 +113,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.peer_id == peer_id
 
-    def test_error_context_builder_with_stack_trace(self):
+    def test_error_context_builder_with_stack_trace(self) -> None:
         """Test ErrorContextBuilder with_stack_trace method."""
         builder = ErrorContextBuilder()
         stack_trace = (
@@ -128,7 +128,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.stack_trace == stack_trace
 
-    def test_error_context_builder_with_original_exception(self):
+    def test_error_context_builder_with_original_exception(self) -> None:
         """Test ErrorContextBuilder with_original_exception method."""
         builder = ErrorContextBuilder()
         exception = Exception("test exception")
@@ -139,7 +139,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._original_exception == exception
 
-    def test_error_context_builder_with_metadata(self):
+    def test_error_context_builder_with_metadata(self) -> None:
         """Test ErrorContextBuilder with_metadata method."""
         builder = ErrorContextBuilder()
         metadata = {"test": "data", "key": "value"}
@@ -150,7 +150,7 @@ class TestErrorContextBuilder:
         assert result is builder
         assert builder._context.metadata == metadata
 
-    def test_error_context_builder_chaining(self):
+    def test_error_context_builder_chaining(self) -> None:
         """Test ErrorContextBuilder method chaining."""
         builder = ErrorContextBuilder()
         peer_id = ID(b"test_peer")
@@ -179,7 +179,7 @@ class TestErrorContextBuilder:
         assert builder._context.peer_id == peer_id
         assert builder._context.metadata == metadata
 
-    def test_error_context_builder_build(self):
+    def test_error_context_builder_build(self) -> None:
         """Test ErrorContextBuilder build method."""
         builder = ErrorContextBuilder()
         peer_id = ID(b"test_peer")
@@ -206,7 +206,7 @@ class TestErrorContextBuilder:
         assert context.peer_id == peer_id
         assert context.metadata == metadata
 
-    def test_error_context_builder_build_with_defaults(self):
+    def test_error_context_builder_build_with_defaults(self) -> None:
         """Test ErrorContextBuilder build with default values."""
         builder = ErrorContextBuilder()
 
@@ -224,7 +224,7 @@ class TestErrorContextBuilder:
         assert context.previous_errors == []
         assert context.metadata == {}
 
-    def test_error_context_builder_build_with_partial_values(self):
+    def test_error_context_builder_build_with_partial_values(self) -> None:
         """Test ErrorContextBuilder build with partial values."""
         builder = ErrorContextBuilder()
 
@@ -246,7 +246,7 @@ class TestErrorContextBuilder:
         assert context.previous_errors == []
         assert context.metadata == {}
 
-    def test_error_context_builder_build_with_exception(self):
+    def test_error_context_builder_build_with_exception(self) -> None:
         """Test ErrorContextBuilder build with exception."""
         builder = ErrorContextBuilder()
 
@@ -265,7 +265,7 @@ class TestErrorContextBuilder:
             # Stack trace is not automatically set by with_original_exception
             assert context.stack_trace is None
 
-    def test_error_context_builder_build_with_custom_timestamp(self):
+    def test_error_context_builder_build_with_custom_timestamp(self) -> None:
         """Test ErrorContextBuilder build with custom timestamp."""
         builder = ErrorContextBuilder()
         context = (
@@ -278,7 +278,7 @@ class TestErrorContextBuilder:
         # Timestamp should be current time (realistic behavior)
         assert context.timestamp > 0
 
-    def test_error_context_builder_build_with_unicode_data(self):
+    def test_error_context_builder_build_with_unicode_data(self) -> None:
         """Test ErrorContextBuilder build with unicode data."""
         builder = ErrorContextBuilder()
 
@@ -296,7 +296,7 @@ class TestErrorContextBuilder:
         assert context.connection_id == "conn_测试_🚀"
         assert context.metadata == {"测试": "数据", "🚀": "rocket"}
 
-    def test_error_context_builder_build_with_very_long_data(self):
+    def test_error_context_builder_build_with_very_long_data(self) -> None:
         """Test ErrorContextBuilder build with very long data."""
         builder = ErrorContextBuilder()
 
@@ -316,7 +316,7 @@ class TestErrorContextBuilder:
         assert context.connection_id == long_connection_id
         assert context.metadata == long_metadata
 
-    def test_error_context_builder_build_multiple_times(self):
+    def test_error_context_builder_build_multiple_times(self) -> None:
         """Test ErrorContextBuilder build multiple times."""
         builder = ErrorContextBuilder()
 
@@ -342,7 +342,7 @@ class TestErrorContextBuilder:
         )  # Last value set
         assert context2.error_code == ErrorCode.CONNECTION_LIMIT_EXCEEDED
 
-    def test_error_context_builder_build_performance(self):
+    def test_error_context_builder_build_performance(self) -> None:
         """Test ErrorContextBuilder build performance."""
         builder = ErrorContextBuilder()
 
@@ -362,21 +362,21 @@ class TestErrorContextBuilder:
         # Should complete in reasonable time
         assert elapsed < 1.0  # Should complete in less than 1 second
 
-    def test_error_context_builder_string_representation(self):
+    def test_error_context_builder_string_representation(self) -> None:
         """Test string representation of ErrorContextBuilder."""
         builder = ErrorContextBuilder()
 
         str_repr = str(builder)
         assert "ErrorContextBuilder" in str_repr
 
-    def test_error_context_builder_repr(self):
+    def test_error_context_builder_repr(self) -> None:
         """Test repr representation of ErrorContextBuilder."""
         builder = ErrorContextBuilder()
 
         repr_str = repr(builder)
         assert "ErrorContextBuilder" in repr_str
 
-    def test_error_context_builder_equality(self):
+    def test_error_context_builder_equality(self) -> None:
         """Test ErrorContextBuilder equality."""
         builder1 = ErrorContextBuilder()
         builder2 = ErrorContextBuilder()
@@ -390,7 +390,7 @@ class TestErrorContextBuilder:
         # Should not be equal anymore
         assert builder1 != builder2
 
-    def test_error_context_builder_hash(self):
+    def test_error_context_builder_hash(self) -> None:
         """Test ErrorContextBuilder hash functionality."""
         builder1 = ErrorContextBuilder()
         builder2 = ErrorContextBuilder()
@@ -398,7 +398,7 @@ class TestErrorContextBuilder:
         # Should have different hashes (different objects)
         assert hash(builder1) != hash(builder2)
 
-    def test_error_context_builder_in_set(self):
+    def test_error_context_builder_in_set(self) -> None:
         """Test ErrorContextBuilder can be used in sets."""
         builder1 = ErrorContextBuilder()
         builder2 = ErrorContextBuilder()
@@ -406,14 +406,14 @@ class TestErrorContextBuilder:
         builder_set = {builder1, builder2}
         assert len(builder_set) == 2  # Different objects
 
-    def test_error_context_builder_in_dict(self):
+    def test_error_context_builder_in_dict(self) -> None:
         """Test ErrorContextBuilder can be used as dictionary key."""
         builder = ErrorContextBuilder()
 
         builder_dict = {builder: "value"}
         assert builder_dict[builder] == "value"
 
-    def test_error_context_builder_copy(self):
+    def test_error_context_builder_copy(self) -> None:
         """Test ErrorContextBuilder can be copied."""
         import copy
 
@@ -427,7 +427,7 @@ class TestErrorContextBuilder:
         # Copy should have the same error code
         assert builder._context.error_code == builder_copy._context.error_code
 
-    def test_error_context_builder_deep_copy(self):
+    def test_error_context_builder_deep_copy(self) -> None:
         """Test ErrorContextBuilder can be deep copied."""
         import copy
 
@@ -441,7 +441,7 @@ class TestErrorContextBuilder:
         # Deep copy should have the same error code
         assert builder._context.error_code == builder_deep_copy._context.error_code
 
-    def test_error_context_builder_serialization(self):
+    def test_error_context_builder_serialization(self) -> None:
         """Test ErrorContextBuilder can be serialized."""
         builder = ErrorContextBuilder()
 
@@ -476,7 +476,7 @@ class TestErrorContextBuilder:
 class TestErrorContextCollector:
     """Test suite for ErrorContextCollector class."""
 
-    def test_error_context_collector_creation(self):
+    def test_error_context_collector_creation(self) -> None:
         """Test ErrorContextCollector creation."""
         collector = ErrorContextCollector()
 
@@ -490,7 +490,7 @@ class TestErrorContextCollector:
         assert hasattr(collector, "get_error_summary")
         assert hasattr(collector, "get_error_statistics")
 
-    def test_error_context_collector_add_error(self):
+    def test_error_context_collector_add_error(self) -> None:
         """Test ErrorContextCollector add_error method."""
         collector = ErrorContextCollector()
 
@@ -507,7 +507,7 @@ class TestErrorContextCollector:
         assert len(collector._errors) == 1
         assert collector._errors[0] == context
 
-    def test_error_context_collector_add_multiple_errors(self):
+    def test_error_context_collector_add_multiple_errors(self) -> None:
         """Test ErrorContextCollector add multiple errors."""
         collector = ErrorContextCollector()
 
@@ -534,7 +534,7 @@ class TestErrorContextCollector:
         assert collector._errors[0] == context1
         assert collector._errors[1] == context2
 
-    def test_error_context_collector_get_errors(self):
+    def test_error_context_collector_get_errors(self) -> None:
         """Test ErrorContextCollector get_errors method."""
         collector = ErrorContextCollector()
 
@@ -563,7 +563,7 @@ class TestErrorContextCollector:
         assert context1 in errors
         assert context2 in errors
 
-    def test_error_context_collector_get_errors_by_code(self):
+    def test_error_context_collector_get_errors_by_code(self) -> None:
         """Test ErrorContextCollector get_errors_by_code method."""
         collector = ErrorContextCollector()
 
@@ -607,7 +607,7 @@ class TestErrorContextCollector:
         assert len(connection_errors) == 1
         assert context2 in connection_errors
 
-    def test_error_context_collector_get_errors_by_category(self):
+    def test_error_context_collector_get_errors_by_category(self) -> None:
         """Test ErrorContextCollector get_errors_by_category method."""
         collector = ErrorContextCollector()
 
@@ -651,7 +651,7 @@ class TestErrorContextCollector:
         assert len(connection_errors) == 1
         assert context2 in connection_errors
 
-    def test_error_context_collector_get_errors_by_severity(self):
+    def test_error_context_collector_get_errors_by_severity(self) -> None:
         """Test ErrorContextCollector get_errors_by_severity method."""
         collector = ErrorContextCollector()
 
@@ -693,7 +693,7 @@ class TestErrorContextCollector:
         assert len(high_errors) == 1
         assert context2 in high_errors
 
-    def test_error_context_collector_get_error_summary(self):
+    def test_error_context_collector_get_error_summary(self) -> None:
         """Test ErrorContextCollector get_error_summary method."""
         collector = ErrorContextCollector()
 
@@ -739,7 +739,7 @@ class TestErrorContextCollector:
         assert summary["severity_distribution"]["critical"] == 2
         assert summary["severity_distribution"]["high"] == 1
 
-    def test_error_context_collector_clear_errors(self):
+    def test_error_context_collector_clear_errors(self) -> None:
         """Test ErrorContextCollector clear_errors method."""
         collector = ErrorContextCollector()
 
@@ -757,7 +757,7 @@ class TestErrorContextCollector:
         collector.clear_errors()
         assert len(collector._errors) == 0
 
-    def test_error_context_collector_get_error_count(self):
+    def test_error_context_collector_get_error_count(self) -> None:
         """Test ErrorContextCollector get_error_count method."""
         collector = ErrorContextCollector()
 
@@ -785,7 +785,7 @@ class TestErrorContextCollector:
         collector.add_error(context2)
         assert collector.get_error_statistics()["total_errors"] == 2
 
-    def test_error_context_collector_filter_errors(self):
+    def test_error_context_collector_filter_errors(self) -> None:
         """Test ErrorContextCollector filter_errors method."""
         collector = ErrorContextCollector()
 
@@ -835,7 +835,7 @@ class TestErrorContextCollector:
         assert len(memory_code_errors) == 1
         assert context1 in memory_code_errors
 
-    def test_error_context_collector_get_errors_with_limit(self):
+    def test_error_context_collector_get_errors_with_limit(self) -> None:
         """Test ErrorContextCollector get_errors with limit."""
         collector = ErrorContextCollector()
 
@@ -874,7 +874,7 @@ class TestErrorContextCollector:
         assert context2 in errors_with_limit
         assert context3 in errors_with_limit
 
-    def test_error_context_collector_performance(self):
+    def test_error_context_collector_performance(self) -> None:
         """Test ErrorContextCollector performance."""
         collector = ErrorContextCollector()
 
@@ -898,7 +898,7 @@ class TestErrorContextCollector:
         assert elapsed < 1.0  # Should complete in less than 1 second
         assert collector.get_error_statistics()["total_errors"] == 1000
 
-    def test_error_context_collector_memory_usage(self):
+    def test_error_context_collector_memory_usage(self) -> None:
         """Test ErrorContextCollector memory usage."""
         collector = ErrorContextCollector()
 
@@ -926,21 +926,21 @@ class TestErrorContextCollector:
         assert elapsed < 0.1  # Should complete in less than 0.1 seconds
         assert len(critical_errors) == 1000
 
-    def test_error_context_collector_string_representation(self):
+    def test_error_context_collector_string_representation(self) -> None:
         """Test string representation of ErrorContextCollector."""
         collector = ErrorContextCollector()
 
         str_repr = str(collector)
         assert "ErrorContextCollector" in str_repr
 
-    def test_error_context_collector_repr(self):
+    def test_error_context_collector_repr(self) -> None:
         """Test repr representation of ErrorContextCollector."""
         collector = ErrorContextCollector()
 
         repr_str = repr(collector)
         assert "ErrorContextCollector" in repr_str
 
-    def test_error_context_collector_equality(self):
+    def test_error_context_collector_equality(self) -> None:
         """Test ErrorContextCollector equality."""
         collector1 = ErrorContextCollector()
         collector2 = ErrorContextCollector()
@@ -965,7 +965,7 @@ class TestErrorContextCollector:
         assert len(collector1.get_errors()) == 1
         assert len(collector2.get_errors()) == 0
 
-    def test_error_context_collector_hash(self):
+    def test_error_context_collector_hash(self) -> None:
         """Test ErrorContextCollector hash functionality."""
         collector1 = ErrorContextCollector()
         collector2 = ErrorContextCollector()
@@ -973,7 +973,7 @@ class TestErrorContextCollector:
         # Should have different hashes (realistic behavior - no __hash__ implemented)
         assert hash(collector1) != hash(collector2)
 
-    def test_error_context_collector_in_set(self):
+    def test_error_context_collector_in_set(self) -> None:
         """Test ErrorContextCollector can be used in sets."""
         collector1 = ErrorContextCollector()
         collector2 = ErrorContextCollector()
@@ -981,14 +981,14 @@ class TestErrorContextCollector:
         collector_set = {collector1, collector2}
         assert len(collector_set) == 2  # Different objects (realistic behavior)
 
-    def test_error_context_collector_in_dict(self):
+    def test_error_context_collector_in_dict(self) -> None:
         """Test ErrorContextCollector can be used as dictionary key."""
         collector = ErrorContextCollector()
 
         collector_dict = {collector: "value"}
         assert collector_dict[collector] == "value"
 
-    def test_error_context_collector_copy(self):
+    def test_error_context_collector_copy(self) -> None:
         """Test ErrorContextCollector can be copied."""
         import copy
 
@@ -1009,7 +1009,7 @@ class TestErrorContextCollector:
         # Both should have the same error count
         assert len(collector.get_errors()) == len(collector_copy.get_errors())
 
-    def test_error_context_collector_deep_copy(self):
+    def test_error_context_collector_deep_copy(self) -> None:
         """Test ErrorContextCollector can be deep copied."""
         import copy
 
@@ -1030,7 +1030,7 @@ class TestErrorContextCollector:
         # Both should have the same error count
         assert len(collector.get_errors()) == len(collector_deep_copy.get_errors())
 
-    def test_error_context_collector_serialization(self):
+    def test_error_context_collector_serialization(self) -> None:
         """Test ErrorContextCollector can be serialized."""
         collector = ErrorContextCollector()
 

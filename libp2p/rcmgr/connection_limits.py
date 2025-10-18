@@ -9,7 +9,6 @@ connection states and directions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Self
 
 from libp2p.rcmgr.exceptions import ResourceLimitExceeded
 
@@ -31,7 +30,7 @@ class ConnectionLimits:
     max_established_per_peer: int | None = None
     max_established_total: int | None = None
 
-    def with_max_pending_inbound(self, limit: int | None) -> Self:
+    def with_max_pending_inbound(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrently incoming connections being
         established.
@@ -40,13 +39,13 @@ class ConnectionLimits:
             limit: Maximum pending inbound connections, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_pending_inbound = limit
         return self
 
-    def with_max_pending_outbound(self, limit: int | None) -> Self:
+    def with_max_pending_outbound(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrently outgoing connections being
         established.
@@ -55,13 +54,13 @@ class ConnectionLimits:
             limit: Maximum pending outbound connections, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_pending_outbound = limit
         return self
 
-    def with_max_established_inbound(self, limit: int | None) -> Self:
+    def with_max_established_inbound(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrent established inbound connections.
 
@@ -69,13 +68,13 @@ class ConnectionLimits:
             limit: Maximum established inbound connections, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_established_inbound = limit
         return self
 
-    def with_max_established_outbound(self, limit: int | None) -> Self:
+    def with_max_established_outbound(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrent established outbound connections.
 
@@ -83,13 +82,13 @@ class ConnectionLimits:
             limit: Maximum established outbound connections, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_established_outbound = limit
         return self
 
-    def with_max_established_per_peer(self, limit: int | None) -> Self:
+    def with_max_established_per_peer(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrent established connections per peer,
         regardless of direction (incoming or outgoing).
@@ -98,13 +97,13 @@ class ConnectionLimits:
             limit: Maximum established connections per peer, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_established_per_peer = limit
         return self
 
-    def with_max_established_total(self, limit: int | None) -> Self:
+    def with_max_established_total(self, limit: int | None) -> "ConnectionLimits":
         """
         Configure the maximum number of concurrent established connections (both
         inbound and outbound).
@@ -117,7 +116,7 @@ class ConnectionLimits:
             limit: Maximum total established connections, or None for no limit
 
         Returns:
-            Self for method chaining
+            ConnectionLimits for method chaining
 
         """
         self.max_established_total = limit

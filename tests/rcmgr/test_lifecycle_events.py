@@ -29,7 +29,7 @@ from libp2p.rcmgr.lifecycle_events import (
 class TestConnectionEventType:
     """Test suite for ConnectionEventType enum."""
 
-    def test_connection_event_type_values(self):
+    def test_connection_event_type_values(self) -> None:
         """Test ConnectionEventType enum values."""
         assert ConnectionEventType.ESTABLISHED_INBOUND.value == "established_inbound"
         assert ConnectionEventType.CONNECTION_CLOSED.value == "connection_closed"

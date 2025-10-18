@@ -21,7 +21,7 @@ from libp2p.rcmgr.scope import (
 )
 
 
-def test_resources_memory_management():
+def test_resources_memory_management() -> None:
     """Test memory reservation and release in Resources."""
     limit = BaseLimit(memory=1024)
     resources = Resources(limit)
@@ -39,7 +39,7 @@ def test_resources_memory_management():
     assert resources.memory == 0
 
 
-def test_resources_memory_limits():
+def test_resources_memory_limits() -> None:
     """Test memory limit checking."""
     limit = BaseLimit(memory=1024)
     resources = Resources(limit)
@@ -52,7 +52,7 @@ def test_resources_memory_limits():
         resources.check_memory(2048)
 
 
-def test_resources_memory_priority():
+def test_resources_memory_priority() -> None:
     """Test memory reservation with priority."""
     limit = BaseLimit(memory=1024)
     resources = Resources(limit)
@@ -65,7 +65,7 @@ def test_resources_memory_priority():
         resources.check_memory(1020, priority=1)
 
 
-def test_resources_stream_management():
+def test_resources_stream_management() -> None:
     """Test stream addition and removal."""
     limit = BaseLimit(streams=10, streams_inbound=6, streams_outbound=4)
     resources = Resources(limit)
@@ -86,7 +86,7 @@ def test_resources_stream_management():
     assert resources.streams_outbound == 1
 
 
-def test_resources_stream_limits():
+def test_resources_stream_limits() -> None:
     limit = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
     resources = Resources(limit)
 
@@ -109,7 +109,7 @@ def test_resources_stream_limits():
     assert "streams_total" in str(exc_info.value)
 
 
-def test_resources_connection_management():
+def test_resources_connection_management() -> None:
     """Test connection addition and removal."""
     limit = BaseLimit(conns=10, conns_inbound=6, conns_outbound=4, fd=5)
     resources = Resources(limit)
@@ -130,7 +130,7 @@ def test_resources_connection_management():
     assert resources.num_fd == 0
 
 
-def test_resources_connection_limits():
+def test_resources_connection_limits() -> None:
     """Test connection limit checking."""
     limit = BaseLimit(conns=1, conns_inbound=1, conns_outbound=1, fd=1)
     resources = Resources(limit)
@@ -145,7 +145,7 @@ def test_resources_connection_limits():
     assert "fd" in str(exc_info.value)
 
 
-def test_base_resource_scope_memory():
+def test_base_resource_scope_memory() -> None:
     """Test memory management in BaseResourceScope."""
     limit = BaseLimit(memory=1024)
     scope = BaseResourceScope(limit, name="test")
@@ -162,7 +162,7 @@ def test_base_resource_scope_memory():
     scope.done()
 
 
-def test_base_resource_scope_memory_limit():
+def test_base_resource_scope_memory_limit() -> None:
     """Test memory limit enforcement."""
     limit = BaseLimit(memory=1024)
     scope = BaseResourceScope(limit, name="test")
@@ -174,7 +174,7 @@ def test_base_resource_scope_memory_limit():
     scope.done()
 
 
-def test_base_resource_scope_streams():
+def test_base_resource_scope_streams() -> None:
     """Test stream management in BaseResourceScope."""
     limit = BaseLimit(streams=2, streams_inbound=1, streams_outbound=1)
     scope = BaseResourceScope(limit, name="test")
@@ -196,7 +196,7 @@ def test_base_resource_scope_streams():
     scope.done()
 
 
-def test_base_resource_scope_hierarchical():
+def test_base_resource_scope_hierarchical() -> None:
     """Test hierarchical resource management."""
     # Create parent scope
     parent_limit = BaseLimit(memory=1024)
@@ -220,7 +220,7 @@ def test_base_resource_scope_hierarchical():
     parent.done()
 
 
-def test_scope_closure():
+def test_scope_closure() -> None:
     """Test scope closure behavior."""
     limit = BaseLimit(memory=1024)
     scope = BaseResourceScope(limit, name="test")
@@ -236,7 +236,7 @@ def test_scope_closure():
         scope.add_stream(Direction.INBOUND)
 
 
-def test_system_scope():
+def test_system_scope() -> None:
     """Test SystemScope creation and behavior."""
     limit = BaseLimit(memory=1024)
     metrics = Metrics()
@@ -252,7 +252,7 @@ def test_system_scope():
     system.done()
 
 
-def test_transient_scope():
+def test_transient_scope() -> None:
     """Test TransientScope creation and behavior."""
     system_limit = BaseLimit(memory=2048)
     system = SystemScope(system_limit)
@@ -273,7 +273,7 @@ def test_transient_scope():
     system.done()
 
 
-def test_peer_scope():
+def test_peer_scope() -> None:
     """Test PeerScope creation and behavior."""
     system_limit = BaseLimit(memory=2048)
     system = SystemScope(system_limit)
@@ -291,7 +291,7 @@ def test_peer_scope():
     system.done()
 
 
-def test_metrics_integration():
+def test_metrics_integration() -> None:
     """Test metrics integration with scopes."""
     limit = BaseLimit(memory=1024)
     metrics = Metrics()

@@ -14,7 +14,7 @@ from libp2p.rcmgr.limits import BaseLimit, Direction, FixedLimiter
 from libp2p.rcmgr.manager import ResourceManager
 
 
-def test_full_resource_manager_workflow():
+def test_full_resource_manager_workflow() -> None:
     """Test complete resource manager workflow."""
     # Create limiter with realistic limits
     limiter = FixedLimiter()
@@ -97,7 +97,7 @@ def test_full_resource_manager_workflow():
         rm.close()
 
 
-def test_hierarchical_limits():
+def test_hierarchical_limits() -> None:
     """Test hierarchical limit enforcement."""
     # Create very restrictive limits
     limiter = FixedLimiter()
@@ -148,7 +148,7 @@ def test_hierarchical_limits():
         rm.close()
 
 
-def test_allowlist_integration():
+def test_allowlist_integration() -> None:
     """Test allowlist integration with resource limits."""
     # Create very restrictive limits
     limiter = FixedLimiter()
@@ -185,7 +185,7 @@ def test_allowlist_integration():
         rm.close()
 
 
-def test_concurrent_resource_usage():
+def test_concurrent_resource_usage() -> None:
     """Test concurrent resource usage and limits."""
     limiter = FixedLimiter()
     limiter.system = BaseLimit(streams=50, conns=20)
@@ -251,7 +251,7 @@ def test_concurrent_resource_usage():
         rm.close()
 
 
-def test_memory_pressure_simulation():
+def test_memory_pressure_simulation() -> None:
     """Test memory pressure handling."""
     # Create limiter with memory limits
     limiter = FixedLimiter()
@@ -302,7 +302,7 @@ def test_memory_pressure_simulation():
         rm.close()
 
 
-def test_scope_lifecycle():
+def test_scope_lifecycle() -> None:
     """Test complete scope lifecycle."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -346,7 +346,7 @@ def test_scope_lifecycle():
         rm.close()
 
 
-def test_error_recovery():
+def test_error_recovery() -> None:
     """Test error recovery and cleanup."""
     limiter = FixedLimiter()
     limiter.peer_default = BaseLimit(streams=2)
@@ -378,7 +378,7 @@ def test_error_recovery():
         rm.close()
 
 
-def test_metrics_integration():
+def test_metrics_integration() -> None:
     """Test metrics collection during normal operation."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter, enable_metrics=True)
@@ -408,7 +408,7 @@ def test_metrics_integration():
         rm.close()
 
 
-def test_resource_manager_stress():
+def test_resource_manager_stress() -> None:
     """Stress test the resource manager."""
     limiter = FixedLimiter()
     limiter.system = BaseLimit(

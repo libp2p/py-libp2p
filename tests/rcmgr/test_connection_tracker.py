@@ -297,7 +297,7 @@ class TestConnectionTracker:
         results = []
         errors = []
 
-        def add_connection(conn_id):
+        def add_connection(conn_id) -> None:
             try:
                 tracker.add_pending_inbound(conn_id, ID(b"peer"))
                 results.append(conn_id)

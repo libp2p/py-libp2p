@@ -8,13 +8,13 @@ from libp2p.peer.id import ID
 from libp2p.rcmgr.allowlist import Allowlist, AllowlistConfig
 
 
-def test_allowlist_creation():
+def test_allowlist_creation() -> None:
     """Test Allowlist creation."""
     allowlist = Allowlist()
     assert allowlist is not None
 
 
-def test_allowlist_creation_with_config():
+def test_allowlist_creation_with_config() -> None:
     """Test Allowlist creation with configuration."""
     peer_id = ID(b"test_peer")
     addr = "/ip4/127.0.0.1/tcp/8080"
@@ -28,7 +28,7 @@ def test_allowlist_creation_with_config():
     assert allowlist.allowed_multiaddr(addr)
 
 
-def test_add_remove_peer():
+def test_add_remove_peer() -> None:
     """Test adding and removing peers."""
     allowlist = Allowlist()
     peer_id = ID(b"test_peer")
@@ -45,7 +45,7 @@ def test_add_remove_peer():
     assert not allowlist.allowed_peer(peer_id)
 
 
-def test_add_remove_multiaddr():
+def test_add_remove_multiaddr() -> None:
     """Test adding and removing multiaddrs."""
     allowlist = Allowlist()
     addr = Multiaddr("/ip4/127.0.0.1/tcp/8080")
@@ -62,7 +62,7 @@ def test_add_remove_multiaddr():
     assert not allowlist.allowed_multiaddr(addr)
 
 
-def test_add_remove_combined():
+def test_add_remove_combined() -> None:
     """Test adding and removing peer+multiaddr combinations."""
     allowlist = Allowlist()
     peer_id = ID(b"test_peer")
@@ -80,7 +80,7 @@ def test_add_remove_combined():
     assert not allowlist.allowed_peer_and_multiaddr(peer_id, addr)
 
 
-def test_allowlist_priority():
+def test_allowlist_priority() -> None:
     """Test allowlist priority rules."""
     allowlist = Allowlist()
     peer_id = ID(b"test_peer")
@@ -105,7 +105,7 @@ def test_allowlist_priority():
     assert allowlist.allowed_peer_and_multiaddr(peer_id, addr)
 
 
-def test_default_allowed():
+def test_default_allowed() -> None:
     """Test default allowed behavior."""
     # Current implementation doesn't have default_allowed behavior
     # Test that items need to be explicitly added
@@ -128,7 +128,7 @@ def test_default_allowed():
     assert allowlist.allowed_peer_and_multiaddr(peer_id, addr)
 
 
-def test_list_methods():
+def test_list_methods() -> None:
     """Test listing allowed peers and multiaddrs."""
     allowlist = Allowlist()
 
@@ -153,7 +153,7 @@ def test_list_methods():
     assert str(addr2) in addrs
 
 
-def test_list_combined():
+def test_list_combined() -> None:
     """Test listing combined peer+multiaddr entries."""
     allowlist = Allowlist()
 
@@ -175,7 +175,7 @@ def test_list_combined():
     assert not allowlist.allowed_multiaddr(addr1)
 
 
-def test_clear_methods():
+def test_clear_methods() -> None:
     """Test clearing allowlist entries."""
     allowlist = Allowlist()
 
@@ -201,7 +201,7 @@ def test_clear_methods():
     assert not allowlist.allowed_peer_and_multiaddr(peer_id, addr)
 
 
-def test_clear_all():
+def test_clear_all() -> None:
     """Test clearing all allowlist entries."""
     allowlist = Allowlist()
 
@@ -226,7 +226,7 @@ def test_clear_all():
     assert len(allowlist) == 0
 
 
-def test_limit_enforcement():
+def test_limit_enforcement() -> None:
     """Test allowlist size behavior."""
     # Current implementation doesn't enforce size limits
     # Test basic size tracking instead
@@ -250,7 +250,7 @@ def test_limit_enforcement():
     assert len(allowlist) == 3
 
 
-def test_config_object():
+def test_config_object() -> None:
     """Test AllowlistConfig object."""
     config = AllowlistConfig()
 
@@ -272,7 +272,7 @@ def test_config_object():
     assert len(config.peer_multiaddrs) == 1
 
 
-def test_edge_cases():
+def test_edge_cases() -> None:
     """Test edge cases and error conditions."""
     allowlist = Allowlist()
 
@@ -295,7 +295,7 @@ def test_edge_cases():
     allowlist.remove_peer_multiaddr(peer_id, addr)  # Should not raise
 
 
-def test_multiaddr_patterns():
+def test_multiaddr_patterns() -> None:
     """Test multiaddr pattern matching."""
     allowlist = Allowlist()
 
@@ -313,14 +313,14 @@ def test_multiaddr_patterns():
         assert allowlist.allowed_multiaddr(addr)
 
 
-def test_concurrent_access():
+def test_concurrent_access() -> None:
     """Test concurrent access to allowlist."""
     import threading
 
     allowlist = Allowlist()
     errors = []
 
-    def worker(worker_id):
+    def worker(worker_id) -> None:
         try:
             peer_id = ID(f"peer_{worker_id}".encode())
             addr = Multiaddr(f"/ip4/192.168.1.{worker_id}/tcp/8080")

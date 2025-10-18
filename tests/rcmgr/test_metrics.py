@@ -6,13 +6,13 @@ from libp2p.rcmgr.limits import Direction
 from libp2p.rcmgr.metrics import Metrics
 
 
-def test_metrics_creation():
+def test_metrics_creation() -> None:
     """Test Metrics creation."""
     metrics = Metrics()
     assert metrics is not None
 
 
-def test_record_memory():
+def test_record_memory() -> None:
     """Test recording memory usage."""
     metrics = Metrics()
 
@@ -25,7 +25,7 @@ def test_record_memory():
     assert memory == 512  # Latest value
 
 
-def test_record_streams():
+def test_record_streams() -> None:
     """Test recording stream counts."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -39,7 +39,7 @@ def test_record_streams():
     assert streams["outbound"] == 2  # total - inbound
 
 
-def test_record_connections():
+def test_record_connections() -> None:
     """Test recording connection counts."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -53,7 +53,7 @@ def test_record_connections():
     assert conns["outbound"] == 4  # total - inbound
 
 
-def test_record_file_descriptors():
+def test_record_file_descriptors() -> None:
     """Test recording file descriptor usage."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -65,7 +65,7 @@ def test_record_file_descriptors():
     assert fd_count == 10
 
 
-def test_increment_operations():
+def test_increment_operations() -> None:
     """Test increment operations."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -85,7 +85,7 @@ def test_increment_operations():
     assert metrics.get_memory(scope_name) == 384
 
 
-def test_increment_streams():
+def test_increment_streams() -> None:
     """Test stream increment operations."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -109,7 +109,7 @@ def test_increment_streams():
     assert streams["outbound"] == 1
 
 
-def test_increment_connections():
+def test_increment_connections() -> None:
     """Test connection increment operations."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -133,7 +133,7 @@ def test_increment_connections():
     assert conns["outbound"] == 1
 
 
-def test_get_summary():
+def test_get_summary() -> None:
     """Test getting comprehensive metrics summary."""
     metrics = Metrics()
 
@@ -176,7 +176,7 @@ def test_get_summary():
     assert service_stats["fd"] == 4
 
 
-def test_multiple_scopes():
+def test_multiple_scopes() -> None:
     """Test metrics for multiple scopes."""
     metrics = Metrics()
 
@@ -196,7 +196,7 @@ def test_multiple_scopes():
         assert streams["inbound"] == i + 1
 
 
-def test_zero_values():
+def test_zero_values() -> None:
     """Test handling of zero values."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -216,7 +216,7 @@ def test_zero_values():
     assert conns["outbound"] == 0
 
 
-def test_negative_increments():
+def test_negative_increments() -> None:
     """Test negative increments (decrements)."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -240,7 +240,7 @@ def test_negative_increments():
     assert conns["total"] == 0
 
 
-def test_underflow_protection():
+def test_underflow_protection() -> None:
     """Test protection against underflow."""
     metrics = Metrics()
     scope_name = "test_scope"
@@ -258,7 +258,7 @@ def test_underflow_protection():
     assert streams["total"] >= 0
 
 
-def test_concurrent_access():
+def test_concurrent_access() -> None:
     """Test concurrent access to metrics."""
     import threading
 
@@ -307,7 +307,7 @@ def test_concurrent_access():
     assert conns["outbound"] == expected_conns
 
 
-def test_large_numbers():
+def test_large_numbers() -> None:
     """Test handling of large numbers."""
     metrics = Metrics()
     scope_name = "large_scope"
@@ -325,7 +325,7 @@ def test_large_numbers():
     assert streams["inbound"] == large_count // 2
 
 
-def test_scope_name_formats():
+def test_scope_name_formats() -> None:
     """Test various scope name formats."""
     metrics = Metrics()
 
@@ -345,7 +345,7 @@ def test_scope_name_formats():
         assert memory == 1024
 
 
-def test_string_values():
+def test_string_values() -> None:
     """Test handling of string values in metrics."""
     metrics = Metrics()
     scope_name = "string_scope"

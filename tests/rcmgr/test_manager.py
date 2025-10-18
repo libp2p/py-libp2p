@@ -12,7 +12,7 @@ from libp2p.rcmgr.limits import BaseLimit, Direction, FixedLimiter
 from libp2p.rcmgr.manager import ResourceManager, new_resource_manager
 
 
-def test_resource_manager_creation():
+def test_resource_manager_creation() -> None:
     """Test ResourceManager creation."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -26,7 +26,7 @@ def test_resource_manager_creation():
     rm.close()
 
 
-def test_new_resource_manager():
+def test_new_resource_manager() -> None:
     """Test new_resource_manager convenience function."""
     limiter = FixedLimiter()
     rm = new_resource_manager(limiter)
@@ -35,7 +35,7 @@ def test_new_resource_manager():
     rm.close()
 
 
-def test_new_resource_manager_with_config():
+def test_new_resource_manager_with_config() -> None:
     """Test new_resource_manager with configuration."""
     limiter = FixedLimiter()
     allowlist_config = AllowlistConfig()
@@ -48,7 +48,7 @@ def test_new_resource_manager_with_config():
     rm.close()
 
 
-def test_open_connection():
+def test_open_connection() -> None:
     """Test opening connections."""
     # Create limiter with low connection limits for testing
     limiter = FixedLimiter()
@@ -82,7 +82,7 @@ def test_open_connection():
     rm.close()
 
 
-def test_open_stream():
+def test_open_stream() -> None:
     """Test opening streams."""
     # Create limiter with low stream limits for testing
     limiter = FixedLimiter()
@@ -110,7 +110,7 @@ def test_open_stream():
     rm.close()
 
 
-def test_view_system():
+def test_view_system() -> None:
     """Test viewing system scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -126,7 +126,7 @@ def test_view_system():
     rm.close()
 
 
-def test_view_transient():
+def test_view_transient() -> None:
     """Test viewing transient scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -142,7 +142,7 @@ def test_view_transient():
     rm.close()
 
 
-def test_view_peer():
+def test_view_peer() -> None:
     """Test viewing peer scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -159,7 +159,7 @@ def test_view_peer():
     rm.close()
 
 
-def test_view_protocol():
+def test_view_protocol() -> None:
     """Test viewing protocol scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -176,7 +176,7 @@ def test_view_protocol():
     rm.close()
 
 
-def test_view_service():
+def test_view_service() -> None:
     """Test viewing service scope."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -193,7 +193,7 @@ def test_view_service():
     rm.close()
 
 
-def test_sticky_scopes():
+def test_sticky_scopes() -> None:
     """Test sticky scope marking."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -215,7 +215,7 @@ def test_sticky_scopes():
     rm.close()
 
 
-def test_list_methods():
+def test_list_methods() -> None:
     """Test listing active scopes."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -245,7 +245,7 @@ def test_list_methods():
     rm.close()
 
 
-def test_allowlist_access():
+def test_allowlist_access() -> None:
     """Test allowlist access."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -262,7 +262,7 @@ def test_allowlist_access():
     rm.close()
 
 
-def test_metrics_access():
+def test_metrics_access() -> None:
     """Test metrics access."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -278,7 +278,7 @@ def test_metrics_access():
     rm.close()
 
 
-def test_resource_manager_closure():
+def test_resource_manager_closure() -> None:
     """Test proper cleanup when closing ResourceManager."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -299,7 +299,7 @@ def test_resource_manager_closure():
         rm.open_connection(Direction.INBOUND)
 
 
-def test_garbage_collection():
+def test_garbage_collection() -> None:
     """Test garbage collection of unused scopes."""
     limiter = FixedLimiter()
     rm = ResourceManager(limiter)
@@ -330,7 +330,7 @@ def test_garbage_collection():
     rm.close()
 
 
-def test_concurrent_access():
+def test_concurrent_access() -> None:
     """Test concurrent access to ResourceManager."""
     import threading
 

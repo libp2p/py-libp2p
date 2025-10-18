@@ -7,7 +7,7 @@ from libp2p.peer.id import ID
 from libp2p.rcmgr.limits import BaseLimit, Direction, FixedLimiter
 
 
-def test_base_limit_creation():
+def test_base_limit_creation() -> None:
     """Test BaseLimit creation with default values."""
     limit = BaseLimit()
 
@@ -20,7 +20,7 @@ def test_base_limit_creation():
     assert limit.get_fd_limit() > 0
 
 
-def test_base_limit_custom_values():
+def test_base_limit_custom_values() -> None:
     """Test BaseLimit with custom values."""
     limit = BaseLimit(
         streams=100,
@@ -43,7 +43,7 @@ def test_base_limit_custom_values():
     assert limit.get_fd_limit() == 64
 
 
-def test_fixed_limiter_defaults():
+def test_fixed_limiter_defaults() -> None:
     """Test FixedLimiter with default values."""
     limiter = FixedLimiter()
 
@@ -60,7 +60,7 @@ def test_fixed_limiter_defaults():
     assert transient_limits.get_conn_total_limit() == 50
 
 
-def test_fixed_limiter_custom_limits():
+def test_fixed_limiter_custom_limits() -> None:
     """Test FixedLimiter with custom limits."""
     custom_system = BaseLimit(
         streams=1000,
@@ -74,7 +74,7 @@ def test_fixed_limiter_custom_limits():
     assert system_limits.get_stream_total_limit() == 1000
 
 
-def test_fixed_limiter_peer_limits():
+def test_fixed_limiter_peer_limits() -> None:
     """Test peer-specific limits."""
     limiter = FixedLimiter()
     peer_id = ID(b"test_peer")
@@ -86,7 +86,7 @@ def test_fixed_limiter_peer_limits():
     assert peer_limits.get_memory_limit() == 64 << 20  # 64MB
 
 
-def test_fixed_limiter_protocol_limits():
+def test_fixed_limiter_protocol_limits() -> None:
     """Test protocol-specific limits."""
     limiter = FixedLimiter()
     protocol = TProtocol("/test/1.0.0")
@@ -98,7 +98,7 @@ def test_fixed_limiter_protocol_limits():
     assert protocol_limits.get_memory_limit() == 16 << 20  # 16MB
 
 
-def test_fixed_limiter_service_limits():
+def test_fixed_limiter_service_limits() -> None:
     """Test service-specific limits."""
     limiter = FixedLimiter()
     service = "test_service"
@@ -110,7 +110,7 @@ def test_fixed_limiter_service_limits():
     assert service_limits.get_memory_limit() == 16 << 20  # 16MB
 
 
-def test_direction_enum():
+def test_direction_enum() -> None:
     """Test Direction enum values."""
     assert Direction.INBOUND.value == "inbound"
     assert Direction.OUTBOUND.value == "outbound"

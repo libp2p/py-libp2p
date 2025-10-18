@@ -12,7 +12,7 @@ from libp2p.rcmgr.exceptions import (
 )
 
 
-def test_resource_manager_exception():
+def test_resource_manager_exception() -> None:
     """Test base ResourceManagerException."""
     msg = "Test error message"
     exc = ResourceManagerException(msg)
@@ -21,7 +21,7 @@ def test_resource_manager_exception():
     assert isinstance(exc, Exception)
 
 
-def test_resource_limit_exceeded():
+def test_resource_limit_exceeded() -> None:
     """Test ResourceLimitExceeded exception."""
     scope_name = "test_scope"
     resource_type = "memory"
@@ -47,7 +47,7 @@ def test_resource_limit_exceeded():
     assert isinstance(exc, ResourceManagerException)
 
 
-def test_resource_limit_exceeded_simple():
+def test_resource_limit_exceeded_simple() -> None:
     """Test ResourceLimitExceeded with simple message."""
     msg = "Stream limit exceeded"
     exc = ResourceLimitExceeded(message=msg)
@@ -59,7 +59,7 @@ def test_resource_limit_exceeded_simple():
     assert exc.available is None
 
 
-def test_scope_closed_exception():
+def test_scope_closed_exception() -> None:
     """Test ScopeClosedException."""
     scope_name = "closed_scope"
     exc = ScopeClosedException(scope_name)
@@ -73,7 +73,7 @@ def test_scope_closed_exception():
     assert isinstance(exc, ResourceManagerException)
 
 
-def test_scope_closed_exception_simple():
+def test_scope_closed_exception_simple() -> None:
     """Test ScopeClosedException with simple message."""
     msg = "Scope is closed"
     exc = ScopeClosedException(message=msg)
@@ -82,7 +82,7 @@ def test_scope_closed_exception_simple():
     assert exc.scope_name is None
 
 
-def test_invalid_resource_manager_state():
+def test_invalid_resource_manager_state() -> None:
     """Test InvalidResourceManagerState exception."""
     msg = "ResourceManager is in invalid state"
     exc = InvalidResourceManagerState(msg)
@@ -93,7 +93,7 @@ def test_invalid_resource_manager_state():
     assert isinstance(exc, ResourceManagerException)
 
 
-def test_exception_chaining():
+def test_exception_chaining() -> None:
     """Test exception chaining and context."""
     original_error = ValueError("Original error")
 
@@ -108,7 +108,7 @@ def test_exception_chaining():
         assert str(rm_error.__cause__) == "Original error"
 
 
-def test_resource_limit_exceeded_usage_pattern():
+def test_resource_limit_exceeded_usage_pattern() -> None:
     """Test typical usage pattern for ResourceLimitExceeded."""
 
     def check_memory_limit(scope_name: str, requested: int, available: int):
@@ -134,7 +134,7 @@ def test_resource_limit_exceeded_usage_pattern():
     assert exc.available == 1024
 
 
-def test_scope_closed_usage_pattern():
+def test_scope_closed_usage_pattern() -> None:
     """Test typical usage pattern for ScopeClosedException."""
 
     class MockScope:
@@ -165,7 +165,7 @@ def test_scope_closed_usage_pattern():
     assert exc_info.value.scope_name == "test_scope"
 
 
-def test_exception_attributes():
+def test_exception_attributes() -> None:
     """Test exception attribute access."""
     # ResourceLimitExceeded with all attributes
     exc1 = ResourceLimitExceeded("scope1", "streams", 10, 5)
@@ -183,7 +183,7 @@ def test_exception_attributes():
     assert str(exc3) == "test"
 
 
-def test_exception_representation():
+def test_exception_representation() -> None:
     """Test exception string representation."""
     # Test ResourceLimitExceeded repr
     exc1 = ResourceLimitExceeded("test_scope", "connections", 100, 50)
@@ -198,7 +198,7 @@ def test_exception_representation():
     assert "closed_scope" in repr_str
 
 
-def test_exception_equality():
+def test_exception_equality() -> None:
     """Test exception equality comparison."""
     # Same exceptions should be equal
     exc1a = ResourceLimitExceeded("scope", "memory", 1024, 512)
@@ -212,7 +212,7 @@ def test_exception_equality():
     assert str(exc1a) == str(exc1b)
 
 
-def test_multiple_exception_types():
+def test_multiple_exception_types() -> None:
     """Test catching different exception types."""
 
     def problematic_function(error_type):
@@ -245,7 +245,7 @@ def test_multiple_exception_types():
             problematic_function(error_type)
 
 
-def test_exception_context_manager():
+def test_exception_context_manager() -> None:
     """Test exceptions in context managers."""
 
     class ResourceScope:
