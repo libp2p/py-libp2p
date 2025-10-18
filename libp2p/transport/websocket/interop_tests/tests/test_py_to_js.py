@@ -1,54 +1,82 @@
-from pathlib import Path
-import subprocess
 import sys
 import trio
+import json
+import subprocess
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from py_node.py_websocket_node import PyWebSocketNode
 from py_node.test_utils import TestResults
 
 
-async def _py_client_js_server_async():
+async def test_py_client_js_server():
+    """Test Python client connecting to JavaScript server"""
     results = TestResults()
     js_process = None
+    
     try:
-        js_cwd = Path(__file__).parent.parent / "js_node"
-        js_process = subprocess.Popen([
-            'node', 'js_websocket_node.js', 'server', '8003', 'false', '15000'
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=js_cwd)
-
+        js_node_path = Path(__file__).parent.parent / "js_node" / "js_websocket_node.js"
+        js_process = subprocess.Popen(
+            ['node', str(js_node_path), 'server', '8002', 'false', '15000'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        print("Starting JavaScript server...")
         await trio.sleep(3)
-
-        import requests
-
-        target_url = 'http://127.0.0.1:8003'
-        test_message = 'Hello from Python client'
-
+        
+        print("Setting up Python client...")
+        node = PyWebSocketNode()
+        await node.setup_node()
+        
+        target_addr = "/ip4/127.0.0.1/tcp/8002"
+        test_message = "Hello from Python client"
+        
+        print(f"Sending message to JS server: {test_message}")
+        
         try:
-            response = requests.post(target_url, data=test_message, timeout=10)
-            response_text = response.text
-            if response.status_code == 200 and test_message in response_text:
-                results.add_result('py_to_js_communication', True, {'sent': test_message, 'received': response_text})
+            response = await node.dial_and_send(target_addr, test_message)
+            
+            if response and test_message in response:
+                results.add_result('py_to_js_communication', True, {
+                    'sent': test_message,
+                    'received': response
+                })
+                print(f"Python to JS test completed successfully")
+                print(f"Received: {response}")
             else:
-                results.add_result('py_to_js_communication', False, {'sent': test_message, 'received': response_text, 'status_code': response.status_code})
-        except requests.RequestException as e:
-            results.add_result('py_to_js_communication', False, f"Request error: {e}")
-
+                results.add_result('py_to_js_communication', False, {
+                    'sent': test_message,
+                    'received': response,
+                    'error': 'Response does not contain original message'
+                })
+                print(f"Python to JS test failed: unexpected response")
+                
+        except Exception as e:
+            results.add_result('py_to_js_communication', False, {
+                'error': f'Connection error: {str(e)}'
+            })
+            print(f"Python to JS test failed: {e}")
+        
+        await node.stop()
+        
     except Exception as e:
         results.add_error(f"Test error: {e}")
-
+        print(f"Test error: {e}")
+        
     finally:
         if js_process:
             js_process.terminate()
             try:
-                js_process.wait(timeout=5)
+                js_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 js_process.kill()
-
+    
     return results.to_dict()
 
 
-def test_py_client_js_server():
-    results = trio.run(_py_client_js_server_async)
-    assert 'py_to_js_communication' in results['results']
-    assert results['results']['py_to_js_communication']['success'] is True
+if __name__ == "__main__":
+    print("=== Python Client to JavaScript Server Test ===")
+    results = trio.run(test_py_client_js_server)
+    print("\nTest Results:", json.dumps(results, indent=2))

@@ -1,6 +1,5 @@
 import { TestResults } from './test_utils.js'
 import { createServer } from 'http'
-import { connect } from 'net'
 
 let LIBP2P_AVAILABLE = false
 
