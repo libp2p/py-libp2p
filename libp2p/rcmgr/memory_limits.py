@@ -243,10 +243,14 @@ class MemoryConnectionLimits:
             limit_strs.append(f"process_bytes={limits['max_process_memory_bytes']}")
 
         if limits["max_process_memory_percent"] is not None:
-            limit_strs.append(f"process_percent={limits['max_process_memory_percent']:.1f}%")
+            limit_strs.append(
+                f"process_percent={limits['max_process_memory_percent']:.1f}%"
+            )
 
         if limits["max_system_memory_percent"] is not None:
-            limit_strs.append(f"system_percent={limits['max_system_memory_percent']:.1f}%")
+            limit_strs.append(
+                f"system_percent={limits['max_system_memory_percent']:.1f}%"
+            )
 
         if not limit_strs:
             return "MemoryConnectionLimits(no_limits)"
@@ -297,7 +301,7 @@ def new_memory_connection_limits_with_bytes(max_bytes: int) -> MemoryConnectionL
 
 
 def new_memory_connection_limits_with_percent(
-    max_percent: float
+    max_percent: float,
 ) -> MemoryConnectionLimits:
     """
     Create new memory connection limits with percentage limit.

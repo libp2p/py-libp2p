@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from libp2p.peer.id import ID
 
@@ -28,7 +28,7 @@ class ProtocolRateLimitConfig:
 
     # Protocol identification
     protocol_name: str
-    protocol_version: Optional[str] = None
+    protocol_version: str | None = None
 
     # Rate limiting parameters
     refill_rate: float = 10.0  # Tokens per second
@@ -95,7 +95,7 @@ class ProtocolRateLimitStats:
 
     # Protocol information
     protocol_name: str
-    protocol_version: Optional[str]
+    protocol_version: str | None
 
     # Rate limiting statistics
     current_rate: float
@@ -117,7 +117,7 @@ class ProtocolRateLimitStats:
     time_since_last_request: float
     next_available_time: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary."""
         return {
             "protocol_name": self.protocol_name,
@@ -160,9 +160,9 @@ class ProtocolRateLimiter:
         self._rate_limiter: RateLimiter = self._create_rate_limiter()
 
         # Protocol-specific state
-        self._concurrent_requests: Dict[str, int] = {}
-        self._request_start_times: Dict[str, List[float]] = {}
-        self._backoff_until: Dict[str, float] = {}
+        self._concurrent_requests: dict[str, int] = {}
+        self._request_start_times: dict[str, list[float]] = {}
+        self._backoff_until: dict[str, float] = {}
 
         # Statistics
         self._request_timeouts: int = 0
@@ -189,8 +189,8 @@ class ProtocolRateLimiter:
 
     def _get_entity_key(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
     ) -> str:
         """
         Get entity key for rate limiting.
@@ -227,7 +227,8 @@ class ProtocolRateLimiter:
         # Remove requests that have timed out
         timeout_threshold = current_time - self.config.request_timeout_seconds
         self._request_start_times[entity_key] = [
-            start_time for start_time in self._request_start_times[entity_key]
+            start_time
+            for start_time in self._request_start_times[entity_key]
             if start_time > timeout_threshold
         ]
 
@@ -237,9 +238,8 @@ class ProtocolRateLimiter:
         )
 
         # Count timeouts
-        if (
-            len(self._request_start_times[entity_key])
-            < self._concurrent_requests.get(entity_key, 0)
+        if len(self._request_start_times[entity_key]) < self._concurrent_requests.get(
+            entity_key, 0
         ):
             self._request_timeouts += 1
 
@@ -288,9 +288,9 @@ class ProtocolRateLimiter:
     def try_allow_request(
         self,
         tokens: float = 1.0,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        current_time: float | None = None,
     ) -> bool:
         """
         Try to allow a protocol request based on rate limiting.
@@ -350,9 +350,9 @@ class ProtocolRateLimiter:
     def allow_request(
         self,
         tokens: float = 1.0,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        current_time: float | None = None,
     ) -> None:
         """
         Allow a protocol request based on rate limiting (raises exception if denied).
@@ -372,9 +372,9 @@ class ProtocolRateLimiter:
 
     def finish_request(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        current_time: float | None = None,
     ) -> None:
         """
         Finish a protocol request.
@@ -398,14 +398,14 @@ class ProtocolRateLimiter:
         ):
             self._request_start_times[entity_key].pop(0)
             self._concurrent_requests[entity_key] = len(
-            self._request_start_times[entity_key]
-        )
+                self._request_start_times[entity_key]
+            )
 
     def get_stats(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        current_time: float | None = None,
     ) -> ProtocolRateLimitStats:
         """
         Get current statistics for the protocol rate limiter.
@@ -464,9 +464,9 @@ class ProtocolRateLimiter:
 
     def get_entity_stats(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Get entity-specific statistics.
 
@@ -518,7 +518,7 @@ class ProtocolRateLimiter:
 # Factory functions
 def create_protocol_rate_limiter(
     protocol_name: str,
-    protocol_version: Optional[str] = None,
+    protocol_version: str | None = None,
     refill_rate: float = 10.0,
     capacity: float = 100.0,
     initial_tokens: float = 0.0,
@@ -585,7 +585,7 @@ def create_protocol_rate_limiter(
 
 def create_strict_protocol_rate_limiter(
     protocol_name: str,
-    protocol_version: Optional[str] = None,
+    protocol_version: str | None = None,
     refill_rate: float = 10.0,
     capacity: float = 100.0,
     initial_tokens: float = 0.0,
@@ -617,7 +617,7 @@ def create_strict_protocol_rate_limiter(
 
 def create_burst_protocol_rate_limiter(
     protocol_name: str,
-    protocol_version: Optional[str] = None,
+    protocol_version: str | None = None,
     refill_rate: float = 10.0,
     capacity: float = 100.0,
     initial_tokens: float = 0.0,

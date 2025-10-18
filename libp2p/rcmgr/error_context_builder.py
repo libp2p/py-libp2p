@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 import traceback
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import multiaddr
 
@@ -43,7 +43,7 @@ class ErrorContextBuilder:
             severity=ErrorSeverity.MEDIUM,
             message="",
         )
-        self._original_exception: Optional[Exception] = None
+        self._original_exception: Exception | None = None
 
     def with_error_code(self, error_code: ErrorCode) -> ErrorContextBuilder:
         """
@@ -104,8 +104,8 @@ class ErrorContextBuilder:
     def with_resource_info(
         self,
         resource_type: str,
-        resource_id: Optional[str] = None,
-        resource_scope: Optional[str] = None,
+        resource_id: str | None = None,
+        resource_scope: str | None = None,
     ) -> ErrorContextBuilder:
         """
         Set resource information.
@@ -126,10 +126,10 @@ class ErrorContextBuilder:
 
     def with_connection_info(
         self,
-        connection_id: Optional[str] = None,
-        peer_id: Optional[ID] = None,
-        local_addr: Optional[multiaddr.Multiaddr] = None,
-        remote_addr: Optional[multiaddr.Multiaddr] = None,
+        connection_id: str | None = None,
+        peer_id: ID | None = None,
+        local_addr: multiaddr.Multiaddr | None = None,
+        remote_addr: multiaddr.Multiaddr | None = None,
     ) -> ErrorContextBuilder:
         """
         Set connection information.
@@ -153,8 +153,8 @@ class ErrorContextBuilder:
     def with_limit_info(
         self,
         limit_type: str,
-        limit_value: Union[int, float],
-        current_value: Union[int, float],
+        limit_value: int | float,
+        current_value: int | float,
     ) -> ErrorContextBuilder:
         """
         Set limit information.
@@ -178,11 +178,11 @@ class ErrorContextBuilder:
 
     def with_system_info(
         self,
-        system_memory_total: Optional[int] = None,
-        system_memory_available: Optional[int] = None,
-        system_memory_percent: Optional[float] = None,
-        process_memory_bytes: Optional[int] = None,
-        process_memory_percent: Optional[float] = None,
+        system_memory_total: int | None = None,
+        system_memory_available: int | None = None,
+        system_memory_percent: float | None = None,
+        process_memory_bytes: int | None = None,
+        process_memory_percent: float | None = None,
     ) -> ErrorContextBuilder:
         """
         Set system information.
@@ -205,7 +205,7 @@ class ErrorContextBuilder:
         self._context.process_memory_percent = process_memory_percent
         return self
 
-    def with_metadata(self, metadata: Dict[str, Any]) -> ErrorContextBuilder:
+    def with_metadata(self, metadata: dict[str, Any]) -> ErrorContextBuilder:
         """
         Set metadata.
 
@@ -219,9 +219,7 @@ class ErrorContextBuilder:
         self._context.metadata.update(metadata)
         return self
 
-    def with_stack_trace(
-        self, stack_trace: Optional[str] = None
-    ) -> ErrorContextBuilder:
+    def with_stack_trace(self, stack_trace: str | None = None) -> ErrorContextBuilder:
         """
         Set stack trace.
 
@@ -251,7 +249,7 @@ class ErrorContextBuilder:
         self._original_exception = exception
         return self
 
-    def with_previous_errors(self, errors: List[ErrorContext]) -> ErrorContextBuilder:
+    def with_previous_errors(self, errors: list[ErrorContext]) -> ErrorContextBuilder:
         """
         Set previous errors.
 
@@ -350,10 +348,10 @@ class ErrorContextCollector:
 
         """
         self.max_errors = max_errors
-        self._errors: List[ErrorContext] = []
-        self._error_counts: Dict[str, int] = {}
-        self._severity_counts: Dict[ErrorSeverity, int] = {}
-        self._category_counts: Dict[ErrorCategory, int] = {}
+        self._errors: list[ErrorContext] = []
+        self._error_counts: dict[str, int] = {}
+        self._severity_counts: dict[ErrorSeverity, int] = {}
+        self._category_counts: dict[ErrorCategory, int] = {}
 
     def add_error(self, error_context: ErrorContext) -> None:
         """
@@ -382,11 +380,11 @@ class ErrorContextCollector:
 
     def get_errors(
         self,
-        error_code: Optional[ErrorCode] = None,
-        severity: Optional[ErrorSeverity] = None,
-        category: Optional[ErrorCategory] = None,
-        limit: Optional[int] = None,
-    ) -> List[ErrorContext]:
+        error_code: ErrorCode | None = None,
+        severity: ErrorSeverity | None = None,
+        category: ErrorCategory | None = None,
+        limit: int | None = None,
+    ) -> list[ErrorContext]:
         """
         Get errors matching the specified criteria.
 
@@ -416,7 +414,7 @@ class ErrorContextCollector:
 
         return errors
 
-    def get_error_statistics(self) -> Dict[str, Any]:
+    def get_error_statistics(self) -> dict[str, Any]:
         """
         Get error statistics.
 
@@ -431,12 +429,12 @@ class ErrorContextCollector:
             "category_counts": {
                 c.value: c for c, count in self._category_counts.items()
             },
-            "recent_errors": len([
-                e for e in self._errors if time.time() - e.timestamp < 3600
-            ]),  # Last hour
+            "recent_errors": len(
+                [e for e in self._errors if time.time() - e.timestamp < 3600]
+            ),  # Last hour
         }
 
-    def get_error_summary(self) -> Dict[str, Any]:
+    def get_error_summary(self) -> dict[str, Any]:
         """
         Get error summary for monitoring.
 
@@ -450,7 +448,7 @@ class ErrorContextCollector:
         recent_errors = [e for e in self._errors if time.time() - e.timestamp < 3600]
 
         # Get most common error codes
-        error_code_counts: Dict[str, int] = {}
+        error_code_counts: dict[str, int] = {}
         for error in self._errors:
             code = error.error_code.value
             error_code_counts[code] = error_code_counts.get(code, 0) + 1

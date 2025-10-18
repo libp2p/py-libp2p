@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import multiaddr
 
@@ -127,35 +127,35 @@ class ErrorContext:
     timestamp: float = field(default_factory=time.time)
 
     # Resource information
-    resource_type: Optional[str] = None
-    resource_id: Optional[str] = None
-    resource_scope: Optional[str] = None
+    resource_type: str | None = None
+    resource_id: str | None = None
+    resource_scope: str | None = None
 
     # Connection information
-    connection_id: Optional[str] = None
-    peer_id: Optional[ID] = None
-    local_addr: Optional[multiaddr.Multiaddr] = None
-    remote_addr: Optional[multiaddr.Multiaddr] = None
+    connection_id: str | None = None
+    peer_id: ID | None = None
+    local_addr: multiaddr.Multiaddr | None = None
+    remote_addr: multiaddr.Multiaddr | None = None
 
     # Limit information
-    limit_type: Optional[str] = None
-    limit_value: Optional[Union[int, float]] = None
-    current_value: Optional[Union[int, float]] = None
-    limit_percentage: Optional[float] = None
+    limit_type: str | None = None
+    limit_value: int | float | None = None
+    current_value: int | float | None = None
+    limit_percentage: float | None = None
 
     # System information
-    system_memory_total: Optional[int] = None
-    system_memory_available: Optional[int] = None
-    system_memory_percent: Optional[float] = None
-    process_memory_bytes: Optional[int] = None
-    process_memory_percent: Optional[float] = None
+    system_memory_total: int | None = None
+    system_memory_available: int | None = None
+    system_memory_percent: float | None = None
+    process_memory_bytes: int | None = None
+    process_memory_percent: float | None = None
 
     # Additional context
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    stack_trace: Optional[str] = None
-    previous_errors: List[ErrorContext] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    stack_trace: str | None = None
+    previous_errors: list[ErrorContext] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert error context to dictionary."""
         return {
             "error_code": self.error_code.value,
@@ -198,7 +198,7 @@ class ResourceLimitExceededError(Exception):
     def __init__(
         self,
         error_context: ErrorContext,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
     ):
         """
         Initialize resource limit exceeded error.
@@ -246,7 +246,7 @@ class ResourceLimitExceededError(Exception):
 
         return message
 
-    def get_error_summary(self) -> Dict[str, Any]:
+    def get_error_summary(self) -> dict[str, Any]:
         """Get error summary for monitoring."""
         return {
             "error_code": self.error_context.error_code.value,
@@ -272,7 +272,7 @@ class SystemResourceError(Exception):
     def __init__(
         self,
         error_context: ErrorContext,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
     ):
         """
         Initialize system resource error.
@@ -312,7 +312,7 @@ class SystemResourceError(Exception):
 
         return message
 
-    def get_error_summary(self) -> Dict[str, Any]:
+    def get_error_summary(self) -> dict[str, Any]:
         """Get error summary for monitoring."""
         return {
             "error_code": self.error_context.error_code.value,
@@ -338,7 +338,7 @@ class ConfigurationError(Exception):
     def __init__(
         self,
         error_context: ErrorContext,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
     ):
         """
         Initialize configuration error.
@@ -371,7 +371,7 @@ class ConfigurationError(Exception):
 
         return message
 
-    def get_error_summary(self) -> Dict[str, Any]:
+    def get_error_summary(self) -> dict[str, Any]:
         """Get error summary for monitoring."""
         return {
             "error_code": self.error_context.error_code.value,
@@ -395,7 +395,7 @@ class OperationalError(Exception):
     def __init__(
         self,
         error_context: ErrorContext,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
     ):
         """
         Initialize operational error.
@@ -428,7 +428,7 @@ class OperationalError(Exception):
 
         return message
 
-    def get_error_summary(self) -> Dict[str, Any]:
+    def get_error_summary(self) -> dict[str, Any]:
         """Get error summary for monitoring."""
         return {
             "error_code": self.error_context.error_code.value,
@@ -449,12 +449,12 @@ class OperationalError(Exception):
 # Error factory functions
 def create_connection_limit_error(
     limit_type: str,
-    limit_value: Union[int, float],
-    current_value: Union[int, float],
-    connection_id: Optional[str] = None,
-    peer_id: Optional[ID] = None,
-    message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    limit_value: int | float,
+    current_value: int | float,
+    connection_id: str | None = None,
+    peer_id: ID | None = None,
+    message: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ResourceLimitExceededError:
     """Create a connection limit exceeded error."""
     error_code = ErrorCode.CONNECTION_LIMIT_EXCEEDED
@@ -489,13 +489,13 @@ def create_connection_limit_error(
 
 def create_memory_limit_error(
     limit_type: str,
-    limit_value: Union[int, float],
-    current_value: Union[int, float],
-    system_memory_total: Optional[int] = None,
-    system_memory_available: Optional[int] = None,
-    process_memory_bytes: Optional[int] = None,
-    message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    limit_value: int | float,
+    current_value: int | float,
+    system_memory_total: int | None = None,
+    system_memory_available: int | None = None,
+    process_memory_bytes: int | None = None,
+    message: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> SystemResourceError:
     """Create a memory limit exceeded error."""
     error_code = ErrorCode.MEMORY_LIMIT_EXCEEDED
@@ -538,8 +538,8 @@ def create_memory_limit_error(
 def create_configuration_error(
     config_key: str,
     config_value: Any,
-    message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    message: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ConfigurationError:
     """Create a configuration error."""
     context = ErrorContext(
@@ -560,8 +560,8 @@ def create_configuration_error(
 def create_operational_error(
     operation: str,
     component: str,
-    message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    message: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> OperationalError:
     """Create an operational error."""
     context = ErrorContext(

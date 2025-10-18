@@ -13,7 +13,6 @@ import threading
 import time
 from typing import (
     Any,
-    Dict,
 )
 
 import multiaddr
@@ -165,22 +164,22 @@ class ResourceManager:
         # Rate limiting (Phase 5)
         self._global_rate_limiter: RateLimiter | None = None
         self._per_peer_rate_limiter: RateLimiter | None = None
-        self._protocol_rate_limiters: Dict[str, ProtocolRateLimiter] = {}
+        self._protocol_rate_limiters: dict[str, ProtocolRateLimiter] = {}
 
         if enable_rate_limiting:
             # Create global rate limiter
             self._global_rate_limiter = create_global_rate_limiter(
                 refill_rate=100.0,  # 100 requests per second
-                capacity=1000.0,   # 1000 burst capacity
+                capacity=1000.0,  # 1000 burst capacity
                 initial_tokens=100.0,  # Start with some tokens
             )
 
             # Create per-peer rate limiter
             self._per_peer_rate_limiter = create_per_peer_rate_limiter(
-                refill_rate=10.0,   # 10 requests per second per peer
-                capacity=100.0,    # 100 burst capacity per peer
+                refill_rate=10.0,  # 10 requests per second per peer
+                capacity=100.0,  # 100 burst capacity per peer
                 initial_tokens=10.0,  # Start with some tokens per peer
-                max_peers=1000,    # Track up to 1000 peers
+                max_peers=1000,  # Track up to 1000 peers
             )
 
         # Scope storage
@@ -699,8 +698,13 @@ class ResourceManager:
         """
         if self._lifecycle_handler:
             await self._lifecycle_handler.publish_stream_event(
-                event_type, connection_id, peer_id, stream_id, protocol, direction,
-                metadata
+                event_type,
+                connection_id,
+                peer_id,
+                stream_id,
+                protocol,
+                direction,
+                metadata,
             )
 
     async def publish_peer_event(
@@ -947,9 +951,9 @@ class ResourceManager:
             protocol_limiter = self._protocol_rate_limiters[protocol_name]
             protocol_limiter.finish_request(peer_id, connection_id, current_time)
 
-    def get_rate_limiting_stats(self) -> Dict[str, Any]:
+    def get_rate_limiting_stats(self) -> dict[str, Any]:
         """Get rate limiting statistics."""
-        stats: Dict[str, Any] = {
+        stats: dict[str, Any] = {
             "global_rate_limiter": None,
             "per_peer_rate_limiter": None,
             "protocol_rate_limiters": {},
@@ -1101,8 +1105,16 @@ def new_resource_manager(
     )
     metrics = Metrics() if enable_metrics else None
     return ResourceManager(
-        limiter, allowlist, metrics, allowlist_config, enable_metrics,
-        connection_limits, enable_connection_tracking,
-        memory_limits, enable_memory_limits, enable_lifecycle_events,
-        enable_enhanced_errors, enable_rate_limiting
+        limiter,
+        allowlist,
+        metrics,
+        allowlist_config,
+        enable_metrics,
+        connection_limits,
+        enable_connection_tracking,
+        memory_limits,
+        enable_memory_limits,
+        enable_lifecycle_events,
+        enable_enhanced_errors,
+        enable_rate_limiting,
     )

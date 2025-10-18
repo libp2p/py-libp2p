@@ -8,7 +8,7 @@ the resource management system and provide hooks for connection state changes.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import multiaddr
 
@@ -140,7 +140,8 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
             local_addr=event.local_addr,
             remote_addr=event.remote_addr,
             direction=(
-                "inbound" if event.event_type == ConnectionEventType.ESTABLISHED_INBOUND
+                "inbound"
+                if event.event_type == ConnectionEventType.ESTABLISHED_INBOUND
                 else "outbound"
             ),
             metadata=event.metadata,
@@ -225,7 +226,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
         direction: str,
         local_addr: multiaddr.Multiaddr | None = None,
         remote_addr: multiaddr.Multiaddr | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Publish a connection established event.
@@ -261,7 +262,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
         connection_id: str,
         peer_id: ID | None = None,
         reason: str = "unknown",
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Publish a connection closed event.
@@ -289,7 +290,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
         current_value: int | float,
         connection_id: str | None = None,
         peer_id: ID | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Publish a resource limit exceeded event.
@@ -331,7 +332,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
         stream_id: str | None = None,
         protocol: str | None = None,
         direction: str | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Publish a stream lifecycle event.
@@ -365,7 +366,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
         action: str,
         peer_id: ID,
         connection_id: str | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Publish a peer-related event.
@@ -396,7 +397,7 @@ class ConnectionLifecycleHandler(AsyncConnectionEventHandler):
 
         await self.event_bus.publish(event)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get handler statistics.
 

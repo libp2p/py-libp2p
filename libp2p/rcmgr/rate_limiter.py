@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import multiaddr
 
@@ -142,7 +142,7 @@ class RateLimitStats:
     time_since_last_request: float
     next_available_time: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary."""
         return {
             "current_rate": self.current_rate,
@@ -178,9 +178,9 @@ class RateLimiter:
         self.config = config
 
         # Rate limiting state
-        self._token_buckets: Dict[str, TokenBucket] = {}
-        self._window_counts: Dict[str, List[float]] = {}
-        self._last_request_times: Dict[str, float] = {}
+        self._token_buckets: dict[str, TokenBucket] = {}
+        self._window_counts: dict[str, list[float]] = {}
+        self._last_request_times: dict[str, float] = {}
 
         # Statistics
         self._total_requests: int = 0
@@ -193,10 +193,10 @@ class RateLimiter:
 
     def _get_entity_key(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        protocol: Optional[str] = None,
-        endpoint: Optional[Union[str, multiaddr.Multiaddr]] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol: str | None = None,
+        endpoint: str | multiaddr.Multiaddr | None = None,
     ) -> str:
         """
         Get entity key for rate limiting.
@@ -242,7 +242,7 @@ class RateLimiter:
                 # Remove oldest entity (simple LRU)
                 oldest_key = min(
                     self._token_buckets.keys(),
-                    key=lambda k: self._last_request_times.get(k, 0)
+                    key=lambda k: self._last_request_times.get(k, 0),
                 )
                 del self._token_buckets[oldest_key]
                 if oldest_key in self._last_request_times:
@@ -299,13 +299,13 @@ class RateLimiter:
             # Increase rate if request was allowed
             self._current_rate = min(
                 self._current_rate * (1 + self.config.adaptation_factor),
-                self.config.max_rate
+                self.config.max_rate,
             )
         else:
             # Decrease rate if request was denied
             self._current_rate = max(
                 self._current_rate * (1 - self.config.adaptation_factor),
-                self.config.min_rate
+                self.config.min_rate,
             )
 
         # Update last adaptation time
@@ -314,11 +314,11 @@ class RateLimiter:
     def try_allow(
         self,
         tokens: float = 1.0,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        protocol: Optional[str] = None,
-        endpoint: Optional[Union[str, multiaddr.Multiaddr]] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol: str | None = None,
+        endpoint: str | multiaddr.Multiaddr | None = None,
+        current_time: float | None = None,
     ) -> bool:
         """
         Try to allow a request based on rate limiting.
@@ -363,7 +363,8 @@ class RateLimiter:
 
             # Clean up old requests
             self._window_counts[entity_key] = [
-                timestamp for timestamp in self._window_counts[entity_key]
+                timestamp
+                for timestamp in self._window_counts[entity_key]
                 if timestamp > window_start
             ]
 
@@ -383,7 +384,8 @@ class RateLimiter:
 
             # Clean up old requests
             self._window_counts[entity_key] = [
-                timestamp for timestamp in self._window_counts[entity_key]
+                timestamp
+                for timestamp in self._window_counts[entity_key]
                 if timestamp > window_start
             ]
 
@@ -416,11 +418,11 @@ class RateLimiter:
     def allow(
         self,
         tokens: float = 1.0,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        protocol: Optional[str] = None,
-        endpoint: Optional[Union[str, multiaddr.Multiaddr]] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol: str | None = None,
+        endpoint: str | multiaddr.Multiaddr | None = None,
+        current_time: float | None = None,
     ) -> None:
         """
         Allow a request based on rate limiting (raises exception if denied).
@@ -444,11 +446,11 @@ class RateLimiter:
 
     def get_stats(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        protocol: Optional[str] = None,
-        endpoint: Optional[Union[str, multiaddr.Multiaddr]] = None,
-        current_time: Optional[float] = None,
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol: str | None = None,
+        endpoint: str | multiaddr.Multiaddr | None = None,
+        current_time: float | None = None,
     ) -> RateLimitStats:
         """
         Get current statistics for the rate limiter.
@@ -513,11 +515,11 @@ class RateLimiter:
 
     def get_entity_stats(
         self,
-        peer_id: Optional[ID] = None,
-        connection_id: Optional[str] = None,
-        protocol: Optional[str] = None,
-        endpoint: Optional[Union[str, multiaddr.Multiaddr]] = None,
-    ) -> Dict[str, Any]:
+        peer_id: ID | None = None,
+        connection_id: str | None = None,
+        protocol: str | None = None,
+        endpoint: str | multiaddr.Multiaddr | None = None,
+    ) -> dict[str, Any]:
         """
         Get entity-specific statistics.
 

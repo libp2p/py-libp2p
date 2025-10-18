@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 import time
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import multiaddr
 
@@ -64,7 +64,7 @@ class ConnectionEvent:
     peer_id: ID | None = None
     local_addr: multiaddr.Multiaddr | None = None
     remote_addr: multiaddr.Multiaddr | None = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         """String representation of the event."""
@@ -201,11 +201,11 @@ class ConnectionEventBus:
 
         """
         self.max_event_history = max_event_history
-        self._handlers: Dict[ConnectionEventType, List[ConnectionEventHandler]] = {}
-        self._async_handlers: Dict[
-            ConnectionEventType, List[AsyncConnectionEventHandler]
+        self._handlers: dict[ConnectionEventType, list[ConnectionEventHandler]] = {}
+        self._async_handlers: dict[
+            ConnectionEventType, list[AsyncConnectionEventHandler]
         ] = {}
-        self._event_history: List[ConnectionEvent] = []
+        self._event_history: list[ConnectionEvent] = []
         self._lock = asyncio.Lock()
 
         logger.debug(
@@ -315,7 +315,7 @@ class ConnectionEventBus:
         self,
         event_type: ConnectionEventType | None = None,
         limit: int | None = None,
-    ) -> List[ConnectionEvent]:
+    ) -> list[ConnectionEvent]:
         """
         Get event history.
 
@@ -337,7 +337,7 @@ class ConnectionEventBus:
 
         return events
 
-    def get_event_stats(self) -> Dict[str, Any]:
+    def get_event_stats(self) -> dict[str, Any]:
         """
         Get event statistics.
 
@@ -345,7 +345,7 @@ class ConnectionEventBus:
             Dictionary of event statistics
 
         """
-        stats: Dict[str, Any] = {}
+        stats: dict[str, Any] = {}
 
         # Count events by type
         for event in self._event_history:
@@ -354,9 +354,7 @@ class ConnectionEventBus:
 
         # Add summary statistics
         stats["total_events"] = len(self._event_history)
-        stats["unique_event_types"] = len(
-            set(e.event_type for e in self._event_history)
-        )
+        stats["unique_event_types"] = len({e.event_type for e in self._event_history})
         stats["handler_counts"] = {
             event_type.value: len(handlers)
             for event_type, handlers in self._handlers.items()

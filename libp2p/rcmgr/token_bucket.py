@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -78,7 +78,7 @@ class TokenBucketStats:
     time_since_last_refill: float
     next_refill_time: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary."""
         return {
             "current_tokens": self.current_tokens,
@@ -184,7 +184,7 @@ class TokenBucket:
         ]
 
     def try_consume(
-        self, tokens: float = 1.0, current_time: Optional[float] = None
+        self, tokens: float = 1.0, current_time: float | None = None
     ) -> bool:
         """
         Try to consume tokens from the bucket.
@@ -230,9 +230,7 @@ class TokenBucket:
 
             return False
 
-    def consume(
-        self, tokens: float = 1.0, current_time: Optional[float] = None
-    ) -> None:
+    def consume(self, tokens: float = 1.0, current_time: float | None = None) -> None:
         """
         Consume tokens from the bucket (raises exception if not enough).
 
@@ -247,7 +245,7 @@ class TokenBucket:
         if not self.try_consume(tokens, current_time):
             raise ValueError(f"Not enough tokens available: {tokens} > {self._tokens}")
 
-    def get_stats(self, current_time: Optional[float] = None) -> TokenBucketStats:
+    def get_stats(self, current_time: float | None = None) -> TokenBucketStats:
         """
         Get current statistics for the token bucket.
 
@@ -292,7 +290,7 @@ class TokenBucket:
             next_refill_time=next_refill_time,
         )
 
-    def get_history(self, time_window: Optional[float] = None) -> Dict[str, Any]:
+    def get_history(self, time_window: float | None = None) -> dict[str, Any]:
         """
         Get request history for monitoring.
 
