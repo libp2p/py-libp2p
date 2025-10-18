@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from multiaddr import Multiaddr
+from base58 import b58encode
 import trio
 
 from libp2p.abc import IHost
@@ -893,3 +894,76 @@ async def test_stream_handler_calls_handler_function():
 
     # Assert that handler_function was called with the RawConnection
     handler_function.assert_awaited_once()
+
+@pytest.mark.trio
+async def test_refresh_worker_removes_expired():
+    host = MagicMock()
+    host.new_stream = AsyncMock()
+    transport = CircuitV2Transport(host, protocol=MagicMock(), config=MagicMock())
+
+    # generate valid fake peer ID
+    relay_id = ID.from_base58(b58encode(b"expired" + b"\x00" * 25).decode())
+
+    now = time.time()
+    # reservation already expired
+    transport._reservations = {relay_id: now - 1}
+    transport._make_reservation = AsyncMock(return_value=True)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(transport._refresh_reservations_worker)
+        await trio.sleep(0.2)
+        nursery.cancel_scope.cancel()
+
+    assert relay_id not in transport._reservations
+
+
+@pytest.mark.trio
+async def test_refresh_worker_refreshes_active_reservation():
+    host = MagicMock()
+    stream_mock = AsyncMock()
+    host.new_stream = AsyncMock(return_value=stream_mock)
+    transport = CircuitV2Transport(host, protocol=MagicMock(), config=MagicMock())
+
+    # valid fake peer ID
+    relay_id = ID.from_base58(b58encode(b"active" + b"\x00" * 26).decode())
+
+    now = time.time()
+    ttl = 1.0  # short TTL
+    transport._reservations = {relay_id: now + ttl}
+    transport._make_reservation = AsyncMock(return_value=True)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(transport._refresh_reservations_worker)
+        await trio.sleep(0.2)
+        nursery.cancel_scope.cancel()
+
+    # reservation should still exist
+    assert relay_id in transport._reservations
+    transport._make_reservation.assert_called()
+
+
+@pytest.mark.trio
+async def test_refresh_worker_handles_failed_refresh():
+    host = MagicMock()
+    stream_mock = AsyncMock()
+    host.new_stream = AsyncMock(return_value=stream_mock)
+    transport = CircuitV2Transport(host, protocol=MagicMock(), config=MagicMock())
+
+    # valid fake peer ID
+    relay_id = ID.from_base58(b58encode(b"fail" + b"\x00" * 28).decode())
+
+    now = time.time()
+    ttl = 1.0
+    transport._reservations = {relay_id: now + ttl}
+
+    # simulate reservation failure
+    transport._make_reservation = AsyncMock(return_value=False)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(transport._refresh_reservations_worker)
+        await trio.sleep(0.2)
+        nursery.cancel_scope.cancel()
+
+    # reservation still exists because failure doesn't remove it
+    assert relay_id in transport._reservations
+    transport._make_reservation.assert_called()

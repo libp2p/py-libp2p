@@ -61,6 +61,8 @@ from .utils import (
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
 TOP_N = 3
+RESERVATION_REFRESH_INTERVAL = 10 # seconds
+RESERVATION_REFRESH_MARGIN = 30 # seconds
 
 class CircuitV2Transport(ITransport):
     """
@@ -104,6 +106,8 @@ class CircuitV2Transport(ITransport):
         self._last_relay_index = -1
         self._relay_list = []
         self._relay_metrics: dict[ID, dict[str, float | int]] = {}
+        self._reservations: dict[ID, float] = {}
+        self._refreshing = False
 
     async def dial(  # type: ignore[override]
         self,
@@ -419,6 +423,27 @@ class CircuitV2Transport(ITransport):
         )
         scored_relays.append((relay_id, score))
 
+    async def reserve(
+            self,
+            stream: INetStream,
+            relay_peer_id: ID,
+            nursery: trio.Nursery
+    ) -> bool:
+        """
+        Public method to create a reservation and start refresher if needed.
+        """
+        success = await self._make_reservation(stream, relay_peer_id)
+        if not success:
+            return False
+
+        # Start refresher if this is the first reservation
+        if not self._refreshing:
+            self._refreshing = True
+            nursery.start_soon(
+                self._refresh_reservations_worker
+            )
+        return True
+
     async def _make_reservation(
         self,
         stream: INetStream,
@@ -483,6 +508,7 @@ class CircuitV2Transport(ITransport):
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
             status_msg = getattr(resp.status, "message", "Unknown error")
+            expires = getattr(resp.reservation, "expire", 0)
 
             logger.debug(
                 "Reservation response: code=%s, message=%s", status_code, status_msg
@@ -496,14 +522,83 @@ class CircuitV2Transport(ITransport):
                 )
                 return False
 
-            # Store reservation info
-            # TODO: Implement reservation storage and refresh mechanism
+            self._reservations[relay_peer_id] = expires
+            logger.info("Reserved peer %s (ttl=%.1fs)", relay_peer_id, expires)
+
             return True
 
         except Exception as e:
             logger.error("Error making reservation: %s", str(e))
             return False
+        
+    async def _refresh_reservations_worker(self) -> None:
+        """Periodically refresh all active reservations."""
+        logger.info("Started reservation refresh loop")
+        try:
+            while self._reservations:
+                now = time.time()
+                expired = [
+                    relay_peer_id for relay_peer_id,
+                    exp in self._reservations.items()
+                    if exp <= now
+                ]
 
+                # Remove expired reservations
+                for relay_peer_id in expired:
+                    logger.info("Reservation expired for peer %s", relay_peer_id)
+                    del self._reservations[relay_peer_id]
+
+
+                to_refresh = [
+                    relay_peer_id
+                    for relay_peer_id, exp in self._reservations.items()
+                    if exp - now <= RESERVATION_REFRESH_MARGIN
+                ]
+
+
+                for relay_peer_id in to_refresh:
+                  try:
+                       # Open a fresh stream per refresh
+                        stream = await self.host.new_stream(
+                            relay_peer_id,
+                            [PROTOCOL_ID]
+                        )
+                        success = await self._make_reservation(stream, relay_peer_id)
+                        await stream.close()
+                        if success:
+                            logger.info(
+                                "Refreshed reservation for relay %s", relay_peer_id
+                            )
+                        else:
+                            logger.warning(
+                                "Failed to refresh reservation for relay %s",
+                                relay_peer_id
+                            )
+                  except Exception as e:
+                      logger.error(
+                            "Error refreshing reservation for relay %s: %s",
+                            relay_peer_id, str(e)
+                        )
+
+                # Calculate next wake-up dynamically
+                now = time.time()
+                next_exp = min(
+                    self._reservations.values(),
+                    default=now + RESERVATION_REFRESH_INTERVAL
+                )
+                sleep_time = max(0, next_exp - now - RESERVATION_REFRESH_MARGIN)
+                await trio.sleep(sleep_time)
+
+        except trio.Cancelled:
+            self._refreshing = False
+            logger.info("Reservation refresher cancelled")
+        finally:
+            self._refreshing = False
+            logger.info("Stopped reservation refresher")
+
+
+
+    
     def create_listener(self, handler_function: THandler) -> IListener:
         """
         Create a listener on the transport.
@@ -535,7 +630,7 @@ class CircuitV2Listener(Service, IListener):
     def __init__(
         self,
         host: IHost,
-        handler_function: Callable[[ReadWriteCloser], Awaitable[None]],
+        handler_function: THandler,
         protocol: CircuitV2Protocol,
         config: RelayConfig,
     ) -> None:
