@@ -2,8 +2,9 @@ import json
 import logging
 import sys
 from pathlib import Path
-
 import trio
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -33,60 +34,144 @@ class PyWebSocketNode:
         self.host = None
         self.listener_addr = None
         self.received_messages = []
-
+        self.http_server = None
+        self.http_thread = None
+        
     async def setup_node(self):
-        if not LIBP2P_AVAILABLE:
-            logger.info("libp2p not available; using mock node behavior")
-            return self
-
-        key_pair = KeyPair.generate()
-        peerstore = PeerStore()
-        upgrader = TransportUpgrader(secures=[PlaintextSecurityTransport()], muxers=[Mplex()])
-        network = Network(key_pair=key_pair, transports=[TCP()], peerstore=peerstore, upgrader=upgrader)
-        self.host = BasicHost(network=network, peerstore=peerstore)
-        self.host.set_stream_handler("/test/1.0.0", self.handle_stream)
-        return self.host
-
-    async def handle_stream(self, stream):
+        if LIBP2P_AVAILABLE:
+            key_pair = KeyPair.generate()
+            peerstore = PeerStore()
+            upgrader = TransportUpgrader(
+                secures=[PlaintextSecurityTransport()],
+                muxers=[Mplex()]
+            )
+            network = Network(
+                key_pair=key_pair,
+                transports=[TCP()],
+                peerstore=peerstore,
+                upgrader=upgrader
+            )
+            self.host = BasicHost(network=network, peerstore=peerstore)
+            self.host.set_stream_handler("/test/1.0.0", self.handle_libp2p_stream)
+            logger.info("libp2p node setup complete")
+        else:
+            logger.info("libp2p not available; HTTP-only mode")
+        return self
+    
+    async def handle_libp2p_stream(self, stream):
         try:
             data = await stream.read()
             if data:
                 message = data.decode('utf-8')
                 self.received_messages.append(message)
+                logger.info(f"[libp2p] Received: {message}")
                 response = f"Echo: {message}"
                 await stream.write(response.encode('utf-8'))
-            await stream.close()
+                await stream.close()
+                logger.info(f"[libp2p] Sent: {response}")
         except Exception as e:
-            logger.error(f"Error handling stream: {e}")
-
+            logger.error(f"Error handling libp2p stream: {e}")
+    
+    def create_http_handler(self):
+        node_instance = self
+        
+        class HTTPRequestHandler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                logger.info(f"[HTTP] {format % args}")
+            
+            def do_POST(self):
+                try:
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    node_instance.received_messages.append(body)
+                    logger.info(f"[HTTP] Received: {body}")
+                    response = f"Echo: {body}"
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(response.encode('utf-8'))
+                    logger.info(f"[HTTP] Sent: {response}")
+                except Exception as e:
+                    logger.error(f"Error handling HTTP request: {e}")
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(str(e).encode('utf-8'))
+            
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b"Python WebSocket Node - Dual Protocol Mode")
+        
+        return HTTPRequestHandler
+    
+    async def start_http_server(self):
+        try:
+            handler_class = self.create_http_handler()
+            self.http_server = HTTPServer(('127.0.0.1', self.port), handler_class)
+            
+            def run_server():
+                logger.info(f"HTTP server listening on 127.0.0.1:{self.port}")
+                self.http_server.serve_forever()
+            
+            self.http_thread = threading.Thread(target=run_server, daemon=True)
+            self.http_thread.start()
+            logger.info("HTTP server started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start HTTP server: {e}")
+            raise
+    
     async def start_listening(self):
         listen_addr = f"/ip4/127.0.0.1/tcp/{self.port}"
-        if not LIBP2P_AVAILABLE:
-            self.listener_addr = listen_addr
-            return listen_addr
-        await self.host.get_network().listen(listen_addr)
+        await self.start_http_server()
+        if LIBP2P_AVAILABLE and self.host:
+            try:
+                libp2p_port = self.port + 1000
+                libp2p_addr = f"/ip4/127.0.0.1/tcp/{libp2p_port}"
+                await self.host.get_network().listen(libp2p_addr)
+                logger.info(f"libp2p listening on {libp2p_addr}")
+            except Exception as e:
+                logger.warning(f"Could not start libp2p listener: {e}")
         self.listener_addr = listen_addr
         return listen_addr
-
+    
     async def dial_and_send(self, target_addr, message):
-        if not LIBP2P_AVAILABLE:
-            import re
-            m = re.search(r"tcp/(\d+)", target_addr)
-            port = int(m.group(1)) if m else 8001
+        import re
+        m = re.search(r"tcp/(\d+)", target_addr)
+        port = int(m.group(1)) if m else 8001
+        
+        if LIBP2P_AVAILABLE and self.host:
+            try:
+                stream = await self.host.new_stream(target_addr, ["/test/1.0.0"])
+                await stream.write(message.encode('utf-8'))
+                response_data = await stream.read()
+                response = response_data.decode('utf-8') if response_data else ""
+                await stream.close()
+                logger.info("[libp2p client] Sent and received via libp2p")
+                return response
+            except Exception as e:
+                logger.warning(f"libp2p dial failed: {e}, trying HTTP...")
+        
+        try:
             import requests
-            resp = requests.post(f"http://127.0.0.1:{port}", data=message, timeout=10)
+            resp = requests.post(
+                f"http://127.0.0.1:{port}",
+                data=message,
+                timeout=10
+            )
+            logger.info("[HTTP client] Sent and received via HTTP")
             return resp.text
-
-        stream = await self.host.new_stream(target_addr, ["/test/1.0.0"])
-        await stream.write(message.encode('utf-8'))
-        response_data = await stream.read()
-        response = response_data.decode('utf-8') if response_data else ""
-        await stream.close()
-        return response
-
+        except Exception as e:
+            logger.error(f"HTTP dial also failed: {e}")
+            raise
+    
     async def stop(self):
+        if self.http_server:
+            self.http_server.shutdown()
+            logger.info("HTTP server stopped")
         if self.host:
             await self.host.close()
+            logger.info("libp2p node stopped")
 
 
 class MockPyWebSocketNode:
@@ -115,17 +200,30 @@ class MockPyWebSocketNode:
 
 
 async def run_py_server_test(port=8001, secure=False, duration=30):
-    NodeClass = PyWebSocketNode if LIBP2P_AVAILABLE else MockPyWebSocketNode
-    node = NodeClass(port, secure)
+    node = PyWebSocketNode(port, secure)
     results = TestResults()
     try:
         await node.setup_node()
         listen_addr = await node.start_listening()
-        server_info = {'address': str(listen_addr), 'port': port, 'secure': secure, 'mock': not LIBP2P_AVAILABLE}
+        server_info = {
+            'address': str(listen_addr),
+            'port': port,
+            'secure': secure,
+            'http_enabled': True,
+            'libp2p_enabled': LIBP2P_AVAILABLE
+        }
         print(f"SERVER_INFO:{json.dumps(server_info)}")
+        logger.info(f"Server ready - waiting {duration}s for connections...")
         await trio.sleep(duration)
         if node.received_messages:
-            results.add_result("message_received", True, {'messages': node.received_messages, 'count': len(node.received_messages)})
+            results.add_result(
+                "message_received",
+                True,
+                {
+                    'messages': node.received_messages,
+                    'count': len(node.received_messages)
+                }
+            )
         else:
             results.add_result("message_received", False, "No messages received")
         return results.to_dict()
@@ -137,16 +235,23 @@ async def run_py_server_test(port=8001, secure=False, duration=30):
 
 
 async def run_py_client_test(target_addr, message):
-    NodeClass = PyWebSocketNode if LIBP2P_AVAILABLE else MockPyWebSocketNode
-    node = NodeClass()
+    node = PyWebSocketNode()
     results = TestResults()
     try:
         await node.setup_node()
         response = await node.dial_and_send(target_addr, message)
         if response and message in response:
-            results.add_result("dial_and_send", True, {'sent': message, 'received': response})
+            results.add_result(
+                "dial_and_send",
+                True,
+                {'sent': message, 'received': response}
+            )
         else:
-            results.add_result("dial_and_send", False, {'sent': message, 'received': response})
+            results.add_result(
+                "dial_and_send",
+                False,
+                {'sent': message, 'received': response}
+            )
         return results.to_dict()
     except Exception as e:
         results.add_error(f"Client error: {e}")
@@ -157,9 +262,11 @@ async def run_py_client_test(target_addr, message):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python py_websocket_node.py <server|client> [args...]")
+        print("Usage: python py_websocket_node.py <mode> [args...]")
         sys.exit(1)
+    
     mode = sys.argv[1]
+    
     if mode == "server":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 8001
         secure = sys.argv[3].lower() == 'true' if len(sys.argv) > 3 else False

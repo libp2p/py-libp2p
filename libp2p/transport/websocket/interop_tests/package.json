@@ -1,0 +1,16 @@
+{
+  "name": "py-libp2p-websocket-interop-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Interoperability tests for py-libp2p WebSocket transport",
+  "scripts": {
+    "test:js-to-py": "node tests/test_js_to_py.js",
+    "test:py-to-js": "python tests/test_py_to_js.py",
+    "test:bidirectional": "python tests/bidirectional_test.py",
+    "test:all": "bash run_all_tests.sh"
+  },
+  "keywords": ["libp2p", "websocket", "interop", "testing"],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
