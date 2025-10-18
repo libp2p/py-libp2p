@@ -29,17 +29,17 @@ class TestErrorContextBuilder:
         builder = ErrorContextBuilder()
 
         assert builder is not None
-        assert hasattr(builder, 'with_error_code')
-        assert hasattr(builder, 'with_error_category')
-        assert hasattr(builder, 'with_severity')
-        assert hasattr(builder, 'with_message')
-        assert hasattr(builder, 'with_connection_info')
-        assert hasattr(builder, 'with_connection_info')
-        assert hasattr(builder, 'with_connection_info')
-        assert hasattr(builder, 'with_stack_trace')
-        assert hasattr(builder, 'with_original_exception')
-        assert hasattr(builder, 'with_metadata')
-        assert hasattr(builder, 'build_context')
+        assert hasattr(builder, "with_error_code")
+        assert hasattr(builder, "with_error_category")
+        assert hasattr(builder, "with_severity")
+        assert hasattr(builder, "with_message")
+        assert hasattr(builder, "with_connection_info")
+        assert hasattr(builder, "with_connection_info")
+        assert hasattr(builder, "with_connection_info")
+        assert hasattr(builder, "with_stack_trace")
+        assert hasattr(builder, "with_original_exception")
+        assert hasattr(builder, "with_metadata")
+        assert hasattr(builder, "build_context")
 
     def test_error_context_builder_with_error_code(self):
         """Test ErrorContextBuilder with_error_code method."""
@@ -118,8 +118,8 @@ class TestErrorContextBuilder:
         builder = ErrorContextBuilder()
         stack_trace = (
             "Traceback (most recent call last):\n"
-            "  File \"test.py\", line 1, in <module>\n"
-            "    raise Exception(\"test\")\nException: test"
+            '  File "test.py", line 1, in <module>\n'
+            '    raise Exception("test")\nException: test'
         )
 
         result = builder.with_stack_trace(stack_trace)
@@ -156,13 +156,14 @@ class TestErrorContextBuilder:
         peer_id = ID(b"test_peer")
         metadata = {"test": "data"}
 
-        result = (builder
-                 .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                 .with_error_category(ErrorCategory.MEMORY_LIMIT)
-                 .with_severity(ErrorSeverity.CRITICAL)
-                 .with_message("Memory limit exceeded")
-                 .with_connection_info(connection_id="conn_1", peer_id=peer_id)
-                 .with_metadata(metadata))
+        result = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_error_category(ErrorCategory.MEMORY_LIMIT)
+            .with_severity(ErrorSeverity.CRITICAL)
+            .with_message("Memory limit exceeded")
+            .with_connection_info(connection_id="conn_1", peer_id=peer_id)
+            .with_metadata(metadata)
+        )
 
         # Should return self for chaining
         assert result is builder
@@ -184,14 +185,15 @@ class TestErrorContextBuilder:
         peer_id = ID(b"test_peer")
         metadata = {"test": "data"}
 
-        context = (builder
-                  .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                  .with_error_category(ErrorCategory.MEMORY_LIMIT)
-                  .with_severity(ErrorSeverity.CRITICAL)
-                  .with_message("Memory limit exceeded")
-                  .with_connection_info(connection_id="conn_1", peer_id=peer_id)
-                  .with_metadata(metadata)
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_error_category(ErrorCategory.MEMORY_LIMIT)
+            .with_severity(ErrorSeverity.CRITICAL)
+            .with_message("Memory limit exceeded")
+            .with_connection_info(connection_id="conn_1", peer_id=peer_id)
+            .with_metadata(metadata)
+            .build_context()
+        )
 
         assert isinstance(context, ErrorContext)
         assert context.error_code == ErrorCode.MEMORY_LIMIT_EXCEEDED
@@ -226,10 +228,11 @@ class TestErrorContextBuilder:
         """Test ErrorContextBuilder build with partial values."""
         builder = ErrorContextBuilder()
 
-        context = (builder
-                  .with_error_code(ErrorCode.CONNECTION_LIMIT_EXCEEDED)
-                  .with_message("Connection limit exceeded")
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.CONNECTION_LIMIT_EXCEEDED)
+            .with_message("Connection limit exceeded")
+            .build_context()
+        )
 
         assert isinstance(context, ErrorContext)
         assert context.error_code == ErrorCode.CONNECTION_LIMIT_EXCEEDED
@@ -250,11 +253,12 @@ class TestErrorContextBuilder:
         try:
             raise Exception("test exception")
         except Exception as e:
-            context = (builder
-                      .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                      .with_message("Memory limit exceeded")
-                      .with_original_exception(e)
-                      .build_context())
+            context = (
+                builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+                .with_message("Memory limit exceeded")
+                .with_original_exception(e)
+                .build_context()
+            )
 
             # The original exception is stored in the builder, not in previous_errors
             assert builder._original_exception == e
@@ -264,11 +268,12 @@ class TestErrorContextBuilder:
     def test_error_context_builder_build_with_custom_timestamp(self):
         """Test ErrorContextBuilder build with custom timestamp."""
         builder = ErrorContextBuilder()
-        context = (builder
-                  .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                  .with_message("Memory limit exceeded")
-                  .with_connection_info()
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_message("Memory limit exceeded")
+            .with_connection_info()
+            .build_context()
+        )
 
         # Timestamp should be current time (realistic behavior)
         assert context.timestamp > 0
@@ -277,12 +282,15 @@ class TestErrorContextBuilder:
         """Test ErrorContextBuilder build with unicode data."""
         builder = ErrorContextBuilder()
 
-        context = (builder
-                  .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                  .with_message("内存限制超出")
-                  .with_connection_info(connection_id="conn_测试_🚀", peer_id=ID(b"test_peer"))
-                  .with_metadata({"测试": "数据", "🚀": "rocket"})
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_message("内存限制超出")
+            .with_connection_info(
+                connection_id="conn_测试_🚀", peer_id=ID(b"test_peer")
+            )
+            .with_metadata({"测试": "数据", "🚀": "rocket"})
+            .build_context()
+        )
 
         assert context.message == "内存限制超出"
         assert context.connection_id == "conn_测试_🚀"
@@ -296,12 +304,13 @@ class TestErrorContextBuilder:
         long_connection_id = "conn_" + "x" * 10000
         long_metadata = {"key": "x" * 10000}
 
-        context = (builder
-                  .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                  .with_message(long_message)
-                  .with_connection_info(connection_id=long_connection_id)
-                  .with_metadata(long_metadata)
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_message(long_message)
+            .with_connection_info(connection_id=long_connection_id)
+            .with_metadata(long_metadata)
+            .build_context()
+        )
 
         assert context.message == long_message
         assert context.connection_id == long_connection_id
@@ -312,21 +321,25 @@ class TestErrorContextBuilder:
         builder = ErrorContextBuilder()
 
         # Build first context
-        context1 = (builder
-                   .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                   .with_message("Memory limit exceeded")
-                   .build_context())
+        context1 = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_message("Memory limit exceeded")
+            .build_context()
+        )
 
         # Build second context
-        context2 = (builder
-                   .with_error_code(ErrorCode.CONNECTION_LIMIT_EXCEEDED)
-                   .with_message("Connection limit exceeded")
-                   .build_context())
+        context2 = (
+            builder.with_error_code(ErrorCode.CONNECTION_LIMIT_EXCEEDED)
+            .with_message("Connection limit exceeded")
+            .build_context()
+        )
 
         # Should be the same object (builder reuses _context)
         assert context1 is context2
         # The context gets modified by subsequent calls
-        assert context1.error_code == ErrorCode.CONNECTION_LIMIT_EXCEEDED  # Last value set
+        assert (
+            context1.error_code == ErrorCode.CONNECTION_LIMIT_EXCEEDED
+        )  # Last value set
         assert context2.error_code == ErrorCode.CONNECTION_LIMIT_EXCEEDED
 
     def test_error_context_builder_build_performance(self):
@@ -337,10 +350,11 @@ class TestErrorContextBuilder:
         start_time = time.time()
 
         for i in range(1000):
-            (builder
-             .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-             .with_message(f"Memory limit exceeded {i}")
-                      .build_context())
+            (
+                builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+                .with_message(f"Memory limit exceeded {i}")
+                .build_context()
+            )
 
         end_time = time.time()
         elapsed = end_time - start_time
@@ -431,12 +445,13 @@ class TestErrorContextBuilder:
         """Test ErrorContextBuilder can be serialized."""
         builder = ErrorContextBuilder()
 
-        context = (builder
-                  .with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
-                  .with_message("Memory limit exceeded")
-                  .with_connection_info(connection_id="conn_1")
-                  .with_metadata({"test": "data"})
-                  .build_context())
+        context = (
+            builder.with_error_code(ErrorCode.MEMORY_LIMIT_EXCEEDED)
+            .with_message("Memory limit exceeded")
+            .with_connection_info(connection_id="conn_1")
+            .with_metadata({"test": "data"})
+            .build_context()
+        )
 
         # Should be able to serialize context data (convert enums to values)
         context_dict = {
@@ -446,7 +461,7 @@ class TestErrorContextBuilder:
             "message": context.message,
             "timestamp": context.timestamp,
             "connection_id": context.connection_id,
-            "metadata": context.metadata
+            "metadata": context.metadata,
         }
 
         json_str = json.dumps(context_dict)
@@ -466,14 +481,14 @@ class TestErrorContextCollector:
         collector = ErrorContextCollector()
 
         assert collector is not None
-        assert hasattr(collector, 'add_error')
-        assert hasattr(collector, 'get_errors')
-        assert hasattr(collector, 'get_errors')
-        assert hasattr(collector, 'get_errors')
-        assert hasattr(collector, 'get_errors')
-        assert hasattr(collector, 'get_error_summary')
-        assert hasattr(collector, 'get_error_summary')
-        assert hasattr(collector, 'get_error_statistics')
+        assert hasattr(collector, "add_error")
+        assert hasattr(collector, "get_errors")
+        assert hasattr(collector, "get_errors")
+        assert hasattr(collector, "get_errors")
+        assert hasattr(collector, "get_errors")
+        assert hasattr(collector, "get_error_summary")
+        assert hasattr(collector, "get_error_summary")
+        assert hasattr(collector, "get_error_statistics")
 
     def test_error_context_collector_add_error(self):
         """Test ErrorContextCollector add_error method."""
@@ -484,7 +499,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         collector.add_error(context)
@@ -501,7 +516,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -509,7 +524,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         collector.add_error(context1)
@@ -528,7 +543,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -536,7 +551,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         collector.add_error(context1)
@@ -557,7 +572,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -565,7 +580,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -573,7 +588,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Another memory limit exceeded",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -581,8 +596,8 @@ class TestErrorContextCollector:
         collector.add_error(context3)
 
         memory_errors = collector.get_errors(error_code=ErrorCode.MEMORY_LIMIT_EXCEEDED)
-        connection_errors = collector.get_errors(error_code=
-            ErrorCode.CONNECTION_LIMIT_EXCEEDED
+        connection_errors = collector.get_errors(
+            error_code=ErrorCode.CONNECTION_LIMIT_EXCEEDED
         )
 
         assert len(memory_errors) == 2
@@ -601,7 +616,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -609,7 +624,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -617,7 +632,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Another memory limit exceeded",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -645,7 +660,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -653,7 +668,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -661,7 +676,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Connection limit exceeded again",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -687,7 +702,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -695,7 +710,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -703,7 +718,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Another memory limit exceeded",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -733,7 +748,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         collector.add_error(context)
@@ -753,7 +768,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -761,7 +776,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         collector.add_error(context1)
@@ -779,7 +794,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -787,7 +802,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -795,7 +810,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Rate limit exceeded",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -829,7 +844,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
         context2 = ErrorContext(
@@ -837,7 +852,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.HIGH,
             message="Connection limit exceeded",
-            timestamp=1234567891.0
+            timestamp=1234567891.0,
         )
 
         context3 = ErrorContext(
@@ -845,7 +860,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.CONNECTION_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Connection limit exceeded again",
-            timestamp=1234567892.0
+            timestamp=1234567892.0,
         )
 
         collector.add_error(context1)
@@ -858,7 +873,6 @@ class TestErrorContextCollector:
         assert len(errors_with_limit) == 2
         assert context2 in errors_with_limit
         assert context3 in errors_with_limit
-
 
     def test_error_context_collector_performance(self):
         """Test ErrorContextCollector performance."""
@@ -873,7 +887,7 @@ class TestErrorContextCollector:
                 error_category=ErrorCategory.MEMORY_LIMIT,
                 severity=ErrorSeverity.CRITICAL,
                 message=f"Memory limit exceeded {i}",
-                timestamp=1234567890.0 + i
+                timestamp=1234567890.0 + i,
             )
             collector.add_error(context)
 
@@ -895,7 +909,7 @@ class TestErrorContextCollector:
                 error_category=ErrorCategory.MEMORY_LIMIT,
                 severity=ErrorSeverity.CRITICAL,
                 message=f"Memory limit exceeded {i}",
-                timestamp=1234567890.0 + i
+                timestamp=1234567890.0 + i,
             )
             collector.add_error(context)
 
@@ -943,7 +957,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
         collector1.add_error(context)
 
@@ -984,7 +998,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
         collector.add_error(context)
 
@@ -1005,7 +1019,7 @@ class TestErrorContextCollector:
             error_category=ErrorCategory.MEMORY_LIMIT,
             severity=ErrorSeverity.CRITICAL,
             message="Memory limit exceeded",
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
         collector.add_error(context)
 
@@ -1027,7 +1041,7 @@ class TestErrorContextCollector:
             message="Memory limit exceeded",
             timestamp=1234567890.0,
             connection_id="conn_1",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
         collector.add_error(context)
 

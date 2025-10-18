@@ -33,7 +33,10 @@ class TestConnectionEventType:
         """Test ConnectionEventType enum values."""
         assert ConnectionEventType.ESTABLISHED_INBOUND.value == "established_inbound"
         assert ConnectionEventType.CONNECTION_CLOSED.value == "connection_closed"
-        assert ConnectionEventType.RESOURCE_LIMIT_EXCEEDED.value == "resource_limit_exceeded"
+        assert (
+            ConnectionEventType.RESOURCE_LIMIT_EXCEEDED.value
+            == "resource_limit_exceeded"
+        )
         assert ConnectionEventType.STREAM_OPENED.value == "stream_opened"
         assert ConnectionEventType.STREAM_CLOSED.value == "stream_closed"
         assert ConnectionEventType.PEER_CONNECTED.value == "peer_connected"
@@ -43,9 +46,15 @@ class TestConnectionEventType:
 
     def test_connection_event_type_membership(self):
         """Test ConnectionEventType membership."""
-        assert "established_inbound" in [member.value for member in ConnectionEventType.__members__.values()]
-        assert "connection_closed" in [member.value for member in ConnectionEventType.__members__.values()]
-        assert "resource_limit_exceeded" in [member.value for member in ConnectionEventType.__members__.values()]
+        assert "established_inbound" in [
+            member.value for member in ConnectionEventType.__members__.values()
+        ]
+        assert "connection_closed" in [
+            member.value for member in ConnectionEventType.__members__.values()
+        ]
+        assert "resource_limit_exceeded" in [
+            member.value for member in ConnectionEventType.__members__.values()
+        ]
 
 
 class TestConnectionEvent:
@@ -58,7 +67,7 @@ class TestConnectionEvent:
             timestamp=1234567890.0,
             connection_id="conn_1",
             peer_id=ID(b"test_peer"),
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert event.event_type == ConnectionEventType.ESTABLISHED_INBOUND
@@ -70,8 +79,7 @@ class TestConnectionEvent:
     def test_connection_event_default_values(self):
         """Test ConnectionEvent with default values."""
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         assert event.connection_id is None
@@ -83,7 +91,7 @@ class TestConnectionEvent:
         event = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
 
         str_repr = str(event)
@@ -95,17 +103,17 @@ class TestConnectionEvent:
         event1 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
         event2 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
         event3 = ConnectionEvent(
             event_type=ConnectionEventType.CONNECTION_CLOSED,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
 
         assert event1 == event2
@@ -116,12 +124,12 @@ class TestConnectionEvent:
         event1 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
         event2 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
 
         # Events are not hashable (realistic for dataclasses with mutable fields)
@@ -133,12 +141,12 @@ class TestConnectionEvent:
         event1 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
         event2 = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
 
         # Events are not hashable, so they can't be used in sets
@@ -150,7 +158,7 @@ class TestConnectionEvent:
         event = ConnectionEvent(
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
-            connection_id="conn_1"
+            connection_id="conn_1",
         )
 
         # Events are not hashable, so they can't be used as dictionary keys
@@ -172,7 +180,7 @@ class TestConnectionEstablishedEvent:
             direction="inbound",
             local_addr=multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/8080"),
             remote_addr=multiaddr.Multiaddr("/ip4/192.168.1.1/tcp/9090"),
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert event.event_type == ConnectionEventType.ESTABLISHED_INBOUND
@@ -186,8 +194,7 @@ class TestConnectionEstablishedEvent:
     def test_connection_established_event_default_values(self):
         """Test ConnectionEstablishedEvent with default values."""
         event = ConnectionEstablishedEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         assert event.connection_id is None
@@ -203,7 +210,7 @@ class TestConnectionEstablishedEvent:
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
             connection_id="conn_1",
-            direction="inbound"
+            direction="inbound",
         )
 
         str_repr = str(event)
@@ -223,7 +230,7 @@ class TestConnectionClosedEvent:
             connection_id="conn_1",
             peer_id=ID(b"test_peer"),
             reason="timeout",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert event.event_type == ConnectionEventType.CONNECTION_CLOSED
@@ -235,8 +242,7 @@ class TestConnectionClosedEvent:
     def test_connection_closed_event_default_values(self):
         """Test ConnectionClosedEvent with default values."""
         event = ConnectionClosedEvent(
-            event_type=ConnectionEventType.CONNECTION_CLOSED,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.CONNECTION_CLOSED, timestamp=1234567890.0
         )
 
         assert event.connection_id is None
@@ -250,7 +256,7 @@ class TestConnectionClosedEvent:
             event_type=ConnectionEventType.CONNECTION_CLOSED,
             timestamp=1234567890.0,
             connection_id="conn_1",
-            reason="timeout"
+            reason="timeout",
         )
 
         str_repr = str(event)
@@ -272,10 +278,12 @@ class TestResourceLimitEvent:
             current_value=2048,
             connection_id="conn_1",
             peer_id=ID(b"test_peer"),
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
-        assert event.event_type == ConnectionEventType.MEMORY_LIMIT_EXCEEDED  # Auto-set based on limit_type
+        assert (
+            event.event_type == ConnectionEventType.MEMORY_LIMIT_EXCEEDED
+        )  # Auto-set based on limit_type
         assert event.limit_type == "memory"
         assert event.limit_value == 1024
         assert event.current_value == 2048
@@ -287,10 +295,12 @@ class TestResourceLimitEvent:
         """Test ResourceLimitEvent with default values."""
         event = ResourceLimitEvent(
             event_type=ConnectionEventType.RESOURCE_LIMIT_EXCEEDED,
-            timestamp=1234567890.0
+            timestamp=1234567890.0,
         )
 
-        assert event.limit_type == "connection"  # Auto-set based on RESOURCE_LIMIT_EXCEEDED
+        assert (
+            event.limit_type == "connection"
+        )  # Auto-set based on RESOURCE_LIMIT_EXCEEDED
         assert event.limit_value == 0  # Auto-set default
         assert event.current_value == 0  # Auto-set default
         assert event.connection_id is None
@@ -303,7 +313,7 @@ class TestResourceLimitEvent:
             event_type=ConnectionEventType.RESOURCE_LIMIT_EXCEEDED,
             timestamp=1234567890.0,
             limit_type="memory",
-            limit_value=1024
+            limit_value=1024,
         )
 
         str_repr = str(event)
@@ -324,7 +334,7 @@ class TestStreamEvent:
             stream_id="stream_1",
             protocol="/test/1.0.0",
             direction="inbound",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert event.event_type == ConnectionEventType.STREAM_OPENED
@@ -338,8 +348,7 @@ class TestStreamEvent:
     def test_stream_event_default_values(self):
         """Test StreamEvent with default values."""
         event = StreamEvent(
-            event_type=ConnectionEventType.STREAM_OPENED,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.STREAM_OPENED, timestamp=1234567890.0
         )
 
         assert event.connection_id is None
@@ -355,7 +364,7 @@ class TestStreamEvent:
             event_type=ConnectionEventType.STREAM_OPENED,
             timestamp=1234567890.0,
             stream_id="stream_1",
-            protocol="/test/1.0.0"
+            protocol="/test/1.0.0",
         )
 
         str_repr = str(event)
@@ -374,7 +383,7 @@ class TestPeerEvent:
             peer_id=ID(b"test_peer"),
             action="connected",
             connection_id="conn_1",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert event.event_type == ConnectionEventType.PEER_CONNECTED
@@ -386,8 +395,7 @@ class TestPeerEvent:
     def test_peer_event_default_values(self):
         """Test PeerEvent with default values."""
         event = PeerEvent(
-            event_type=ConnectionEventType.PEER_CONNECTED,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.PEER_CONNECTED, timestamp=1234567890.0
         )
 
         assert event.peer_id is None
@@ -400,7 +408,7 @@ class TestPeerEvent:
         event = PeerEvent(
             event_type=ConnectionEventType.PEER_CONNECTED,
             timestamp=1234567890.0,
-            action="connected"
+            action="connected",
         )
 
         str_repr = str(event)
@@ -417,12 +425,11 @@ class TestConnectionEventHandler:
         handler = Mock(spec=ConnectionEventHandler)
 
         # Test that it implements the protocol
-        assert hasattr(handler, 'handle_event')
+        assert hasattr(handler, "handle_event")
 
         # Test calling the handler
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(handler.handle_event(event))
@@ -438,11 +445,12 @@ class TestConnectionEventHandler:
 
     def test_connection_event_handler_with_real_implementation(self):
         """Test ConnectionEventHandler with real implementation."""
+
         class TestHandler:
             def __init__(self):
-                self.events = []
+                self.events: list[ConnectionEvent] = []
 
-            def handle_event(self, event: ConnectionEvent) -> None:
+            async def handle_event(self, event: ConnectionEvent) -> None:
                 self.events.append(event)
 
         handler = TestHandler()
@@ -450,12 +458,11 @@ class TestConnectionEventHandler:
 
         # Test handling events
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         # Test that handler can be called
-        handler.handle_event(event)
+        asyncio.run(handler.handle_event(event))
         assert len(handler.events) == 1
         assert handler.events[0] == event
 
@@ -469,12 +476,11 @@ class TestAsyncConnectionEventHandler:
         handler = Mock(spec=AsyncConnectionEventHandler)
 
         # Test that it implements the protocol
-        assert hasattr(handler, 'handle_event')
+        assert hasattr(handler, "handle_event")
 
         # Test calling the handler
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(handler.handle_event(event))
@@ -489,9 +495,10 @@ class TestAsyncConnectionEventHandler:
 
     def test_async_connection_event_handler_with_real_implementation(self):
         """Test AsyncConnectionEventHandler with real implementation."""
+
         class TestAsyncHandler:
             def __init__(self):
-                self.events = []
+                self.events: list[ConnectionEvent] = []
 
             async def handle_event(self, event: ConnectionEvent) -> None:
                 self.events.append(event)
@@ -501,8 +508,7 @@ class TestAsyncConnectionEventHandler:
 
         # Test handling events
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         # Test async handling
@@ -521,10 +527,10 @@ class TestConnectionEventBus:
         bus = ConnectionEventBus()
 
         assert bus is not None
-        assert hasattr(bus, 'subscribe')
-        assert hasattr(bus, 'unsubscribe')
-        assert hasattr(bus, 'publish')
-        assert hasattr(bus, 'publish')
+        assert hasattr(bus, "subscribe")
+        assert hasattr(bus, "unsubscribe")
+        assert hasattr(bus, "publish")
+        assert hasattr(bus, "publish")
 
     def test_connection_event_bus_subscribe_sync_handler(self):
         """Test subscribing synchronous handler."""
@@ -535,8 +541,7 @@ class TestConnectionEventBus:
 
         # Should be able to publish events
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(bus.publish(event))
@@ -551,8 +556,7 @@ class TestConnectionEventBus:
 
         # Should be able to publish events
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(bus.publish(event))
@@ -569,8 +573,7 @@ class TestConnectionEventBus:
 
         # Should be able to publish events
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(bus.publish(event))
@@ -587,8 +590,7 @@ class TestConnectionEventBus:
 
         # Should not receive events after unsubscribing
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(bus.publish(event))
@@ -603,8 +605,7 @@ class TestConnectionEventBus:
 
         # Should be able to publish events asynchronously
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         async def test_async_publish():
@@ -623,12 +624,10 @@ class TestConnectionEventBus:
 
         # Publish multiple events
         event1 = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
         event2 = ConnectionEvent(
-            event_type=ConnectionEventType.CONNECTION_CLOSED,
-            timestamp=1234567891.0
+            event_type=ConnectionEventType.CONNECTION_CLOSED, timestamp=1234567891.0
         )
 
         asyncio.run(bus.publish(event1))
@@ -654,8 +653,7 @@ class TestConnectionEventBus:
 
         # Should not raise exception when handler fails
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         # Should not raise exception
@@ -675,8 +673,7 @@ class TestConnectionEventBus:
 
         # Should not raise exception when handler fails
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         # Should not raise exception
@@ -694,7 +691,7 @@ class TestConnectionEventBus:
         for i in range(10):
             event = ConnectionEvent(
                 event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-                timestamp=1234567890.0 + i
+                timestamp=1234567890.0 + i,
             )
             events.append(event)
             asyncio.run(bus.publish(event))
@@ -714,8 +711,7 @@ class TestConnectionEventBus:
 
         # Publish event
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         asyncio.run(bus.publish(event))
@@ -752,8 +748,8 @@ class TestConnectionEventBus:
 
         # Test that the bus has the handler (check both dictionaries)
         has_handler = (
-            ConnectionEventType.ESTABLISHED_INBOUND in bus1._handlers or
-            ConnectionEventType.ESTABLISHED_INBOUND in bus1._async_handlers
+            ConnectionEventType.ESTABLISHED_INBOUND in bus1._handlers
+            or ConnectionEventType.ESTABLISHED_INBOUND in bus1._async_handlers
         )
         assert has_handler
 
@@ -794,12 +790,12 @@ class TestConnectionEventBus:
         assert bus is not bus_copy
         # Both should have the same handler count (check both dictionaries)
         has_handler_original = (
-            ConnectionEventType.ESTABLISHED_INBOUND in bus._handlers or
-            ConnectionEventType.ESTABLISHED_INBOUND in bus._async_handlers
+            ConnectionEventType.ESTABLISHED_INBOUND in bus._handlers
+            or ConnectionEventType.ESTABLISHED_INBOUND in bus._async_handlers
         )
         has_handler_copy = (
-            ConnectionEventType.ESTABLISHED_INBOUND in bus_copy._handlers or
-            ConnectionEventType.ESTABLISHED_INBOUND in bus_copy._async_handlers
+            ConnectionEventType.ESTABLISHED_INBOUND in bus_copy._handlers
+            or ConnectionEventType.ESTABLISHED_INBOUND in bus_copy._async_handlers
         )
         assert has_handler_original
         assert has_handler_copy
@@ -818,12 +814,12 @@ class TestConnectionEventBus:
         assert bus is not bus_deep_copy
         # Both should have the same handler count (check both dictionaries)
         has_handler_original = (
-            ConnectionEventType.ESTABLISHED_INBOUND in bus._handlers or
-            ConnectionEventType.ESTABLISHED_INBOUND in bus._async_handlers
+            ConnectionEventType.ESTABLISHED_INBOUND in bus._handlers
+            or ConnectionEventType.ESTABLISHED_INBOUND in bus._async_handlers
         )
         has_handler_deep_copy = (
-            ConnectionEventType.ESTABLISHED_INBOUND in bus_deep_copy._handlers or
-            ConnectionEventType.ESTABLISHED_INBOUND in bus_deep_copy._async_handlers
+            ConnectionEventType.ESTABLISHED_INBOUND in bus_deep_copy._handlers
+            or ConnectionEventType.ESTABLISHED_INBOUND in bus_deep_copy._async_handlers
         )
         assert has_handler_original
         assert has_handler_deep_copy
@@ -840,7 +836,7 @@ class TestConnectionEventBus:
         for i in range(1000):
             event = ConnectionEvent(
                 event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-                timestamp=1234567890.0 + i
+                timestamp=1234567890.0 + i,
             )
             asyncio.run(bus.publish(event))
 
@@ -867,7 +863,7 @@ class TestConnectionEventBus:
                 for i in range(10):
                     event = ConnectionEvent(
                         event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-                        timestamp=1234567890.0 + i
+                        timestamp=1234567890.0 + i,
                     )
                     asyncio.run(bus.publish(event))
                 results.append("success")
@@ -905,7 +901,7 @@ class TestConnectionEventBus:
         for i in range(100):
             event = ConnectionEvent(
                 event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-                timestamp=1234567890.0 + i
+                timestamp=1234567890.0 + i,
             )
             asyncio.run(bus.publish(event))
 
@@ -933,8 +929,7 @@ class TestConnectionEventBus:
 
         # Test publishing event
         event = ConnectionEvent(
-            event_type=ConnectionEventType.ESTABLISHED_INBOUND,
-            timestamp=1234567890.0
+            event_type=ConnectionEventType.ESTABLISHED_INBOUND, timestamp=1234567890.0
         )
 
         # Should not raise exception
@@ -949,7 +944,7 @@ class TestConnectionEventBus:
             event_type=ConnectionEventType.ESTABLISHED_INBOUND,
             timestamp=1234567890.0,
             connection_id="conn_1",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         # Should be able to serialize event data (convert enum to value)
@@ -957,7 +952,7 @@ class TestConnectionEventBus:
             "event_type": event.event_type.value,
             "timestamp": event.timestamp,
             "connection_id": event.connection_id,
-            "metadata": event.metadata
+            "metadata": event.metadata,
         }
 
         json_str = json.dumps(event_dict)

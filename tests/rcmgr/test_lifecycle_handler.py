@@ -85,14 +85,14 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             await handler.publish_connection_established(
                 connection_id="conn_1",
                 peer_id=ID(b"test_peer"),
                 direction="inbound",
                 local_addr=multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/8080"),
                 remote_addr=multiaddr.Multiaddr("/ip4/192.168.1.1/tcp/9090"),
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
             # Should have published event
@@ -124,9 +124,7 @@ class TestConnectionLifecycleHandler:
 
         # Should not raise exception
         await handler.publish_connection_established(
-            connection_id="conn_1",
-            peer_id=ID(b"test_peer"),
-            direction="inbound"
+            connection_id="conn_1", peer_id=ID(b"test_peer"), direction="inbound"
         )
 
     @pytest.mark.asyncio
@@ -147,12 +145,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             await handler.publish_connection_closed(
                 connection_id="conn_1",
                 peer_id=ID(b"test_peer"),
                 reason="timeout",
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
             # Should have published event
@@ -181,9 +179,7 @@ class TestConnectionLifecycleHandler:
 
         # Should not raise exception
         await handler.publish_connection_closed(
-            connection_id="conn_1",
-            peer_id=ID(b"test_peer"),
-            reason="timeout"
+            connection_id="conn_1", peer_id=ID(b"test_peer"), reason="timeout"
         )
 
     @pytest.mark.asyncio
@@ -203,14 +199,14 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             await handler.publish_resource_limit_exceeded(
                 limit_type="memory",
                 limit_value=1024,
                 current_value=2048,
                 connection_id="conn_1",
                 peer_id=ID(b"test_peer"),
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
             # Should have published event
@@ -222,7 +218,12 @@ class TestConnectionLifecycleHandler:
             assert event.metadata.get("current_value") == 2048
             assert event.connection_id == "conn_1"
             assert event.peer_id == ID(b"test_peer")
-            assert event.metadata == {"test": "data", "limit_type": "memory", "limit_value": 1024, "current_value": 2048}
+            assert event.metadata == {
+                "test": "data",
+                "limit_type": "memory",
+                "limit_value": 1024,
+                "current_value": 2048,
+            }
 
     @pytest.mark.asyncio
     async def test_publish_resource_limit_exceeded_with_none_event_bus(self):
@@ -241,9 +242,7 @@ class TestConnectionLifecycleHandler:
 
         # Should not raise exception
         await handler.publish_resource_limit_exceeded(
-            limit_type="memory",
-            limit_value=1024,
-            current_value=2048
+            limit_type="memory", limit_value=1024, current_value=2048
         )
 
     @pytest.mark.asyncio
@@ -263,7 +262,7 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             await handler.publish_stream_event(
                 event_type=ConnectionEventType.STREAM_OPENED,
                 connection_id="conn_1",
@@ -271,7 +270,7 @@ class TestConnectionLifecycleHandler:
                 stream_id="stream_1",
                 protocol="/test/1.0.0",
                 direction="inbound",
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
             # Should have published event
@@ -284,7 +283,12 @@ class TestConnectionLifecycleHandler:
             assert event.metadata.get("stream_id") == "stream_1"
             assert event.metadata.get("protocol") == "/test/1.0.0"
             assert event.metadata.get("direction") == "inbound"
-            assert event.metadata == {"test": "data", "stream_id": "stream_1", "protocol": "/test/1.0.0", "direction": "inbound"}
+            assert event.metadata == {
+                "test": "data",
+                "stream_id": "stream_1",
+                "protocol": "/test/1.0.0",
+                "direction": "inbound",
+            }
 
     @pytest.mark.asyncio
     async def test_publish_stream_event_with_none_event_bus(self):
@@ -305,7 +309,7 @@ class TestConnectionLifecycleHandler:
         await handler.publish_stream_event(
             event_type=ConnectionEventType.STREAM_OPENED,
             connection_id="conn_1",
-            peer_id=ID(b"test_peer")
+            peer_id=ID(b"test_peer"),
         )
 
     @pytest.mark.asyncio
@@ -325,12 +329,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             await handler.publish_peer_event(
                 action="connected",
                 peer_id=ID(b"test_peer"),
                 connection_id="conn_1",
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
             # Should have published event
@@ -358,10 +362,7 @@ class TestConnectionLifecycleHandler:
         )
 
         # Should not raise exception
-        await handler.publish_peer_event(
-            action="connected",
-            peer_id=ID(b"test_peer")
-        )
+        await handler.publish_peer_event(action="connected", peer_id=ID(b"test_peer"))
 
     def test_get_stats(self):
         """Test getting handler statistics."""
@@ -431,14 +432,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus to raise exception
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             mock_publish.side_effect = Exception("Event bus error")
 
             # Should not raise exception
             await handler.publish_connection_established(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                direction="inbound"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), direction="inbound"
             )
 
     @pytest.mark.asyncio
@@ -458,14 +457,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus to raise exception
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             mock_publish.side_effect = Exception("Event bus error")
 
             # Should not raise exception
             await handler.publish_connection_closed(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                reason="timeout"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), reason="timeout"
             )
 
     @pytest.mark.asyncio
@@ -485,14 +482,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus to raise exception
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             mock_publish.side_effect = Exception("Event bus error")
 
             # Should not raise exception
             await handler.publish_resource_limit_exceeded(
-                limit_type="memory",
-                limit_value=1024,
-                current_value=2048
+                limit_type="memory", limit_value=1024, current_value=2048
             )
 
     @pytest.mark.asyncio
@@ -512,14 +507,14 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus to raise exception
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             mock_publish.side_effect = Exception("Event bus error")
 
             # Should not raise exception
             await handler.publish_stream_event(
                 event_type=ConnectionEventType.STREAM_OPENED,
                 connection_id="conn_1",
-                peer_id=ID(b"test_peer")
+                peer_id=ID(b"test_peer"),
             )
 
     @pytest.mark.asyncio
@@ -539,13 +534,12 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus to raise exception
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             mock_publish.side_effect = Exception("Event bus error")
 
             # Should not raise exception
             await handler.publish_peer_event(
-                action="connected",
-                peer_id=ID(b"test_peer")
+                action="connected", peer_id=ID(b"test_peer")
             )
 
     @pytest.mark.asyncio
@@ -565,35 +559,28 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Publish multiple events
             await handler.publish_connection_established(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                direction="inbound"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), direction="inbound"
             )
 
             await handler.publish_connection_closed(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                reason="timeout"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), reason="timeout"
             )
 
             await handler.publish_resource_limit_exceeded(
-                limit_type="memory",
-                limit_value=1024,
-                current_value=2048
+                limit_type="memory", limit_value=1024, current_value=2048
             )
 
             await handler.publish_stream_event(
                 event_type=ConnectionEventType.STREAM_OPENED,
                 connection_id="conn_1",
-                peer_id=ID(b"test_peer")
+                peer_id=ID(b"test_peer"),
             )
 
             await handler.publish_peer_event(
-                action="connected",
-                peer_id=ID(b"test_peer")
+                action="connected", peer_id=ID(b"test_peer")
             )
 
             # Should have published all events
@@ -616,14 +603,14 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Publish events concurrently
             tasks = []
             for i in range(10):
                 task = handler.publish_connection_established(
                     connection_id=f"conn_{i}",
                     peer_id=ID(f"peer_{i}".encode()),
-                    direction="inbound"
+                    direction="inbound",
                 )
                 tasks.append(task)
 
@@ -738,7 +725,9 @@ class TestConnectionLifecycleHandler:
         )
 
         handler_set = {handler1, handler2}
-        assert len(handler_set) == 2  # Different objects (realistic behavior - no __eq__/__hash__ implemented)
+        assert (
+            len(handler_set) == 2
+        )  # Different objects (realistic behavior - no __eq__/__hash__ implemented)
 
     def test_connection_lifecycle_handler_in_dict(self):
         """Test ConnectionLifecycleHandler can be used as dictionary key."""
@@ -823,7 +812,7 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Measure time for many events
             start_time = time.time()
 
@@ -831,7 +820,7 @@ class TestConnectionLifecycleHandler:
                 await handler.publish_connection_established(
                     connection_id=f"conn_{i}",
                     peer_id=ID(f"peer_{i}".encode()),
-                    direction="inbound"
+                    direction="inbound",
                 )
 
             end_time = time.time()
@@ -858,13 +847,13 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Publish many events
             for i in range(1000):
                 await handler.publish_connection_established(
                     connection_id=f"conn_{i}",
                     peer_id=ID(f"peer_{i}".encode()),
-                    direction="inbound"
+                    direction="inbound",
                 )
 
             # Should handle many events efficiently
@@ -887,35 +876,28 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Test with None values
             await handler.publish_connection_established(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                direction="inbound"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), direction="inbound"
             )
 
             await handler.publish_connection_closed(
-                connection_id="conn_1",
-                peer_id=ID(b"test_peer"),
-                reason="timeout"
+                connection_id="conn_1", peer_id=ID(b"test_peer"), reason="timeout"
             )
 
             await handler.publish_resource_limit_exceeded(
-                limit_type="memory",
-                limit_value=1024,
-                current_value=2048
+                limit_type="memory", limit_value=1024, current_value=2048
             )
 
             await handler.publish_stream_event(
                 event_type=ConnectionEventType.STREAM_OPENED,
                 connection_id="conn_1",
-                peer_id=ID(b"test_peer")
+                peer_id=ID(b"test_peer"),
             )
 
             await handler.publish_peer_event(
-                action="connected",
-                peer_id=ID(b"test_peer")
+                action="connected", peer_id=ID(b"test_peer")
             )
 
             # Should have published all events
@@ -938,7 +920,7 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Test with unicode data
             await handler.publish_connection_established(
                 connection_id="conn_测试_🚀",
@@ -946,7 +928,7 @@ class TestConnectionLifecycleHandler:
                 direction="inbound",
                 local_addr=multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/8080"),
                 remote_addr=multiaddr.Multiaddr("/ip4/192.168.1.1/tcp/9090"),
-                metadata={"测试": "数据", "🚀": "rocket"}
+                metadata={"测试": "数据", "🚀": "rocket"},
             )
 
             # Should have published event
@@ -972,7 +954,7 @@ class TestConnectionLifecycleHandler:
         )
 
         # Mock the event bus
-        with patch.object(event_bus, 'publish') as mock_publish:
+        with patch.object(event_bus, "publish") as mock_publish:
             # Test with very long data
             long_conn_id = "conn_" + "x" * 10000
             long_peer_id = ID(b"x" * 10000)
@@ -982,7 +964,7 @@ class TestConnectionLifecycleHandler:
                 connection_id=long_conn_id,
                 peer_id=long_peer_id,
                 direction="inbound",
-                metadata=long_metadata
+                metadata=long_metadata,
             )
 
             # Should have published event

@@ -33,13 +33,13 @@ class TestMemoryConnectionLimits:
         """Test MemoryConnectionLimits creation with custom values."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,  # 1GB
+            max_process_memory_bytes=1024 * 1024 * 1024,  # 1GB
             max_process_memory_percent=70.0,
             max_system_memory_percent=85.0,
             memory_stats_cache=cache,
         )
 
-        assert limits.max_process_memory_bytes == 1024*1024*1024
+        assert limits.max_process_memory_bytes == 1024 * 1024 * 1024
         assert limits.max_process_memory_percent == 70.0
         assert limits.max_system_memory_percent == 85.0
         assert limits.memory_stats_cache == cache
@@ -63,17 +63,17 @@ class TestMemoryConnectionLimits:
         """Test checking process memory bytes when within limit."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,  # 1GB
+            max_process_memory_bytes=1024 * 1024 * 1024,  # 1GB
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
+                "process_memory_bytes": 512 * 1024 * 1024,  # 512MB
                 "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,  # 8GB
                 "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,  # 3GB
+                "available_memory_bytes": 3 * 1024 * 1024 * 1024,  # 3GB
                 "timestamp": 1234567890,
             }
 
@@ -84,16 +84,16 @@ class TestMemoryConnectionLimits:
         """Test checking process memory bytes when exceeding limit."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,  # 1GB
+            max_process_memory_bytes=1024 * 1024 * 1024,  # 1GB
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
-                process_memory_bytes=2*1024*1024*1024,  # 2GB
+                process_memory_bytes=2 * 1024 * 1024 * 1024,  # 2GB
                 process_memory_percent=50.0,
-                system_memory_total=8*1024*1024*1024,  # 8GB
-                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_total=8 * 1024 * 1024 * 1024,  # 8GB
+                system_memory_available=3 * 1024 * 1024 * 1024,  # 3GB
                 system_memory_percent=60.0,
                 timestamp=1234567890,
             )
@@ -113,13 +113,13 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
+                "process_memory_bytes": 512 * 1024 * 1024,  # 512MB
                 "process_memory_percent": 70.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,  # 8GB
                 "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,  # 3GB
+                "available_memory_bytes": 3 * 1024 * 1024 * 1024,  # 3GB
                 "timestamp": 1234567890,
             }
 
@@ -134,12 +134,12 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
-                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_bytes=512 * 1024 * 1024,  # 512MB
                 process_memory_percent=85.0,
-                system_memory_total=8*1024*1024*1024,  # 8GB
-                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_total=8 * 1024 * 1024 * 1024,  # 8GB
+                system_memory_available=3 * 1024 * 1024 * 1024,  # 3GB
                 system_memory_percent=60.0,
                 timestamp=1234567890,
             )
@@ -159,13 +159,13 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,  # 512MB
+                "process_memory_bytes": 512 * 1024 * 1024,  # 512MB
                 "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,  # 8GB
                 "system_memory_percent": 80.0,
-                "available_memory_bytes": 1*1024*1024*1024,  # 1GB
+                "available_memory_bytes": 1 * 1024 * 1024 * 1024,  # 1GB
                 "timestamp": 1234567890,
             }
 
@@ -180,12 +180,12 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
-                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_bytes=512 * 1024 * 1024,  # 512MB
                 process_memory_percent=50.0,
-                system_memory_total=8*1024*1024*1024,  # 8GB
-                system_memory_available=400*1024*1024,  # 400MB
+                system_memory_total=8 * 1024 * 1024 * 1024,  # 8GB
+                system_memory_available=400 * 1024 * 1024,  # 400MB
                 system_memory_percent=95.0,
                 timestamp=1234567890,
             )
@@ -201,18 +201,18 @@ class TestMemoryConnectionLimits:
         """Test checking memory limits when multiple limits are exceeded."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,  # 1GB
+            max_process_memory_bytes=1024 * 1024 * 1024,  # 1GB
             max_process_memory_percent=80.0,
             max_system_memory_percent=90.0,
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
-                process_memory_bytes=2*1024*1024*1024,  # 2GB
+                process_memory_bytes=2 * 1024 * 1024 * 1024,  # 2GB
                 process_memory_percent=85.0,
-                system_memory_total=8*1024*1024*1024,  # 8GB
-                system_memory_available=400*1024*1024,  # 400MB
+                system_memory_total=8 * 1024 * 1024 * 1024,  # 8GB
+                system_memory_available=400 * 1024 * 1024,  # 400MB
                 system_memory_percent=95.0,
                 timestamp=1234567890,
             )
@@ -231,12 +231,12 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
-                process_memory_bytes=512*1024*1024,  # 512MB
+                process_memory_bytes=512 * 1024 * 1024,  # 512MB
                 process_memory_percent=70.0,
-                system_memory_total=8*1024*1024*1024,  # 8GB
-                system_memory_available=3*1024*1024*1024,  # 3GB
+                system_memory_total=8 * 1024 * 1024 * 1024,  # 8GB
+                system_memory_available=3 * 1024 * 1024 * 1024,  # 3GB
                 system_memory_percent=60.0,
                 timestamp=1234567890,
             )
@@ -255,7 +255,7 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.side_effect = Exception("Cache error")
 
             # Should not raise exception, should handle error gracefully
@@ -275,26 +275,26 @@ class TestMemoryConnectionLimits:
         """Test getting memory summary."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,  # 1GB
+            max_process_memory_bytes=1024 * 1024 * 1024,  # 1GB
             max_process_memory_percent=80.0,
             max_system_memory_percent=90.0,
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_summary') as mock_get_summary:
+        with patch.object(cache, "get_memory_summary") as mock_get_summary:
             mock_get_summary.return_value = {
                 "process": {
-                    "memory_bytes": 512*1024*1024,
+                    "memory_bytes": 512 * 1024 * 1024,
                     "memory_percent": 50.0,
-                    "rss_bytes": 512*1024*1024,
-                    "vms_bytes": 1024*1024*1024,
+                    "rss_bytes": 512 * 1024 * 1024,
+                    "vms_bytes": 1024 * 1024 * 1024,
                 },
                 "system": {
-                    "total_memory_bytes": 8*1024*1024*1024,
-                    "available_memory_bytes": 4*1024*1024*1024,
+                    "total_memory_bytes": 8 * 1024 * 1024 * 1024,
+                    "available_memory_bytes": 4 * 1024 * 1024 * 1024,
                     "memory_percent": 50.0,
-                    "swap_total_bytes": 2*1024*1024*1024,
-                    "swap_available_bytes": 1*1024*1024*1024,
+                    "swap_total_bytes": 2 * 1024 * 1024 * 1024,
+                    "swap_available_bytes": 1 * 1024 * 1024 * 1024,
                 },
                 "timestamp": 1234567890,
             }
@@ -313,7 +313,7 @@ class TestMemoryConnectionLimits:
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(memory_stats_cache=cache)
 
-        with patch.object(cache, 'get_memory_summary') as mock_get_summary:
+        with patch.object(cache, "get_memory_summary") as mock_get_summary:
             mock_get_summary.return_value = {"test": "data"}
 
             limits.get_memory_summary(force_refresh=True)
@@ -341,7 +341,7 @@ class TestMemoryConnectionLimits:
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(memory_stats_cache=cache)
 
-        with patch.object(cache, 'get_memory_summary') as mock_get_summary:
+        with patch.object(cache, "get_memory_summary") as mock_get_summary:
             mock_get_summary.side_effect = Exception("Cache error")
 
             # Should return limits summary when cache raises error
@@ -359,19 +359,19 @@ class TestMemoryConnectionLimits:
         cache2 = MemoryStatsCache()
 
         limits1 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache1,
         )
         limits2 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache1,
         )
         limits3 = MemoryConnectionLimits(
-            max_process_memory_bytes=2*1024*1024*1024,
+            max_process_memory_bytes=2 * 1024 * 1024 * 1024,
             memory_stats_cache=cache1,
         )
         limits4 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache2,
         )
 
@@ -387,7 +387,7 @@ class TestMemoryConnectionLimits:
     def test_memory_limits_string_representation(self):
         """Test string representation of memory limits."""
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             max_process_memory_percent=80.0,
             max_system_memory_percent=90.0,
         )
@@ -395,12 +395,12 @@ class TestMemoryConnectionLimits:
         str_repr = str(limits)
         assert "MemoryConnectionLimits" in str_repr
         assert "1073741824" in str_repr  # max_process_memory_bytes (1024*1024*1024)
-        assert "80" in str_repr    # max_process_memory_percent
-        assert "90" in str_repr    # max_system_memory_percent
+        assert "80" in str_repr  # max_process_memory_percent
+        assert "90" in str_repr  # max_system_memory_percent
 
     def test_memory_limits_repr(self):
         """Test repr representation of memory limits."""
-        limits = MemoryConnectionLimits(max_process_memory_bytes=1024*1024*1024)
+        limits = MemoryConnectionLimits(max_process_memory_bytes=1024 * 1024 * 1024)
 
         repr_str = repr(limits)
         assert "MemoryConnectionLimits" in repr_str
@@ -410,11 +410,11 @@ class TestMemoryConnectionLimits:
         """Test memory limits hash functionality."""
         cache = MemoryStatsCache()
         limits1 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
         limits2 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -425,15 +425,15 @@ class TestMemoryConnectionLimits:
         """Test memory limits can be used in sets."""
         cache = MemoryStatsCache()
         limits1 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
         limits2 = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
         limits3 = MemoryConnectionLimits(
-            max_process_memory_bytes=2*1024*1024*1024,
+            max_process_memory_bytes=2 * 1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -444,7 +444,7 @@ class TestMemoryConnectionLimits:
         """Test memory limits can be used as dictionary key."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -457,7 +457,7 @@ class TestMemoryConnectionLimits:
 
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -473,7 +473,7 @@ class TestMemoryConnectionLimits:
 
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -488,7 +488,7 @@ class TestMemoryConnectionLimits:
         import json
 
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             max_process_memory_percent=80.0,
             max_system_memory_percent=90.0,
         )
@@ -506,7 +506,7 @@ class TestMemoryConnectionLimits:
 
         # Should be deserializable
         deserialized = json.loads(json_str)
-        assert deserialized["max_process_memory_bytes"] == 1024*1024*1024
+        assert deserialized["max_process_memory_bytes"] == 1024 * 1024 * 1024
         assert deserialized["max_process_memory_percent"] == 80.0
         assert deserialized["max_system_memory_percent"] == 90.0
 
@@ -522,12 +522,12 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = MemoryStats(
                 process_memory_bytes=1,  # Any non-zero value
                 process_memory_percent=0.1,  # Any non-zero value
-                system_memory_total=8*1024*1024*1024,
-                system_memory_available=4*1024*1024*1024,
+                system_memory_total=8 * 1024 * 1024 * 1024,
+                system_memory_available=4 * 1024 * 1024 * 1024,
                 system_memory_percent=0.1,  # Any non-zero value
                 timestamp=1234567890,
             )
@@ -540,19 +540,19 @@ class TestMemoryConnectionLimits:
         """Test memory limits with very high limits."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=100*1024*1024*1024,  # 100GB
+            max_process_memory_bytes=100 * 1024 * 1024 * 1024,  # 100GB
             max_process_memory_percent=99.9,
             max_system_memory_percent=99.9,
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 50*1024*1024*1024,  # 50GB
+                "process_memory_bytes": 50 * 1024 * 1024 * 1024,  # 50GB
                 "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,  # 8GB
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,  # 8GB
                 "system_memory_percent": 50.0,
-                "available_memory_bytes": 4*1024*1024*1024,  # 4GB
+                "available_memory_bytes": 4 * 1024 * 1024 * 1024,  # 4GB
                 "timestamp": 1234567890,
             }
 
@@ -569,13 +569,13 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,
+                "process_memory_bytes": 512 * 1024 * 1024,
                 "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,
                 "system_memory_percent": 50.0,
-                "available_memory_bytes": 4*1024*1024*1024,
+                "available_memory_bytes": 4 * 1024 * 1024 * 1024,
                 "timestamp": 1234567890,
             }
 
@@ -592,13 +592,13 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,
+                "process_memory_bytes": 512 * 1024 * 1024,
                 "process_memory_percent": 50.0,
-                "system_memory_bytes": 8*1024*1024*1024,
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,
                 "system_memory_percent": 50.0,
-                "available_memory_bytes": 4*1024*1024*1024,
+                "available_memory_bytes": 4 * 1024 * 1024 * 1024,
                 "timestamp": 1234567890,
             }
 
@@ -613,18 +613,19 @@ class TestMemoryConnectionLimits:
             memory_stats_cache=cache,
         )
 
-        with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+        with patch.object(cache, "get_memory_stats") as mock_get_stats:
             mock_get_stats.return_value = {
-                "process_memory_bytes": 512*1024*1024,
+                "process_memory_bytes": 512 * 1024 * 1024,
                 "process_memory_percent": 70.0,
-                "system_memory_bytes": 8*1024*1024*1024,
+                "system_memory_bytes": 8 * 1024 * 1024 * 1024,
                 "system_memory_percent": 60.0,
-                "available_memory_bytes": 3*1024*1024*1024,
+                "available_memory_bytes": 3 * 1024 * 1024 * 1024,
                 "timestamp": 1234567890,
             }
 
             # Measure time for many operations
             import time
+
             start_time = time.time()
 
             for _ in range(1000):
@@ -651,13 +652,13 @@ class TestMemoryConnectionLimits:
 
         def check_limits():
             try:
-                with patch.object(cache, 'get_memory_stats') as mock_get_stats:
+                with patch.object(cache, "get_memory_stats") as mock_get_stats:
                     mock_get_stats.return_value = {
-                        "process_memory_bytes": 512*1024*1024,
+                        "process_memory_bytes": 512 * 1024 * 1024,
                         "process_memory_percent": 70.0,
-                        "system_memory_bytes": 8*1024*1024*1024,
+                        "system_memory_bytes": 8 * 1024 * 1024 * 1024,
                         "system_memory_percent": 60.0,
-                        "available_memory_bytes": 3*1024*1024*1024,
+                        "available_memory_bytes": 3 * 1024 * 1024 * 1024,
                         "timestamp": 1234567890,
                     }
 
@@ -683,10 +684,12 @@ class TestMemoryConnectionLimits:
 
     def test_memory_limits_with_mock_psutil(self):
         """Test memory limits with mocked psutil."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock process
             mock_process = Mock()
-            mock_process.memory_info.return_value = Mock(rss=1024*1024, vms=2048*1024)
+            mock_process.memory_info.return_value = Mock(
+                rss=1024 * 1024, vms=2048 * 1024
+            )
             mock_process.memory_percent.return_value = 85.0  # Exceeds 80% limit
 
             # Mock virtual memory
@@ -717,7 +720,7 @@ class TestMemoryConnectionLimits:
 
     def test_memory_limits_with_psutil_error(self):
         """Test memory limits with psutil error."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock psutil to raise exception
             mock_psutil.Process.side_effect = Exception("psutil error")
 
@@ -734,7 +737,7 @@ class TestMemoryConnectionLimits:
         """Test string representation with cache."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 
@@ -746,7 +749,7 @@ class TestMemoryConnectionLimits:
         """Test repr representation with cache."""
         cache = MemoryStatsCache()
         limits = MemoryConnectionLimits(
-            max_process_memory_bytes=1024*1024*1024,
+            max_process_memory_bytes=1024 * 1024 * 1024,
             memory_stats_cache=cache,
         )
 

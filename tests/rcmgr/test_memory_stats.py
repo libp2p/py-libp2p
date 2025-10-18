@@ -256,10 +256,12 @@ class TestMemoryStatsCache:
 
     def test_memory_stats_with_mock_psutil(self) -> None:
         """Test memory stats with mocked psutil."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock process
             mock_process = Mock()
-            mock_process.memory_info.return_value = Mock(rss=1024*1024, vms=2048*1024)
+            mock_process.memory_info.return_value = Mock(
+                rss=1024 * 1024, vms=2048 * 1024
+            )
             mock_process.memory_percent.return_value = 1.5
 
             # Mock virtual memory
@@ -276,7 +278,7 @@ class TestMemoryStatsCache:
             stats = cache.get_memory_stats()
 
             # Check mocked values
-            assert stats.process_memory_bytes == 1024*1024
+            assert stats.process_memory_bytes == 1024 * 1024
             assert stats.process_memory_percent == 1.5
             assert stats.system_memory_total == 8 * 1024 * 1024 * 1024
             assert stats.system_memory_percent == 50.0
@@ -284,10 +286,12 @@ class TestMemoryStatsCache:
 
     def test_memory_summary_with_mock_psutil(self) -> None:
         """Test memory summary with mocked psutil."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock process
             mock_process = Mock()
-            mock_process.memory_info.return_value = Mock(rss=1024*1024, vms=2048*1024)
+            mock_process.memory_info.return_value = Mock(
+                rss=1024 * 1024, vms=2048 * 1024
+            )
             mock_process.memory_percent.return_value = 1.5
 
             # Mock virtual memory
@@ -304,7 +308,7 @@ class TestMemoryStatsCache:
             summary = cache.get_memory_summary()
 
             # Check mocked values
-            assert summary["process_memory_bytes"] == 1024*1024
+            assert summary["process_memory_bytes"] == 1024 * 1024
             assert summary["process_memory_percent"] == 1.5
             assert summary["process_memory_mb"] == 1.0
             assert summary["system_memory_total"] == 8 * 1024 * 1024 * 1024
@@ -315,7 +319,7 @@ class TestMemoryStatsCache:
 
     def test_memory_stats_with_psutil_error(self) -> None:
         """Test memory stats with psutil error."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock psutil to raise exception
             mock_psutil.Process.side_effect = Exception("psutil error")
 
@@ -333,7 +337,7 @@ class TestMemoryStatsCache:
 
     def test_memory_summary_with_psutil_error(self) -> None:
         """Test memory summary with psutil error."""
-        with patch('libp2p.rcmgr.memory_stats.psutil') as mock_psutil:
+        with patch("libp2p.rcmgr.memory_stats.psutil") as mock_psutil:
             # Mock psutil to raise exception
             mock_psutil.Process.side_effect = Exception("psutil error")
 
@@ -623,14 +627,16 @@ class TestMemoryStatsCache:
         stats = cache.get_memory_stats()
 
         # Should be serializable
-        json_str = json.dumps({
-            "process_memory_bytes": stats.process_memory_bytes,
-            "process_memory_percent": stats.process_memory_percent,
-            "system_memory_total": stats.system_memory_total,
-            "system_memory_available": stats.system_memory_available,
-            "system_memory_percent": stats.system_memory_percent,
-            "timestamp": stats.timestamp,
-        })
+        json_str = json.dumps(
+            {
+                "process_memory_bytes": stats.process_memory_bytes,
+                "process_memory_percent": stats.process_memory_percent,
+                "system_memory_total": stats.system_memory_total,
+                "system_memory_available": stats.system_memory_available,
+                "system_memory_percent": stats.system_memory_percent,
+                "timestamp": stats.timestamp,
+            }
+        )
         assert json_str is not None
 
         # Should be deserializable

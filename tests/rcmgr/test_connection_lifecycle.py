@@ -124,7 +124,7 @@ class TestConnectionLifecycleManager:
         limits = ConnectionLimits(
             max_established_inbound=5,
             max_established_per_peer=3,
-            max_established_total=10
+            max_established_total=10,
         )
         tracker = ConnectionTracker(limits)
         manager = ConnectionLifecycleManager(tracker, limits)
@@ -175,7 +175,7 @@ class TestConnectionLifecycleManager:
         limits = ConnectionLimits(
             max_established_outbound=5,
             max_established_per_peer=3,
-            max_established_total=10
+            max_established_total=10,
         )
         tracker = ConnectionTracker(limits)
         manager = ConnectionLifecycleManager(tracker, limits)
@@ -230,7 +230,10 @@ class TestConnectionLifecycleManager:
 
         # Fill up the per-peer limit
         await manager.handle_established_inbound_connection(
-            "conn_1", peer_id, local_addr, remote_addr,
+            "conn_1",
+            peer_id,
+            local_addr,
+            remote_addr,
         )
         await manager.handle_established_outbound_connection(
             "conn_2", peer_id, local_addr, "tcp"
@@ -239,7 +242,10 @@ class TestConnectionLifecycleManager:
         # Third connection for same peer should fail
         with pytest.raises(ResourceLimitExceeded) as exc_info:
             await manager.handle_established_inbound_connection(
-                "conn_3", peer_id, local_addr, remote_addr,
+                "conn_3",
+                peer_id,
+                local_addr,
+                remote_addr,
             )
 
         assert "per peer" in str(exc_info.value).lower()

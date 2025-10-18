@@ -31,11 +31,7 @@ class TestTokenBucketConfig:
 
     def test_token_bucket_config_custom_values(self) -> None:
         """Test TokenBucketConfig creation with custom values."""
-        config = TokenBucketConfig(
-            refill_rate=5.0,
-            capacity=100.0,
-            initial_tokens=50.0
-        )
+        config = TokenBucketConfig(refill_rate=5.0, capacity=100.0, initial_tokens=50.0)
         assert config.refill_rate == 5.0
         assert config.capacity == 100.0
         assert config.initial_tokens == 50.0
@@ -392,10 +388,7 @@ class TestTokenBucketIntegration:
     def test_token_bucket_with_monitoring(self) -> None:
         """Test TokenBucket with monitoring enabled."""
         config = TokenBucketConfig(
-            refill_rate=10.0,
-            capacity=100.0,
-            enable_monitoring=True,
-            max_history_size=5
+            refill_rate=10.0, capacity=100.0, enable_monitoring=True, max_history_size=5
         )
         bucket = TokenBucket(config)
 
@@ -412,9 +405,7 @@ class TestTokenBucketIntegration:
     def test_token_bucket_without_monitoring(self) -> None:
         """Test TokenBucket with monitoring disabled."""
         config = TokenBucketConfig(
-            refill_rate=10.0,
-            capacity=100.0,
-            enable_monitoring=False
+            refill_rate=10.0, capacity=100.0, enable_monitoring=False
         )
         bucket = TokenBucket(config)
 
@@ -433,7 +424,7 @@ class TestTokenBucketIntegration:
             capacity=10.0,
             initial_tokens=10.0,
             allow_burst=True,
-            burst_multiplier=2.0
+            burst_multiplier=2.0,
         )
         bucket = TokenBucket(config)
 
@@ -450,7 +441,7 @@ class TestTokenBucketIntegration:
             refill_rate=10.0,
             capacity=100.0,
             time_window_seconds=2.0,
-            min_interval_seconds=0.1
+            min_interval_seconds=0.1,
         )
         bucket = TokenBucket(config)
 
@@ -468,7 +459,7 @@ class TestTokenBucketIntegration:
             capacity=100.0,
             enable_monitoring=True,
             time_window_seconds=0.1,
-            max_history_size=3
+            max_history_size=3,
         )
         bucket = TokenBucket(config)
 

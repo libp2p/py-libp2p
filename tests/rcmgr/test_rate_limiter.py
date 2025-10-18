@@ -40,7 +40,7 @@ class TestRateLimitConfig:
             strategy=RateLimitStrategy.FIXED_WINDOW,
             scope=RateLimitScope.PER_PEER,
             refill_rate=20.0,
-            capacity=200.0
+            capacity=200.0,
         )
         assert config.strategy == RateLimitStrategy.FIXED_WINDOW
         assert config.scope == RateLimitScope.PER_PEER
@@ -133,7 +133,7 @@ class TestRateLimiter:
             strategy=RateLimitStrategy.TOKEN_BUCKET,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=50.0
+            initial_tokens=50.0,
         )
         limiter = RateLimiter(config)
 
@@ -150,7 +150,7 @@ class TestRateLimiter:
         config = RateLimitConfig(
             strategy=RateLimitStrategy.FIXED_WINDOW,
             window_size_seconds=60.0,
-            max_requests_per_window=5
+            max_requests_per_window=5,
         )
         limiter = RateLimiter(config)
 
@@ -166,7 +166,7 @@ class TestRateLimiter:
         config = RateLimitConfig(
             strategy=RateLimitStrategy.SLIDING_WINDOW,
             window_size_seconds=60.0,
-            max_requests_per_window=5
+            max_requests_per_window=5,
         )
         limiter = RateLimiter(config)
 
@@ -185,7 +185,7 @@ class TestRateLimiter:
             max_rate=100.0,
             min_rate=1.0,
             adaptation_factor=0.1,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -201,7 +201,7 @@ class TestRateLimiter:
             scope=RateLimitScope.GLOBAL,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -214,7 +214,7 @@ class TestRateLimiter:
             scope=RateLimitScope.PER_PEER,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -230,7 +230,7 @@ class TestRateLimiter:
             scope=RateLimitScope.PER_CONNECTION,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -243,7 +243,7 @@ class TestRateLimiter:
             scope=RateLimitScope.PER_PROTOCOL,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -256,7 +256,7 @@ class TestRateLimiter:
             scope=RateLimitScope.PER_ENDPOINT,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -265,11 +265,7 @@ class TestRateLimiter:
 
     def test_rate_limiter_allow_method(self) -> None:
         """Test RateLimiter allow method (raises exception)."""
-        config = RateLimitConfig(
-            refill_rate=1.0,
-            capacity=1.0,
-            initial_tokens=1.0
-        )
+        config = RateLimitConfig(refill_rate=1.0, capacity=1.0, initial_tokens=1.0)
         limiter = RateLimiter(config)
 
         # Should be able to consume token
@@ -297,9 +293,7 @@ class TestRateLimiter:
     def test_rate_limiter_get_entity_stats(self) -> None:
         """Test RateLimiter entity-specific statistics."""
         config = RateLimitConfig(
-            scope=RateLimitScope.PER_PEER,
-            refill_rate=10.0,
-            capacity=100.0
+            scope=RateLimitScope.PER_PEER, refill_rate=10.0, capacity=100.0
         )
         limiter = RateLimiter(config)
 
@@ -388,7 +382,7 @@ class TestRateLimiter:
             refill_rate=10.0,
             capacity=100.0,
             max_peers=2,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -413,7 +407,7 @@ class TestRateLimiter:
             min_rate=1.0,
             adaptation_factor=0.1,
             initial_tokens=10.0,
-            min_interval_seconds=0.0001  # Very small interval for immediate adaptation
+            min_interval_seconds=0.0001,  # Very small interval for immediate adaptation
         )
         limiter = RateLimiter(config)
 
@@ -433,7 +427,7 @@ class TestRateLimiter:
         config = RateLimitConfig(
             strategy=RateLimitStrategy.FIXED_WINDOW,
             window_size_seconds=0.1,
-            max_requests_per_window=5
+            max_requests_per_window=5,
         )
         limiter = RateLimiter(config)
 
@@ -460,7 +454,7 @@ class TestRateLimiterFactory:
             strategy=RateLimitStrategy.TOKEN_BUCKET,
             scope=RateLimitScope.GLOBAL,
             refill_rate=20.0,
-            capacity=200.0
+            capacity=200.0,
         )
         assert limiter.config.strategy == RateLimitStrategy.TOKEN_BUCKET
         assert limiter.config.scope == RateLimitScope.GLOBAL
@@ -470,9 +464,7 @@ class TestRateLimiterFactory:
     def test_create_global_rate_limiter(self) -> None:
         """Test create_global_rate_limiter factory function."""
         limiter = create_global_rate_limiter(
-            refill_rate=20.0,
-            capacity=200.0,
-            initial_tokens=100.0
+            refill_rate=20.0, capacity=200.0, initial_tokens=100.0
         )
         assert limiter.config.scope == RateLimitScope.GLOBAL
         assert limiter.config.strategy == RateLimitStrategy.TOKEN_BUCKET
@@ -482,10 +474,7 @@ class TestRateLimiterFactory:
     def test_create_per_peer_rate_limiter(self) -> None:
         """Test create_per_peer_rate_limiter factory function."""
         limiter = create_per_peer_rate_limiter(
-            refill_rate=20.0,
-            capacity=200.0,
-            initial_tokens=100.0,
-            max_peers=500
+            refill_rate=20.0, capacity=200.0, initial_tokens=100.0, max_peers=500
         )
         assert limiter.config.scope == RateLimitScope.PER_PEER
         assert limiter.config.strategy == RateLimitStrategy.TOKEN_BUCKET
@@ -500,7 +489,7 @@ class TestRateLimiterFactory:
             max_rate=100.0,
             min_rate=1.0,
             adaptation_factor=0.1,
-            scope=RateLimitScope.GLOBAL
+            scope=RateLimitScope.GLOBAL,
         )
         assert limiter.config.strategy == RateLimitStrategy.ADAPTIVE
         assert limiter.config.scope == RateLimitScope.GLOBAL
@@ -516,10 +505,7 @@ class TestRateLimiterIntegration:
     def test_rate_limiter_with_monitoring(self) -> None:
         """Test RateLimiter with monitoring enabled."""
         config = RateLimitConfig(
-            refill_rate=10.0,
-            capacity=100.0,
-            enable_monitoring=True,
-            max_history_size=5
+            refill_rate=10.0, capacity=100.0, enable_monitoring=True, max_history_size=5
         )
         limiter = RateLimiter(config)
 
@@ -534,9 +520,7 @@ class TestRateLimiterIntegration:
     def test_rate_limiter_without_monitoring(self) -> None:
         """Test RateLimiter with monitoring disabled."""
         config = RateLimitConfig(
-            refill_rate=10.0,
-            capacity=100.0,
-            enable_monitoring=False
+            refill_rate=10.0, capacity=100.0, enable_monitoring=False
         )
         limiter = RateLimiter(config)
 
@@ -555,7 +539,7 @@ class TestRateLimiterIntegration:
             capacity=10.0,
             initial_tokens=10.0,
             allow_burst=True,
-            burst_multiplier=2.0
+            burst_multiplier=2.0,
         )
         limiter = RateLimiter(config)
 
@@ -572,7 +556,7 @@ class TestRateLimiterIntegration:
             capacity=100.0,
             time_window_seconds=2.0,
             min_interval_seconds=0.1,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 
@@ -586,7 +570,7 @@ class TestRateLimiterIntegration:
             refill_rate=10.0,
             capacity=100.0,
             max_peers=2,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = RateLimiter(config)
 

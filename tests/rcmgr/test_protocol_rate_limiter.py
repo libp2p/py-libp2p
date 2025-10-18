@@ -40,7 +40,7 @@ class TestProtocolRateLimitConfig:
             protocol_version="1.0.0",
             refill_rate=20.0,
             capacity=200.0,
-            initial_tokens=100.0
+            initial_tokens=100.0,
         )
         assert config.protocol_name == "test_protocol"
         assert config.protocol_version == "1.0.0"
@@ -174,7 +174,7 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=50.0
+            initial_tokens=50.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -193,7 +193,7 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             refill_rate=1.0,
             capacity=1.0,
-            initial_tokens=1.0
+            initial_tokens=1.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -229,7 +229,7 @@ class TestProtocolRateLimiter:
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
             max_concurrent_requests=2,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -250,7 +250,7 @@ class TestProtocolRateLimiter:
             max_concurrent_requests=1,
             request_timeout_seconds=0.1,
             backoff_factor=2.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -264,16 +264,17 @@ class TestProtocolRateLimiter:
         assert limiter.try_allow_request(peer_id=peer_id) is False
 
         # Should be in backoff
-        assert limiter._is_in_backoff(
-            limiter._get_entity_key(peer_id), time.time()
-        ) is True
+        assert (
+            limiter._is_in_backoff(limiter._get_entity_key(peer_id), time.time())
+            is True
+        )
 
     def test_protocol_rate_limiter_request_timeout(self) -> None:
         """Test ProtocolRateLimiter request timeout handling."""
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
             request_timeout_seconds=0.1,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -368,7 +369,7 @@ class TestProtocolRateLimiter:
             protocol_name="test_protocol",
             refill_rate=100.0,
             capacity=1000.0,
-            initial_tokens=1000.0
+            initial_tokens=1000.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -391,7 +392,7 @@ class TestProtocolRateLimiter:
             refill_rate=100.0,
             capacity=1000.0,
             initial_tokens=1000.0,
-            max_concurrent_requests=100  # Allow all 100 concurrent requests
+            max_concurrent_requests=100,  # Allow all 100 concurrent requests
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -414,7 +415,7 @@ class TestProtocolRateLimiter:
             refill_rate=10.0,
             capacity=100.0,
             max_peers=2,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -437,7 +438,7 @@ class TestProtocolRateLimiter:
             scope=RateLimitScope.GLOBAL,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -451,7 +452,7 @@ class TestProtocolRateLimiter:
             scope=RateLimitScope.PER_CONNECTION,
             refill_rate=10.0,
             capacity=100.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -463,7 +464,7 @@ class TestProtocolRateLimiter:
         config = ProtocolRateLimitConfig(
             protocol_name="test_protocol",
             request_timeout_seconds=0.1,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -489,7 +490,7 @@ class TestProtocolRateLimiter:
             max_concurrent_requests=1,
             request_timeout_seconds=0.1,
             backoff_factor=2.0,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -523,7 +524,7 @@ class TestProtocolRateLimiterFactory:
             protocol_version="1.0.0",
             refill_rate=20.0,
             capacity=200.0,
-            initial_tokens=100.0
+            initial_tokens=100.0,
         )
         assert limiter.config.protocol_name == "test_protocol"
         assert limiter.config.protocol_version == "1.0.0"
@@ -538,7 +539,7 @@ class TestProtocolRateLimiterFactory:
             protocol_version="1.0.0",
             refill_rate=20.0,
             capacity=200.0,
-            initial_tokens=100.0
+            initial_tokens=100.0,
         )
         assert limiter.config.protocol_name == "test_protocol"
         assert limiter.config.protocol_version == "1.0.0"
@@ -555,7 +556,7 @@ class TestProtocolRateLimiterFactory:
             refill_rate=20.0,
             capacity=200.0,
             initial_tokens=100.0,
-            burst_multiplier=2.0
+            burst_multiplier=2.0,
         )
         assert limiter.config.protocol_name == "test_protocol"
         assert limiter.config.protocol_version == "1.0.0"
@@ -576,7 +577,7 @@ class TestProtocolRateLimiterIntegration:
             refill_rate=10.0,
             capacity=100.0,
             enable_monitoring=True,
-            max_history_size=5
+            max_history_size=5,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -598,7 +599,7 @@ class TestProtocolRateLimiterIntegration:
             protocol_name="test_protocol",
             refill_rate=10.0,
             capacity=100.0,
-            enable_monitoring=False
+            enable_monitoring=False,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -622,7 +623,7 @@ class TestProtocolRateLimiterIntegration:
             capacity=10.0,
             initial_tokens=10.0,
             allow_burst=True,
-            burst_multiplier=2.0
+            burst_multiplier=2.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -643,7 +644,7 @@ class TestProtocolRateLimiterIntegration:
             capacity=100.0,
             time_window_seconds=2.0,
             min_interval_seconds=0.1,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 
@@ -661,7 +662,7 @@ class TestProtocolRateLimiterIntegration:
             refill_rate=10.0,
             capacity=100.0,
             max_peers=2,
-            initial_tokens=10.0
+            initial_tokens=10.0,
         )
         limiter = ProtocolRateLimiter(config)
 

@@ -5,7 +5,6 @@ Tests the connection limits configuration and enforcement logic
 that mirrors the Rust libp2p connection limits functionality.
 """
 
-
 import pytest
 
 from libp2p.rcmgr.connection_limits import (
@@ -79,13 +78,15 @@ class TestConnectionLimits:
 
     def test_chained_configuration(self) -> None:
         """Test chaining multiple configuration methods."""
-        limits = (ConnectionLimits()
-                 .with_max_pending_inbound(10)
-                 .with_max_pending_outbound(20)
-                 .with_max_established_inbound(30)
-                 .with_max_established_outbound(40)
-                 .with_max_established_per_peer(5)
-                 .with_max_established_total(100))
+        limits = (
+            ConnectionLimits()
+            .with_max_pending_inbound(10)
+            .with_max_pending_outbound(20)
+            .with_max_established_inbound(30)
+            .with_max_established_outbound(40)
+            .with_max_established_per_peer(5)
+            .with_max_established_total(100)
+        )
 
         assert limits.max_pending_inbound == 10
         assert limits.max_pending_outbound == 20
@@ -276,8 +277,8 @@ class TestConnectionLimits:
         assert "20" in str_repr  # pending outbound
         assert "30" in str_repr  # established inbound
         assert "40" in str_repr  # established outbound
-        assert "5" in str_repr   # per peer
-        assert "100" in str_repr # total
+        assert "5" in str_repr  # per peer
+        assert "100" in str_repr  # total
 
     def test_limits_repr(self) -> None:
         """Test repr representation of limits."""
