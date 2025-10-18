@@ -34,6 +34,8 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
+from libp2p.rcmgr.limits import Direction
+from libp2p.rcmgr.manager import ResourceManager
 from libp2p.tools.async_service import (
     Service,
 )
@@ -89,6 +91,7 @@ class Swarm(Service, INetworkService):
     retry_config: RetryConfig
     connection_config: ConnectionConfig | QUICTransportConfig
     _round_robin_index: dict[ID, int]
+    _resource_manager: ResourceManager | None
 
     def __init__(
         self,
@@ -122,6 +125,11 @@ class Swarm(Service, INetworkService):
 
         # Load balancing state
         self._round_robin_index = {}
+        self._resource_manager = None
+
+    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
+        """Attach a ResourceManager to wire connection/stream scopes."""
+        self._resource_manager = resource_manager
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
@@ -647,6 +655,36 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
+        # If QUIC and resource manager is present, attach a connection scope
+        if (
+            isinstance(muxed_conn, QUICConnection)
+            and self._resource_manager is not None
+        ):
+            try:
+                direction = (
+                    Direction.OUTBOUND
+                    if muxed_conn._is_initiator
+                    else Direction.INBOUND
+                )
+                endpoint = getattr(muxed_conn, "_maddr", None)
+                peer_id_for_scope = muxed_conn.peer_id
+                conn_scope = self._resource_manager.open_connection(
+                    direction=direction,
+                    use_fd=True,
+                    endpoint=endpoint,
+                    peer_id=peer_id_for_scope,
+                )
+                # QUICConnection provides a hook to set scope and ensure cleanup
+                if hasattr(muxed_conn, "set_resource_scope"):
+                    muxed_conn.set_resource_scope(conn_scope)
+            except Exception as e:
+                # If resource guard denies, close connection and rethrow
+                try:
+                    await muxed_conn.close()
+                except Exception:
+                    pass
+                raise SwarmException(f"Connection denied by resource manager: {e}")
+
         swarm_conn = SwarmConn(
             muxed_conn,
             self,

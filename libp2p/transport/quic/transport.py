@@ -451,7 +451,9 @@ class QUICTransport(ITransport):
 
         logger.debug("QUIC transport closed")
 
-    async def _cleanup_terminated_connection(self, connection: QUICConnection) -> None:
+    async def _cleanup_terminated_connection(
+        self, connection: "QUICConnection"
+    ) -> None:
         """Clean up a terminated connection from all listeners."""
         try:
             for listener in self._listeners:

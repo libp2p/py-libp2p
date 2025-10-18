@@ -608,6 +608,14 @@ class QUICStream(IMuxedStream):
         async with self._receive_buffer_lock:
             self._receive_buffer.clear()
 
+        # Release resource scope if present
+        if self._resource_scope and hasattr(self._resource_scope, "done"):
+            try:
+                self._resource_scope.done()
+            except Exception as e:
+                logger.warning(f"Error releasing resource scope: {e}")
+            self._resource_scope = None
+
         # Remove from connection's stream registry
         self._connection._remove_stream(self._stream_id)
 
