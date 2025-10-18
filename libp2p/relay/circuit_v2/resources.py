@@ -291,3 +291,31 @@ class RelayResourceManager:
         # Create new reservation
         self.create_reservation(peer_id)
         return self.limits.duration
+
+    def has_reservation(self, peer_id: ID) -> bool:
+        """
+        Check if a reservation already exists for a peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check for
+
+        Returns
+        -------
+        bool
+            True if reservation exists, False otherwise
+
+        """
+        existing = self._reservations.get(peer_id)
+        if existing and not existing.is_expired():
+            return True
+        return False
+
+    def refresh_reservation(self, peer_id: ID) -> int:
+        if self.has_reservation(peer_id):
+            self.create_reservation(peer_id)
+            return self.limits.duration
+        
+        return 0
+
