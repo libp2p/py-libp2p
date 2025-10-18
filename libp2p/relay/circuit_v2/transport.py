@@ -208,6 +208,36 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established.
 
         """
+        # Prefer stored /p2p-circuit addrs from peerstore
+        # Try first to read addresses from peerstore
+        peer_store = self.host.get_peerstore()
+        stored_addrs = peer_store.addrs(peer_info.peer_id)
+
+        # Get validated stored p2p-circuit addrs
+        circuit_addrs = []
+        for ma in stored_addrs:
+            try:
+                _, target_peer_id = self.parse_circuit_ma(ma)
+                if target_peer_id == peer_info.peer_id:
+                    circuit_addrs.append(ma)
+            except ValueError:
+                continue
+
+        for ma in circuit_addrs:
+            try:
+                logger.debug(
+                    "Trying stored circuit multiaddr %s for peer %s",
+                    ma,
+                    peer_info.peer_id
+                )
+                conn = await self._dial_via_circuit_addr(ma, peer_info)
+                if conn:
+                    logger.debug("Connected via stored circuit addr %s", ma)
+                    return conn
+                logger.debug("Dial via %s returned None", ma)
+            except Exception as e:
+                logger.debug("Stored circuit addr failed (%s): %s", ma, e)
+
         # If no specific relay is provided, try to find one
         if relay_info is None:
             relay_peer_id = await self._select_relay(dest_info)
@@ -275,11 +305,154 @@ class CircuitV2Transport(ITransport):
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
             # Create raw connection from stream
+            self._store_multiaddrs(peer_info, relay_peer_id)
             return RawConnection(stream=relay_stream, initiator=True)
 
         except Exception as e:
             await relay_stream.close()
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
+
+    def parse_circuit_ma(
+            self,
+            ma: multiaddr.Multiaddr
+    ) -> tuple[multiaddr.Multiaddr, ID]:
+        """
+        Parse a /p2p-circuit/p2p/<targetPeerID> path from a relay Multiaddr.
+
+        Returns:
+            relay_ma: Multiaddr to the relay
+            target_peer_id: ID of the target peer
+
+        Raises:
+            ValueError: if the Multiaddr is not a valid circuit address
+
+        """
+        parts = ma.items()
+
+        if len(parts) < 2:
+            raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
+
+        proto_name, _ = parts[-2]
+        if proto_name.name != "p2p-circuit":
+            raise ValueError(f"Missing /p2p-circuit in Multiaddr: {ma}")
+
+        proto_name, val = parts[-1]
+        if proto_name.name != "p2p":
+            raise ValueError(f"Missing /p2p/<peerID> at the end: {ma}")
+
+        try:
+            if isinstance(val, ID):
+                target_peer_id = val
+            else:
+                target_peer_id = ID.from_base58(val)
+        except Exception as e:
+            raise ValueError(f"Invalid peer ID in circuit Multiaddr: {val}") from e
+
+        relay_parts = parts[:-2]
+        relay_ma_str = "/".join(
+            f"{p[0].name}/{p[1]}"
+            for p in relay_parts
+            if p[1] is not None
+        )
+        relay_ma = (
+            multiaddr.Multiaddr(relay_ma_str)
+            if relay_ma_str
+            else multiaddr.Multiaddr("/")
+        )
+
+        return relay_ma, target_peer_id
+
+    def _store_multiaddrs(self, peer_info: PeerInfo, relay_peer_id: ID) -> None:
+        """
+        Store all /p2p-circuit addresses for a peer in the peerstore,
+        based on the relay's addresses.
+        """
+        try:
+            relay_addrs = self.host.get_peerstore().addrs(relay_peer_id)
+            if not relay_addrs:
+                return
+
+            peer_store = self.host.get_peerstore()
+            for relay_ma in relay_addrs:
+                if not isinstance(relay_ma, multiaddr.Multiaddr):
+                    continue
+
+                # Construct /p2p-circuit address
+                circuit_ma = (
+                    relay_ma
+                        .encapsulate(multiaddr.Multiaddr("/p2p-circuit"))
+                        .encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
+                )
+
+                peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31-1)
+                logger.debug(
+                    "Stored relay circuit multiaddr %s for peer %s",
+                    circuit_ma,
+                    peer_info.peer_id
+                )
+
+        except Exception as e:
+            logger.error(
+                "Failed to store relay multiaddrs for peer %s: %s",
+                peer_info.peer_id,
+                e
+            )
+
+
+    async def _dial_via_circuit_addr(
+            self,
+            circuit_ma: multiaddr.Multiaddr,
+            peer_info: PeerInfo
+    ) -> RawConnection:
+        """
+        Dial using a stored /p2p-circuit multiaddr.
+
+        circuit_ma looks like: <relay-ma>/p2p-circuit/p2p/<target-peer-id>
+        We extract the relay multiaddr (everything before /p2p-circuit), dial the relay,
+        and issue a HOP CONNECT to the target peer.
+        """
+        ma_str = str(circuit_ma)
+        idx = ma_str.find("/p2p-circuit")
+        if idx == -1:
+            raise ConnectionError("Not a p2p-ciruit multiaddr")
+
+        relay_ma_str = ma_str[:idx] # everything before /p2p-circuit
+        relay_ma = multiaddr.Multiaddr(relay_ma_str)
+        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        if not relay_peer_id_str:
+            raise ConnectionError("Relay multiaddr missing peer id")
+
+        relay_peer_id = ID.from_base58(relay_peer_id_str)
+
+        # open stream to the relay and request hop connect
+        relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+        if not relay_stream:
+            raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
+
+        try:
+            hop_msg = HopMessage(
+                type=HopMessage.CONNECT,
+                peer=peer_info.peer_id.to_bytes(),
+            )
+            await relay_stream.write(hop_msg.SerializeToString())
+
+            resp_bytes = await relay_stream.read()
+            resp = HopMessage()
+            resp.ParseFromString(resp_bytes)
+
+            status_code = getattr(resp.status, "code", StatusCode.OK)
+            status_msg = getattr(resp.status, "message", "Unknown error")
+
+            if status_code != StatusCode.OK:
+                await relay_stream.close()
+                raise ConnectionError(f"Relay connection failed: {status_msg}")
+
+            return RawConnection(stream=relay_stream, initiator=True)
+
+        except Exception:
+            await relay_stream.close()
+            raise
+
 
     async def _select_relay(self, peer_info: PeerInfo) -> ID | None:
         """
