@@ -381,7 +381,8 @@ class TestMemoryConnectionLimits:
         # Different values
         assert limits1 != limits3
 
-        # Same values, different cache - should be equal since cache is not part of configuration
+        # Same values, different cache - should be equal since cache is not part
+        # of configuration
         assert limits1 == limits4
 
     def test_memory_limits_string_representation(self):

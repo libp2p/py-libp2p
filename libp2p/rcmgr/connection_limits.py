@@ -127,7 +127,8 @@ class ConnectionLimits:
         """Check if pending inbound limit would be exceeded."""
         if self.max_pending_inbound is not None and current >= self.max_pending_inbound:
             raise ResourceLimitExceeded(
-                message=f"Pending inbound limit exceeded: {current} >= {self.max_pending_inbound}"
+                message=f"Pending inbound limit exceeded: {current} >= "
+                f"{self.max_pending_inbound}"
             )
 
     def check_pending_outbound_limit(self, current: int) -> None:
@@ -137,7 +138,8 @@ class ConnectionLimits:
             and current >= self.max_pending_outbound
         ):
             raise ResourceLimitExceeded(
-                message=f"Pending outbound limit exceeded: {current} >= {self.max_pending_outbound}"
+                message=f"Pending outbound limit exceeded: {current} >= "
+                f"{self.max_pending_outbound}"
             )
 
     def check_established_inbound_limit(self, current: int) -> None:
@@ -147,7 +149,8 @@ class ConnectionLimits:
             and current >= self.max_established_inbound
         ):
             raise ResourceLimitExceeded(
-                message=f"Established inbound limit exceeded: {current} >= {self.max_established_inbound}"
+                message=f"Established inbound limit exceeded: {current} >= "
+                f"{self.max_established_inbound}"
             )
 
     def check_established_outbound_limit(self, current: int) -> None:
@@ -157,7 +160,8 @@ class ConnectionLimits:
             and current >= self.max_established_outbound
         ):
             raise ResourceLimitExceeded(
-                message=f"Established outbound limit exceeded: {current} >= {self.max_established_outbound}"
+                message=f"Established outbound limit exceeded: {current} >= "
+                f"{self.max_established_outbound}"
             )
 
     def check_established_per_peer_limit(self, current: int) -> None:
@@ -167,7 +171,8 @@ class ConnectionLimits:
             and current >= self.max_established_per_peer
         ):
             raise ResourceLimitExceeded(
-                message=f"Established per peer limit exceeded: {current} >= {self.max_established_per_peer}"
+                message=f"Established per peer limit exceeded: {current} >= "
+                f"{self.max_established_per_peer}"
             )
 
     def check_established_total_limit(self, current: int) -> None:
@@ -177,7 +182,8 @@ class ConnectionLimits:
             and current >= self.max_established_total
         ):
             raise ResourceLimitExceeded(
-                message=f"Established total limit exceeded: {current} >= {self.max_established_total}"
+                message=f"Established total limit exceeded: {current} >= "
+                f"{self.max_established_total}"
             )
 
     def get_limits_summary(self) -> dict[str, int | None]:

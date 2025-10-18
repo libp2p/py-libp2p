@@ -369,7 +369,8 @@ class TestStreamEvent:
 
         str_repr = str(event)
         assert "stream_opened" in str_repr  # Event type is used, not class name
-        # Note: stream_id and protocol are not included in the default string representation
+        # Note: stream_id and protocol are not included in the default string
+        # representation
 
 
 class TestPeerEvent:

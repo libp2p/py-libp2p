@@ -359,7 +359,8 @@ class TestProtocolRateLimiter:
         with pytest.raises(ValueError, match="capacity must be positive"):
             ProtocolRateLimitConfig(protocol_name="test", capacity=0.0)
 
-        # Test with negative refill rate - should raise ValueError during config creation
+        # Test with negative refill rate - should raise ValueError during config
+        # creation
         with pytest.raises(ValueError, match="refill_rate must be positive"):
             ProtocolRateLimitConfig(protocol_name="test", refill_rate=-1.0)
 

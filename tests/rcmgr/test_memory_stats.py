@@ -7,6 +7,7 @@ that provides efficient memory usage tracking.
 
 import threading
 import time
+from typing import Any, Dict, List
 from unittest.mock import Mock, patch
 
 from libp2p.rcmgr.memory_stats import MemoryStats, MemoryStatsCache
@@ -34,7 +35,7 @@ class TestMemoryStatsCache:
         """Test getting fresh memory statistics."""
         cache = MemoryStatsCache()
 
-        stats = cache.get_memory_stats()
+        stats: MemoryStats = cache.get_memory_stats()
 
         assert stats is not None
         assert isinstance(stats, MemoryStats)
@@ -50,12 +51,12 @@ class TestMemoryStatsCache:
         cache = MemoryStatsCache(cache_duration=1.0)
 
         # First call - should be fresh
-        stats1 = cache.get_memory_stats()
+        stats1: MemoryStats = cache.get_memory_stats()
         assert cache._last_update > 0
         assert cache._cached_stats is not None
 
         # Second call within duration - should be cached
-        stats2 = cache.get_memory_stats()
+        stats2: MemoryStats = cache.get_memory_stats()
         assert stats1 == stats2  # Should be identical
 
     def test_get_memory_stats_cache_expiry(self) -> None:
@@ -79,7 +80,7 @@ class TestMemoryStatsCache:
         """Test getting memory summary."""
         cache = MemoryStatsCache()
 
-        summary = cache.get_memory_summary()
+        summary: Dict[str, Any] = cache.get_memory_summary()
 
         assert summary is not None
         assert "process_memory_bytes" in summary
@@ -94,21 +95,21 @@ class TestMemoryStatsCache:
         assert "cache_age" in summary
 
         # Values should be reasonable
-        assert summary["process_memory_bytes"] >= 0
-        assert 0 <= summary["process_memory_percent"] <= 100
-        assert summary["system_memory_total"] > 0
-        assert 0 <= summary["system_memory_percent"] <= 100
-        assert summary["system_memory_available"] >= 0
+        assert int(summary["process_memory_bytes"]) >= 0  # type: ignore
+        assert 0 <= float(summary["process_memory_percent"]) <= 100  # type: ignore
+        assert int(summary["system_memory_total"]) > 0  # type: ignore
+        assert 0 <= float(summary["system_memory_percent"]) <= 100  # type: ignore
+        assert int(summary["system_memory_available"]) >= 0  # type: ignore
 
     def test_get_memory_summary_cached(self) -> None:
         """Test getting cached memory summary."""
         cache = MemoryStatsCache(cache_duration=1.0)
 
         # First call
-        summary1 = cache.get_memory_summary()
+        summary1: Dict[str, Any] = cache.get_memory_summary()
 
         # Second call within duration - should be cached
-        summary2 = cache.get_memory_summary()
+        summary2: Dict[str, Any] = cache.get_memory_summary()
         assert summary1 == summary2
 
     def test_get_memory_summary_cache_expiry(self) -> None:
@@ -158,10 +159,10 @@ class TestMemoryStatsCache:
     def test_concurrent_access(self) -> None:
         """Test concurrent access to memory stats."""
         cache = MemoryStatsCache()
-        results = []
-        errors = []
+        results: List[MemoryStats] = []
+        errors: List[Exception] = []
 
-        def get_stats():
+        def get_stats() -> None:
             try:
                 stats = cache.get_memory_stats()
                 results.append(stats)
@@ -169,7 +170,7 @@ class TestMemoryStatsCache:
                 errors.append(e)
 
         # Start multiple threads
-        threads = []
+        threads: List[threading.Thread] = []
         for _ in range(10):
             t = threading.Thread(target=get_stats)
             threads.append(t)
@@ -186,10 +187,10 @@ class TestMemoryStatsCache:
     def test_concurrent_access_with_cache(self) -> None:
         """Test concurrent access with caching."""
         cache = MemoryStatsCache(cache_duration=1.0)
-        results = []
-        errors = []
+        results: List[MemoryStats] = []
+        errors: List[Exception] = []
 
-        def get_stats():
+        def get_stats() -> None:
             try:
                 stats = cache.get_memory_stats()
                 results.append(stats)
@@ -197,7 +198,7 @@ class TestMemoryStatsCache:
                 errors.append(e)
 
         # Start multiple threads
-        threads = []
+        threads: List[threading.Thread] = []
         for _ in range(10):
             t = threading.Thread(target=get_stats)
             threads.append(t)
@@ -219,7 +220,7 @@ class TestMemoryStatsCache:
         """Test memory statistics consistency."""
         cache = MemoryStatsCache()
 
-        stats = cache.get_memory_stats()
+        stats: MemoryStats = cache.get_memory_stats()
 
         # Process memory should be reasonable
         assert stats.process_memory_bytes >= 0
@@ -237,22 +238,25 @@ class TestMemoryStatsCache:
         """Test memory summary consistency."""
         cache = MemoryStatsCache()
 
-        summary = cache.get_memory_summary()
+        summary: Dict[str, Any] = cache.get_memory_summary()
 
         # Process summary consistency
-        assert summary["process_memory_bytes"] >= 0
-        assert 0 <= summary["process_memory_percent"] <= 100
-        assert summary["process_memory_mb"] >= 0
+        assert int(summary["process_memory_bytes"]) >= 0  # type: ignore
+        assert 0 <= float(summary["process_memory_percent"]) <= 100  # type: ignore
+        assert float(summary["process_memory_mb"]) >= 0  # type: ignore
 
         # System summary consistency
-        assert summary["system_memory_total"] > 0
-        assert summary["system_memory_available"] >= 0
-        assert 0 <= summary["system_memory_percent"] <= 100
-        assert summary["system_memory_total_gb"] > 0
-        assert summary["system_memory_available_gb"] >= 0
+        assert int(summary["system_memory_total"]) > 0  # type: ignore
+        assert int(summary["system_memory_available"]) >= 0  # type: ignore
+        assert 0 <= float(summary["system_memory_percent"]) <= 100  # type: ignore
+        assert float(summary["system_memory_total_gb"]) > 0  # type: ignore
+        assert float(summary["system_memory_available_gb"]) >= 0  # type: ignore
 
         # Available memory should not exceed total memory
-        assert summary["system_memory_available"] <= summary["system_memory_total"]
+        assert (
+            int(summary["system_memory_available"])  # type: ignore
+            <= int(summary["system_memory_total"])  # type: ignore
+        )
 
     def test_memory_stats_with_mock_psutil(self) -> None:
         """Test memory stats with mocked psutil."""
@@ -275,7 +279,7 @@ class TestMemoryStatsCache:
             mock_psutil.virtual_memory.return_value = mock_virtual_memory
 
             cache = MemoryStatsCache()
-            stats = cache.get_memory_stats()
+            stats: MemoryStats = cache.get_memory_stats()
 
             # Check mocked values
             assert stats.process_memory_bytes == 1024 * 1024
@@ -305,7 +309,7 @@ class TestMemoryStatsCache:
             mock_psutil.virtual_memory.return_value = mock_virtual_memory
 
             cache = MemoryStatsCache()
-            summary = cache.get_memory_summary()
+            summary: Dict[str, Any] = cache.get_memory_summary()
 
             # Check mocked values
             assert summary["process_memory_bytes"] == 1024 * 1024
@@ -327,7 +331,7 @@ class TestMemoryStatsCache:
 
             # Should handle error gracefully
             try:
-                stats = cache.get_memory_stats()
+                stats: MemoryStats = cache.get_memory_stats()
                 # If it doesn't raise, check that it has reasonable defaults
                 assert stats.process_memory_bytes >= 0
                 assert 0 <= stats.process_memory_percent <= 100
@@ -345,10 +349,10 @@ class TestMemoryStatsCache:
 
             # Should handle error gracefully
             try:
-                summary = cache.get_memory_summary()
+                summary: Dict[str, Any] = cache.get_memory_summary()
                 # If it doesn't raise, check that it has reasonable defaults
-                assert summary["process_memory_bytes"] >= 0
-                assert 0 <= summary["process_memory_percent"] <= 100
+                assert summary["process_memory_bytes"] >= 0  # type: ignore
+                assert 0 <= summary["process_memory_percent"] <= 100  # type: ignore
             except Exception:
                 # It's acceptable for the cache to raise if psutil fails
                 pass
@@ -422,10 +426,10 @@ class TestMemoryStatsCache:
     def test_memory_stats_thread_safety(self) -> None:
         """Test memory stats thread safety."""
         cache = MemoryStatsCache()
-        results = []
-        errors = []
+        results: List[MemoryStats] = []
+        errors: List[Exception] = []
 
-        def get_stats():
+        def get_stats() -> None:
             try:
                 stats = cache.get_memory_stats()
                 results.append(stats)
@@ -433,7 +437,7 @@ class TestMemoryStatsCache:
                 errors.append(e)
 
         # Start many threads
-        threads = []
+        threads: List[threading.Thread] = []
         for _ in range(50):
             t = threading.Thread(target=get_stats)
             threads.append(t)
@@ -450,10 +454,10 @@ class TestMemoryStatsCache:
     def test_memory_summary_thread_safety(self) -> None:
         """Test memory summary thread safety."""
         cache = MemoryStatsCache()
-        results = []
-        errors = []
+        results: List[Dict[str, Any]] = []
+        errors: List[Exception] = []
 
-        def get_summary():
+        def get_summary() -> None:
             try:
                 summary = cache.get_memory_summary()
                 results.append(summary)
@@ -461,7 +465,7 @@ class TestMemoryStatsCache:
                 errors.append(e)
 
         # Start many threads
-        threads = []
+        threads: List[threading.Thread] = []
         for _ in range(50):
             t = threading.Thread(target=get_summary)
             threads.append(t)
@@ -487,8 +491,8 @@ class TestMemoryStatsCache:
 
         # Test with very long duration
         cache2 = MemoryStatsCache(cache_duration=100.0)
-        stats3 = cache2.get_memory_stats()
-        stats4 = cache2.get_memory_stats()
+        stats3: MemoryStats = cache2.get_memory_stats()
+        stats4: MemoryStats = cache2.get_memory_stats()
         # Should be identical (cached)
         assert stats3 == stats4
 
@@ -504,8 +508,8 @@ class TestMemoryStatsCache:
 
         # Test with very long duration
         cache2 = MemoryStatsCache(cache_duration=100.0)
-        summary3 = cache2.get_memory_summary()
-        summary4 = cache2.get_memory_summary()
+        summary3: Dict[str, Any] = cache2.get_memory_summary()
+        summary4: Dict[str, Any] = cache2.get_memory_summary()
         # Should be identical (cached)
         assert summary3 == summary4
 
@@ -517,7 +521,7 @@ class TestMemoryStatsCache:
         cache._cached_stats = None
         cache._last_update = 0.0
 
-        stats = cache.get_memory_stats()
+        stats: MemoryStats = cache.get_memory_stats()
         assert stats is not None
 
         # Test with invalid cache
@@ -535,7 +539,7 @@ class TestMemoryStatsCache:
         cache._cached_stats = None
         cache._last_update = 0.0
 
-        summary = cache.get_memory_summary()
+        summary: Dict[str, Any] = cache.get_memory_summary()
         assert summary is not None
 
         # Test with invalid cache
@@ -549,14 +553,14 @@ class TestMemoryStatsCache:
         """Test string representation of cache."""
         cache = MemoryStatsCache()
 
-        str_repr = str(cache)
+        str_repr: str = str(cache)
         assert "MemoryStatsCache" in str_repr
 
     def test_memory_stats_repr(self) -> None:
         """Test repr representation of cache."""
         cache = MemoryStatsCache()
 
-        repr_str = repr(cache)
+        repr_str: str = repr(cache)
         assert "MemoryStatsCache" in repr_str
 
     def test_memory_stats_equality(self) -> None:
@@ -592,7 +596,7 @@ class TestMemoryStatsCache:
         """Test cache can be used as dictionary key."""
         cache = MemoryStatsCache()
 
-        cache_dict = {cache: "value"}
+        cache_dict: Dict[MemoryStatsCache, str] = {cache: "value"}
         assert cache_dict[cache] == "value"
 
     def test_memory_stats_copy(self) -> None:
@@ -624,7 +628,7 @@ class TestMemoryStatsCache:
         cache = MemoryStatsCache()
 
         # Get stats
-        stats = cache.get_memory_stats()
+        stats: MemoryStats = cache.get_memory_stats()
 
         # Should be serializable
         json_str = json.dumps(
@@ -650,7 +654,7 @@ class TestMemoryStatsCache:
         cache = MemoryStatsCache()
 
         # Get summary
-        summary = cache.get_memory_summary()
+        summary: Dict[str, Any] = cache.get_memory_summary()
 
         # Should be serializable
         json_str = json.dumps(summary)
@@ -734,35 +738,35 @@ class TestMemoryStatsCache:
         """Test getting process memory bytes."""
         cache = MemoryStatsCache()
 
-        memory_bytes = cache.get_process_memory_bytes()
+        memory_bytes: int = cache.get_process_memory_bytes()
         assert memory_bytes >= 0
 
     def test_get_process_memory_percent(self) -> None:
         """Test getting process memory percent."""
         cache = MemoryStatsCache()
 
-        memory_percent = cache.get_process_memory_percent()
+        memory_percent: float = cache.get_process_memory_percent()
         assert 0 <= memory_percent <= 100
 
     def test_get_system_memory_total(self) -> None:
         """Test getting system memory total."""
         cache = MemoryStatsCache()
 
-        memory_total = cache.get_system_memory_total()
+        memory_total: int = cache.get_system_memory_total()
         assert memory_total > 0
 
     def test_get_system_memory_available(self) -> None:
         """Test getting system memory available."""
         cache = MemoryStatsCache()
 
-        memory_available = cache.get_system_memory_available()
+        memory_available: int = cache.get_system_memory_available()
         assert memory_available >= 0
 
     def test_get_system_memory_percent(self) -> None:
         """Test getting system memory percent."""
         cache = MemoryStatsCache()
 
-        memory_percent = cache.get_system_memory_percent()
+        memory_percent: float = cache.get_system_memory_percent()
         assert 0 <= memory_percent <= 100
 
     def test_is_memory_available(self) -> None:
@@ -770,17 +774,19 @@ class TestMemoryStatsCache:
         cache = MemoryStatsCache()
 
         # Test with small amount
-        is_available = cache.is_memory_available(1024)  # 1KB
+        is_available: bool = cache.is_memory_available(1024)  # 1KB
         assert isinstance(is_available, bool)
 
         # Test with large amount
-        is_available_large = cache.is_memory_available(1024 * 1024 * 1024 * 1024)  # 1TB
+        is_available_large: bool = cache.is_memory_available(
+            1024 * 1024 * 1024 * 1024
+        )  # 1TB
         assert isinstance(is_available_large, bool)
 
     def test_memory_stats_properties(self) -> None:
         """Test MemoryStats properties."""
         cache = MemoryStatsCache()
-        stats = cache.get_memory_stats()
+        stats: MemoryStats = cache.get_memory_stats()
 
         # Test process memory properties
         assert stats.process_memory_mb >= 0

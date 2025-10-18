@@ -340,7 +340,8 @@ class TestRateLimiter:
         with pytest.raises(ValueError, match="capacity must be positive"):
             RateLimitConfig(refill_rate=10.0, capacity=0.0)
 
-        # Test with negative refill rate - should raise ValueError during config creation
+        # Test with negative refill rate - should raise ValueError during config
+        # creation
         with pytest.raises(ValueError, match="refill_rate must be positive"):
             RateLimitConfig(refill_rate=-1.0, capacity=100.0)
 
