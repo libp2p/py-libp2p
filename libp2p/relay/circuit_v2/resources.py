@@ -316,6 +316,6 @@ class RelayResourceManager:
         if self.has_reservation(peer_id):
             self.create_reservation(peer_id)
             return self.limits.duration
-        
+
         return 0
 
