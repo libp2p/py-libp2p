@@ -21,28 +21,23 @@ from .exceptions import (
     StreamOrConnLimitExceeded,
     ResourceScopeClosed,
 )
-from .limits import (
-    BaseLimit,
-    FixedLimiter,
-    ScopeStat,
-)
-from .manager import ResourceManager, new_resource_manager
+from .limits import Direction
+from .manager import ResourceManager, new_resource_manager, ResourceLimits
 from .memory_limits import MemoryConnectionLimits
 from .metrics import Metrics, ResourceMetrics
-from .scope import (
-    BaseResourceScope,
-)
+from .connection_pool import ConnectionPool
+from .memory_pool import MemoryPool
+from .circuit_breaker import CircuitBreaker, CircuitBreakerError
+from .graceful_degradation import GracefulDegradation
+from .monitoring import ProductionMonitor, Metric, Alert, MetricType, AlertSeverity
+from .health_checks import HealthChecker, HealthStatus, HealthCheckType, HealthCheckResult
+from .config import ProductionConfig, ConnectionConfig, MemoryConfig, PerformanceConfig, MonitoringConfig, CircuitBreakerConfig, GracefulDegradationConfig, LoggingConfig, SecurityConfig
 
 __all__ = [
     # Main classes
     "ResourceManager",
     "new_resource_manager",
-    # Scopes
-    "BaseResourceScope",
-    # Limits
-    "BaseLimit",
-    "FixedLimiter",
-    "ScopeStat",
+    "ResourceLimits",
     # Connection Limits
     "ConnectionLimits",
     "new_connection_limits",
@@ -57,6 +52,35 @@ __all__ = [
     # Metrics
     "Metrics",
     "ResourceMetrics",
+    # Enums
+    "Direction",
+    # Performance Optimizations
+    "ConnectionPool",
+    "MemoryPool",
+    # Production Features
+    "CircuitBreaker",
+    "CircuitBreakerError",
+    "GracefulDegradation",
+    # Monitoring & Health
+    "ProductionMonitor",
+    "Metric",
+    "Alert",
+    "MetricType",
+    "AlertSeverity",
+    "HealthChecker",
+    "HealthStatus",
+    "HealthCheckType",
+    "HealthCheckResult",
+    # Configuration
+    "ProductionConfig",
+    "ConnectionConfig",
+    "MemoryConfig",
+    "PerformanceConfig",
+    "MonitoringConfig",
+    "CircuitBreakerConfig",
+    "GracefulDegradationConfig",
+    "LoggingConfig",
+    "SecurityConfig",
     # Exceptions
     "ResourceLimitExceeded",
     "MemoryLimitExceeded",

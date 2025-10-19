@@ -14,6 +14,9 @@ from typing import (
 
 import multiaddr
 
+if TYPE_CHECKING:
+    from libp2p.rcmgr import ResourceManager
+
 from libp2p.abc import (
     IHost,
     INetConn,
@@ -97,11 +100,22 @@ class BasicHost(IHost):
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        resource_manager: Optional["ResourceManager"] = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         self.negotiate_timeout = negotiate_timeout
+
+        # Set up resource manager if provided
+        if resource_manager is not None:
+            if hasattr(self._network, "set_resource_manager"):
+                self._network.set_resource_manager(resource_manager)  # type: ignore
+            else:
+                # Log warning if network doesn't support resource manager
+                logger.warning(
+                    "Resource manager provided but network service doesn't support it"
+                )
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))

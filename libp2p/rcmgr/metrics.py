@@ -1,12 +1,41 @@
+"""
+Optimized resource metrics implementation.
+
+This module provides high-performance metrics collection for the resource manager,
+using array-based storage for optimal performance in production environments.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from enum import IntEnum
+import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from .limits import Direction
+
+class Direction(IntEnum):
+    """Direction enum for resource tracking"""
+
+    INBOUND = 0
+    OUTBOUND = 1
+
+
+class MetricType(IntEnum):
+    """Enumeration of metric types for array indexing."""
+
+    CONNECTIONS_INBOUND = 0
+    CONNECTIONS_OUTBOUND = 1
+    MEMORY_USAGE = 2
+    STREAMS_INBOUND = 3
+    STREAMS_OUTBOUND = 4
+    CONNECTION_BLOCKS = 5
+    MEMORY_BLOCKS = 6
+    STREAM_BLOCKS = 7
+    PEAK_CONNECTIONS = 8
+    PEAK_MEMORY = 9
+    PEAK_STREAMS = 10
 
 
 @dataclass
@@ -21,403 +50,230 @@ class ResourceMetrics:
 
 
 class Metrics:
-    ## time may not be necessary, but maybe useful for some metrics
-    ## some implementation for remaining blocked services might be left
+    """
+    High-performance metrics with array storage.
+
+    This implementation uses pre-allocated arrays for O(1) access
+    to metrics, avoiding dictionary overhead and string operations.
+    """
+
     def __init__(self) -> None:
-        """Initialize the BasicMetrics collector."""
-        self.data: dict[str, float | str] = {}
-        self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
+        """Initialize the optimized metrics collector."""
+        # Pre-allocated arrays for O(1) access
+        self._counters = [0] * len(MetricType)
+        self._gauges = [0.0] * len(MetricType)
+        self._lock = threading.RLock()
         self._start_time = time.time()
 
-    def record(self, key: str, value: float | str) -> None:
-        self.data[key] = value
+        # Resource-specific metrics (for backward compatibility)
+        self.resource_metrics: dict[str, ResourceMetrics] = defaultdict(ResourceMetrics)
 
-    def get(self, key: str, default: float = 0.0) -> float:
-        value = self.data.get(key, default)
-        if isinstance(value, str):
-            try:
-                return float(value)
-            except ValueError:
-                return default
-        return float(value) if isinstance(value, (int, float)) else default
+    def increment(self, metric: MetricType, delta: int = 1) -> None:
+        """
+        Increment a counter metric.
 
-    def increment(self, key: str, delta: float = 1.0) -> None:
-        current = self.data.get(key, 0.0)
-        current = float(current) if isinstance(current, (int, float, str)) else 0.0
-        self.data[key] = current + delta
+        Args:
+            metric: The metric type to increment
+            delta: Amount to increment by
 
-    def block_memory(self, size: int) -> None:
-        self.resource_metrics["memory"].blocked += 1
-        self.increment("memory_blocks_total")
-        self.record("last_memory_block_size", size)
-        self.record("last_memory_block_time", time.time())
+        """
+        with self._lock:
+            self._counters[metric] += delta
 
-    def allow_memory(self, size: int) -> None:
-        metrics = self.resource_metrics["memory"]
-        metrics.allowed += 1
-        metrics.current_usage += size
-        metrics.peak_usage = max(metrics.peak_usage, metrics.current_usage)
-        metrics.last_updated = time.time()
+    def set_gauge(self, metric: MetricType, value: float) -> None:
+        """
+        Set a gauge metric value.
 
-        self.increment("memory_allocations_total")
-        self.record("memory_current_usage", metrics.current_usage)
-        self.record("memory_peak_usage", metrics.peak_usage)
+        Args:
+            metric: The metric type to set
+            value: The value to set
 
-    def release_memory(self, size: int) -> None:
-        """Record memory release."""
-        metrics = self.resource_metrics["memory"]
-        metrics.current_usage = max(0, metrics.current_usage - size)
-        metrics.last_updated = time.time()
+        """
+        with self._lock:
+            self._gauges[metric] = value
 
-        self.record("memory_current_usage", metrics.current_usage)
+    def get_counter(self, metric: MetricType) -> int:
+        """
+        Get a counter metric value.
 
-    def record_memory(self, scope_name: str, size: int | str) -> None:
-        """Record memory usage for a specific scope."""
-        self.record(f"memory_{scope_name}", size)
-        self.record(f"memory_{scope_name}_time", time.time())
+        Args:
+            metric: The metric type to get
 
-    def get_memory(self, scope_name: str) -> float | str:
-        """Get memory usage for a specific scope."""
-        value = self.data.get(f"memory_{scope_name}", 0)
-        return value
+        Returns:
+            The counter value
 
-    def increment_memory(self, scope_name: str, delta: int) -> None:
-        """Increment memory usage for a specific scope by delta amount."""
-        current_key = f"memory_{scope_name}"
-        current = self.get(current_key, 0)
-        new_value = max(0.0, current + delta)  # Don't allow negative memory
-        self.record(current_key, new_value)
-        self.record(f"memory_{scope_name}_time", time.time())
+        """
+        with self._lock:
+            return self._counters[metric]
 
-    ## File Descriptor Metrics
+    def get_gauge(self, metric: MetricType) -> float:
+        """
+        Get a gauge metric value.
 
-    def record_fd(self, scope_name: str, count: int) -> None:
-        """Record file descriptor count for a specific scope."""
-        self.record(f"fd_{scope_name}", count)
-        self.record(f"fd_{scope_name}_time", time.time())
+        Args:
+            metric: The metric type to get
 
-    def get_fd(self, scope_name: str) -> int:
-        """Get file descriptor count for a specific scope."""
-        return int(self.get(f"fd_{scope_name}"))
+        Returns:
+            The gauge value
 
-    ## Stream Metrics
+        """
+        with self._lock:
+            return self._gauges[metric]
 
-    def block_stream(self, peer_id: str, direction: str) -> None:
-        """Record a blocked stream."""
-        key = f"streams_{direction}"
-        self.resource_metrics[key].blocked += 1
-        self.increment(f"{key}_blocks_total")
-        self.record(f"last_{key}_block_peer", peer_id)
-        self.record(f"last_{key}_block_time", time.time())
+    def record_connection(self, direction: str, delta: int = 1) -> None:
+        """
+        Record a connection event.
+
+        Args:
+            direction: Connection direction ('inbound' or 'outbound')
+            delta: Change in connection count
+
+        """
+        if direction == "inbound":
+            self.increment(MetricType.CONNECTIONS_INBOUND, delta)
+        else:
+            self.increment(MetricType.CONNECTIONS_OUTBOUND, delta)
+
+        # Update peak connections
+        current_total = self.get_counter(
+            MetricType.CONNECTIONS_INBOUND
+        ) + self.get_counter(MetricType.CONNECTIONS_OUTBOUND)
+        if current_total > self.get_gauge(MetricType.PEAK_CONNECTIONS):
+            self.set_gauge(MetricType.PEAK_CONNECTIONS, current_total)
+
+    def record_memory(self, size: int, delta: int = 1) -> None:
+        """
+        Record a memory event.
+
+        Args:
+            size: Memory size in bytes
+            delta: Change in memory count
+
+        """
+        self.increment(MetricType.MEMORY_USAGE, size * delta)
+
+        # Update peak memory
+        current_memory = self.get_counter(MetricType.MEMORY_USAGE)
+        if current_memory > self.get_gauge(MetricType.PEAK_MEMORY):
+            self.set_gauge(MetricType.PEAK_MEMORY, current_memory)
+
+    def record_stream(self, direction: str, delta: int = 1) -> None:
+        """
+        Record a stream event.
+
+        Args:
+            direction: Stream direction ('inbound' or 'outbound')
+            delta: Change in stream count
+
+        """
+        if direction == "inbound":
+            self.increment(MetricType.STREAMS_INBOUND, delta)
+        else:
+            self.increment(MetricType.STREAMS_OUTBOUND, delta)
+
+        # Update peak streams
+        current_total = self.get_counter(MetricType.STREAMS_INBOUND) + self.get_counter(
+            MetricType.STREAMS_OUTBOUND
+        )
+        if current_total > self.get_gauge(MetricType.PEAK_STREAMS):
+            self.set_gauge(MetricType.PEAK_STREAMS, current_total)
+
+    def record_block(self, resource_type: str) -> None:
+        """
+        Record a resource block event.
+
+        Args:
+            resource_type: Type of resource that was blocked
+
+        """
+        if resource_type == "connection":
+            self.increment(MetricType.CONNECTION_BLOCKS)
+        elif resource_type == "memory":
+            self.increment(MetricType.MEMORY_BLOCKS)
+        elif resource_type == "stream":
+            self.increment(MetricType.STREAM_BLOCKS)
+
+    # Backward compatibility methods
+    def allow_conn(self, direction: str, use_fd: bool = True) -> None:
+        """Record an allowed connection (backward compatibility)."""
+        self.record_connection(direction)
+
+    def remove_conn(self, direction: str, use_fd: bool = True) -> None:
+        """Record a removed connection (backward compatibility)."""
+        self.record_connection(direction, -1)
 
     def allow_stream(self, peer_id: str, direction: str) -> None:
-        """Record an allowed stream."""
-        key = f"streams_{direction}"
-        metrics = self.resource_metrics[key]
-        metrics.allowed += 1
-        metrics.current_usage += 1
-        metrics.peak_usage = max(metrics.peak_usage, metrics.current_usage)
-        metrics.last_updated = time.time()
+        """Record an allowed stream (backward compatibility)."""
+        self.record_stream(direction)
 
-        self.increment(f"{key}_total")
-        self.record(f"{key}_current", metrics.current_usage)
-        self.record(f"{key}_peak", metrics.peak_usage)
+    def remove_stream(self, direction: str) -> None:
+        """Record a removed stream (backward compatibility)."""
+        self.record_stream(direction, -1)
 
-    def record_streams(self, scope_name: str, total: int, inbound: int) -> None:
-        """Record stream counts for a specific scope."""
-        outbound = total - inbound
-        self.record(f"streams_{scope_name}_inbound", inbound)
-        self.record(f"streams_{scope_name}_outbound", outbound)
-        self.record(f"streams_{scope_name}_total", total)
-        self.record(f"streams_{scope_name}_time", time.time())
+    def allow_memory(self, size: int) -> None:
+        """Record allowed memory (backward compatibility)."""
+        self.record_memory(size)
 
-    def get_streams(self, scope_name: str) -> dict[str, int]:
-        """Get stream counts for a specific scope."""
-        inbound = int(self.get(f"streams_{scope_name}_inbound"))
-        outbound = int(self.get(f"streams_{scope_name}_outbound"))
-        total = int(self.get(f"streams_{scope_name}_total"))
-        return {"inbound": inbound, "outbound": outbound, "total": total}
+    def release_memory(self, size: int) -> None:
+        """Record released memory (backward compatibility)."""
+        self.record_memory(size, -1)
 
-    def add_stream(self, scope_name: str, direction: Direction) -> None:
-        """
-        Add a stream to the specified scope.
+    def block_conn(self, direction: str, use_fd: bool = True) -> None:
+        """Record a blocked connection (backward compatibility)."""
+        self.record_block("connection")
 
-        Args:
-            scope_name: The name of the scope to track the stream under
-            direction: The stream direction (inbound/outbound)
+    def block_stream(self, peer_id: str, direction: str) -> None:
+        """Record a blocked stream (backward compatibility)."""
+        self.record_block("stream")
 
-        """
-        direction_str = direction.value.lower()
-        # Increment the count for this scope and direction
-        key = f"streams_{scope_name}_{direction_str}"
-        self.increment(key)
-
-        # Update total count
-        total_key = f"streams_{scope_name}_total"
-        self.increment(total_key)
-
-        # Update timestamp
-        self.record(f"streams_{scope_name}_time", time.time())
-
-    def remove_stream(self, *args: str | Direction) -> None:
-        """
-        Remove a stream - supports both global and scope-specific removal.
-
-        Args:
-            args: Either (direction_str,) for global removal or
-                  (scope_name, direction) for scope-specific removal
-
-        """
-        if len(args) == 1:
-            # Global removal: remove_stream(direction_str)
-            direction = args[0]
-            key = f"streams_{direction}"
-            metrics = self.resource_metrics[key]
-            metrics.current_usage = max(0, metrics.current_usage - 1)
-            metrics.last_updated = time.time()
-            self.record(f"{key}_current", metrics.current_usage)
-        elif len(args) == 2:
-            # Scope-specific removal: remove_stream(scope_name, direction)
-            scope_name, direction = args
-            # Handle Direction enum or string safely
-            try:
-                # Try to access .value attribute (Direction enum)
-                if hasattr(direction, "value"):
-                    direction_value = getattr(direction, "value")
-                    if hasattr(direction_value, "lower"):
-                        direction_str = direction_value.lower()
-                    else:
-                        direction_str = str(direction_value).lower()
-                else:
-                    direction_str = str(direction).lower()
-            except (AttributeError, TypeError):
-                # Fallback to string conversion
-                direction_str = str(direction).lower()
-
-            # Decrement the count for this scope and direction
-            key = f"streams_{scope_name}_{direction_str}"
-            current = self.get(key, 0)
-            self.record(key, max(0.0, current - 1))
-
-            # Update total count
-            total_key = f"streams_{scope_name}_total"
-            current_total = self.get(total_key, 0)
-            self.record(total_key, max(0.0, current_total - 1))
-            # Update timestamp
-            self.record(f"streams_{scope_name}_time", time.time())
-        else:
-            raise TypeError(
-                f"remove_stream() takes 1 or 2 arguments but {len(args)} were given"
-            )  ## Connection Metrics
-
-    def block_conn(self, direction: str, use_fd: bool) -> None:
-        """Record a blocked connection."""
-        key = f"conns_{direction}"
-        self.resource_metrics[key].blocked += 1
-        self.increment(f"{key}_blocks_total")
-        self.record(f"last_{key}_block_time", time.time())
-
-        if use_fd:
-            self.resource_metrics["fd"].blocked += 1
-            self.increment("fd_blocks_total")
-
-    def allow_conn(self, direction: str, use_fd: bool) -> None:
-        key = f"conns_{direction}"
-        metrics = self.resource_metrics[key]
-        metrics.allowed += 1
-        metrics.current_usage += 1
-        metrics.peak_usage = max(metrics.peak_usage, metrics.current_usage)
-        metrics.last_updated = time.time()
-
-        self.increment(f"{key}_total")
-        self.record(f"{key}_current", metrics.current_usage)
-        self.record(f"{key}_peak", metrics.peak_usage)
-
-        if use_fd:
-            fd_metrics = self.resource_metrics["fd"]
-            fd_metrics.allowed += 1
-            fd_metrics.current_usage += 1
-            fd_metrics.peak_usage = max(fd_metrics.peak_usage, fd_metrics.current_usage)
-            fd_metrics.last_updated = time.time()
-
-            self.increment("fd_total")
-            self.record("fd_current", fd_metrics.current_usage)
-            self.record("fd_peak", fd_metrics.peak_usage)
-
-    def remove_conn(self, direction: str, use_fd: bool) -> None:
-        key = f"conns_{direction}"
-        metrics = self.resource_metrics[key]
-        metrics.current_usage = max(0, metrics.current_usage - 1)
-        metrics.last_updated = time.time()
-
-        self.record(f"{key}_current", metrics.current_usage)
-
-        if use_fd:
-            fd_metrics = self.resource_metrics["fd"]
-            fd_metrics.current_usage = max(0, fd_metrics.current_usage - 1)
-            fd_metrics.last_updated = time.time()
-
-            self.record("fd_current", fd_metrics.current_usage)
-
-    def record_connections(self, scope_name: str, total: int, inbound: int) -> None:
-        """Record connection counts for a specific scope."""
-        outbound = total - inbound
-        self.record(f"connections_{scope_name}_inbound", inbound)
-        self.record(f"connections_{scope_name}_outbound", outbound)
-        self.record(f"connections_{scope_name}_total", total)
-        self.record(f"connections_{scope_name}_time", time.time())
-
-    def add_connection(self, scope_name: str, direction: Direction) -> None:
-        """
-        Add a connection to the specified scope.
-
-        Args:
-            scope_name: The name of the scope to track the connection under
-            direction: The connection direction (inbound/outbound)
-
-        """
-        direction_str = direction.value.lower()
-        # Increment the count for this scope and direction
-        key = f"connections_{scope_name}_{direction_str}"
-        self.increment(key)
-
-        # Update total count
-        total_key = f"connections_{scope_name}_total"
-        self.increment(total_key)
-
-        # Update timestamp
-        self.record(f"connections_{scope_name}_time", time.time())
-
-    def get_connections(self, scope_name: str) -> dict[str, int]:
-        """Get connection counts for a specific scope."""
-        inbound = int(self.get(f"connections_{scope_name}_inbound"))
-        outbound = int(self.get(f"connections_{scope_name}_outbound"))
-        total = int(self.get(f"connections_{scope_name}_total"))
-        return {"inbound": inbound, "outbound": outbound, "total": total}
-
-    def remove_connection(self, scope_name: str, direction: Direction) -> None:
-        """
-        Remove a connection from the specified scope.
-
-        Args:
-            scope_name: The name of the scope to remove the connection from
-            direction: The connection direction (inbound/outbound).
-
-        """
-        direction_str = direction.value.lower()
-        # Decrement the count for this scope and direction
-        key = f"connections_{scope_name}_{direction_str}"
-        current = self.get(key, 0)
-        self.record(key, max(0.0, current - 1))
-
-        # Update total count
-        total_key = f"connections_{scope_name}_total"
-        current_total = self.get(total_key, 0)
-        self.record(total_key, max(0.0, current_total - 1))
-        # Update timestamp
-        self.record(f"connections_{scope_name}_time", time.time())
-
-    def allow_peer(self, peer_id: str) -> None:
-        self.increment("peer_connections_total")
-        self.record("last_peer_connected", peer_id)
-        self.record("last_peer_connect_time", time.time())
-
-    def allow_protocol(self, protocol: str) -> None:
-        self.increment("protocol_streams_total")
-        self.record("last_protocol_stream", protocol)
-        self.record("last_protocol_stream_time", time.time())
-
-    def allow_service(self, service: str) -> None:
-        """Record an allowed service stream."""
-        self.increment("service_streams_total")
-        self.record("last_service_stream", service)
-        self.record("last_service_stream_time", time.time())
-
-    def block_protocol_peer(self, protocol: str, peer_id: str) -> None:
-        """Record a blocked protocol-peer stream."""
-        self.increment("protocol_peer_blocks_total")
-        self.record("last_protocol_peer_block", f"{protocol}:{peer_id}")
-        self.record("last_protocol_peer_block_time", time.time())
-
-    def block_service_peer(self, service: str, peer_id: str) -> None:
-        """Record a blocked service-peer stream."""
-        self.increment("service_peer_blocks_total")
-        self.record("last_service_peer_block", f"{service}:{peer_id}")
-        self.record("last_service_peer_block_time", time.time())
+    def block_memory(self, size: int) -> None:
+        """Record blocked memory (backward compatibility)."""
+        self.record_block("memory")
 
     def get_summary(self) -> dict[str, Any]:
-        summary: dict[str, Any] = {
-            "uptime": time.time() - self._start_time,
-            "resource_metrics": {},
-            "totals": {},
-        }
+        """
+        Get a summary of all metrics.
 
-        # Group metrics by scope
-        scope_metrics: dict[str, dict[str, Any]] = {}
+        Returns:
+            Dictionary containing all metric values
 
-        for key, value in self.data.items():
-            # Parse scope-specific metrics
-            if key.startswith(("memory_", "streams_", "connections_", "fd_")):
-                parts = key.split("_", 1)
-                if len(parts) >= 2:
-                    metric_type = parts[0]
-                    scope_info = parts[1]
-
-                    # Skip time stamps
-                    if scope_info.endswith("_time"):
-                        continue
-
-                    # Extract scope name (everything before the last _direction or
-                    # _property)
-                    if scope_info.endswith(("_inbound", "_outbound", "_total")):
-                        scope_parts = scope_info.rsplit("_", 1)
-                        scope_name = scope_parts[0]
-                        property_name = scope_parts[1]
-                    else:
-                        scope_name = scope_info
-                        property_name = "total"
-
-                    if scope_name not in scope_metrics:
-                        scope_metrics[scope_name] = {}
-
-                    if metric_type == "memory":
-                        scope_metrics[scope_name]["memory"] = value
-                    elif metric_type == "fd":
-                        scope_metrics[scope_name]["fd"] = value
-                    elif metric_type in ("streams", "connections"):
-                        if metric_type not in scope_metrics[scope_name]:
-                            scope_metrics[scope_name][metric_type] = {}
-                        scope_metrics[scope_name][metric_type][property_name] = value
-
-        summary["resource_metrics"] = scope_metrics
-
-        # Original resource metrics (for backward compatibility)
-        for resource_type, metrics in self.resource_metrics.items():
-            # Store both with and without "global_" prefix for compatibility
-            global_key = f"global_{resource_type}"
-            resource_data = {
-                "allowed": metrics.allowed,
-                "blocked": metrics.blocked,
-                "current_usage": metrics.current_usage,
-                "peak_usage": metrics.peak_usage,
-                "success_rate": (
-                    metrics.allowed / (metrics.allowed + metrics.blocked)
-                    if (metrics.allowed + metrics.blocked) > 0
-                    else 1.0
-                ),
+        """
+        with self._lock:
+            return {
+                "uptime": time.time() - self._start_time,
+                "connections": {
+                    "inbound": self.get_counter(MetricType.CONNECTIONS_INBOUND),
+                    "outbound": self.get_counter(MetricType.CONNECTIONS_OUTBOUND),
+                    "total": (
+                        self.get_counter(MetricType.CONNECTIONS_INBOUND)
+                        + self.get_counter(MetricType.CONNECTIONS_OUTBOUND)
+                    ),
+                    "peak": self.get_gauge(MetricType.PEAK_CONNECTIONS),
+                },
+                "memory": {
+                    "current": self.get_counter(MetricType.MEMORY_USAGE),
+                    "peak": self.get_gauge(MetricType.PEAK_MEMORY),
+                },
+                "streams": {
+                    "inbound": self.get_counter(MetricType.STREAMS_INBOUND),
+                    "outbound": self.get_counter(MetricType.STREAMS_OUTBOUND),
+                    "total": (
+                        self.get_counter(MetricType.STREAMS_INBOUND)
+                        + self.get_counter(MetricType.STREAMS_OUTBOUND)
+                    ),
+                    "peak": self.get_gauge(MetricType.PEAK_STREAMS),
+                },
+                "blocks": {
+                    "connections": self.get_counter(MetricType.CONNECTION_BLOCKS),
+                    "memory": self.get_counter(MetricType.MEMORY_BLOCKS),
+                    "streams": self.get_counter(MetricType.STREAM_BLOCKS),
+                },
             }
-            summary["resource_metrics"][global_key] = resource_data
-            summary["resource_metrics"][resource_type] = resource_data
-
-        # Total counters
-        for key, value in self.data.items():
-            if "_total" in key or "_current" in key or "_peak" in key:
-                summary["totals"][key] = value
-
-        return summary
 
     def reset(self) -> None:
-        """Reset all metrics."""
-        self.data.clear()
+        """Reset all metrics to zero."""
+        with self._lock:
+            self._counters = [0] * len(MetricType)
+            self._gauges = [0.0] * len(MetricType)
         self.resource_metrics.clear()
         self._start_time = time.time()

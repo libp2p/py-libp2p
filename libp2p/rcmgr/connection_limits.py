@@ -30,7 +30,7 @@ class ConnectionLimits:
     max_established_per_peer: int | None = None
     max_established_total: int | None = None
 
-    def with_max_pending_inbound(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_pending_inbound(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrently incoming connections being
         established.
@@ -45,7 +45,7 @@ class ConnectionLimits:
         self.max_pending_inbound = limit
         return self
 
-    def with_max_pending_outbound(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_pending_outbound(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrently outgoing connections being
         established.
@@ -60,7 +60,7 @@ class ConnectionLimits:
         self.max_pending_outbound = limit
         return self
 
-    def with_max_established_inbound(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_established_inbound(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrent established inbound connections.
 
@@ -74,7 +74,7 @@ class ConnectionLimits:
         self.max_established_inbound = limit
         return self
 
-    def with_max_established_outbound(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_established_outbound(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrent established outbound connections.
 
@@ -88,7 +88,7 @@ class ConnectionLimits:
         self.max_established_outbound = limit
         return self
 
-    def with_max_established_per_peer(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_established_per_peer(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrent established connections per peer,
         regardless of direction (incoming or outgoing).
@@ -103,7 +103,7 @@ class ConnectionLimits:
         self.max_established_per_peer = limit
         return self
 
-    def with_max_established_total(self, limit: int | None) -> "ConnectionLimits":
+    def with_max_established_total(self, limit: int | None) -> ConnectionLimits:
         """
         Configure the maximum number of concurrent established connections (both
         inbound and outbound).

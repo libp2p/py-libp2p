@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING, Optional
+
 from libp2p.abc import (
     INetworkService,
     IPeerRouting,
 )
+
+if TYPE_CHECKING:
+    from libp2p.rcmgr import ResourceManager
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -24,8 +29,11 @@ class RoutedHost(BasicHost):
         router: IPeerRouting,
         enable_mDNS: bool = False,
         bootstrap: list[str] | None = None,
+        resource_manager: Optional["ResourceManager"] = None,
     ):
-        super().__init__(network, enable_mDNS, bootstrap)
+        super().__init__(
+            network, enable_mDNS, bootstrap, resource_manager=resource_manager
+        )
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:

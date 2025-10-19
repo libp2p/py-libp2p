@@ -286,7 +286,7 @@ class MemoryConnectionLimits:
             )
         )
 
-    def __deepcopy__(self, memo: dict[str, object]) -> "MemoryConnectionLimits":
+    def __deepcopy__(self, memo: dict[str, object]) -> MemoryConnectionLimits:
         """Deep copy memory connection limits, creating new cache."""
         from .memory_stats import MemoryStatsCache
 

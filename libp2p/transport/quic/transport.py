@@ -117,7 +117,7 @@ class QUICTransport(ITransport):
         self._background_nursery = nursery
         logger.debug("Transport background nursery set")
 
-    def set_swarm(self, swarm: Swarm) -> None:
+    def set_swarm(self, swarm: "Swarm") -> None:
         """Set the swarm for adding incoming connections."""
         self._swarm = swarm
 
