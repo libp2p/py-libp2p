@@ -14,6 +14,7 @@ maintainers = [
     { name = "pacrob", email = "pacrob-py-libp2p@proton.me" },
     { name = "Manu Sheel Gupta", email = "manu@seeta.in" },
     { name = "Dave Grantham", email = "dwg@linuxprogrammer.org" },
+    { name = "Luca (acul71)" },
 ]
 dependencies = [
     "aioquic>=1.2.0",
