@@ -494,3 +494,66 @@ async def test_mplex_stream_concurrent_operations_with_deadlines(mplex_stream_pa
     async with trio.open_nursery() as nursery:
         nursery.start_soon(writer)
         nursery.start_soon(reader)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_negative_ttl(mplex_stream_pair):
+    """Test that deadline methods return False for negative TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with negative TTL
+    assert stream_0.set_deadline(-1) is False
+    assert stream_0.set_deadline(-10) is False
+    # Deadlines should remain unchanged
+    assert stream_0.read_deadline is None
+    assert stream_0.write_deadline is None
+
+    # Test set_read_deadline with negative TTL
+    assert stream_0.set_read_deadline(-1) is False
+    assert stream_0.set_read_deadline(-5) is False
+    # Read deadline should remain unchanged
+    assert stream_0.read_deadline is None
+
+    # Test set_write_deadline with negative TTL
+    assert stream_0.set_write_deadline(-1) is False
+    assert stream_0.set_write_deadline(-3) is False
+    # Write deadline should remain unchanged
+    assert stream_0.write_deadline is None
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_zero_ttl(mplex_stream_pair):
+    """Test that deadline methods accept zero TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with zero TTL (should be valid)
+    assert stream_0.set_deadline(0) is True
+    assert stream_0.read_deadline == 0
+    assert stream_0.write_deadline == 0
+
+    # Test set_read_deadline with zero TTL
+    assert stream_0.set_read_deadline(0) is True
+    assert stream_0.read_deadline == 0
+
+    # Test set_write_deadline with zero TTL
+    assert stream_0.set_write_deadline(0) is True
+    assert stream_0.write_deadline == 0
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_positive_ttl(mplex_stream_pair):
+    """Test that deadline methods accept positive TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with positive TTL
+    assert stream_0.set_deadline(1) is True
+    assert stream_0.read_deadline == 1
+    assert stream_0.write_deadline == 1
+
+    # Test set_read_deadline with positive TTL
+    assert stream_0.set_read_deadline(5) is True
+    assert stream_0.read_deadline == 5
+
+    # Test set_write_deadline with positive TTL
+    assert stream_0.set_write_deadline(10) is True
+    assert stream_0.write_deadline == 10

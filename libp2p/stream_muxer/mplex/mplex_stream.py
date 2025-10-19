@@ -1,8 +1,10 @@
+from collections.abc import Awaitable, Callable
 from types import (
     TracebackType,
 )
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 import trio
@@ -124,16 +126,9 @@ class MplexStream(IMuxedStream):
             raise MplexStreamReset
 
         # Apply read deadline if set
-        if self.read_deadline is not None:
-            try:
-                with trio.fail_after(self.read_deadline):
-                    return await self._do_read(n)
-            except trio.TooSlowError:
-                raise TimeoutError(
-                    f"Read operation timed out after {self.read_deadline} seconds"
-                )
-        else:
-            return await self._do_read(n)
+        return await self._with_timeout(
+            self.read_deadline, "Read", lambda: self._do_read(n)
+        )
 
     async def _do_read(self, n: int | None = None) -> bytes:
         """
@@ -199,16 +194,9 @@ class MplexStream(IMuxedStream):
             raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
 
         # Apply write deadline if set
-        if self.write_deadline is not None:
-            try:
-                with trio.fail_after(self.write_deadline):
-                    await self._do_write(data)
-            except trio.TooSlowError:
-                raise TimeoutError(
-                    f"Write operation timed out after {self.write_deadline} seconds"
-                )
-        else:
-            await self._do_write(data)
+        await self._with_timeout(
+            self.write_deadline, "Write", lambda: self._do_write(data)
+        )
 
     async def _do_write(self, data: bytes) -> None:
         """
@@ -219,11 +207,7 @@ class MplexStream(IMuxedStream):
         async with self.rw_lock.write_lock():
             if self.event_local_closed.is_set():
                 raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
-            flag = (
-                HeaderTags.MessageInitiator
-                if self.is_initiator
-                else HeaderTags.MessageReceiver
-            )
+            flag = self._get_header_flag("message")
             await self.muxed_conn.send_message(flag, data, self.stream_id)
 
     async def close(self) -> None:
@@ -235,9 +219,7 @@ class MplexStream(IMuxedStream):
             if self.event_local_closed.is_set():
                 return
 
-        flag = (
-            HeaderTags.CloseInitiator if self.is_initiator else HeaderTags.CloseReceiver
-        )
+        flag = self._get_header_flag("close")
 
         try:
             with trio.fail_after(5):  # timeout in seconds
@@ -271,11 +253,7 @@ class MplexStream(IMuxedStream):
             self.event_reset.set()
 
             if not self.event_remote_closed.is_set():
-                flag = (
-                    HeaderTags.ResetInitiator
-                    if self.is_initiator
-                    else HeaderTags.ResetReceiver
-                )
+                flag = self._get_header_flag("reset")
                 # Try to send reset message to the other side.
                 # Ignore if there is anything wrong.
                 try:
@@ -292,6 +270,70 @@ class MplexStream(IMuxedStream):
             if self.muxed_conn.streams is not None:
                 self.muxed_conn.streams.pop(self.stream_id, None)
 
+    def _validate_ttl(self, ttl: int) -> bool:
+        """
+        Validate TTL value for deadline operations.
+
+        :param ttl: timeout value to validate
+        :return: True if valid (non-negative), False otherwise
+        """
+        return ttl >= 0
+
+    def _set_deadline_with_validation(self, ttl: int, deadline_attr: str) -> bool:
+        """
+        Set deadline with validation for a specific deadline attribute.
+
+        :param ttl: timeout value
+        :param deadline_attr: attribute name to set ('read_deadline' or
+            'write_deadline')
+        :return: True if successful, False if ttl is invalid
+        """
+        if not self._validate_ttl(ttl):
+            return False
+        setattr(self, deadline_attr, ttl)
+        return True
+
+    async def _with_timeout(
+        self,
+        timeout: int | None,
+        operation_name: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """
+        Execute an operation with optional timeout handling.
+
+        :param timeout: timeout in seconds, None for no timeout
+        :param operation_name: name of the operation for error messages
+        :param operation: callable to execute
+        :return: result of the operation
+        :raises TimeoutError: if operation times out
+        """
+        if timeout is None:
+            return await operation()
+
+        try:
+            with trio.fail_after(timeout):
+                return await operation()
+        except trio.TooSlowError:
+            raise TimeoutError(
+                f"{operation_name} operation timed out after {timeout} seconds"
+            )
+
+    def _get_header_flag(self, operation_type: str) -> HeaderTags:
+        """
+        Get appropriate header flag based on operation type and initiator status.
+
+        :param operation_type: type of operation ('message', 'close', 'reset')
+        :return: appropriate HeaderTags value
+        """
+        flag_map = {
+            "message": (HeaderTags.MessageInitiator, HeaderTags.MessageReceiver),
+            "close": (HeaderTags.CloseInitiator, HeaderTags.CloseReceiver),
+            "reset": (HeaderTags.ResetInitiator, HeaderTags.ResetReceiver),
+        }
+        initiator_flag, receiver_flag = flag_map[operation_type]
+        return initiator_flag if self.is_initiator else receiver_flag
+
     def set_deadline(self, ttl: int) -> bool:
         """
         Set deadline for both read and write operations on the muxed stream.
@@ -301,8 +343,10 @@ class MplexStream(IMuxedStream):
         is raised.
 
         :param ttl: timeout in seconds for read and write operations
-        :return: True if successful
+        :return: True if successful, False if ttl is invalid (negative)
         """
+        if not self._validate_ttl(ttl):
+            return False
         self.read_deadline = ttl
         self.write_deadline = ttl
         return True
@@ -316,10 +360,9 @@ class MplexStream(IMuxedStream):
         a TimeoutError is raised.
 
         :param ttl: timeout in seconds for read operations
-        :return: True if successful
+        :return: True if successful, False if ttl is invalid (negative)
         """
-        self.read_deadline = ttl
-        return True
+        return self._set_deadline_with_validation(ttl, "read_deadline")
 
     def set_write_deadline(self, ttl: int) -> bool:
         """
@@ -330,10 +373,9 @@ class MplexStream(IMuxedStream):
         a TimeoutError is raised.
 
         :param ttl: timeout in seconds for write operations
-        :return: True if successful
+        :return: True if successful, False if ttl is invalid (negative)
         """
-        self.write_deadline = ttl
-        return True
+        return self._set_deadline_with_validation(ttl, "write_deadline")
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""
