@@ -102,6 +102,7 @@ class BasicHost(IHost):
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        psk: str | None = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -120,6 +121,7 @@ class BasicHost(IHost):
         self.bootstrap = None
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
+        self.psk = psk
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(

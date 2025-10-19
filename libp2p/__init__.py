@@ -182,6 +182,7 @@ def new_swarm(
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    psk: str | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -195,6 +196,7 @@ def new_swarm(
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
     :param quic_transport_opt: options for transport
+    :param psk: optional pre-shared key for PSK encryption in transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -300,7 +302,8 @@ def new_swarm(
         upgrader,
         transport,
         retry_config=retry_config,
-        connection_config=connection_config
+        connection_config=connection_config,
+        psk=psk
     )
 
 
@@ -320,6 +323,7 @@ def new_host(
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    psk: str | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -337,6 +341,7 @@ def new_host(
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
+    :param psk: optional pre-shared key (PSK)
     :return: return a host instance
     """
 
@@ -353,7 +358,8 @@ def new_host(
         listen_addrs=listen_addrs,
         connection_config=quic_transport_opt if enable_quic else None,
         tls_client_config=tls_client_config,
-        tls_server_config=tls_server_config
+        tls_server_config=tls_server_config,
+        psk=psk
     )
 
     if disc_opt is not None:
