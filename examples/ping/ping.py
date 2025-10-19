@@ -25,6 +25,7 @@ logging.getLogger("libp2p").setLevel(logging.WARNING)
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 RESP_TIMEOUT = 60
+PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
 
 
 async def handle_ping(stream: INetStream) -> None:
@@ -71,7 +72,7 @@ async def run(port: int, destination: str) -> None:
         port = find_free_port()
 
     listen_addrs = get_available_interfaces(port)
-    host = new_host(listen_addrs=listen_addrs)
+    host = new_host(listen_addrs=listen_addrs, psk=PSK)
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
