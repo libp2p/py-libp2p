@@ -12,6 +12,7 @@ import hashlib
 import logging
 import time
 from typing import (
+    Any,
     NamedTuple,
     cast,
 )
@@ -76,6 +77,7 @@ from .pb import (
 from .pubsub_notifee import (
     PubsubNotifee,
 )
+from .rpc_queue import QueueClosed, RpcQueue
 from .subscription import (
     TrioSubscriptionAPI,
 )
@@ -86,6 +88,10 @@ from .validators import (
 
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
+
+# DefaultMaximumMessageSize is 1mb.
+DefaultMaxMessageSize = 1 << 20
+OutBoundQueueSize = 100 + 8
 
 logger = logging.getLogger("libp2p.pubsub")
 
@@ -137,6 +143,9 @@ class Pubsub(Service, IPubsub):
 
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
+
+    maxMessageSize: int
+    peer_queue: dict[ID, RpcQueue]
 
     def __init__(
         self,
@@ -221,6 +230,11 @@ class Pubsub(Service, IPubsub):
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
+
+        self.maxMessageSize = DefaultMaxMessageSize
+        self._sending_message_tasks: dict[ID, bool] = {}
+        # TODO: Handle deleting the values form queue.
+        self.peer_queue = {}
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
@@ -350,7 +364,7 @@ class Pubsub(Service, IPubsub):
             if topic in self.topic_validators
         )
 
-    def add_to_blacklist(self, peer_id: ID) -> None:
+    async def add_to_blacklist(self, peer_id: ID) -> None:
         """
         Add a peer to the blacklist.
         When a peer is blacklisted:
@@ -363,8 +377,13 @@ class Pubsub(Service, IPubsub):
         :param peer_id: the peer ID to blacklist
         """
         self.blacklisted_peers.add(peer_id)
-        logger.debug("Added peer %s to blacklist", peer_id)
+        print("Added peer %s to blacklist", peer_id)
         self.manager.run_task(self._teardown_if_connected, peer_id)
+
+        # Close and remove the peer's queue if it exists
+        queue = self.peer_queue.get(peer_id)
+        if queue is not None:
+            await queue.close()
 
     async def _teardown_if_connected(self, peer_id: ID) -> None:
         """Close their stream and remove them if connected"""
@@ -402,7 +421,7 @@ class Pubsub(Service, IPubsub):
         """
         return peer_id in self.blacklisted_peers
 
-    def clear_blacklist(self) -> None:
+    async def clear_blacklist(self) -> None:
         """
         Clear all peers from the blacklist.
         This removes all blacklist restrictions, allowing previously blacklisted
@@ -412,6 +431,11 @@ class Pubsub(Service, IPubsub):
         - Participate in topic subscriptions
 
         """
+        # Close and remove all queues for blacklisted peers
+        for peer_id in list(self.blacklisted_peers):
+            queue = self.peer_queue.get(peer_id)
+            if queue is not None:
+                await queue.close()
         self.blacklisted_peers.clear()
         logger.debug("Cleared all peers from blacklist")
 
@@ -445,7 +469,7 @@ class Pubsub(Service, IPubsub):
                 error,
             )
             await stream.reset()
-            self._handle_dead_peer(peer_id)
+            await self._handle_dead_peer(peer_id)
 
     async def wait_until_ready(self) -> None:
         await self.event_handle_peer_queue_started.wait()
@@ -474,13 +498,20 @@ class Pubsub(Service, IPubsub):
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
-
+        # Instead of using self.manager.run_daemon_task,
+        # spawn a background task using trio directly
+        # so that it is not tied to self.manager.wait_finished()
+        trio.lowlevel.spawn_system_task(self.handle_sending_message, peer_id, stream)
         self.peers[peer_id] = stream
 
         logger.debug("added new peer %s", peer_id)
 
-    def _handle_dead_peer(self, peer_id: ID) -> None:
+    async def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
+            # Even if not in peers, still close and remove the queue if it exists
+            queue = self.peer_queue.get(peer_id)
+            if queue is not None:
+                await queue.close()
             return
         del self.peers[peer_id]
 
@@ -489,6 +520,11 @@ class Pubsub(Service, IPubsub):
                 self.peer_topics[topic].discard(peer_id)
 
         self.router.remove_peer(peer_id)
+
+        # Close and remove the peer's queue if it exists
+        queue = self.peer_queue.get(peer_id)
+        if queue is not None:
+            await queue.close()
 
         logger.debug("removed dead peer %s", peer_id)
 
@@ -513,7 +549,7 @@ class Pubsub(Service, IPubsub):
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
                 # Remove Peer
-                self._handle_dead_peer(peer_id)
+                await self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -645,7 +681,7 @@ class Pubsub(Service, IPubsub):
             except StreamClosed:
                 peer_id = stream.muxed_conn.peer_id
                 logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+                await self._handle_dead_peer(peer_id)
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
@@ -858,5 +894,211 @@ class Pubsub(Service, IPubsub):
         except StreamClosed:
             peer_id = stream.muxed_conn.peer_id
             logger.debug("Fail to write message to %s: stream closed", peer_id)
-            self._handle_dead_peer(peer_id)
+            await self._handle_dead_peer(peer_id)
             return False
+
+    async def handle_sending_message(self, to_peer: ID, stream: INetStream) -> None:
+        if to_peer in self._sending_message_tasks:
+            return
+        self._sending_message_tasks[to_peer] = True
+        try:
+            if to_peer not in self.peer_queue:
+                queue = RpcQueue(OutBoundQueueSize)
+                self.peer_queue[to_peer] = queue
+            else:
+                queue = self.peer_queue[to_peer]
+
+            while True:
+                try:
+                    rpc_msg: rpc_pb2.RPC = await queue.pop()
+                    await self.write_msg(stream, rpc_msg)
+                except QueueClosed:
+                    logger.error("The queue is already closed.")
+                    break
+                except Exception as e:
+                    logger.exception(
+                        "Exception in handle_sending_message \
+                                     for peer %s: %s",
+                        to_peer,
+                        e,
+                    )
+                    break
+        finally:
+            self._sending_message_tasks.pop(to_peer, None)
+
+    def size_of_embedded_msg(self, msg_size: int) -> int:
+        def sov_rpc(x: int) -> int:
+            if x == 0:
+                return 1
+            return (x.bit_length() + 6) // 7
+
+        prefix_size = sov_rpc(msg_size)
+        return prefix_size + msg_size
+
+    def split_rpc(self, pb_rpc: rpc_pb2.RPC, limit: int) -> list[rpc_pb2.RPC]:
+        """
+        Splits the given pb_rpc into a list of RPCs, each not exceeding the
+        given size limit.
+        If a sub-message is too large to fit, it will be returned as an
+        oversized RPC.
+        """
+        result: list[rpc_pb2.RPC] = []
+
+        def base_rpc() -> rpc_pb2.RPC:
+            return rpc_pb2.RPC()
+
+        # Split Publish messages
+        publish_msgs = pb_rpc.publish
+        n = len(publish_msgs)
+        if n > 0:
+            msg_sizes = [msg.ByteSize() for msg in publish_msgs]
+            incr_sizes = [1 + self.size_of_embedded_msg(sz) for sz in msg_sizes]
+            i = 0
+            while i < n:
+                new_rpc = base_rpc()
+                size = 0
+                j = i
+                while j < n and size + incr_sizes[j] <= limit:
+                    size += incr_sizes[j]
+                    j += 1
+                if j > i:
+                    new_rpc.publish.extend(publish_msgs[i:j])
+                    result.append(new_rpc)
+                i = j
+
+        # if the rest of the RPC (without publish) fits, add it
+        rest_rpc = base_rpc()
+        rest_rpc.CopyFrom(pb_rpc)
+        while rest_rpc.publish:
+            rest_rpc.publish.pop()
+        if rest_rpc.ByteSize() < limit and rest_rpc.ByteSize() > 0:
+            result.append(rest_rpc)
+            return result
+
+        # Split subscriptions
+        subs = pb_rpc.subscriptions
+        n = len(subs)
+        if n > 0:
+            sub_sizes = [subs[i].ByteSize() for i in range(n)]
+            incr_sizes = [1 + self.size_of_embedded_msg(sz) for sz in sub_sizes]
+            i = 0
+            while i < n:
+                new_rpc = base_rpc()
+                size = 0
+                j = i
+                while j < n and size + incr_sizes[j] <= limit:
+                    size += incr_sizes[j]
+                    j += 1
+                if j > i:
+                    new_rpc.subscriptions.extend(subs[i:j])
+                    result.append(new_rpc)
+                i = j
+
+        # Split control grafts
+        ctl = pb_rpc.control
+        if ctl is not None and ctl.ByteSize() > 0:
+            grafts = list(ctl.graft)
+            i = 0
+            while i < len(grafts):
+                new_rpc = base_rpc()
+                new_rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+                size = 0
+                j = i
+                while j < len(grafts):
+                    graft = grafts[j]
+                    new_rpc.control.graft.extend([graft])
+                    incremental_size = new_rpc.ByteSize()
+                    if size + incremental_size > limit:
+                        if len(new_rpc.control.graft) > 1:
+                            new_rpc.control.graft.pop()
+                            result.append(new_rpc)
+                        break
+                    size += incremental_size
+                    j += 1
+                i = j
+
+            # Split control prunes
+            prunes = list(ctl.prune)
+            i = 0
+            while i < len(prunes):
+                new_rpc = base_rpc()
+                new_rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+                size = 0
+                j = i
+                while j < len(prunes):
+                    prune = prunes[j]
+                    new_rpc.control.prune.extend([prune])
+                    incremental_size = new_rpc.ByteSize()
+                    if size + incremental_size > limit:
+                        if len(new_rpc.control.prune) > 1:
+                            new_rpc.control.prune.pop()
+                            result.append(new_rpc)
+                        break
+                    size += incremental_size
+                    j += 1
+                i = j
+
+            # Split control iwant
+            iwants = list(ctl.iwant)
+            all_msg_ids: list[Any] = []
+            for iwant in iwants:
+                all_msg_ids.extend(iwant.messageIDs)
+
+            k = 0
+            while k < len(all_msg_ids):
+                new_rpc = base_rpc()
+                new_rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+                new_iwant = rpc_pb2.ControlIWant()
+                size = 0
+                current_index = k
+                while current_index < len(all_msg_ids):
+                    msg_id = all_msg_ids[current_index]
+                    new_iwant.messageIDs.append(msg_id)
+                    incremental_size = new_rpc.ByteSize() + new_iwant.ByteSize()
+                    if size + incremental_size > limit:
+                        if len(new_iwant.messageIDs) > 1:
+                            new_iwant.messageIDs.pop()
+                            new_rpc.control.iwant.extend([new_iwant])
+                            result.append(new_rpc)
+                        break
+                    size += incremental_size
+                    current_index += 1
+                if new_iwant.messageIDs:
+                    new_rpc.control.iwant.extend([new_iwant])
+                    result.append(new_rpc)
+                k = current_index
+
+            # Split control ihave
+            ihaves = list(ctl.ihave)
+            for ihave in ihaves:
+                topic_id = ihave.topicID
+                msg_ids = list(ihave.messageIDs)
+                k = 0
+                while k < len(msg_ids):
+                    new_rpc = base_rpc()
+                    new_rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+                    new_ihave = rpc_pb2.ControlIHave()
+                    new_ihave.topicID = topic_id
+                    size = 0
+                    current_index = k
+                    while current_index < len(msg_ids):
+                        msg_id = msg_ids[current_index]
+                        new_ihave.messageIDs.extend([msg_id])
+                        incremental_size = new_rpc.ByteSize()
+                        if size + incremental_size > limit:
+                            if len(new_ihave.messageIDs) > 1:
+                                new_ihave.messageIDs.pop()
+                                new_rpc.control.ihave.extend([new_ihave])
+                                result.append(new_rpc)
+                            break
+                        size += incremental_size
+                        current_index += 1
+                    k = current_index
+
+        # If nothing was added, but the original RPC is non-empty, add it as is
+        if not result and pb_rpc.ByteSize() > 0:
+            result.append(pb_rpc)
+        if result and result[-1].ByteSize() == 0:
+            result.pop()
+
+        return result
