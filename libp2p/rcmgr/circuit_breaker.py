@@ -61,8 +61,8 @@ class CircuitBreaker:
 
         Args:
             func: Function to execute
-            *args: Function arguments
-            **kwargs: Function keyword arguments
+            args: Function arguments
+            kwargs: Function keyword arguments
 
         Returns:
             Function result

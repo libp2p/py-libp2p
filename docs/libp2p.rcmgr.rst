@@ -44,13 +44,6 @@ libp2p.rcmgr.metrics module
    :show-inheritance:
    :undoc-members:
 
-libp2p.rcmgr.scope module
--------------------------
-
-.. automodule:: libp2p.rcmgr.scope
-   :members:
-   :show-inheritance:
-   :undoc-members:
 
 Module contents
 ---------------

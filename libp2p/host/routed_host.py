@@ -6,7 +6,7 @@ from libp2p.abc import (
 )
 
 if TYPE_CHECKING:
-    from libp2p.rcmgr import ResourceManager
+    from libp2p.rcmgr.manager import ResourceManager
 from libp2p.host.basic_host import (
     BasicHost,
 )

@@ -15,7 +15,7 @@ from typing import (
 import multiaddr
 
 if TYPE_CHECKING:
-    from libp2p.rcmgr import ResourceManager
+    from libp2p.rcmgr.manager import ResourceManager
 
 from libp2p.abc import (
     IHost,
