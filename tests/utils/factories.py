@@ -497,6 +497,7 @@ class GossipsubFactory(factory.Factory):
     prune_back_off = GOSSIPSUB_PARAMS.prune_back_off
     unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
     score_params = None
+    max_idontwant_messages = 10
 
 
 class PubsubFactory(factory.Factory):
@@ -627,6 +628,7 @@ class PubsubFactory(factory.Factory):
         prune_back_off: int = GOSSIPSUB_PARAMS.prune_back_off,
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
         score_params: ScoreParams | None = None,
+        max_idontwant_messages: int = 10,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -652,6 +654,7 @@ class PubsubFactory(factory.Factory):
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
+                max_idontwant_messages=max_idontwant_messages,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -671,6 +674,7 @@ class PubsubFactory(factory.Factory):
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
+                max_idontwant_messages=max_idontwant_messages,
             )
 
         async with cls._create_batch_with_router(
