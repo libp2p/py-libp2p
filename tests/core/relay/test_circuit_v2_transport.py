@@ -6,9 +6,9 @@ import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from multiaddr import Multiaddr
 from base58 import b58encode
 import multiaddr
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import IHost
@@ -28,7 +28,6 @@ from libp2p.relay.circuit_v2.pb.circuit_pb2 import (
     HopMessage,
 )
 from libp2p.relay.circuit_v2.protocol import (
-    PROTOCOL_ID,
     STOP_PROTOCOL_ID,
     CircuitV2Protocol,
     RelayLimits,
@@ -1035,49 +1034,47 @@ async def test_dial_peer_info_uses_stored_multiaddr(protocol):
     transport._dial_via_circuit_addr.assert_called_with(circuit_ma, peer_info)
     assert conn == mock_conn
 
-
 @pytest.mark.trio
 async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     mock_host = Mock()
+
     peerstore = Mock()
     mock_host.get_peerstore.return_value = peerstore
 
     relay_stream = AsyncMock()
     mock_host.new_stream = AsyncMock(return_value=relay_stream)
 
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    relay_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}")
+    relay_info = PeerInfo(relay_peer_id, [relay_addr])
+
+    mock_host.connect = AsyncMock(return_value=relay_info)
+    mock_host.get_addrs.return_value = [relay_addr]
+    mock_host.get_id.return_value = relay_peer_id
+    mock_host.get_private_key.return_value = relay_key.private_key  # <-- THIS
+
     transport = CircuitV2Transport(
         host=mock_host,
         config=Mock(enable_client=False),
-        protocol=protocol
+        protocol=protocol,
     )
-    transport._select_relay = AsyncMock()
+    transport._select_relay = AsyncMock(return_value=relay_peer_id)
 
-    priv_key1 = create_new_key_pair()
-    priv_key2 = create_new_key_pair()
-    peer_id = ID.from_pubkey(priv_key1.public_key)
-    relay_peer_id = ID.from_pubkey(priv_key2.public_key)
-    peer_info = PeerInfo(peer_id, [])
+    dest_key = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key.public_key)
+    peer_info = PeerInfo(dest_peer_id, [])
 
-    transport._select_relay.return_value = relay_peer_id
+    peerstore.addrs.return_value = [relay_addr]
 
-    relay_ma = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
-    )
-    peerstore.addrs.return_value = [relay_ma]
-
-    status = create_status(
-        code=StatusCode.OK,
-        message="OK",
-    )
-    hop_resp = HopMessage(
-        type=HopMessage.STATUS,
-        status=status
-    )
-    relay_stream.read = AsyncMock(return_value=hop_resp.SerializeToString())
+    status = create_status(code=StatusCode.OK, message="OK")
+    hop_resp = HopMessage(type=HopMessage.STATUS, status=status)
+    relay_stream.read.return_value = hop_resp.SerializeToString()
+    relay_stream.write = AsyncMock()
 
     conn = await transport.dial_peer_info(peer_info)
 
-    peerstore.add_addrs.assert_called()
+    peerstore.add_addrs.assert_called_once()
     assert isinstance(conn, RawConnection)
     assert conn.is_initiator
 

@@ -46,6 +46,7 @@ from .discovery import (
 )
 from .pb.circuit_pb2 import (
     HopMessage,
+    StopMessage,
 )
 from .protocol import (
     PROTOCOL_ID,
@@ -215,14 +216,14 @@ class CircuitV2Transport(ITransport):
         # Prefer stored /p2p-circuit addrs from peerstore
         # Try first to read addresses from peerstore
         peer_store = self.host.get_peerstore()
-        stored_addrs = peer_store.addrs(peer_info.peer_id)
+        stored_addrs = peer_store.addrs(dest_info.peer_id)
 
         # Get validated stored p2p-circuit addrs
         circuit_addrs = []
         for ma in stored_addrs:
             try:
                 _, target_peer_id = self.parse_circuit_ma(ma)
-                if target_peer_id == peer_info.peer_id:
+                if target_peer_id == dest_info.peer_id:
                     circuit_addrs.append(ma)
             except ValueError:
                 continue
@@ -232,9 +233,9 @@ class CircuitV2Transport(ITransport):
                 logger.debug(
                     "Trying stored circuit multiaddr %s for peer %s",
                     ma,
-                    peer_info.peer_id
+                    dest_info.peer_id
                 )
-                conn = await self._dial_via_circuit_addr(ma, peer_info)
+                conn = await self._dial_via_circuit_addr(ma, dest_info)
                 if conn:
                     logger.debug("Connected via stored circuit addr %s", ma)
                     return conn
@@ -309,7 +310,7 @@ class CircuitV2Transport(ITransport):
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
             # Create raw connection from stream
-            self._store_multiaddrs(peer_info, relay_peer_id)
+            self._store_multiaddrs(dest_info, relay_peer_id)
             return RawConnection(stream=relay_stream, initiator=True)
 
         except Exception as e:
@@ -729,7 +730,7 @@ class CircuitV2Transport(ITransport):
         except Exception as e:
             logger.error("Error making reservation: %s", str(e))
             return False
-        
+
     async def _refresh_reservations_worker(self) -> None:
         """Periodically refresh all active reservations."""
         logger.info("Started reservation refresh loop")
@@ -797,7 +798,7 @@ class CircuitV2Transport(ITransport):
 
 
 
-    
+
     def create_listener(self, handler_function: THandler) -> IListener:
         """
         Create a listener on the transport.
@@ -856,6 +857,51 @@ class CircuitV2Listener(Service, IListener):
             multiaddr.Multiaddr
         ] = []  # Store multiaddrs as Multiaddr objects
         self.handler_function = handler_function
+
+    async def handle_incoming_connection(
+        self,
+        stream: INetStream,
+        remote_peer_id: ID,
+    ) -> RawConnection:
+        """
+        Handle an incoming relay connection.
+
+        Parameters
+        ----------
+        stream : INetStream
+            The incoming stream
+        remote_peer_id : ID
+            The remote peer's ID
+
+        Returns
+        -------
+        RawConnection
+            The established connection
+
+        Raises
+        ------
+        ConnectionError
+            If the connection cannot be established
+
+        """
+        if not self.config.enable_stop:
+            raise ConnectionError("Stop role is not enabled")
+
+        try:
+            # Read STOP message
+            msg_bytes = await stream.read()
+            stop_msg = StopMessage()
+            stop_msg.ParseFromString(msg_bytes)
+
+            if stop_msg.type != StopMessage.CONNECT:
+                raise ConnectionError("Invalid STOP message type")
+
+            # Create raw connection
+            return RawConnection(stream=stream, initiator=False)
+
+        except Exception as e:
+            await stream.close()
+            raise ConnectionError(f"Failed to handle incoming connection: {str(e)}")
 
     async def run(self) -> None:
         """Run the listener service."""

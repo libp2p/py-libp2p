@@ -553,6 +553,7 @@ class CircuitV2Protocol(Service):
     async def _handle_reserve(self, stream: INetStream, msg: HopMessage) -> None:
         """Handle a reservation request."""
         peer_id = None
+        signed_envelope = None
         try:
             peer_id = ID(msg.peer)
             logger.debug("Handling reservation request from peer %s", peer_id)

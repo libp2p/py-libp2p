@@ -14,11 +14,11 @@ from libp2p.network.stream.exceptions import (
     StreamError,
     StreamReset,
 )
+from libp2p.peer import peerstore
 from libp2p.peer.envelope import (
     Envelope,
     unmarshal_envelope,
 )
-from libp2p.peer import peerstore
 from libp2p.peer.id import (
     ID,
 )
