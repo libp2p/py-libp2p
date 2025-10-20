@@ -2,7 +2,9 @@
 Utility functions for Kademlia DHT implementation.
 """
 
+import heapq
 import logging
+from typing import Generator, Iterator
 
 import base58
 import multihash
@@ -161,6 +163,113 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
         return xor_distance(target_key, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
+
+
+def get_peer_distance(peer_id: ID, target_key: bytes) -> int:
+    """
+    Calculate the XOR distance between a peer ID and target key.
+    
+    This is a cached version that avoids repeated hashing for the same peer.
+    
+    params: peer_id: The peer ID to calculate distance for
+    params: target_key: The target key to measure distance from
+    
+    Returns
+    -------
+        int: XOR distance between peer and target key
+    """
+    peer_hash = multihash.digest(peer_id.to_bytes(), "sha2-256").digest
+    return xor_distance(target_key, peer_hash)
+
+
+def find_closest_peers_heap(
+    target_key: bytes, 
+    peer_ids: list[ID], 
+    count: int
+) -> list[ID]:
+    """
+    Find the closest peers to a target key using a heap-based approach.
+    
+    This is more memory-efficient than sorting the entire list when only
+    the top-k peers are needed. Time complexity: O(n log k) instead of O(n log n).
+    
+    params: target_key: The target key to measure distance from
+    params: peer_ids: List of peer IDs to search through
+    params: count: Maximum number of closest peers to return
+    
+    Returns
+    -------
+        List[ID]: List of closest peer IDs (up to count)
+    """
+    if not peer_ids:
+        return []
+    
+    if len(peer_ids) <= count:
+        # If we have fewer peers than requested, just sort them all
+        return sort_peer_ids_by_distance(target_key, peer_ids)
+    
+    # Use a max-heap to keep track of the k closest peers
+    # We store (-distance, peer_id) to make it a max-heap (Python's heapq is min-heap)
+    heap = []
+    
+    for peer_id in peer_ids:
+        distance = get_peer_distance(peer_id, target_key)
+        
+        if len(heap) < count:
+            # Heap not full yet, add the peer
+            heapq.heappush(heap, (-distance, peer_id))
+        else:
+            # Heap is full, check if this peer is closer than the farthest in heap
+            max_distance = -heap[0][0]  # Get the current max distance
+            if distance < max_distance:
+                # This peer is closer, replace the farthest
+                heapq.heapreplace(heap, (-distance, peer_id))
+    
+    # Extract peers from heap and sort by distance
+    closest_peers = [peer_id for _, peer_id in heap]
+    return sort_peer_ids_by_distance(target_key, closest_peers)
+
+
+def find_closest_peers_streaming(
+    target_key: bytes, 
+    peer_generator: Generator[ID, None, None], 
+    count: int
+) -> list[ID]:
+    """
+    Find the closest peers using a streaming approach for memory efficiency.
+    
+    This is useful when dealing with large peer sets that don't fit in memory.
+    Time complexity: O(n log k) where n is the total number of peers.
+    
+    params: target_key: The target key to measure distance from
+    params: peer_generator: Generator yielding peer IDs
+    params: count: Maximum number of closest peers to return
+    
+    Returns
+    -------
+        List[ID]: List of closest peer IDs (up to count)
+    """
+    heap = []
+    
+    for peer_id in peer_generator:
+        distance = get_peer_distance(peer_id, target_key)
+        
+        if len(heap) < count:
+            # Heap not full yet, add the peer
+            heapq.heappush(heap, (-distance, peer_id))
+        else:
+            # Heap is full, check if this peer is closer than the farthest in heap
+            max_distance = -heap[0][0]  # Get the current max distance
+            if distance < max_distance:
+                # This peer is closer, replace the farthest
+                heapq.heapreplace(heap, (-distance, peer_id))
+    
+    # Extract peers from heap and sort by distance
+    if not heap:
+        return []
+    
+    closest_peers = [peer_id for _, peer_id in heap]
+    return sort_peer_ids_by_distance(target_key, closest_peers)
 
 
 def shared_prefix_len(first: bytes, second: bytes) -> int:
