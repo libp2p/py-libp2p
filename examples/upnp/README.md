@@ -9,7 +9,7 @@ This allows peers from the public internet to directly dial your node, which is 
 First, ensure you have installed the necessary dependencies from the root of the repository:
 
 ```sh
-pip install -e ".[upnp]"
+pip install -e .
 ```
 
 Then, run the script in a terminal:

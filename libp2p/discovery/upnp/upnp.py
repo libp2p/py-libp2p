@@ -14,11 +14,6 @@ class UpnpManager:
     """
 
     def __init__(self) -> None:
-        if miniupnpc is None:
-            raise ImportError(
-                "miniupnpc is required for UPnP functionality. "
-                "Please install it with: pip install miniupnpc"
-            )
         self._gateway = miniupnpc.UPnP()
         self._lan_addr: str | None = None
         self._external_ip: str | None = None

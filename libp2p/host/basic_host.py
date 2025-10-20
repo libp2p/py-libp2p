@@ -31,7 +31,7 @@ from libp2p.custom_types import (
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 from libp2p.discovery.mdns.mdns import MDNSDiscovery
-from libp2p.discovery.upnp import UpnpManager
+from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )

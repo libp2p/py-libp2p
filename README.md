@@ -20,46 +20,6 @@ Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io
 
 Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby). Please reach out to us for collaboration or active feedback. If you have questions, feel free to open a new [discussion](https://github.com/libp2p/py-libp2p/discussions). We are also available on the libp2p Discord — join us at #py-libp2p [sub-channel](https://discord.gg/d92MEugb).
 
-## Installation
-
-### System Dependencies
-
-py-libp2p requires some system-level dependencies for certain features like UPnP NAT traversal:
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get update
-sudo apt-get install -y libminiupnpc-dev
-```
-
-**Linux (RHEL/CentOS/Fedora):**
-```bash
-sudo yum install -y miniupnpc-devel
-```
-
-**macOS:**
-```bash
-brew install miniupnpc
-```
-
-**Windows:**
-The miniupnpc package should install automatically via pip, but you may need Visual C++ Build Tools.
-
-### Python Installation
-
-```bash
-pip install libp2p
-```
-
-For development:
-```bash
-git clone https://github.com/libp2p/py-libp2p.git
-cd py-libp2p
-# Install system dependencies (Linux/macOS)
-./scripts/install_system_deps.sh
-pip install -e .
-```
-
 ## Feature Breakdown
 
 py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
