@@ -28,11 +28,16 @@ class RoutedHost(BasicHost):
         network: INetworkService,
         router: IPeerRouting,
         enable_mDNS: bool = False,
+        enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: Optional["ResourceManager"] = None,
     ):
         super().__init__(
-            network, enable_mDNS, bootstrap, resource_manager=resource_manager
+            network,
+            enable_mDNS,
+            enable_upnp,
+            bootstrap,
+            resource_manager=resource_manager,
         )
         self._router = router
 

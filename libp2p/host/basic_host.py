@@ -34,6 +34,7 @@ from libp2p.custom_types import (
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 from libp2p.discovery.mdns.mdns import MDNSDiscovery
+from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )
@@ -92,11 +93,15 @@ class BasicHost(IHost):
 
     multiselect: Multiselect
     multiselect_client: MultiselectClient
+    mDNS: MDNSDiscovery | None
+    upnp: UpnpManager | None
+    bootstrap: BootstrapDiscovery | None
 
     def __init__(
         self,
         network: INetworkService,
         enable_mDNS: bool = False,
+        enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
@@ -120,8 +125,13 @@ class BasicHost(IHost):
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))
         self.multiselect_client = MultiselectClient()
+        self.mDNS = None
         if enable_mDNS:
             self.mDNS = MDNSDiscovery(network)
+
+        # Initialize bootstrap discovery container. Keep attribute defined so
+        # we can avoid hasattr checks elsewhere.
+        self.bootstrap = None
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
 
@@ -132,6 +142,14 @@ class BasicHost(IHost):
             self.get_private_key(),
         )
         self.get_peerstore().set_local_record(envelope)
+
+        # Initialize UPnP manager if enabled
+        # Note: UPnP integration follows the same pattern as mDNS for consistency.
+        # The UpnpManager is a standalone component that can be used independently
+        # or integrated into the host lifecycle for automatic port management.
+        self.upnp = None
+        if enable_upnp:
+            self.upnp = UpnpManager()
 
     def get_id(self) -> ID:
         """
@@ -196,18 +214,32 @@ class BasicHost(IHost):
             network = self.get_network()
             async with background_trio_service(network):
                 await network.listen(*listen_addrs)
-                if hasattr(self, "mDNS") and self.mDNS is not None:
+                if self.mDNS is not None:
                     logger.debug("Starting mDNS Discovery")
                     self.mDNS.start()
-                if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                if self.upnp is not None:
+                    upnp_manager = self.upnp
+                    logger.debug("Starting UPnP discovery and port mapping")
+                    if await upnp_manager.discover():
+                        for addr in self.get_addrs():
+                            if port := addr.value_for_protocol("tcp"):
+                                await upnp_manager.add_port_mapping(port, "TCP")
+                if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
+
                 try:
                     yield
                 finally:
-                    if hasattr(self, "mDNS") and self.mDNS is not None:
+                    if self.mDNS is not None:
                         self.mDNS.stop()
-                    if hasattr(self, "bootstrap") and self.bootstrap is not None:
+                    if self.upnp and self.upnp.get_external_ip():
+                        upnp_manager = self.upnp
+                        logger.debug("Removing UPnP port mappings")
+                        for addr in self.get_addrs():
+                            if port := addr.value_for_protocol("tcp"):
+                                await upnp_manager.remove_port_mapping(port, "TCP")
+                    if self.bootstrap is not None:
                         self.bootstrap.stop()
 
         return _run()
