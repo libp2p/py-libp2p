@@ -285,7 +285,9 @@ class Pubsub(Service, IPubsub):
                         logger.debug(
                             "received `publish` message %s from peer %s", msg, peer_id
                         )
-                        self.manager.run_task(self.push_msg, peer_id, msg)
+                        # Only schedule task if service is still running
+                        if self.manager.is_running:
+                            self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
                     # deal with RPC.subscriptions
@@ -820,6 +822,19 @@ class Pubsub(Service, IPubsub):
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
+
+    def get_message_id(self, msg: rpc_pb2.Message) -> bytes:
+        """
+        Get the message ID for a given message using the configured
+        message ID constructor.
+
+        This method provides a public interface for external components (like routers)
+        to access message ID construction functionality.
+
+        :param msg: the message to get the ID for
+        :return: the message ID as bytes
+        """
+        return self._msg_id_constructor(msg)
 
     async def write_msg(self, stream: INetStream, rpc_msg: rpc_pb2.RPC) -> bool:
         """
