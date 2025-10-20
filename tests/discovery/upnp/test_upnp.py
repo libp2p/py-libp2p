@@ -13,9 +13,9 @@ def mock_upnp_gateway():
     mock_gateway = MagicMock()
     mock_miniupnpc.UPnP.return_value = mock_gateway
 
-    with patch("libp2p.discovery.upnp.miniupnpc", mock_miniupnpc):
+    with patch("libp2p.discovery.upnp.upnp.miniupnpc", mock_miniupnpc):
         # Import UpnpManager after mocking miniupnpc
-        from libp2p.discovery.upnp import UpnpManager
+        from libp2p.discovery.upnp.upnp import UpnpManager
 
         yield mock_gateway, UpnpManager
 
@@ -72,7 +72,7 @@ async def test_upnp_discover_no_devices_found(mock_upnp_gateway):
     assert manager.get_external_ip() is None
 
 
-@patch("libp2p.discovery.upnp.logger")
+@patch("libp2p.discovery.upnp.upnp.logger")
 async def test_upnp_discover_double_nat(mock_logger, mock_upnp_gateway):
     """
     Test UPnP discovery when the external IP is private (double NAT).
@@ -115,7 +115,7 @@ async def test_add_port_mapping_success(mock_upnp_gateway):
     )
 
 
-@patch("libp2p.discovery.upnp.logger")
+@patch("libp2p.discovery.upnp.upnp.logger")
 async def test_add_port_mapping_failure_no_discover(mock_logger, mock_upnp_gateway):
     """
     Test that adding a port mapping fails if discover() hasn't been run.
@@ -131,7 +131,7 @@ async def test_add_port_mapping_failure_no_discover(mock_logger, mock_upnp_gatew
     )
 
 
-@patch("libp2p.discovery.upnp.logger")
+@patch("libp2p.discovery.upnp.upnp.logger")
 async def test_add_port_mapping_exception(mock_logger, mock_upnp_gateway):
     """
     Test adding a port mapping when the gateway raises an exception.
@@ -167,7 +167,7 @@ async def test_remove_port_mapping_success(mock_upnp_gateway):
     mock_gateway.deleteportmapping.assert_called_once_with(8080, "TCP")
 
 
-@patch("libp2p.discovery.upnp.logger")
+@patch("libp2p.discovery.upnp.upnp.logger")
 async def test_upnp_discover_invalid_igd(mock_logger, mock_upnp_gateway):
     """
     Test UPnP discovery when a non-IGD device is selected.
@@ -189,7 +189,7 @@ async def test_upnp_discover_invalid_igd(mock_logger, mock_upnp_gateway):
     )
 
 
-@patch("libp2p.discovery.upnp.logger")
+@patch("libp2p.discovery.upnp.upnp.logger")
 async def test_upnp_discover_selectigd_failure(mock_logger, mock_upnp_gateway):
     """
     Test UPnP discovery when selectigd fails with a descriptive error.

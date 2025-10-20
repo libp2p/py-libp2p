@@ -10,7 +10,7 @@ logger = logging.getLogger("libp2p.discovery.upnp")
 class UpnpManager:
     """
     A simple, self-contained manager for UPnP port mapping that can be used
-    alongside a libp2p Host.s
+    alongside a libp2p Host.
     """
 
     def __init__(self) -> None:
