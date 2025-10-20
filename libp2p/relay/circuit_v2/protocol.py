@@ -5,6 +5,7 @@ This module implements the Circuit Relay v2 protocol as specified in:
 https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
+from enum import Enum, auto
 import logging
 from typing import (
     Any,
@@ -36,6 +37,15 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from .config import (
+    DEFAULT_MAX_CIRCUIT_BYTES,
+    DEFAULT_MAX_CIRCUIT_CONNS,
+    DEFAULT_MAX_CIRCUIT_DURATION,
+    DEFAULT_MAX_RESERVATIONS,
+    DEFAULT_PROTOCOL_CLOSE_TIMEOUT,
+    DEFAULT_PROTOCOL_READ_TIMEOUT,
+    DEFAULT_PROTOCOL_WRITE_TIMEOUT,
+)
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
@@ -56,18 +66,22 @@ logger = logging.getLogger("libp2p.relay.circuit_v2")
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
 
+
+# Direction enum for data piping
+class Pipe(Enum):
+    SRC_TO_DST = auto()
+    DST_TO_SRC = auto()
+
+
 # Default limits for relay resources
 DEFAULT_RELAY_LIMITS = RelayLimits(
-    duration=60 * 60,  # 1 hour
-    data=1024 * 1024 * 1024,  # 1GB
-    max_circuit_conns=8,
-    max_reservations=4,
+    duration=DEFAULT_MAX_CIRCUIT_DURATION,
+    data=DEFAULT_MAX_CIRCUIT_BYTES,
+    max_circuit_conns=DEFAULT_MAX_CIRCUIT_CONNS,
+    max_reservations=DEFAULT_MAX_RESERVATIONS,
 )
 
-# Stream operation timeouts
-STREAM_READ_TIMEOUT = 15  # seconds
-STREAM_WRITE_TIMEOUT = 15  # seconds
-STREAM_CLOSE_TIMEOUT = 10  # seconds
+# Stream operation constants
 MAX_READ_RETRIES = 5  # Maximum number of read retries
 
 
@@ -111,6 +125,9 @@ class CircuitV2Protocol(Service):
         host: IHost,
         limits: RelayLimits | None = None,
         allow_hop: bool = False,
+        read_timeout: int = DEFAULT_PROTOCOL_READ_TIMEOUT,
+        write_timeout: int = DEFAULT_PROTOCOL_WRITE_TIMEOUT,
+        close_timeout: int = DEFAULT_PROTOCOL_CLOSE_TIMEOUT,
     ) -> None:
         """
         Initialize a Circuit Relay v2 protocol instance.
@@ -123,11 +140,20 @@ class CircuitV2Protocol(Service):
             Resource limits for the relay
         allow_hop : bool
             Whether to allow this node to act as a relay
+        read_timeout : int
+            Timeout for stream read operations, in seconds
+        write_timeout : int
+            Timeout for stream write operations, in seconds
+        close_timeout : int
+            Timeout for stream close operations, in seconds
 
         """
         self.host = host
         self.limits = limits or DEFAULT_RELAY_LIMITS
         self.allow_hop = allow_hop
+        self.read_timeout = read_timeout
+        self.write_timeout = write_timeout
+        self.close_timeout = close_timeout
 
         # Ensure we pass the host to the resource manager for crypto operations
         logger.debug("Creating resource manager with host %s", host.get_id())
@@ -183,7 +209,7 @@ class CircuitV2Protocol(Service):
             return
 
         try:
-            with trio.fail_after(STREAM_CLOSE_TIMEOUT):
+            with trio.fail_after(self.close_timeout):
                 await stream.close()
         except Exception:
             try:
@@ -225,7 +251,7 @@ class CircuitV2Protocol(Service):
 
         while retries < max_retries:
             try:
-                with trio.fail_after(STREAM_READ_TIMEOUT):
+                with trio.fail_after(self.read_timeout):
                     # Try reading with timeout
                     logger.debug(
                         "Attempting to read from stream (attempt %d/%d)",
@@ -302,7 +328,7 @@ class CircuitV2Protocol(Service):
             # First, handle the read timeout gracefully
             try:
                 with trio.fail_after(
-                    STREAM_READ_TIMEOUT * 2
+                    self.read_timeout * 2
                 ):  # Double the timeout for reading
                     msg_bytes = await stream.read()
                     if not msg_bytes:
@@ -423,7 +449,7 @@ class CircuitV2Protocol(Service):
         """
         try:
             # Read the incoming message with timeout
-            with trio.fail_after(STREAM_READ_TIMEOUT):
+            with trio.fail_after(self.read_timeout):
                 msg_bytes = await stream.read()
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
@@ -467,8 +493,20 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, src_stream, stream, peer_id)
-                nursery.start_soon(self._relay_data, stream, src_stream, peer_id)
+                nursery.start_soon(
+                    self._relay_data,
+                    src_stream,
+                    stream,
+                    peer_id,
+                    Pipe.SRC_TO_DST,
+                )
+                nursery.start_soon(
+                    self._relay_data,
+                    stream,
+                    src_stream,
+                    peer_id,
+                    Pipe.DST_TO_SRC,
+                )
 
         except trio.TooSlowError:
             logger.error("Timeout reading from stop stream")
@@ -550,7 +588,7 @@ class CircuitV2Protocol(Service):
             # pb_reservation.addrs.extend(addrs)
 
             # Send reservation success response
-            with trio.fail_after(STREAM_WRITE_TIMEOUT):
+            with trio.fail_after(self.write_timeout):
                 status = create_status(
                     code=StatusCode.OK, message="Reservation accepted"
                 )
@@ -601,7 +639,7 @@ class CircuitV2Protocol(Service):
             # Always close the stream when done with reservation
             if cast(INetStreamWithExtras, stream).is_open():
                 try:
-                    with trio.fail_after(STREAM_CLOSE_TIMEOUT):
+                    with trio.fail_after(self.close_timeout):
                         await stream.close()
                 except Exception as close_err:
                     logger.error("Error closing stream: %s", str(close_err))
@@ -691,7 +729,7 @@ class CircuitV2Protocol(Service):
             logger.debug("Attempting to connect to destination peer %s", peer_id)
 
             # Try to connect to the destination with timeout
-            with trio.fail_after(STREAM_READ_TIMEOUT):
+            with trio.fail_after(self.read_timeout):
                 dst_stream = await self.host.new_stream(peer_id, [STOP_PROTOCOL_ID])
                 if not dst_stream:
                     raise ConnectionError("Could not connect to destination")
@@ -761,8 +799,20 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, stream, dst_stream, peer_id)
-                nursery.start_soon(self._relay_data, dst_stream, stream, peer_id)
+                nursery.start_soon(
+                    self._relay_data,
+                    stream,
+                    dst_stream,
+                    peer_id,
+                    Pipe.SRC_TO_DST,
+                )
+                nursery.start_soon(
+                    self._relay_data,
+                    dst_stream,
+                    stream,
+                    peer_id,
+                    Pipe.DST_TO_SRC,
+                )
 
         except trio.TooSlowError:
             logger.error("Timeout connecting to destination peer %s", peer_id)
@@ -800,6 +850,7 @@ class CircuitV2Protocol(Service):
         src_stream: INetStream,
         dst_stream: INetStream,
         peer_id: ID,
+        direction: Pipe,
     ) -> None:
         """
         Relay data between two streams.
@@ -813,71 +864,60 @@ class CircuitV2Protocol(Service):
         peer_id : ID
             The peer ID for the reservation
 
+        direction : Pipe
+            Direction of data flow (``Pipe.SRC_TO_DST`` or ``Pipe.DST_TO_SRC``)
+
         """
         try:
             # Get the reservation for tracking data usage
             reservation = self.resource_manager._reservations.get(peer_id)
-
-            # Buffer for data transfer
-            buffer_size = 4096
             total_bytes = 0
 
             while True:
-                try:
-                    # Read with timeout to prevent hanging
-                    with trio.fail_after(STREAM_READ_TIMEOUT):
-                        data = await src_stream.read(buffer_size)
-                        if not data:
-                            # End of stream
-                            logger.debug("End of stream reached for peer %s", peer_id)
-                            break
-
-                        # Track data usage
-                        bytes_transferred = len(data)
-                        total_bytes += bytes_transferred
-
-                        # Track data and check limits
-                        if (
-                            reservation
-                            and not self.resource_manager.track_data_transfer(
-                                peer_id, bytes_transferred
-                            )
-                        ):
-                            logger.warning(
-                                "Data transfer limit exceeded for peer %s: "
-                                "current=%d, attempted=%d, limit=%d",
-                                peer_id,
-                                reservation.data_used,
-                                bytes_transferred,
-                                reservation.limits.data,
-                            )
-                            # Close the connection due to limit exceeded
-                            await self._send_status(
-                                src_stream,
-                                StatusCode.RESOURCE_LIMIT_EXCEEDED,
-                                "Data transfer limit exceeded",
-                            )
-                            await src_stream.reset()
-                            await dst_stream.reset()
-                            return
-
-                        # Write data to destination
-                        with trio.fail_after(STREAM_WRITE_TIMEOUT):
-                            await dst_stream.write(data)
-
-                except trio.TooSlowError:
-                    logger.warning(
-                        "Timeout during relay operation for peer %s", peer_id
-                    )
-                    continue
-                except MplexStreamEOF:
-                    logger.debug("Stream EOF for peer %s", peer_id)
+                # Read data with retries
+                data = await self._read_stream_with_retry(src_stream)
+                if not data:
+                    logger.info("%s closed/reset", direction.name)
                     break
-                except MplexStreamReset:
-                    logger.debug("Stream reset for peer %s", peer_id)
+
+                # Track data usage
+                bytes_transferred = len(data)
+                total_bytes += bytes_transferred
+
+                # Track data and check limits
+                if (
+                    reservation
+                    and not self.resource_manager.track_data_transfer(
+                        peer_id, bytes_transferred
+                    )
+                ):
+                    logger.warning(
+                        "Data transfer limit exceeded for peer %s: "
+                        "current=%d, attempted=%d, limit=%d",
+                        peer_id,
+                        reservation.data_used,
+                        bytes_transferred,
+                        reservation.limits.data,
+                    )
+                    # Close the connection due to limit exceeded
+                    await self._send_status(
+                        src_stream,
+                        StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                        "Data transfer limit exceeded",
+                    )
+                    await src_stream.reset()
+                    await dst_stream.reset()
+                    return
+
+                # Write data to destination
+                try:
+                    with trio.fail_after(self.write_timeout):
+                        await dst_stream.write(data)
+                except trio.TooSlowError:
+                    logger.error("Timeout writing in %s", direction.name)
                     break
                 except Exception as e:
-                    logger.error("Error relaying data for peer %s: %s", peer_id, str(e))
+                    logger.error("Error writing in %s: %s", direction.name, str(e))
                     break
 
             # Log the total bytes transferred
@@ -935,7 +975,7 @@ class CircuitV2Protocol(Service):
         """Send a status message."""
         try:
             logger.debug("Sending status message with code %s: %s", code, message)
-            with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
+            with trio.fail_after(self.write_timeout * 2):  # Double the timeout
                 # Create a proto Status directly
                 pb_status = PbStatus()
                 pb_status.code = cast(
@@ -973,7 +1013,7 @@ class CircuitV2Protocol(Service):
         """Send a status message on a STOP stream."""
         try:
             logger.debug("Sending stop status message with code %s: %s", code, message)
-            with trio.fail_after(STREAM_WRITE_TIMEOUT * 2):  # Double the timeout
+            with trio.fail_after(self.write_timeout * 2):  # Double the timeout
                 # Create a proto Status directly
                 pb_status = PbStatus()
                 pb_status.code = cast(

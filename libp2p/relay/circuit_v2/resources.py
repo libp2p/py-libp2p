@@ -8,6 +8,7 @@ including reservations and connection limits.
 from dataclasses import (
     dataclass,
 )
+from enum import Enum, auto
 import hashlib
 import logging
 import os
@@ -27,6 +28,18 @@ logger = logging.getLogger("libp2p.relay.circuit_v2.resources")
 
 # Prefix for data to be signed, helps prevent signature reuse attacks
 RELAY_VOUCHER_DOMAIN_SEP = b"libp2p-relay-voucher:"
+
+RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
+TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
+
+
+# Reservation status enum
+class ReservationStatus(Enum):
+    """Lifecycle status of a relay reservation."""
+
+    ACTIVE = auto()
+    EXPIRED = auto()
+    REJECTED = auto()
 
 
 @dataclass
@@ -100,8 +113,8 @@ class Reservation:
         # - Peer ID to bind it to the specific peer
         # - Timestamp for uniqueness
         # - Hash everything for a fixed size output
-        random_bytes = os.urandom(16)  # 128 bits of randomness
-        timestamp = str(int(self.created_at * 1000000)).encode()
+        random_bytes = os.urandom(RANDOM_BYTES_LENGTH)
+        timestamp = str(int(self.created_at * TIMESTAMP_MULTIPLIER)).encode()
         peer_bytes = self.peer_id.to_bytes()
 
         # Combine all elements and hash them
@@ -115,6 +128,15 @@ class Reservation:
     def is_expired(self) -> bool:
         """Check if the reservation has expired."""
         return time.time() > self.expires_at
+
+    # Expose a friendly status enum
+
+    @property
+    def status(self) -> ReservationStatus:
+        """Return the current status as a ``ReservationStatus`` enum."""
+        return (
+            ReservationStatus.EXPIRED if self.is_expired() else ReservationStatus.ACTIVE
+        )
 
     def can_accept_connection(self) -> bool:
         """Check if a new connection can be accepted."""

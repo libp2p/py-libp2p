@@ -14,6 +14,7 @@ defaults:
 jobs:
   tox:
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # 1 hour timeout
     strategy:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
@@ -82,6 +83,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60  # 1 hour timeout
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
@@ -103,5 +105,5 @@ jobs:
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
             python -m tox run -e windows-wheel
           else
-            python -m tox run -e py311-${{ matrix.toxenv }}
+            python -m tox run -e py${{ matrix.python-version }}-${{ matrix.toxenv }}
           fi

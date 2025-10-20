@@ -5,3 +5,7 @@ from libp2p.exceptions import (
 
 class HandshakeFailure(BaseLibp2pError):
     pass
+
+
+class SecurityError(BaseLibp2pError):
+    pass

@@ -1,6 +1,8 @@
 from collections.abc import (
     Sequence,
 )
+import ipaddress
+import os
 from typing import (
     NamedTuple,
 )
@@ -21,12 +23,38 @@ from libp2p.pubsub import (
 MAX_READ_LEN = 65535
 
 
-LISTEN_MADDR = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/0")
+def _validate_ipv4_address(address: str) -> str:
+    """
+    Validate that the given address is a valid IPv4 address.
+
+    Args:
+        address: The IP address string to validate
+
+    Returns:
+        The validated IPv4 address, or "127.0.0.1" if invalid
+
+    """
+    try:
+        # Validate that it's a valid IPv4 address
+        ipaddress.IPv4Address(address)
+        return address
+    except (ipaddress.AddressValueError, ValueError):
+        # If invalid, return the secure default
+        return "127.0.0.1"
+
+
+# Default bind address configuration with environment variable override
+# DEFAULT_BIND_ADDRESS defaults to "127.0.0.1" (secure) but can be overridden
+# via LIBP2P_BIND environment variable (e.g., "0.0.0.0" for tests)
+# Invalid IPv4 addresses will fallback to "127.0.0.1"
+DEFAULT_BIND_ADDRESS = _validate_ipv4_address(os.getenv("LIBP2P_BIND", "127.0.0.1"))
+LISTEN_MADDR = multiaddr.Multiaddr(f"/ip4/{DEFAULT_BIND_ADDRESS}/tcp/0")
 
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID = gossipsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID_V1 = gossipsub.PROTOCOL_ID_V11
+GOSSIPSUB_PROTOCOL_ID_V12 = gossipsub.PROTOCOL_ID_V12
 
 
 class GossipsubParams(NamedTuple):
