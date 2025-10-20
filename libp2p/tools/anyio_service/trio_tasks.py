@@ -9,8 +9,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 import uuid
 
-import anyio
-from anyio import TaskInfo
+import trio
 
 from .exceptions import DaemonTaskExit, LifecycleError, TooManyChildrenException
 
@@ -174,13 +173,13 @@ class FunctionTask(BaseTaskWithChildren):
     Task that wraps an async function with full lifecycle management.
 
     HIGH COMPLEXITY:
-    - Tracks the anyio task for parent finding
+    - Tracks the trio task for parent finding
     - Has its own cancel scope for ordered cancellation
     - Waits for children before completing (if not daemon)
     - Manages lifecycle with events
     """
 
-    _anyio_task: TaskInfo | None = None
+    _trio_task: trio.lowlevel.Task | None = None
 
     @classmethod
     def iterate_tasks(cls, *tasks: TaskAPI) -> Iterable[FunctionTask]:
@@ -208,11 +207,11 @@ class FunctionTask(BaseTaskWithChildren):
         self._async_fn_args = async_fn_args
         self._count_in_stats = count_in_stats  # Whether to include in user-facing stats
 
-        # Event to track when task is done (created lazily in async context)
-        self._done: anyio.Event | None = None
+        # Event to track when task is done
+        self._done = trio.Event()
 
-        # Cancel scope for ordered cancellation (created lazily in async context)
-        self._cancel_scope: anyio.CancelScope | None = None
+        # Cancel scope for ordered cancellation
+        self._cancel_scope = trio.CancelScope()  # type: ignore[call-arg]
 
     # Stats tracking API
     @property
@@ -220,22 +219,22 @@ class FunctionTask(BaseTaskWithChildren):
         """Return whether this task should be included in user-facing statistics."""
         return self._count_in_stats
 
-    # AnyIO-specific API for parent tracking
+    # Trio-specific API for parent tracking
     @property
-    def has_anyio_task(self) -> bool:
-        return self._anyio_task is not None
+    def has_trio_task(self) -> bool:
+        return self._trio_task is not None
 
     @property
-    def anyio_task(self) -> TaskInfo:
-        if self._anyio_task is None:
-            raise LifecycleError("AnyIO task not set yet")
-        return self._anyio_task
+    def trio_task(self) -> trio.lowlevel.Task:
+        if self._trio_task is None:
+            raise LifecycleError("Trio task not set yet")
+        return self._trio_task
 
-    @anyio_task.setter
-    def anyio_task(self, value: TaskInfo) -> None:
-        if self._anyio_task is not None:
-            raise LifecycleError(f"Task already set: {self._anyio_task}")
-        self._anyio_task = value
+    @trio_task.setter
+    def trio_task(self, value: trio.lowlevel.Task) -> None:
+        if self._trio_task is not None:
+            raise LifecycleError(f"Task already set: {self._trio_task}")
+        self._trio_task = value
 
     # Core TaskAPI implementation
     async def run(self) -> None:
@@ -243,19 +242,13 @@ class FunctionTask(BaseTaskWithChildren):
         Run the function with full lifecycle management.
 
         HIGH COMPLEXITY:
-        - Sets anyio task for parent finding
+        - Sets trio task for parent finding
         - Runs within cancel scope
         - Enforces daemon behavior
         - Waits for children before completing (if not daemon)
         - Cleans up parent reference
         """
-        # Initialize primitives (must be done in async context for AnyIO)
-        if self._done is None:
-            self._done = anyio.Event()
-        if self._cancel_scope is None:
-            self._cancel_scope = anyio.CancelScope()
-
-        self.anyio_task = anyio.get_current_task()
+        self.trio_task = trio.lowlevel.current_task()
 
         try:
             with self._cancel_scope:
@@ -269,8 +262,7 @@ class FunctionTask(BaseTaskWithChildren):
                     await tuple(self.children)[0].wait_done()
 
         finally:
-            if self._done is not None:
-                self._done.set()
+            self._done.set()
             if self.parent is not None:
                 self.parent.discard_child(self)
 
@@ -285,18 +277,14 @@ class FunctionTask(BaseTaskWithChildren):
             await task.cancel()
 
         # Then cancel self
-        if self._cancel_scope is not None:
-            self._cancel_scope.cancel()
+        self._cancel_scope.cancel()
         await self.wait_done()
 
     @property
     def is_done(self) -> bool:
-        return self._done is not None and self._done.is_set()
+        return self._done.is_set()
 
     async def wait_done(self) -> None:
-        # Wait for task to be initialized and then wait for it to be done
-        while self._done is None:
-            await anyio.sleep(0)
         await self._done.wait()
 
 

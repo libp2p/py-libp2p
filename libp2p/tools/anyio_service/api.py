@@ -8,8 +8,8 @@ import functools
 import sys
 from typing import Any, Optional, TypeVar, cast
 
-import trio
-import trio_typing
+import anyio
+from anyio.abc import ObjectReceiveStream, ObjectSendStream
 
 from .exceptions import LifecycleError
 from .stats import Stats
@@ -102,7 +102,6 @@ class InternalManagerAPI(ManagerAPI):
     by the service implementation, not by external callers.
     """
 
-    @trio_typing.takes_callable_and_args
     @abstractmethod
     def run_task(
         self,
@@ -114,7 +113,6 @@ class InternalManagerAPI(ManagerAPI):
         """Run a task in the background."""
         ...
 
-    @trio_typing.takes_callable_and_args
     @abstractmethod
     def run_daemon_task(
         self, async_fn: AsyncFn, *args: Any, name: str | None = None
@@ -211,13 +209,13 @@ _ChannelPayload = tuple[Optional[Any], Optional[BaseException]]
 async def _wait_finished(
     service: ServiceAPI,
     api_func: Callable[..., Any],
-    channel: trio.abc.SendChannel[_ChannelPayload],
+    stream: ObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: wait for service to finish."""
     manager = service.get_manager()
 
     if manager.is_finished:
-        await channel.send(
+        await stream.send(
             (
                 None,
                 LifecycleError(
@@ -229,7 +227,7 @@ async def _wait_finished(
         return
 
     await manager.wait_finished()
-    await channel.send(
+    await stream.send(
         (
             None,
             LifecycleError(
@@ -245,7 +243,7 @@ async def _wait_api_fn(
     api_fn: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    channel: trio.abc.SendChannel[_ChannelPayload],
+    stream: ObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: execute the API function."""
     try:
@@ -256,9 +254,9 @@ async def _wait_api_fn(
             raise Exception(
                 "This should be unreachable but acts as a type guard for mypy"
             )
-        await channel.send((None, exc_value.with_traceback(exc_tb)))
+        await stream.send((None, exc_value.with_traceback(exc_tb)))
     else:
-        await channel.send((result, None))
+        await stream.send((result, None))
 
 
 def external_api(func: TFunc) -> TFunc:
@@ -266,7 +264,7 @@ def external_api(func: TFunc) -> TFunc:
     Decorator to protect external API methods.
 
     MEDIUM COMPLEXITY: Ensures methods can only be called while service is running.
-    Uses trio channels and nurseries to race the API call against service shutdown.
+    Uses AnyIO streams and task groups to race the API call against service shutdown.
     """
 
     @functools.wraps(func)
@@ -283,26 +281,26 @@ def external_api(func: TFunc) -> TFunc:
                 f"Cannot access external API {func}. Service {self} is not running."
             )
 
-        # Create a channel for communication
-        channels: tuple[
-            trio.abc.SendChannel[_ChannelPayload],
-            trio.abc.ReceiveChannel[_ChannelPayload],
-        ] = trio.open_memory_channel(0)
-        send_channel, receive_channel = channels
+        # Create a memory stream for communication
+        streams: tuple[
+            ObjectSendStream[_ChannelPayload],
+            ObjectReceiveStream[_ChannelPayload],
+        ] = anyio.create_memory_object_stream(0)
+        send_stream, receive_stream = streams
 
         # Race the API call against service finishing
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
                 _wait_api_fn,  # type: ignore
                 self,
                 func,
                 args,
                 kwargs,
-                send_channel,
+                send_stream,
             )
-            nursery.start_soon(_wait_finished, self, func, send_channel)
-            result, err = await receive_channel.receive()
-            nursery.cancel_scope.cancel()
+            tg.start_soon(_wait_finished, self, func, send_stream)
+            result, err = await receive_stream.receive()
+            tg.cancel_scope.cancel()
 
         if err is None:
             return result

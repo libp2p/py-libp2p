@@ -13,7 +13,10 @@ The implementation is split across multiple modules for clarity:
 - context: Context managers for running services
 """
 from .api import Service, as_service, external_api
-from .context import TrioManager, background_trio_service
+from .context import (
+    background_anyio_service,
+    background_trio_service,
+)
 from .exceptions import (
     DaemonTaskExit,
     LifecycleError,
@@ -21,6 +24,7 @@ from .exceptions import (
     TooManyChildrenException,
 )
 from .manager import AnyIOManager
+from .trio_manager import TrioManager
 from .stats import Stats, TaskStats
 from .tasks import MAX_CHILDREN_TASKS, TaskType
 from .utils import get_task_name, is_verbose_logging_enabled
@@ -31,6 +35,7 @@ __all__ = [
     "AnyIOManager",
     "TrioManager",
     "as_service",
+    "background_anyio_service",
     "background_trio_service",
     # Exceptions
     "ServiceException",
