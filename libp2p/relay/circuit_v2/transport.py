@@ -11,9 +11,11 @@ import logging
 import multiaddr
 import trio
 
+from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.abc import (
     IHost,
     IListener,
+    INetConn,
     INetStream,
     ITransport,
     ReadWriteCloser,
@@ -95,7 +97,7 @@ class CircuitV2Transport(ITransport):
     async def dial(
         self,
         maddr: multiaddr.Multiaddr,
-    ) -> RawConnection:
+    ) -> INetConn:
         """
         Dial a peer using the multiaddr.
 
@@ -106,7 +108,7 @@ class CircuitV2Transport(ITransport):
 
         Returns
         -------
-        RawConnection
+        INetConn
             The established connection
 
         Raises
@@ -151,8 +153,10 @@ class CircuitV2Transport(ITransport):
         else:
             raise ConnectionError("relay_id_str must be a string or ID")
         relay_peer_info = PeerInfo(relay_peer_id, [relay_maddr])
-        return await self.dial_peer_info(dest_info=dest_info, relay_info=relay_peer_info)
-
+        raw_conn = await self.dial_peer_info(dest_info=dest_info, relay_info=relay_peer_info)
+        i_net_conn = await self.host.upgrade_outbound_connection(raw_conn, dest_info.peer_id)
+        return i_net_conn
+        
     async def dial_peer_info(
         self,
         dest_info: PeerInfo,
@@ -351,17 +355,9 @@ class CircuitV2Transport(ITransport):
             logger.error("Error making reservation: %s", str(e))
             return False
 
-    def create_listener(
-        self,
-        handler_function: Callable[[ReadWriteCloser], Awaitable[None]],
-    ) -> IListener:
+    def create_listener(self) -> IListener:
         """
         Create a listener for incoming relay connections.
-
-        Parameters
-        ----------
-        handler_function : Callable[[ReadWriteCloser], Awaitable[None]]
-            The handler function for new connections
 
         Returns
         -------
@@ -406,7 +402,7 @@ class CircuitV2Listener(Service, IListener):
         self,
         stream: INetStream,
         remote_peer_id: ID,
-    ) -> RawConnection:
+    ) -> INetConn:
         """
         Handle an incoming relay connection.
 
@@ -419,7 +415,7 @@ class CircuitV2Listener(Service, IListener):
 
         Returns
         -------
-        RawConnection
+        INetConn
             The established connection
 
         Raises
@@ -432,17 +428,12 @@ class CircuitV2Listener(Service, IListener):
             raise ConnectionError("Stop role is not enabled")
 
         try:
-            # Read STOP message
-            msg_bytes = await stream.read()
-            stop_msg = StopMessage()
-            stop_msg.ParseFromString(msg_bytes)
-
-            if stop_msg.type != StopMessage.CONNECT:
-                raise ConnectionError("Invalid STOP message type")
-
             # Create raw connection
-            return RawConnection(stream=stream, initiator=False)
-
+            raw_conn = RawConnection(stream=stream, initiator=False)
+            ma = multiaddr.Multiaddr(remote_peer_id)
+            i_net_conn = self.host.upgrade_inbound_connection(raw_conn, ma)
+            return i_net_conn
+            
         except Exception as e:
             await stream.close()
             raise ConnectionError(f"Failed to handle incoming connection: {str(e)}")

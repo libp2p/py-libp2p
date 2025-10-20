@@ -19,7 +19,12 @@ import trio
 from libp2p.abc import (
     IHost,
     INetStream,
+    INetConn,
 )
+from libp2p.network.connection.raw_connection import (
+    RawConnection,
+)
+import multiaddr
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -51,6 +56,9 @@ from .protocol_buffer import (
 from .resources import (
     RelayLimits,
     RelayResourceManager,
+)
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2")
@@ -186,6 +194,7 @@ class CircuitV2Protocol(Service):
     async def _read_stream_with_retry(
         self,
         stream: INetStream,
+        peer_id: ID,
         max_retries: int = MAX_READ_RETRIES,
     ) -> bytes | None:
         """
@@ -217,20 +226,17 @@ class CircuitV2Protocol(Service):
 
         while retries < max_retries:
             try:
-                with trio.fail_after(STREAM_READ_TIMEOUT):
-                    # Try reading with timeout
-                    logger.debug(
-                        "Attempting to read from stream (attempt %d/%d)",
-                        retries + 1,
-                        max_retries,
-                    )
-                    data = await stream.read(1024)
-                    if not data:  # EOF
-                        logger.debug("Stream EOF detected")
-                        return None
+                logger.debug(" Attempting to read from stream (attempt %d/%d)",
+                    retries + 1,
+                    max_retries,
+                )
+                data = await stream.read(MAX_READ_LEN)
+                if not data:  # EOF
+                    logger.debug("Stream EOF detected")
+                    return None
 
-                    logger.debug("Successfully read %d bytes from stream", len(data))
-                    return data
+                logger.debug("Successfully read %d bytes from stream", len(data))
+                return data
             except trio.WouldBlock:
                 # Just retry immediately if we would block
                 retries += 1
@@ -247,7 +253,6 @@ class CircuitV2Protocol(Service):
                 return None
             except trio.TooSlowError as e:
                 last_error = e
-                retries += 1
                 logger.debug(
                     "Read timeout (attempt %d/%d), retrying...", retries, max_retries
                 )
@@ -426,6 +431,8 @@ class CircuitV2Protocol(Service):
                 StatusCode.OK,
                 "Connection established",
             )
+            
+            i_net_conn = await self.handle_incoming_connection(stream, stop_msg.peer)
         except trio.TooSlowError:
             logger.error("Timeout reading from stop stream")
             await self._send_stop_status(
@@ -446,6 +453,43 @@ class CircuitV2Protocol(Service):
             except Exception:
                 pass
 
+    async def handle_incoming_connection(
+        self,
+        stream: INetStream,
+        remote_peer_id: bytes,
+    ) -> INetConn:
+        """
+        Handle an incoming relay connection.
+
+        Parameters
+        ----------
+        stream : INetStream
+            The incoming stream
+        remote_peer_id : ID
+            The remote peer's ID
+
+        Returns
+        -------
+        INetConn
+            The established connection
+
+        Raises
+        ------
+        ConnectionError
+            If the connection cannot be established
+
+        """
+        try:
+            # Create raw connection
+            raw_conn = RawConnection(stream=stream, initiator=False)
+            ma = multiaddr.Multiaddr(remote_peer_id)
+            i_net_conn = await self.host.upgrade_inbound_connection(raw_conn, ma)
+            return i_net_conn
+            
+        except Exception as e:
+            await stream.close()
+            raise ConnectionError(f"Failed to handle incoming connection: {str(e)}")
+        
     async def _handle_reserve(self, stream: INetStream, msg: HopMessage) -> None:
         """Handle a reservation request."""
         peer_id = None
@@ -609,7 +653,7 @@ class CircuitV2Protocol(Service):
 
             # Start relaying data
             async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._relay_data, stream, dst_stream, peer_id)
+                nursery.start_soon(self._relay_data, stream, dst_stream, source_addr)
                 nursery.start_soon(self._relay_data, dst_stream, stream, peer_id)
 
         except (trio.TooSlowError, ConnectionError) as e:
@@ -664,7 +708,7 @@ class CircuitV2Protocol(Service):
         try:
             while True:
                 # Read data with retries
-                data = await self._read_stream_with_retry(src_stream)
+                data = await self._read_stream_with_retry(src_stream, peer_id)
                 if not data:
                     logger.info("Source stream closed/reset")
                     break

@@ -434,7 +434,7 @@ async def setup_source_node(
                     # Create a proper peer info with a relay address
                     # The destination peer should be reachable through a
                     # p2p-circuit address
-                    circuit_addr = multiaddr.Multiaddr(f"/p2p-circuit/p2p/{dest_id}")
+                    circuit_addr = multiaddr.Multiaddr(f"{relay_info.addrs[0]}/p2p-circuit/p2p/{dest_peer_id}")
                     dest_peer_info = PeerInfo(dest_peer_id, [circuit_addr])
                     logger.info(f"This is the dest peer info: {dest_peer_info}")
 
@@ -446,10 +446,7 @@ async def setup_source_node(
                         )
 
                         logger.debug("[SRC] dialing via transport: dest=%s relay=%s", dest_peer_id, relay_peer_id)
-                        connection = await transport.dial_peer_info(
-                            dest_peer_info, relay_peer_id=relay_peer_id
-                        )
-
+                        connection = await transport.dial(circuit_addr)
                         logger.info("Established relay RawConnection: %s", connection)
 
                         logger.info(
