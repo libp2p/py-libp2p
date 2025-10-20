@@ -500,7 +500,8 @@ async def test_circuit_v2_transport_relay_selection_prioritizes_reservations():
     async with HostFactory.create_batch_and_listen(4) as hosts:
         client_host, relay_host1, relay_host2, relay_host3 = hosts
         logger.info(
-            "Created hosts for test_circuit_v2_transport_relay_selection_prioritizes_reservations"
+            "Created hosts for test_circuit_v2_transport_"
+            "relay_selection_prioritizes_reservations"
         )
 
         # Setup
@@ -561,9 +562,7 @@ async def test_circuit_v2_transport_relay_selection_prioritizes_reservations():
         )
 
         selected2 = await client_transport._select_relay(target_info)
-        assert selected2 == relay_id2, (
-            "Should keep selecting relay2 (has reservation)"
-        )
+        assert selected2 == relay_id2, "Should keep selecting relay2 (has reservation)"
 
         logger.info("Reservation prioritization test passed")
 
@@ -574,7 +573,8 @@ async def test_circuit_v2_transport_relay_selection_multiple_reservations():
     async with HostFactory.create_batch_and_listen(4) as hosts:
         client_host, relay_host1, relay_host2, relay_host3 = hosts
         logger.info(
-            "Created hosts for test_circuit_v2_transport_relay_selection_multiple_reservations"
+            "Created hosts for test_circuit_v2_transport_"
+            "relay_selection_multiple_reservations"
         )
 
         # Setup
@@ -635,10 +635,14 @@ async def test_circuit_v2_transport_relay_selection_multiple_reservations():
 
         # Should round-robin only among relays with reservations (1 and 3)
         selected1 = await client_transport._select_relay(target_info)
-        assert selected1 == relay_id1, "First selection should be relay1 (has reservation)"
+        assert selected1 == relay_id1, (
+            "First selection should be relay1 (has reservation)"
+        )
 
         selected2 = await client_transport._select_relay(target_info)
-        assert selected2 == relay_id3, "Second selection should be relay3 (has reservation)"
+        assert selected2 == relay_id3, (
+            "Second selection should be relay3 (has reservation)"
+        )
 
         selected3 = await client_transport._select_relay(target_info)
         assert selected3 == relay_id1, "Third selection should cycle back to relay1"
@@ -707,7 +711,9 @@ async def test_circuit_v2_transport_relay_selection_fallback_no_reservation():
         # Should still select relays even without reservations
         selected1 = await client_transport._select_relay(target_info)
         assert selected1 is not None, "Should select a relay even without reservations"
-        assert selected1 in [relay_id1, relay_id2], "Should select from available relays"
+        assert selected1 in [relay_id1, relay_id2], (
+            "Should select from available relays"
+        )
 
         logger.info("Fallback to non-reserved relays test passed")
 

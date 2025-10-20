@@ -93,6 +93,9 @@ class CircuitV2Transport(ITransport):
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
         self.relay_counter = 0  # for round robin load balancing
+        # A lock to protect ``relay_counter`` from concurrent access since
+        # ``_select_relay`` may be invoked from multiple tasks concurrently.
+        self._relay_counter_lock = trio.Lock()
 
     async def dial(
         self,
@@ -234,13 +237,20 @@ class CircuitV2Transport(ITransport):
                         other_relays.append(relay_id)
 
                 # Return first available relay with reservation, or fallback to others
-                self.relay_counter += 1
-                if relays_with_reservations:
-                    return relays_with_reservations[
-                        (self.relay_counter - 1) % len(relays_with_reservations)
-                    ]
-                elif other_relays:
-                    return other_relays[(self.relay_counter - 1) % len(other_relays)]
+                candidate_list = (
+                    relays_with_reservations
+                    if relays_with_reservations
+                    else other_relays
+                )
+                if candidate_list:
+                    # Round-robin load-balancing protected by a lock to avoid race
+                    # conditions when multiple coroutines attempt relay selection
+                    # simultaneously.
+                    async with self._relay_counter_lock:
+                        index = self.relay_counter % len(candidate_list)
+                        relay_peer_id = candidate_list[index]
+                        self.relay_counter += 1
+                    return relay_peer_id
 
             # Wait and try discovery
             await trio.sleep(1)

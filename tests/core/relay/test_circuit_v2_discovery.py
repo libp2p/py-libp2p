@@ -551,9 +551,9 @@ async def test_relay_discovery_reservation_expiration():
 
             # Mark relay as having a reservation that expires in 1 second
             relay_info = client_discovery.get_relay_info(relay_host.get_id())
-            if relay_info:
-                relay_info.has_reservation = True
-                relay_info.reservation_expires_at = time.time() + 1  # Expires in 1 sec
+            assert relay_info is not None, "Failed to retrieve relay info"
+            relay_info.has_reservation = True
+            relay_info.reservation_expires_at = time.time() + 1  # Expires in 1 sec
 
             # Verify reservation is active
             assert relay_info.has_reservation, "Reservation should be active"
@@ -586,7 +586,8 @@ async def test_relay_discovery_multiple_relays_with_mixed_reservations():
     async with HostFactory.create_batch_and_listen(4) as hosts:
         client_host, relay_host1, relay_host2, relay_host3 = hosts
         logger.info(
-            "Created hosts for test_relay_discovery_multiple_relays_with_mixed_reservations"
+            "Created hosts for test_relay_discovery_"
+            "multiple_relays_with_mixed_reservations"
         )
 
         # Set up discovery
@@ -636,8 +637,11 @@ async def test_relay_discovery_multiple_relays_with_mixed_reservations():
 
             # Get relay info for each
             relay_info1 = client_discovery.get_relay_info(relay_host1.get_id())
+            assert relay_info1 is not None, "Failed to retrieve relay_info1"
             relay_info2 = client_discovery.get_relay_info(relay_host2.get_id())
+            assert relay_info2 is not None, "Failed to retrieve relay_info2"
             relay_info3 = client_discovery.get_relay_info(relay_host3.get_id())
+            assert relay_info3 is not None, "Failed to retrieve relay_info3"
 
             # Verify reservation status
             assert relay_info1.has_reservation, "relay1 should have reservation"
@@ -702,7 +706,9 @@ async def test_relay_discovery_reservation_renewal_on_expiration():
 
                 if initial_has_reservation:
                     # Manually expire the reservation
-                    relay_info.reservation_expires_at = time.time() - 1  # Already expired
+                    relay_info.reservation_expires_at = (
+                        time.time() - 1
+                    )  # Already expired
 
                     # Trigger cleanup which should renew the reservation
                     await client_discovery._cleanup_expired()
@@ -719,7 +725,10 @@ async def test_relay_discovery_reservation_renewal_on_expiration():
 
 @pytest.mark.trio
 async def test_relay_discovery_get_relay_info():
-    """Test get_relay_info() returns correct information including reservation status."""
+    """
+    Test get_relay_info() returns correct information
+    including reservation status.
+    """
     async with HostFactory.create_batch_and_listen(2) as hosts:
         client_host, relay_host = hosts
         logger.info("Created hosts for test_relay_discovery_get_relay_info")
@@ -752,7 +761,7 @@ async def test_relay_discovery_get_relay_info():
 
             # Get relay info
             relay_info = client_discovery.get_relay_info(relay_host.get_id())
-            assert relay_info is not None, "Should return relay info"
+            assert relay_info is not None, "Failed to retrieve relay info"
             assert relay_info.peer_id == relay_host.get_id(), "Peer ID should match"
             assert not relay_info.has_reservation, (
                 "Should not have reservation initially"
