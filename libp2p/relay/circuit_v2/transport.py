@@ -22,6 +22,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     THandler,
 )
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
@@ -108,6 +109,9 @@ class CircuitV2Transport(ITransport):
         self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
         self._refreshing = False
+        self.dht: KadDHT | None = None
+        if config.enable_dht_discovery:
+            self.dht = KadDHT(host, DHTMode.CLIENT)
 
     async def dial(  # type: ignore[override]
         self,
@@ -453,18 +457,19 @@ class CircuitV2Transport(ITransport):
             await relay_stream.close()
             raise
 
-
     async def _select_relay(self, peer_info: PeerInfo) -> ID | None:
         """
         Select an appropriate relay for the given peer.
 
-        - Gather relays (preserve insertion order, dedupe by to_string()).
-        - Measure relays concurrently to collect scores.
-        - Take top TOP_N relays by score (desc, tie-break by to_string()).
-        - Pick one from top list using round-robin across invocations.
+        Selection priority:
+        1. Stored relays in _relay_list.
+        2. Relays discovered dynamically via DHT.
+        3. Measure, score, and pick top N relays round-robin.
 
-        Returns:
-            Selected relay ID or None if none found.
+        Returns
+        -------
+        ID | None
+            Chosen relay peer ID or None if no suitable relay is found.
 
         """
         if not self.client_config.enable_auto_relay:
@@ -472,38 +477,48 @@ class CircuitV2Transport(ITransport):
             return None
 
         for attempt in range(self.client_config.max_auto_relay_attempts):
-            # Fetch relays if _relay_list is empty — preserve order and dedupe
+            # --- Step 1: Use stored relays if available ---
             if not self._relay_list:
+                # Fetch relays from discovery
                 relays = self.discovery.get_relays() or []
-                # preserve current order and append new ones (dedupe by to_string)
                 seen = {r.to_string() for r in self._relay_list}
                 for r in relays:
                     if r.to_string() not in seen:
                         self._relay_list.append(r)
                         seen.add(r.to_string())
 
+                # --- Step 2: Fall back to DHT if still empty ---
+                if not self._relay_list and self.dht:
+                    discovered = await self.discover_peers(
+                        peer_info.peer_id.to_bytes(),
+                        max_results=TOP_N
+                    )
+                    for p in discovered:
+                        if p.peer_id.to_string() not in {
+                            r.to_string()
+                            for r in self._relay_list
+                        }:
+                            self._relay_list.append(p.peer_id)
+
             if not self._relay_list:
                 backoff = min(2 ** attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
-            # Measure all relays concurrently.
-            # scored_relays will be filled by _measure_relay.
+            # --- Step 3: Measure relays concurrently ---
             scored_relays: list[tuple[ID, float]] = []
             async with trio.open_nursery() as nursery:
                 for relay_id in list(self._relay_list):
                     nursery.start_soon(self._measure_relay, relay_id, scored_relays)
 
-            # If no scored relays, backoff and retry
             if not scored_relays:
                 backoff = min(2 ** attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
-            # Filter by minimum score
+            # --- Step 4: Filter by minimum score ---
             filtered = [
-                (rid, score) for (rid, score)
-                in scored_relays
+                (rid, score) for rid, score in scored_relays
                 if score >= self.client_config.min_relay_score
             ]
             if not filtered:
@@ -511,29 +526,22 @@ class CircuitV2Transport(ITransport):
                 await trio.sleep(backoff)
                 continue
 
-            # Sort by score desc, tie-break by to_string() to be deterministic
+            # --- Step 5: Sort top relays ---
             filtered.sort(key=lambda x: (x[1], x[0].to_string()), reverse=True)
-
-            # Take top N
-            top_relays = [rid for (rid, _) in filtered[:TOP_N]]
-
-            # Defensive: if top_relays empty (shouldn't be), backoff
+            top_relays = [rid for rid, _ in filtered[:TOP_N]]
             if not top_relays:
                 backoff = min(2 ** attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
-            # Round-robin selection across the top_relays list
-            # Ensure _last_relay_index cycles relative to top_relays length.
+            # --- Step 6: Round-robin selection ---
             if self._last_relay_index == -1:
-                # First selection: pick best relay
                 self._last_relay_index = 0
             else:
-                # Next selections: cycle through top N
                 self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
             chosen = top_relays[self._last_relay_index]
 
-            # Ensure metrics access uses the actual relay object (or insert if missing)
+            # Ensure metrics exist
             if chosen not in self._relay_metrics:
                 self._relay_metrics[chosen] = {
                     "latency": 0,
@@ -553,8 +561,26 @@ class CircuitV2Transport(ITransport):
             "No suitable relay found after %d attempts",
             self.client_config.max_auto_relay_attempts
         )
-
         return None
+
+    async def discover_peers(self, key: bytes, max_results: int = 5) -> list[PeerInfo]:
+        if not self.dht:
+            return []
+
+        found_peers: list[PeerInfo] = []
+
+        # 1. Use the routing table of the DHT
+        closest_ids = self.dht.routing_table.find_local_closest_peers(key, 20)
+        for peer_id in closest_ids:
+            if peer_id == self.dht.local_peer_id:
+                continue
+            if len(found_peers) >= max_results:
+                break
+            peer_info = await self.dht.find_peer(peer_id)
+            if peer_info:
+                found_peers.append(peer_info)
+
+        return found_peers[:max_results]
 
     async def _is_relay_available(self, relay_peer_id: ID) -> bool:
         """Check if the relay is currently reachable."""
