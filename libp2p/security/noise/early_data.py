@@ -4,6 +4,7 @@ from abc import (
     ABC,
     abstractmethod,
 )
+from collections.abc import Awaitable, Callable
 from typing import (
     Protocol,
     runtime_checkable,
@@ -82,7 +83,7 @@ class LoggingEarlyDataHandler(AsyncEarlyDataHandler):
 
         logger = logging.getLogger(self.logger_name)
         logger.info(f"Received early data: {len(data)} bytes")
-        logger.debug(f"Early data content: {data}")
+        logger.debug(f"Early data content: {data!r}")
 
 
 class BufferingEarlyDataHandler(AsyncEarlyDataHandler):
@@ -141,7 +142,9 @@ class BufferingEarlyDataHandler(AsyncEarlyDataHandler):
 class CallbackEarlyDataHandler(AsyncEarlyDataHandler):
     """Early data handler that calls a user-provided callback."""
 
-    def __init__(self, callback):
+    def __init__(
+        self, callback: Callable[[bytes], None] | Callable[[bytes], Awaitable[None]]
+    ) -> None:
         """
         Initialize with a callback function.
 
@@ -163,11 +166,9 @@ class CallbackEarlyDataHandler(AsyncEarlyDataHandler):
 
         """
         # Try to call as async, fall back to sync if needed
-        try:
-            await self.callback(data)
-        except TypeError:
-            # Handler is sync, call directly
-            self.callback(data)
+        result = self.callback(data)
+        if hasattr(result, "__await__"):
+            await result  # type: ignore
 
 
 class CompositeEarlyDataHandler(AsyncEarlyDataHandler):
@@ -200,7 +201,7 @@ class CompositeEarlyDataHandler(AsyncEarlyDataHandler):
                 await handler.handle_early_data(data)
             except TypeError:
                 # Handler is sync, call directly
-                handler.handle_early_data(data)
+                await handler.handle_early_data(data)
 
     def add_handler(self, handler: EarlyDataHandler) -> None:
         """
@@ -256,7 +257,7 @@ class EarlyDataManager:
                 await self.handler.handle_early_data(data)
             except TypeError:
                 # Handler is sync, call directly
-                self.handler.handle_early_data(data)
+                await self.handler.handle_early_data(data)
 
     def has_early_data(self) -> bool:
         """

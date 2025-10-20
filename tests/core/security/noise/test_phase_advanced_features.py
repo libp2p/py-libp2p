@@ -1,6 +1,5 @@
 """Tests for Phase 4: Advanced Features Integration."""
 
-
 import pytest
 
 from libp2p.crypto.secp256k1 import create_new_key_pair
@@ -331,8 +330,7 @@ class TestEnhancedTransport:
         assert pattern.__class__.__name__ == "PatternXX"
 
         # Test pattern with remote peer (should still be XX if no cached key)
-        remote_peer = ID.from_pubkey(libp2p_keypair.public_key)
-        pattern = transport.get_pattern(remote_peer)
+        pattern = transport.get_pattern()
         assert pattern.__class__.__name__ == "PatternXX"
 
     def test_static_key_caching(self, key_pairs):

@@ -160,7 +160,7 @@ class RekeyManager:
         self._bytes_since_rekey = 0
         self._rekey_count += 1
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int | float]:
         """
         Get rekey statistics.
 
@@ -239,7 +239,7 @@ class RekeyHandler:
 
         return False
 
-    def get_rekey_stats(self) -> dict:
+    def get_rekey_stats(self) -> dict[str, int | float]:
         """
         Get rekey statistics.
 

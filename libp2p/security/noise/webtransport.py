@@ -22,7 +22,7 @@ class WebTransportCertificate(Protocol):
 class WebTransportCertManager:
     """Manager for WebTransport certificate hashes in Noise extensions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cert_hashes: list[bytes] = []
 
     def add_certificate(self, cert_data: bytes) -> bytes:
@@ -91,7 +91,7 @@ class WebTransportCertManager:
 class WebTransportSupport:
     """Support for WebTransport integration in Noise protocol."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cert_manager = WebTransportCertManager()
 
     @property

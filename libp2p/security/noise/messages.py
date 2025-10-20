@@ -26,10 +26,12 @@ class NoiseExtensions:
 
     This class provides support for:
     - WebTransport certificate hashes for WebTransport support
-    - Early data payload for 0-RTT support
+    - Stream multiplexers supported by this peer (spec compliant)
+    - Early data payload for 0-RTT support (Python extension)
     """
 
     webtransport_certhashes: list[bytes] = field(default_factory=list)
+    stream_muxers: list[str] = field(default_factory=list)
     early_data: bytes | None = None
 
     def to_protobuf(self) -> noise_pb.NoiseExtensions:
@@ -42,6 +44,7 @@ class NoiseExtensions:
         """
         ext = noise_pb.NoiseExtensions()
         ext.webtransport_certhashes.extend(self.webtransport_certhashes)
+        ext.stream_muxers.extend(self.stream_muxers)  # type: ignore[attr-defined]
         if self.early_data is not None:
             ext.early_data = self.early_data
         return ext
@@ -63,6 +66,7 @@ class NoiseExtensions:
             early_data = pb_ext.early_data
         return cls(
             webtransport_certhashes=list(pb_ext.webtransport_certhashes),
+            stream_muxers=list(pb_ext.stream_muxers),  # type: ignore[attr-defined]
             early_data=early_data,
         )
 
@@ -74,7 +78,11 @@ class NoiseExtensions:
             bool: True if no extensions data is present
 
         """
-        return not self.webtransport_certhashes and self.early_data is None
+        return (
+            not self.webtransport_certhashes
+            and not self.stream_muxers
+            and self.early_data is None
+        )
 
     def has_webtransport_certhashes(self) -> bool:
         """
@@ -85,6 +93,16 @@ class NoiseExtensions:
 
         """
         return bool(self.webtransport_certhashes)
+
+    def has_stream_muxers(self) -> bool:
+        """
+        Check if stream multiplexers are present.
+
+        Returns:
+            bool: True if stream multiplexers are present
+
+        """
+        return bool(self.stream_muxers)
 
     def has_early_data(self) -> bool:
         """
@@ -104,13 +122,11 @@ class NoiseHandshakePayload:
 
     This class represents the payload sent during Noise handshake and provides:
     - Peer identity verification through public key and signature
-    - Optional early data for 0-RTT support
-    - Optional extensions for advanced features like WebTransport
+    - Optional extensions for advanced features like WebTransport and stream muxers
     """
 
     id_pubkey: PublicKey
     id_sig: bytes
-    early_data: bytes | None = None
     extensions: NoiseExtensions | None = None
 
     def serialize(self) -> bytes:
@@ -131,18 +147,8 @@ class NoiseHandshakePayload:
             identity_key=self.id_pubkey.serialize(), identity_sig=self.id_sig
         )
 
-        # Handle early data: prefer extensions over legacy data field
-        if self.extensions is not None and self.extensions.early_data is not None:
-            # Early data is in extensions
-            msg.extensions.CopyFrom(self.extensions.to_protobuf())
-        elif self.early_data is not None:
-            # Legacy early data in data field (for backward compatibility)
-            msg.data = self.early_data
-            if self.extensions is not None:
-                # Still include extensions even if early data is in legacy field
-                msg.extensions.CopyFrom(self.extensions.to_protobuf())
-        elif self.extensions is not None:
-            # Extensions without early data
+        # Include extensions if present
+        if self.extensions is not None:
             msg.extensions.CopyFrom(self.extensions.to_protobuf())
 
         return msg.SerializeToString()
@@ -174,17 +180,8 @@ class NoiseHandshakePayload:
             raise ValueError("Invalid handshake payload: missing required fields")
 
         extensions = None
-        early_data = None
-
         if msg.HasField("extensions"):
             extensions = NoiseExtensions.from_protobuf(msg.extensions)
-            # Early data from extensions takes precedence
-            if extensions.early_data is not None:
-                early_data = extensions.early_data
-
-        # Fall back to legacy data field if no early data in extensions
-        if early_data is None:
-            early_data = msg.data if msg.data != b"" else None
 
         try:
             id_pubkey = deserialize_public_key(msg.identity_key)
@@ -194,7 +191,6 @@ class NoiseHandshakePayload:
         return cls(
             id_pubkey=id_pubkey,
             id_sig=msg.identity_sig,
-            early_data=early_data,
             extensions=extensions,
         )
 
@@ -210,19 +206,17 @@ class NoiseHandshakePayload:
 
     def has_early_data(self) -> bool:
         """
-        Check if early data is present (either in extensions or legacy field).
+        Check if early data is present in extensions.
 
         Returns:
             bool: True if early data is present
 
         """
-        if self.extensions is not None and self.extensions.has_early_data():
-            return True
-        return self.early_data is not None
+        return self.extensions is not None and self.extensions.has_early_data()
 
     def get_early_data(self) -> bytes | None:
         """
-        Get early data, preferring extensions over legacy field.
+        Get early data from extensions.
 
         Returns:
             bytes | None: The early data if present
@@ -230,7 +224,7 @@ class NoiseHandshakePayload:
         """
         if self.extensions is not None and self.extensions.has_early_data():
             return self.extensions.early_data
-        return self.early_data
+        return None
 
 
 def make_data_to_be_signed(noise_static_pubkey: PublicKey) -> bytes:

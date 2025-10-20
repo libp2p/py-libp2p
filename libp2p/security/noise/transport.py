@@ -68,6 +68,7 @@ class Transport(ISecureTransport):
         self.webtransport_support = WebTransportSupport()
         self.early_data_manager = EarlyDataManager(early_data_handler)
         self.rekey_manager = RekeyManager(rekey_policy)
+        self._static_key_cache: dict[ID, bytes] = {}
 
     def get_pattern(self) -> IPattern:
         """
@@ -100,8 +101,9 @@ class Transport(ISecureTransport):
         secure_conn = await pattern.handshake_inbound(conn)
 
         # Handle early data if present
-        if hasattr(pattern, "early_data") and pattern.early_data is not None:
-            await self.early_data_manager.handle_early_data(pattern.early_data)
+        early_data = getattr(pattern, "early_data", None)
+        if early_data is not None:
+            await self.early_data_manager.handle_early_data(early_data)
 
         return secure_conn
 
@@ -121,7 +123,36 @@ class Transport(ISecureTransport):
         secure_conn = await pattern.handshake_outbound(conn, peer_id)
 
         # Handle early data if present
-        if hasattr(pattern, "early_data") and pattern.early_data is not None:
-            await self.early_data_manager.handle_early_data(pattern.early_data)
+        early_data = getattr(pattern, "early_data", None)
+        if early_data is not None:
+            await self.early_data_manager.handle_early_data(early_data)
 
         return secure_conn
+
+    def cache_static_key(self, peer_id: ID, static_key: bytes) -> None:
+        """
+        Cache a static key for a peer.
+
+        Args:
+            peer_id: The peer ID
+            static_key: The static key to cache
+
+        """
+        self._static_key_cache[peer_id] = static_key
+
+    def get_cached_static_key(self, peer_id: ID) -> bytes | None:
+        """
+        Get cached static key for a peer.
+
+        Args:
+            peer_id: The peer ID
+
+        Returns:
+            The cached static key or None if not found
+
+        """
+        return self._static_key_cache.get(peer_id)
+
+    def clear_static_key_cache(self) -> None:
+        """Clear the static key cache."""
+        self._static_key_cache.clear()

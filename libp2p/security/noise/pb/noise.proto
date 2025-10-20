@@ -5,8 +5,10 @@ package pb;
 message NoiseExtensions {
 	// WebTransport certificate hashes for WebTransport support
 	repeated bytes webtransport_certhashes = 1;
-	// Early data payload for 0-RTT support
-	bytes early_data = 2;
+	// Stream multiplexers supported by this peer
+	repeated string stream_muxers = 2;
+	// Early data payload for 0-RTT support (Python extension)
+	bytes early_data = 3;
 }
 
 // NoiseHandshakePayload is the payload sent during Noise handshake
@@ -15,8 +17,6 @@ message NoiseHandshakePayload {
 	bytes identity_key = 1;
 	// Signature of the noise static key by the libp2p private key
 	bytes identity_sig = 2;
-	// Legacy early data field (deprecated, use extensions.early_data)
-	bytes data = 3;
 	// Optional extensions for advanced features
 	NoiseExtensions extensions = 4;
 }

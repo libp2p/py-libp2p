@@ -92,7 +92,6 @@ class BasePattern(IPattern):
                 return NoiseHandshakePayload(
                     self.libp2p_privkey.get_public_key(),
                     signature,
-                    early_data=None,  # Early data is in extensions
                     extensions=extensions,
                 )
             elif self.early_data is not None:
@@ -100,12 +99,12 @@ class BasePattern(IPattern):
                 # - embed in extensions
                 extensions_with_early_data = NoiseExtensions(
                     webtransport_certhashes=extensions.webtransport_certhashes,
+                    stream_muxers=extensions.stream_muxers,
                     early_data=self.early_data,
                 )
                 return NoiseHandshakePayload(
                     self.libp2p_privkey.get_public_key(),
                     signature,
-                    early_data=None,  # Early data is now in extensions
                     extensions=extensions_with_early_data,
                 )
             else:
@@ -113,15 +112,13 @@ class BasePattern(IPattern):
                 return NoiseHandshakePayload(
                     self.libp2p_privkey.get_public_key(),
                     signature,
-                    early_data=None,
                     extensions=extensions,
                 )
         else:
-            # No extensions, use legacy early data
+            # No extensions, create empty payload
             return NoiseHandshakePayload(
                 self.libp2p_privkey.get_public_key(),
                 signature,
-                early_data=self.early_data,
                 extensions=None,
             )
 

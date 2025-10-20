@@ -70,13 +70,17 @@ class TestNoiseHandshakePayloadEarlyData:
         """Test handshake payload with early data in extensions."""
         early_data = b"test_early_data"
         certhashes = [b"cert1", b"cert2"]
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
 
-        ext = NoiseExtensions(webtransport_certhashes=certhashes, early_data=early_data)
+        ext = NoiseExtensions(
+            webtransport_certhashes=certhashes,
+            stream_muxers=stream_muxers,
+            early_data=early_data,
+        )
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
-            early_data=None,  # No legacy early data
             extensions=ext,
         )
 
@@ -88,39 +92,20 @@ class TestNoiseHandshakePayloadEarlyData:
         assert deserialized.extensions is not None
         assert deserialized.extensions.early_data == early_data
         assert deserialized.extensions.webtransport_certhashes == certhashes
-        # Legacy early data should also be set for backward compatibility
-        assert deserialized.early_data == early_data
+        assert deserialized.extensions.stream_muxers == stream_muxers
+        # Early data should be accessible through payload methods
+        assert deserialized.has_early_data()
+        assert deserialized.get_early_data() == early_data
 
-    def test_handshake_payload_with_legacy_early_data(self, key_pair):
-        """Test handshake payload with legacy early data (backward compatibility)."""
-        early_data = b"legacy_early_data"
+    def test_handshake_payload_with_stream_muxers_only(self, key_pair):
+        """Test handshake payload with only stream muxers (spec compliant)."""
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
 
-        payload = NoiseHandshakePayload(
-            id_pubkey=key_pair.public_key,
-            id_sig=b"test_sig",
-            early_data=early_data,
-            extensions=None,
-        )
-
-        # Serialize and deserialize
-        serialized = payload.serialize()
-        deserialized = NoiseHandshakePayload.deserialize(serialized)
-
-        # Should preserve legacy early data
-        assert deserialized.early_data == early_data
-        assert deserialized.extensions is None
-
-    def test_handshake_payload_with_extensions_and_legacy_early_data(self, key_pair):
-        """Test handshake payload with both extensions and legacy early data."""
-        legacy_early_data = b"legacy_early_data"
-        certhashes = [b"cert1", b"cert2"]
-
-        ext = NoiseExtensions(webtransport_certhashes=certhashes)
+        ext = NoiseExtensions(stream_muxers=stream_muxers)
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
-            early_data=legacy_early_data,
             extensions=ext,
         )
 
@@ -128,26 +113,28 @@ class TestNoiseHandshakePayloadEarlyData:
         serialized = payload.serialize()
         deserialized = NoiseHandshakePayload.deserialize(serialized)
 
-        # Should preserve both
-        assert deserialized.early_data == legacy_early_data
+        # Should preserve stream muxers
         assert deserialized.extensions is not None
-        assert deserialized.extensions.webtransport_certhashes == certhashes
+        assert deserialized.extensions.stream_muxers == stream_muxers
+        assert deserialized.extensions.webtransport_certhashes == []
         assert deserialized.extensions.early_data is None
+        assert not deserialized.has_early_data()
 
-    def test_handshake_payload_early_data_priority(self, key_pair):
-        """Test that early data in extensions takes priority over legacy early data."""
-        legacy_early_data = b"legacy_early_data"
-        extension_early_data = b"extension_early_data"
+    def test_handshake_payload_with_all_extensions(self, key_pair):
+        """Test handshake payload with all extension types."""
+        early_data = b"test_early_data"
         certhashes = [b"cert1", b"cert2"]
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
 
         ext = NoiseExtensions(
-            webtransport_certhashes=certhashes, early_data=extension_early_data
+            webtransport_certhashes=certhashes,
+            stream_muxers=stream_muxers,
+            early_data=early_data,
         )
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
-            early_data=legacy_early_data,  # This should be ignored
             extensions=ext,
         )
 
@@ -155,10 +142,13 @@ class TestNoiseHandshakePayloadEarlyData:
         serialized = payload.serialize()
         deserialized = NoiseHandshakePayload.deserialize(serialized)
 
-        # Extension early data should take priority
+        # All extensions should be preserved
         assert deserialized.extensions is not None
-        assert deserialized.extensions.early_data == extension_early_data
-        assert deserialized.early_data == extension_early_data
+        assert deserialized.extensions.webtransport_certhashes == certhashes
+        assert deserialized.extensions.stream_muxers == stream_muxers
+        assert deserialized.extensions.early_data == early_data
+        assert deserialized.has_early_data()
+        assert deserialized.get_early_data() == early_data
 
 
 class TestPatternEarlyDataIntegration:
@@ -193,8 +183,9 @@ class TestPatternEarlyDataIntegration:
         assert payload.extensions is not None
         assert payload.extensions.early_data == b"pattern_early_data"
         assert payload.extensions.webtransport_certhashes == certhashes
-        # Legacy early data should be None
-        assert payload.early_data is None
+        # Early data should be accessible through payload methods
+        assert payload.has_early_data()
+        assert payload.get_early_data() == b"pattern_early_data"
 
     def test_pattern_with_extensions_without_early_data(self, pattern_setup):
         """Test pattern with extensions but no early data."""
@@ -221,17 +212,17 @@ class TestPatternEarlyDataIntegration:
         assert payload.extensions is not None
         assert payload.extensions.early_data is None
         assert payload.extensions.webtransport_certhashes == certhashes
-        assert payload.early_data is None
+        assert not payload.has_early_data()
 
-    def test_pattern_without_extensions_legacy_early_data(self, pattern_setup):
-        """Test pattern without extensions (legacy behavior)."""
+    def test_pattern_without_extensions_no_early_data(self, pattern_setup):
+        """Test pattern without extensions (no early data)."""
         pattern, libp2p_keypair, noise_keypair = pattern_setup
 
         payload = pattern.make_handshake_payload()
 
-        # Should use legacy early data
-        assert payload.early_data == b"pattern_early_data"
+        # Should have no early data when no extensions
         assert payload.extensions is None
+        assert not payload.has_early_data()
 
     def test_pattern_early_data_roundtrip(self, pattern_setup):
         """Test pattern early data roundtrip through serialization."""
@@ -250,7 +241,8 @@ class TestPatternEarlyDataIntegration:
         assert deserialized.extensions is not None
         assert deserialized.extensions.early_data == b"pattern_early_data"
         assert deserialized.extensions.webtransport_certhashes == certhashes
-        assert deserialized.early_data == b"pattern_early_data"
+        assert deserialized.has_early_data()
+        assert deserialized.get_early_data() == b"pattern_early_data"
 
 
 class TestBackwardCompatibility:
@@ -261,25 +253,27 @@ class TestBackwardCompatibility:
         """Create a test key pair."""
         return create_new_key_pair()
 
-    def test_legacy_handshake_payload_compatibility(self, key_pair):
-        """Test that legacy handshake payloads still work."""
-        early_data = b"legacy_early_data"
+    def test_spec_compliant_handshake_payload(self, key_pair):
+        """Test that spec-compliant handshake payloads work."""
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
 
-        # Create payload the old way
+        # Create payload with spec-compliant extensions
+        ext = NoiseExtensions(stream_muxers=stream_muxers)
         payload = NoiseHandshakePayload(
-            id_pubkey=key_pair.public_key, id_sig=b"test_sig", early_data=early_data
+            id_pubkey=key_pair.public_key, id_sig=b"test_sig", extensions=ext
         )
 
         # Serialize and deserialize
         serialized = payload.serialize()
         deserialized = NoiseHandshakePayload.deserialize(serialized)
 
-        # Should work exactly as before
-        assert deserialized.early_data == early_data
-        assert deserialized.extensions is None
+        # Should preserve spec-compliant extensions
+        assert deserialized.extensions is not None
+        assert deserialized.extensions.stream_muxers == stream_muxers
+        assert not deserialized.has_early_data()
 
-    def test_legacy_pattern_compatibility(self, key_pair):
-        """Test that legacy pattern usage still works."""
+    def test_pattern_with_spec_compliant_extensions(self, key_pair):
+        """Test that patterns work with spec-compliant extensions."""
         libp2p_keypair = create_new_key_pair()
         noise_keypair = create_new_key_pair()
         local_peer = ID.from_pubkey(libp2p_keypair.public_key)
@@ -288,28 +282,35 @@ class TestBackwardCompatibility:
             local_peer,
             libp2p_keypair.private_key,
             noise_keypair.private_key,
-            early_data=b"legacy_early_data",
+            early_data=None,  # No early data for spec compliance
         )
 
-        # Create payload without extensions (legacy way)
-        payload = pattern.make_handshake_payload()
+        # Create payload with spec-compliant extensions
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
+        ext = NoiseExtensions(stream_muxers=stream_muxers)
+        payload = pattern.make_handshake_payload(extensions=ext)
 
-        # Should work exactly as before
-        assert payload.early_data == b"legacy_early_data"
-        assert payload.extensions is None
+        # Should work with spec-compliant extensions
+        assert payload.extensions is not None
+        assert payload.extensions.stream_muxers == stream_muxers
+        assert not payload.has_early_data()
 
-    def test_mixed_usage_compatibility(self, key_pair):
-        """Test mixed usage of legacy and new features."""
-        # Test that we can mix legacy early data with new extensions
-        early_data = b"legacy_early_data"
+    def test_python_extensions_compatibility(self, key_pair):
+        """Test Python-specific extensions work alongside spec compliance."""
+        # Test that we can use Python extensions (early data) with spec compliance
+        early_data = b"python_early_data"
         certhashes = [b"cert1", b"cert2"]
+        stream_muxers = ["/mplex/1.0.0", "/yamux/1.0.0"]
 
-        ext = NoiseExtensions(webtransport_certhashes=certhashes)
+        ext = NoiseExtensions(
+            webtransport_certhashes=certhashes,
+            stream_muxers=stream_muxers,
+            early_data=early_data,
+        )
 
         payload = NoiseHandshakePayload(
             id_pubkey=key_pair.public_key,
             id_sig=b"test_sig",
-            early_data=early_data,
             extensions=ext,
         )
 
@@ -317,8 +318,10 @@ class TestBackwardCompatibility:
         serialized = payload.serialize()
         deserialized = NoiseHandshakePayload.deserialize(serialized)
 
-        # Both should be preserved
-        assert deserialized.early_data == early_data
+        # Should preserve all extensions
         assert deserialized.extensions is not None
         assert deserialized.extensions.webtransport_certhashes == certhashes
-        assert deserialized.extensions.early_data is None
+        assert deserialized.extensions.stream_muxers == stream_muxers
+        assert deserialized.extensions.early_data == early_data
+        assert deserialized.has_early_data()
+        assert deserialized.get_early_data() == early_data
