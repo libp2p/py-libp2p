@@ -3,9 +3,10 @@ Bitswap client implementation for block exchange.
 Supports v1.0.0, v1.1.0, and v1.2.0 protocols.
 """
 
+from collections.abc import Sequence
 import hashlib
 import logging
-from typing import Any, cast
+from typing import Any
 
 import trio
 import varint
@@ -88,8 +89,8 @@ class BitswapClient:
         # Set stream handler for all supported Bitswap protocols
         for protocol in BITSWAP_PROTOCOLS:
             self.host.set_stream_handler(
-                cast(TProtocol, protocol),
-                self._handle_stream,  # type: ignore[arg-type]
+                protocol,
+                self._handle_stream,
             )
 
         self._started = True
@@ -343,19 +344,21 @@ class BitswapClient:
             msg = create_message(wantlist_entries=entries, full_wantlist=False)
 
             # Get negotiated protocol for this peer or use all protocols
-            protocols = [self._peer_protocols.get(peer_id, self.protocol_version)]
-            if peer_id not in self._peer_protocols:
-                protocols = BITSWAP_PROTOCOLS  # Try all
+            if peer_id in self._peer_protocols:
+                protocols = [TProtocol(self._peer_protocols[peer_id])]
+            else:
+                protocols = list(BITSWAP_PROTOCOLS)  # Try all
 
             # Open stream and send message
             stream = await self.host.new_stream(
                 peer_id,
-                protocols,  # type: ignore[arg-type]
+                protocols,
             )
 
             # Store negotiated protocol
-            if hasattr(stream, "protocol_id"):
-                self._peer_protocols[peer_id] = stream.protocol_id  # type: ignore[attr-defined]
+            protocol = stream.get_protocol()
+            if protocol:
+                self._peer_protocols[peer_id] = str(protocol)
 
             await self._write_message(stream, msg)
             logger.debug(f"Sent wantlist to peer {peer_id}")
@@ -391,7 +394,7 @@ class BitswapClient:
             try:
                 stream = await self.host.new_stream(
                     peer_id,
-                    [BITSWAP_PROTOCOL_V100],  # type: ignore[list-item]
+                    [BITSWAP_PROTOCOL_V100],
                 )
                 await self._write_message(stream, msg)
             except Exception as e:
@@ -431,7 +434,7 @@ class BitswapClient:
 
                 stream = await self.host.new_stream(
                     peer_id,
-                    [peer_protocol],  # type: ignore[list-item]
+                    [TProtocol(peer_protocol)],
                 )
                 await self._write_message(stream, msg)
                 logger.debug(f"Sent block {cid.hex()[:16]}... to peer {peer_id}")
@@ -534,8 +537,9 @@ class BitswapClient:
     ) -> None:
         """Process a received Bitswap message."""
         # Detect peer protocol version from stream
-        if hasattr(stream, "protocol"):
-            self._peer_protocols[peer_id] = stream.protocol  # type: ignore[attr-defined]
+        protocol = stream.get_protocol()
+        if protocol:
+            self._peer_protocols[peer_id] = str(protocol)
 
         # Process wantlist
         if msg.HasField("wantlist"):
@@ -547,11 +551,11 @@ class BitswapClient:
 
         # Process payload (v1.1.0+ format)
         if msg.payload:
-            await self._process_blocks_v110(msg.payload)  # type: ignore[arg-type]
+            await self._process_blocks_v110(msg.payload)
 
         # Process block presences (v1.2.0 format)
         if msg.blockPresences:
-            await self._process_block_presences(msg.blockPresences)  # type: ignore[arg-type]
+            await self._process_block_presences(msg.blockPresences)
 
     async def _process_wantlist(
         self, wantlist: Message.Wantlist, peer_id: PeerID, stream: INetStream
@@ -709,7 +713,7 @@ class BitswapClient:
             logger.info("  ✓ All blocks received from this peer!")
         logger.info("=" * 70)
 
-    async def _process_blocks_v110(self, blocks: list[Any]) -> None:
+    async def _process_blocks_v110(self, blocks: Sequence[Any]) -> None:
         """Process received blocks (v1.1.0+ format with prefix)."""
         logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
         for block in blocks:
@@ -734,7 +738,7 @@ class BitswapClient:
             else:
                 logger.debug(f"No pending request for {cid.hex()[:16]}...")
 
-    async def _process_block_presences(self, presences: list[Any]) -> None:
+    async def _process_block_presences(self, presences: Sequence[Any]) -> None:
         """Process received block presences (v1.2.0)."""
         for presence in presences:
             cid = presence.cid

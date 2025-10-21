@@ -231,30 +231,34 @@ def create_directory_node(entries: list[tuple[str, bytes, int]]) -> bytes:
     return encode_dag_pb(links, unixfs_data)
 
 
-def is_file_node(data: bytes) -> bool:
-    """Check if DAG-PB node represents a file."""
+def _get_unixfs_data(data: bytes) -> UnixFSData | None:
+    """
+    Safely extract UnixFS data from DAG-PB node.
+
+    Returns None if the data cannot be decoded or is invalid.
+    """
     try:
         _, unixfs_data = decode_dag_pb(data)
-        return unixfs_data is not None and unixfs_data.type == "file"
+        return unixfs_data
     except Exception:
-        return False
+        return None
+
+
+def is_file_node(data: bytes) -> bool:
+    """Check if DAG-PB node represents a file."""
+    unixfs_data = _get_unixfs_data(data)
+    return unixfs_data is not None and unixfs_data.type == "file"
 
 
 def is_directory_node(data: bytes) -> bool:
     """Check if DAG-PB node represents a directory."""
-    try:
-        _, unixfs_data = decode_dag_pb(data)
-        return unixfs_data is not None and unixfs_data.type == "directory"
-    except Exception:
-        return False
+    unixfs_data = _get_unixfs_data(data)
+    return unixfs_data is not None and unixfs_data.type == "directory"
 
 
 def get_file_size(data: bytes) -> int:
     """Get the total file size from a DAG-PB file node."""
-    try:
-        _, unixfs_data = decode_dag_pb(data)
-        if unixfs_data and unixfs_data.type == "file":
-            return unixfs_data.filesize
-        return 0
-    except Exception:
-        return 0
+    unixfs_data = _get_unixfs_data(data)
+    if unixfs_data and unixfs_data.type == "file":
+        return unixfs_data.filesize
+    return 0

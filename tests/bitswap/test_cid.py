@@ -1,6 +1,5 @@
 """Unit tests for CID computation and verification."""
 
-
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,

@@ -1,6 +1,5 @@
 """Unit tests for Bitswap messages."""
 
-
 from libp2p.bitswap.cid import compute_cid_v1
 from libp2p.bitswap.messages import (
     create_block_message_v100,
@@ -42,9 +41,7 @@ class TestWantlistEntry:
     def test_create_entry_v120_fields(self):
         """Test creating entry with v1.2.0 fields."""
         cid = compute_cid_v1(b"test")
-        entry = create_wantlist_entry(
-            cid, want_type=1, send_dont_have=True
-        )
+        entry = create_wantlist_entry(cid, want_type=1, send_dont_have=True)
 
         assert entry.wantType == 1
         assert entry.sendDontHave is True

@@ -2,10 +2,12 @@
 Bitswap configuration constants and defaults.
 """
 
+from libp2p.custom_types import TProtocol
+
 # Protocol IDs for different Bitswap versions
-BITSWAP_PROTOCOL_V100 = "/ipfs/bitswap/1.0.0"
-BITSWAP_PROTOCOL_V110 = "/ipfs/bitswap/1.1.0"
-BITSWAP_PROTOCOL_V120 = "/ipfs/bitswap/1.2.0"
+BITSWAP_PROTOCOL_V100 = TProtocol("/ipfs/bitswap/1.0.0")
+BITSWAP_PROTOCOL_V110 = TProtocol("/ipfs/bitswap/1.1.0")
+BITSWAP_PROTOCOL_V120 = TProtocol("/ipfs/bitswap/1.2.0")
 
 # All supported protocols (ordered from newest to oldest for negotiation)
 BITSWAP_PROTOCOLS = [
