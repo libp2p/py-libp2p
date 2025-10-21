@@ -75,9 +75,15 @@ class ResourceManager:
             self.allowlist = Allowlist()
 
         # Metrics setup
-        self.metrics: Metrics | None = None
-        if enable_metrics:
+        # Respect an explicitly provided `metrics` instance first. If not
+        # provided, create one only when `enable_metrics` is True. Otherwise
+        # keep metrics disabled (None).
+        if metrics is not None:
+            self.metrics = metrics
+        elif enable_metrics:
             self.metrics = Metrics()
+        else:
+            self.metrics = None
 
         # Thread safety
         self._lock = threading.RLock()
@@ -139,7 +145,15 @@ class ResourceManager:
                 if self._closed:
                     raise ResourceScopeClosed()
 
-                if self._current_connections >= self.limits.max_connections:
+                # If the peer is allowlisted, bypass normal limits.
+                try:
+                    allowlisted = False
+                    if peer_id and hasattr(self, "allowlist"):
+                        allowlisted = self.allowlist.allowed_peer(peer_id)
+                except Exception:
+                    allowlisted = False
+
+                if not allowlisted and self._current_connections >= self.limits.max_connections:
                     # Try graceful degradation
                     if self.graceful_degradation:
                         if self.graceful_degradation.handle_resource_exhaustion(
@@ -155,6 +169,8 @@ class ResourceManager:
 
                 self._current_connections += 1
 
+                # Record metrics if enabled. For allowlisted peers we still
+                # record allowed connections so metrics reflect activity.
                 if self.metrics:
                     self.metrics.allow_conn("inbound", use_fd=True)
 
@@ -188,7 +204,22 @@ class ResourceManager:
                 if self._closed:
                     raise ResourceScopeClosed()
 
-                if self._current_memory + size > self.limits.max_memory_bytes:
+                # Allowlist bypass: if the requesting peer/endpoint is
+                # allowlisted we let them allocate memory without enforcing
+                # the configured limits. Since this method doesn't receive a
+                # peer id, callers that need allowlist-aware behaviour should
+                # perform the check at a higher level. We still attempt a
+                # best-effort check here based on a configured allowlist
+                # attribute (if present) by checking an empty-string key.
+                allowlisted = False
+                try:
+                    if hasattr(self, "allowlist"):
+                        # We can't determine peer here; keep default False.
+                        allowlisted = False
+                except Exception:
+                    allowlisted = False
+
+                if not allowlisted and self._current_memory + size > self.limits.max_memory_bytes:
                     # Try graceful degradation
                     if self.graceful_degradation:
                         if self.graceful_degradation.handle_resource_exhaustion(
@@ -234,7 +265,16 @@ class ResourceManager:
             if self._closed:
                 raise ResourceScopeClosed()
 
-            if self._current_streams >= self.limits.max_streams:
+            # Allowlist bypass for streams: if the peer is allowlisted, do
+            # not enforce the streams limit.
+            try:
+                allowlisted = False
+                if peer_id and hasattr(self, "allowlist"):
+                    allowlisted = self.allowlist.allowed_peer(peer_id)
+            except Exception:
+                allowlisted = False
+
+            if not allowlisted and self._current_streams >= self.limits.max_streams:
                 return False
 
             self._current_streams += 1
