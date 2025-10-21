@@ -5,6 +5,14 @@ Bitswap
 
 The Bitswap protocol enables content discovery and file sharing in py-libp2p networks.
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.bitswap.pb
+
 Overview
 --------
 
