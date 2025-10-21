@@ -163,7 +163,7 @@ async def run_provider(file_path: str, port: int = 0):
             await bitswap.stop()
 
 
-async def run_client(provider_multiaddr_str: str, root_cid_hex: str, output_dir: str = "/tmp"):
+async def run_client(provider_multiaddr_str: str, root_cid_hex: str, output_dir: str = "/tmp", port : int = 0):
     """
     Run the client node to fetch a file.
     
@@ -378,7 +378,7 @@ def main():
         if args.mode == "provider":
             trio.run(run_provider, args.file, args.port)
         elif args.mode == "client":
-            trio.run(run_client, args.provider, args.cid, args.output)
+            trio.run(run_client, args.provider, args.cid, args.output, args.port)
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
