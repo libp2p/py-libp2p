@@ -155,8 +155,8 @@ class TestMetrics:
         metrics = Metrics()
 
         # Verify lists are used
-        assert hasattr(metrics, '_counters')
-        assert hasattr(metrics, '_gauges')
+        assert hasattr(metrics, "_counters")
+        assert hasattr(metrics, "_gauges")
         assert isinstance(metrics._counters, list)
         assert isinstance(metrics._gauges, list)
 

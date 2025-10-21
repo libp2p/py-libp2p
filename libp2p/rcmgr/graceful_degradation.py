@@ -8,7 +8,7 @@ resource exhaustion scenarios in production environments.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .manager import ResourceLimits, ResourceManager
@@ -31,9 +31,9 @@ class GracefulDegradation:
 
     def __init__(
         self,
-        resource_manager: "ResourceManager",
+        resource_manager: ResourceManager,
         max_degradation_levels: int = 5,
-        degradation_factor: float = 0.2
+        degradation_factor: float = 0.2,
     ) -> None:
         """
         Initialize graceful degradation.
@@ -48,7 +48,7 @@ class GracefulDegradation:
         self.max_degradation_levels = max_degradation_levels
         self.degradation_factor = degradation_factor
         self.degradation_level = 0
-        self.original_limits: Optional["ResourceLimits"] = None
+        self.original_limits: ResourceLimits | None = None
         self._store_original_limits()
 
     def _store_original_limits(self) -> None:
@@ -56,10 +56,11 @@ class GracefulDegradation:
         if self.original_limits is None:
             # Import at runtime to avoid circular imports
             from .manager import ResourceLimits
+
             self.original_limits = ResourceLimits(
                 max_connections=self.rm.limits.max_connections,
                 max_memory_mb=self.rm.limits.max_memory_bytes // (1024 * 1024),
-                max_streams=self.rm.limits.max_streams
+                max_streams=self.rm.limits.max_streams,
             )
 
     def handle_resource_exhaustion(self, resource_type: str) -> bool:
@@ -74,10 +75,7 @@ class GracefulDegradation:
 
         """
         if self.degradation_level >= self.max_degradation_levels:
-            logger.warning(
-                "Maximum degradation level reached for %s",
-                resource_type
-            )
+            logger.warning("Maximum degradation level reached for %s", resource_type)
             return False
 
         self.degradation_level += 1
@@ -110,7 +108,8 @@ class GracefulDegradation:
 
         logger.info(
             "Degraded connection limit to %d (level %d)",
-            new_limit, self.degradation_level
+            new_limit,
+            self.degradation_level,
         )
         return True
 
@@ -132,7 +131,8 @@ class GracefulDegradation:
 
         logger.info(
             "Degraded memory limit to %d MB (level %d)",
-            new_limit // (1024 * 1024), self.degradation_level
+            new_limit // (1024 * 1024),
+            self.degradation_level,
         )
         return True
 
@@ -153,8 +153,7 @@ class GracefulDegradation:
         self.rm.limits.max_streams = max(1, new_limit)
 
         logger.info(
-            "Degraded stream limit to %d (level %d)",
-            new_limit, self.degradation_level
+            "Degraded stream limit to %d (level %d)", new_limit, self.degradation_level
         )
         return True
 
@@ -174,10 +173,7 @@ class GracefulDegradation:
             self.degradation_level = max(0, self.degradation_level - 1)
             self._apply_current_limits()
 
-            logger.info(
-                "Recovered from degradation (level %d)",
-                self.degradation_level
-            )
+            logger.info("Recovered from degradation (level %d)", self.degradation_level)
             return True
 
         return False
@@ -194,9 +190,9 @@ class GracefulDegradation:
         current_usage = self.rm.get_stats()
 
         # Check if current usage is below 80% of current limits
-        connection_usage = current_usage['connections'] / self.rm.limits.max_connections
-        memory_usage = current_usage['memory_bytes'] / self.rm.limits.max_memory_bytes
-        stream_usage = current_usage['streams'] / self.rm.limits.max_streams
+        connection_usage = current_usage["connections"] / self.rm.limits.max_connections
+        memory_usage = current_usage["memory_bytes"] / self.rm.limits.max_memory_bytes
+        stream_usage = current_usage["streams"] / self.rm.limits.max_streams
 
         return max(connection_usage, memory_usage, stream_usage) < 0.8
 
@@ -227,7 +223,7 @@ class GracefulDegradation:
         self.degradation_level = 0
         logger.info("Reset degradation to original limits")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get degradation statistics.
 
@@ -236,25 +232,27 @@ class GracefulDegradation:
 
         """
         return {
-            'degradation_level': self.degradation_level,
-            'max_degradation_levels': self.max_degradation_levels,
-            'degradation_factor': self.degradation_factor,
-            'current_limits': {
-                'max_connections': self.rm.limits.max_connections,
-                'max_memory_bytes': self.rm.limits.max_memory_bytes,
-                'max_streams': self.rm.limits.max_streams
+            "degradation_level": self.degradation_level,
+            "max_degradation_levels": self.max_degradation_levels,
+            "degradation_factor": self.degradation_factor,
+            "current_limits": {
+                "max_connections": self.rm.limits.max_connections,
+                "max_memory_bytes": self.rm.limits.max_memory_bytes,
+                "max_streams": self.rm.limits.max_streams,
             },
-            'original_limits': {
-                'max_connections': (
+            "original_limits": {
+                "max_connections": (
                     self.original_limits.max_connections
-                    if self.original_limits else None
+                    if self.original_limits
+                    else None
                 ),
-                'max_memory_bytes': (
+                "max_memory_bytes": (
                     self.original_limits.max_memory_bytes
-                    if self.original_limits else None
+                    if self.original_limits
+                    else None
                 ),
-                'max_streams': (
+                "max_streams": (
                     self.original_limits.max_streams if self.original_limits else None
-                )
-            }
+                ),
+            },
         }

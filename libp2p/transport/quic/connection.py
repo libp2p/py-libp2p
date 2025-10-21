@@ -20,7 +20,7 @@ import trio
 from libp2p.abc import IMuxedConn, IRawConnection
 from libp2p.custom_types import TQUICStreamHandlerFn
 from libp2p.peer.id import ID
-from libp2p.rcmgr.limits import Direction
+from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
 from .exceptions import (

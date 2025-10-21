@@ -104,14 +104,12 @@ class TestProductionMonitor:
         assert "# TYPE libp2p_connections_established_total counter" in openmetrics
         assert "# TYPE libp2p_resource_usage_current gauge" in openmetrics
         assert (
-            "libp2p_connections_established_total{protocol=\"tcp\","
-            "direction=\"inbound\",peer_id=\"peer1\"} 1"
-            in openmetrics
+            'libp2p_connections_established_total{protocol="tcp",'
+            'direction="inbound",peer_id="peer1"} 1' in openmetrics
         )
         assert (
-            "libp2p_resource_usage_current{peer_id=\"peer1\","
-            "resource_type=\"memory\"} 1024"
-            in openmetrics
+            'libp2p_resource_usage_current{peer_id="peer1",'
+            'resource_type="memory"} 1024' in openmetrics
         )
 
     def test_metric_creation(self):
@@ -121,7 +119,7 @@ class TestProductionMonitor:
             value=42.0,
             metric_type=MetricType.GAUGE,
             labels={"peer_id": "peer1"},
-            timestamp=time.time()
+            timestamp=time.time(),
         )
 
         assert metric.name == "test_metric"
@@ -137,7 +135,7 @@ class TestProductionMonitor:
             severity=AlertSeverity.WARNING,
             message="High memory usage",
             threshold=80.0,
-            current_value=85.0
+            current_value=85.0,
         )
 
         assert alert.name == "test_alert"
@@ -160,7 +158,7 @@ class TestProductionMonitor:
             buffer_size=500,
             alert_thresholds={"memory_warning": 70.0, "memory_critical": 90.0},
             enable_connection_tracking=False,
-            enable_protocol_metrics=False
+            enable_protocol_metrics=False,
         )
 
         assert monitor.metrics_buffer.maxlen == 500
@@ -261,19 +259,16 @@ class TestProductionMonitor:
 
         # Verify aggregated metrics
         assert (
-            "libp2p_connections_established_total{protocol=\"tcp\","
-            "direction=\"inbound\",peer_id=\"peer1\"} 1"
-            in openmetrics
+            'libp2p_connections_established_total{protocol="tcp",'
+            'direction="inbound",peer_id="peer1"} 1' in openmetrics
         )
         assert (
-            "libp2p_connections_established_total{protocol=\"tcp\","
-            "direction=\"inbound\",peer_id=\"peer2\"} 1"
-            in openmetrics
+            'libp2p_connections_established_total{protocol="tcp",'
+            'direction="inbound",peer_id="peer2"} 1' in openmetrics
         )
         assert (
-            "libp2p_connections_established_total{protocol=\"tcp\","
-            "direction=\"outbound\",peer_id=\"peer3\"} 1"
-            in openmetrics
+            'libp2p_connections_established_total{protocol="tcp",'
+            'direction="outbound",peer_id="peer3"} 1' in openmetrics
         )
 
     def test_timestamp_accuracy(self):
@@ -296,9 +291,9 @@ class TestProductionMonitor:
 
         # Record metric with special characters in labels
         monitor.record_error(
-            "connection_failed", "timeout", {
-                "peer": "peer\"with\"quotes", "error": "timeout\nwith\nnewlines"
-            }
+            "connection_failed",
+            "timeout",
+            {"peer": 'peer"with"quotes', "error": "timeout\nwith\nnewlines"},
         )
 
         # Export metrics
@@ -368,15 +363,19 @@ class TestProductionMonitor:
 
     def test_alert_severity_comparison(self):
         """Test alert severity comparison."""
-        severities = [AlertSeverity.INFO, AlertSeverity.WARNING,
-                     AlertSeverity.ERROR, AlertSeverity.CRITICAL]
+        severities = [
+            AlertSeverity.INFO,
+            AlertSeverity.WARNING,
+            AlertSeverity.ERROR,
+            AlertSeverity.CRITICAL,
+        ]
 
         # Test that we can compare severities (using severity order)
         severity_order = {
             AlertSeverity.INFO: 0,
             AlertSeverity.WARNING: 1,
             AlertSeverity.ERROR: 2,
-            AlertSeverity.CRITICAL: 3
+            AlertSeverity.CRITICAL: 3,
         }
         worst = max(severities, key=lambda s: severity_order[s])
         assert worst == AlertSeverity.CRITICAL
@@ -404,7 +403,7 @@ class TestProductionMonitor:
             "peer_id": "peer1",
             "protocol": "kad",
             "direction": "inbound",
-            "status": "success"
+            "status": "success",
         }
 
         monitor.record_protocol_metric("kad", "requests", 10, complex_labels)

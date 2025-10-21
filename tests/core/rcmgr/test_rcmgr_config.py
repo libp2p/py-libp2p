@@ -44,7 +44,7 @@ class TestProductionConfig:
             max_connections=100,
             max_connections_per_peer=50,
             connection_timeout=30.0,
-            connection_keepalive=60.0
+            connection_keepalive=60.0,
         )
 
         assert config.max_connections == 100
@@ -58,7 +58,7 @@ class TestProductionConfig:
             max_memory_mb=1024,
             memory_pool_size=512,
             memory_cleanup_interval=300.0,
-            memory_monitoring_interval=10.0
+            memory_monitoring_interval=10.0,
         )
 
         assert config.max_memory_mb == 1024
@@ -72,7 +72,7 @@ class TestProductionConfig:
             enable_connection_pooling=True,
             enable_memory_pooling=True,
             max_concurrent_operations=100,
-            operation_timeout=60.0
+            operation_timeout=60.0,
         )
 
         assert config.enable_connection_pooling is True
@@ -86,7 +86,7 @@ class TestProductionConfig:
             enable_metrics=True,
             metrics_buffer_size=1000,
             health_check_interval=30.0,
-            alert_thresholds={"error_rate_percentage": 90.0}
+            alert_thresholds={"error_rate_percentage": 90.0},
         )
 
         assert config.enable_metrics is True
@@ -100,7 +100,7 @@ class TestProductionConfig:
             enabled=True,
             failure_threshold=5,
             recovery_timeout=60.0,
-            half_open_max_calls=3
+            half_open_max_calls=3,
         )
 
         assert config.enabled is True
@@ -114,7 +114,7 @@ class TestProductionConfig:
             enabled=True,
             max_degradation_levels=3,
             degradation_factor=0.2,
-            recovery_factor=0.1
+            recovery_factor=0.1,
         )
 
         assert config.enabled is True
@@ -129,7 +129,7 @@ class TestProductionConfig:
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             log_file="/var/log/libp2p.log",
             max_log_size=100 * 1024 * 1024,
-            backup_count=5
+            backup_count=5,
         )
 
         assert config.level == "INFO"
@@ -143,7 +143,7 @@ class TestProductionConfig:
         config = SecurityConfig(
             enable_allowlist=True,
             enable_rate_limiting=True,
-            max_requests_per_second=100.0
+            max_requests_per_second=100.0,
         )
 
         assert config.enable_allowlist is True
@@ -170,55 +170,55 @@ class TestProductionConfig:
                 "max_inbound_connections": 75,
                 "max_outbound_connections": 75,
                 "connection_timeout": 45.0,
-                "keep_alive_interval": 90.0
+                "keep_alive_interval": 90.0,
             },
             "memory": {
                 "max_memory_mb": 1536,
                 "memory_pool_size": 768,
                 "memory_cleanup_interval": 600.0,
-                "memory_threshold_percent": 85.0
+                "memory_threshold_percent": 85.0,
             },
             "performance": {
                 "max_streams": 1500,
                 "stream_timeout": 45.0,
                 "max_concurrent_operations": 150,
-                "operation_timeout": 90.0
+                "operation_timeout": 90.0,
             },
             "monitoring": {
                 "metrics_enabled": True,
                 "metrics_interval": 120.0,
                 "health_check_interval": 60.0,
-                "alert_threshold_percent": 85.0
+                "alert_threshold_percent": 85.0,
             },
             "circuit_breaker": {
                 "enabled": True,
                 "failure_threshold": 10,
                 "recovery_timeout": 120.0,
-                "half_open_max_calls": 5
+                "half_open_max_calls": 5,
             },
             "graceful_degradation": {
                 "enabled": True,
                 "degradation_threshold_percent": 85.0,
                 "recovery_threshold_percent": 70.0,
-                "max_degradation_level": 4
+                "max_degradation_level": 4,
             },
             "logging": {
                 "level": "WARNING",
                 "format": "%(asctime)s - %(levelname)s - %(message)s",
                 "file_path": "/var/log/libp2p-warning.log",
                 "max_file_size_mb": 200,
-                "backup_count": 10
+                "backup_count": 10,
             },
             "security": {
                 "allowlist_enabled": False,
                 "allowlist_peers": [],
                 "rate_limiting_enabled": True,
                 "rate_limit_requests_per_second": 200,
-                "encryption_enabled": True
-            }
+                "encryption_enabled": True,
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(config_data, f)
             temp_file = f.name
 
@@ -253,7 +253,7 @@ class TestProductionConfig:
         """Test saving configuration to JSON file."""
         config = ProductionConfig()
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             temp_file = f.name
 
         try:

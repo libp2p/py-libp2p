@@ -73,11 +73,7 @@ class TestSimpleResourceManager:
 
     def test_custom_limits(self):
         """Test resource manager with custom limits."""
-        limits = ResourceLimits(
-            max_connections=100,
-            max_memory_mb=200,
-            max_streams=50
-        )
+        limits = ResourceLimits(max_connections=100, max_memory_mb=200, max_streams=50)
         rm = new_resource_manager(limits=limits)
         assert rm.limits.max_connections == 100
         assert rm.limits.max_memory_bytes == 200 * 1024 * 1024
@@ -121,10 +117,10 @@ class TestSimpleResourceManager:
         rm = new_resource_manager()
 
         # Test with string peer_id
-        assert rm.open_connection("inbound", peer_id="peer1") is True
+        assert rm.open_connection(peer_id="peer1") is not None
 
         # Test with None peer_id
-        assert rm.open_connection("outbound", peer_id=None) is True
+        assert rm.open_connection(peer_id=None) is not None
 
     def test_resource_cleanup_on_close(self):
         """Test resource cleanup when manager is closed."""

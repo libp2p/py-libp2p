@@ -7,13 +7,15 @@ cascading failures in resource management operations.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import Enum
 import time
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states."""
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -21,6 +23,7 @@ class CircuitBreakerState(Enum):
 
 class CircuitBreakerError(Exception):
     """Exception raised when circuit breaker is open."""
+
     pass
 
 
@@ -36,7 +39,7 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         timeout: float = 60.0,
-        expected_exception: type[Exception] = Exception
+        expected_exception: type[Exception] = Exception,
     ) -> None:
         """
         Initialize the circuit breaker.
@@ -52,7 +55,7 @@ class CircuitBreaker:
         self.expected_exception = expected_exception
 
         self.failure_count = 0
-        self.last_failure_time: Optional[float] = None
+        self.last_failure_time: float | None = None
         self.state = CircuitBreakerState.CLOSED
 
     def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -115,15 +118,14 @@ class CircuitBreaker:
 
         """
         return {
-            'state': self.state.value,
-            'failure_count': self.failure_count,
-            'failure_threshold': self.failure_threshold,
-            'timeout': self.timeout,
-            'last_failure_time': self.last_failure_time,
-            'time_since_last_failure': (
-                time.time() - self.last_failure_time
-                if self.last_failure_time else None
-            )
+            "state": self.state.value,
+            "failure_count": self.failure_count,
+            "failure_threshold": self.failure_threshold,
+            "timeout": self.timeout,
+            "last_failure_time": self.last_failure_time,
+            "time_since_last_failure": (
+                time.time() - self.last_failure_time if self.last_failure_time else None
+            ),
         }
 
     def reset(self) -> None:

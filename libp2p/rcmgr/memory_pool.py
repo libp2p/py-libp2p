@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections import deque
 import threading
-from typing import Optional
 
 
 class MemoryPool:
@@ -21,10 +20,7 @@ class MemoryPool:
     """
 
     def __init__(
-        self,
-        block_size: int,
-        initial_blocks: int = 1000,
-        max_blocks: Optional[int] = None
+        self, block_size: int, initial_blocks: int = 1000, max_blocks: int | None = None
     ) -> None:
         """
         Initialize the memory pool.
@@ -47,7 +43,7 @@ class MemoryPool:
             self._pool.append(bytearray(block_size))
             self._total_created += 1
 
-    def acquire(self) -> Optional[bytearray]:
+    def acquire(self) -> bytearray | None:
         """
         Acquire a memory block from the pool.
 
@@ -87,7 +83,7 @@ class MemoryPool:
 
         with self._lock:
             # Zero out the block for security
-            block[:] = b'\x00' * self.block_size
+            block[:] = b"\x00" * self.block_size
 
             # Only add back to pool if we have space
             if len(self._pool) < (self.max_blocks or self._total_created):
@@ -103,15 +99,16 @@ class MemoryPool:
         """
         with self._lock:
             return {
-                'pool_size': len(self._pool),
-                'total_allocated': self._total_allocated,
-                'total_created': self._total_created,
-                'block_size': self.block_size,
-                'max_blocks': self.max_blocks,
-                'utilization': (
+                "pool_size": len(self._pool),
+                "total_allocated": self._total_allocated,
+                "total_created": self._total_created,
+                "block_size": self.block_size,
+                "max_blocks": self.max_blocks,
+                "utilization": (
                     self._total_allocated / self._total_created
-                    if self._total_created > 0 else 0.0
-                )
+                    if self._total_created > 0
+                    else 0.0
+                ),
             }
 
     def clear(self) -> None:

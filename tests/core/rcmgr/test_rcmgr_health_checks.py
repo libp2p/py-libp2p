@@ -37,8 +37,12 @@ class TestHealthChecker:
 
         # Test health check
         health_status = checker.check_health()
-        assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                               HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        assert health_status in [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
     def test_health_status_enum(self):
         """Test HealthStatus enum values."""
@@ -62,7 +66,7 @@ class TestHealthChecker:
             status=HealthStatus.HEALTHY,
             message="All resources healthy",
             details={"connections": 10},
-            timestamp=time.time()
+            timestamp=time.time(),
         )
         assert result.check_type == HealthCheckType.RESOURCE_USAGE
         assert result.status == HealthStatus.HEALTHY
@@ -76,7 +80,7 @@ class TestHealthChecker:
                 check_type=HealthCheckType.RESOURCE_USAGE,
                 status=HealthStatus.HEALTHY,
                 message="Resources OK",
-                details={"connections": 5}
+                details={"connections": 5},
             )
         ]
 
@@ -84,7 +88,7 @@ class TestHealthChecker:
             timestamp=time.time(),
             overall_status=HealthStatus.HEALTHY,
             checks=checks,
-            system_info={"cpu_percent": 10.0}
+            system_info={"cpu_percent": 10.0},
         )
 
         assert history.overall_status == HealthStatus.HEALTHY
@@ -99,7 +103,7 @@ class TestHealthChecker:
             check_interval=60.0,
             history_size=50,
             enable_system_checks=False,
-            enable_performance_checks=False
+            enable_performance_checks=False,
         )
 
         assert checker.check_interval == 60.0
@@ -110,33 +114,37 @@ class TestHealthChecker:
     def test_health_status_comparison(self):
         """Test health status comparison."""
         # Test that we can compare health statuses by their values
-        statuses = [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                   HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        statuses = [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
         # Test that we can get the worst status (using severity order)
         severity_order = {
             HealthStatus.HEALTHY: 0,
             HealthStatus.DEGRADED: 1,
             HealthStatus.UNHEALTHY: 2,
-            HealthStatus.CRITICAL: 3
+            HealthStatus.CRITICAL: 3,
         }
         worst = max(statuses, key=lambda s: severity_order[s])
         assert worst == HealthStatus.CRITICAL
 
-    @patch('psutil.Process')
-    @patch('psutil.virtual_memory')
+    @patch("psutil.Process")
+    @patch("psutil.virtual_memory")
     def test_health_checker_with_mock_resource_manager(self, mock_memory, mock_process):
         """Test health checker with mocked resource manager."""
         # Mock system memory
         mock_memory.return_value = Mock(
-            percent=30.0, available=8*1024**3, total=16*1024**3
+            percent=30.0, available=8 * 1024**3, total=16 * 1024**3
         )
-        
+
         # Mock process memory
         mock_process.return_value.memory_info.return_value = Mock(
-            rss=100*1024*1024  # 100MB
+            rss=100 * 1024 * 1024  # 100MB
         )
-        
+
         mock_rm = Mock()
         mock_rm.get_stats.return_value = {
             "connections": 5,
@@ -145,11 +153,15 @@ class TestHealthChecker:
             "limits": {
                 "max_connections": 100,
                 "max_memory_bytes": 10 * 1024 * 1024,
-                "max_streams": 1000
-            }
+                "max_streams": 1000,
+            },
         }
 
-        checker = HealthChecker(mock_rm, enable_system_checks=False, enable_performance_checks=False)
+        checker = HealthChecker(
+            mock_rm,
+            enable_system_checks=False,
+            enable_performance_checks=False,
+        )
         health_status = checker.check_health()
 
         # Should be healthy with low resource usage
@@ -166,8 +178,8 @@ class TestHealthChecker:
             "limits": {
                 "max_connections": 100,
                 "max_memory_bytes": 10 * 1024 * 1024,
-                "max_streams": 1000
-            }
+                "max_streams": 1000,
+            },
         }
 
         checker = HealthChecker(mock_rm)
@@ -183,18 +195,29 @@ class TestHealthChecker:
 
         # Should still work but without system-level checks
         health_status = checker.check_health()
-        assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                               HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        assert health_status in [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
     def test_health_checker_performance_checks_disabled(self):
         """Test health checker with performance checks disabled."""
         rm = new_resource_manager()
-        checker = HealthChecker(rm, enable_performance_checks=False)
+        checker = HealthChecker(
+            rm,
+            enable_performance_checks=False,
+        )
 
         # Should still work but without performance checks
         health_status = checker.check_health()
-        assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                               HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        assert health_status in [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
     def test_health_checker_history(self):
         """Test health checker history tracking."""
@@ -251,18 +274,22 @@ class TestHealthChecker:
 
         # These should be consistent
         current_status = checker.get_current_status()
-        assert current_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                                 HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        assert current_status in [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
-    @patch('psutil.cpu_percent')
-    @patch('psutil.virtual_memory')
-    @patch('psutil.disk_usage')
+    @patch("psutil.cpu_percent")
+    @patch("psutil.virtual_memory")
+    @patch("psutil.disk_usage")
     def test_health_checker_with_mocked_system(self, mock_disk, mock_memory, mock_cpu):
         """Test health checker with mocked system resources."""
         # Mock system resources
         mock_cpu.return_value = 25.0
         mock_memory.return_value = Mock(
-            percent=30.0, available=8*1024**3, total=16*1024**3
+            percent=30.0, available=8 * 1024**3, total=16 * 1024**3
         )
         mock_disk.return_value = Mock(percent=40.0)
 
@@ -271,8 +298,12 @@ class TestHealthChecker:
 
         # Should work with mocked system
         health_status = checker.check_health()
-        assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                               HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+        assert health_status in [
+            HealthStatus.HEALTHY,
+            HealthStatus.DEGRADED,
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
+        ]
 
     def test_health_checker_error_handling(self):
         """Test health checker error handling."""
@@ -311,5 +342,9 @@ class TestHealthChecker:
         # All checks should complete successfully
         assert len(results) == 5
         for result in results:
-            assert result in [HealthStatus.HEALTHY, HealthStatus.DEGRADED,
-                            HealthStatus.UNHEALTHY, HealthStatus.CRITICAL]
+            assert result in [
+                HealthStatus.HEALTHY,
+                HealthStatus.DEGRADED,
+                HealthStatus.UNHEALTHY,
+                HealthStatus.CRITICAL,
+            ]

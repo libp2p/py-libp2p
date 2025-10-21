@@ -1,14 +1,7 @@
-"""
-Resource Manager implementation.
-
-This module provides the ResourceManager class for managing
-libp2p resources including connections, memory, and streams.
-"""
-
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 from .allowlist import Allowlist, AllowlistConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
@@ -24,6 +17,44 @@ from .memory_limits import (
 from .memory_pool import MemoryPool
 from .memory_stats import MemoryStatsCache
 from .metrics import Direction, Metrics
+
+"""
+Resource Manager implementation.
+"""
+
+
+class ConnectionScope:
+    """Represents a resource scope for a connection. Used for tracking and cleanup."""
+
+    def __init__(self, peer_id: str, resource_manager: ResourceManager) -> None:
+        self.peer_id = peer_id
+        self.resource_manager = resource_manager
+        self.closed = False
+
+    def close(self) -> None:
+        if not self.closed:
+            # Release the connection resource
+            self.resource_manager.release_connection(self.peer_id)
+            self.closed = True
+
+    def __enter__(self) -> ConnectionScope:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        self.close()
+
+
+"""
+Resource Manager implementation.
+
+This module provides the ResourceManager class for managing
+libp2p resources including connections, memory, and streams.
+"""
 
 
 class ResourceLimits:
@@ -83,7 +114,7 @@ class ResourceManager:
         elif enable_metrics:
             self.metrics = Metrics()
         else:
-            self.metrics = None
+            self.metrics = None  # type: ignore
 
         # Thread safety
         self._lock = threading.RLock()
@@ -146,14 +177,24 @@ class ResourceManager:
                     raise ResourceScopeClosed()
 
                 # If the peer is allowlisted, bypass normal limits.
+
                 try:
-                    allowlisted = False
+                    allowlisted: bool = False
                     if peer_id and hasattr(self, "allowlist"):
-                        allowlisted = self.allowlist.allowed_peer(peer_id)
+                        from libp2p.peer.id import ID
+
+                        if isinstance(peer_id, ID):
+                            pid = cast(ID, peer_id)
+                        else:
+                            pid = ID.from_base58(peer_id)
+                        allowlisted = self.allowlist.allowed_peer(pid)
                 except Exception:
                     allowlisted = False
 
-                if not allowlisted and self._current_connections >= self.limits.max_connections:
+                if (
+                    not allowlisted
+                    and self._current_connections >= self.limits.max_connections
+                ):
                     # Try graceful degradation
                     if self.graceful_degradation:
                         if self.graceful_degradation.handle_resource_exhaustion(
@@ -219,7 +260,11 @@ class ResourceManager:
                 except Exception:
                     allowlisted = False
 
-                if not allowlisted and self._current_memory + size > self.limits.max_memory_bytes:
+                current_memory_after = self._current_memory + size
+                if (
+                    not allowlisted
+                    and current_memory_after > self.limits.max_memory_bytes
+                ):
                     # Try graceful degradation
                     if self.graceful_degradation:
                         if self.graceful_degradation.handle_resource_exhaustion(
@@ -268,9 +313,15 @@ class ResourceManager:
             # Allowlist bypass for streams: if the peer is allowlisted, do
             # not enforce the streams limit.
             try:
-                allowlisted = False
+                allowlisted: bool = False
                 if peer_id and hasattr(self, "allowlist"):
-                    allowlisted = self.allowlist.allowed_peer(peer_id)
+                    from libp2p.peer.id import ID
+
+                    if isinstance(peer_id, ID):
+                        pid = cast(ID, peer_id)
+                    else:
+                        pid = ID.from_base58(peer_id)
+                    allowlisted = self.allowlist.allowed_peer(pid)
             except Exception:
                 allowlisted = False
 
@@ -283,7 +334,14 @@ class ResourceManager:
                 direction_str = (
                     "inbound" if direction == Direction.INBOUND else "outbound"
                 )
-                self.metrics.allow_stream(peer_id, direction_str)
+                # Ensure peer_id is a string for metrics
+                from libp2p.peer.id import ID
+
+                if isinstance(peer_id, ID):
+                    peer_id_str = peer_id.to_base58()
+                else:
+                    peer_id_str = str(peer_id)
+                self.metrics.allow_stream(peer_id_str, direction_str)
 
             return True
 
@@ -344,14 +402,19 @@ class ResourceManager:
 
     def open_connection(
         self,
-        direction: str,
-        use_fd: bool = True,
-        endpoint: str | None = None,
         peer_id: Any | None = None,
-    ) -> bool:
-        """Open a connection resource (compatibility method)"""
+    ) -> ConnectionScope | None:
+        """
+        Open a connection resource for the given peer and return a
+        scope object for tracking/cleanup.
+        """
         peer_id_str = str(peer_id) if peer_id is not None else ""
-        return self.acquire_connection(peer_id_str)
+        acquired = self.acquire_connection(peer_id_str)
+        if acquired:
+            return ConnectionScope(peer_id_str, self)
+        return None
+
+    # Only one release_connection method is needed, defined above.
 
     def close(self) -> None:
         """Close the resource manager"""

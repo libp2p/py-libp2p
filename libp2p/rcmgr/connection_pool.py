@@ -8,10 +8,11 @@ connections to avoid allocation overhead in hot paths.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 import threading
-from typing import Callable, Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class ConnectionPool(Generic[T]):
@@ -26,7 +27,7 @@ class ConnectionPool(Generic[T]):
         self,
         max_size: int,
         pre_allocate: bool = True,
-        connection_factory: Optional[Callable[[], T]] = None
+        connection_factory: Callable[[], T] | None = None,
     ) -> None:
         """
         Initialize the connection pool.
@@ -64,7 +65,7 @@ class ConnectionPool(Generic[T]):
                     # If factory fails, stop pre-allocating
                     break
 
-    def acquire(self) -> Optional[T]:
+    def acquire(self) -> T | None:
         """
         Acquire a connection from the pool.
 
@@ -120,13 +121,13 @@ class ConnectionPool(Generic[T]):
         """
         with self._lock:
             return {
-                'pool_size': len(self._pool),
-                'active_connections': len(self._active),
-                'total_created': self._total_created,
-                'max_size': self.max_size,
-                'utilization': (
+                "pool_size": len(self._pool),
+                "active_connections": len(self._active),
+                "total_created": self._total_created,
+                "max_size": self.max_size,
+                "utilization": (
                     len(self._active) / self.max_size if self.max_size > 0 else 0.0
-                )
+                ),
             }
 
     def clear(self) -> None:

@@ -37,7 +37,6 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
-from libp2p.rcmgr.limits import Direction
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.tools.async_service import (
     Service,
@@ -707,22 +706,19 @@ class Swarm(Service, INetworkService):
             and self._resource_manager is not None
         ):
             try:
-                direction = (
-                    Direction.OUTBOUND
-                    if muxed_conn._is_initiator
-                    else Direction.INBOUND
-                )
-                endpoint = getattr(muxed_conn, "_maddr", None)
+                # We don't currently use the `direction` variable here but
+                # keep the peer id for opening a connection scope.
                 peer_id_for_scope = muxed_conn.peer_id
-                direction_str = (
-                    "inbound" if direction == Direction.INBOUND else "outbound"
-                )
                 conn_scope = self._resource_manager.open_connection(
-                    direction=direction_str,
-                    use_fd=True,
-                    endpoint=endpoint,
                     peer_id=peer_id_for_scope,
                 )
+                if conn_scope is None:
+                    # Resource manager denied the connection.
+                    # Keep the message concise so it fits within the
+                    # project's line-length limit.
+                    raise SwarmException(
+                        "Connection denied by resource manager: resource limit exceeded"
+                    )
                 # QUICConnection provides a hook to set scope and ensure cleanup
                 if hasattr(muxed_conn, "set_resource_scope"):
                     muxed_conn.set_resource_scope(conn_scope)

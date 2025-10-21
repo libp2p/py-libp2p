@@ -1,3 +1,5 @@
+from __future__ import annotations  
+
 from collections.abc import (
     AsyncIterator,
     Sequence,
@@ -105,7 +107,7 @@ class BasicHost(IHost):
         bootstrap: list[str] | None = None,
         default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-        resource_manager: Optional["ResourceManager"] = None,
+        resource_manager: Optional["libp2p.rcmgr.manager.ResourceManager"] = None,
     ) -> None:
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)

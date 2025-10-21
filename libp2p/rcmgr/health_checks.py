@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 import psutil
 
 
 class HealthStatus(Enum):
     """Health status levels."""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
@@ -28,6 +29,7 @@ class HealthStatus(Enum):
 
 class HealthCheckType(Enum):
     """Types of health checks."""
+
     RESOURCE_USAGE = "resource_usage"
     CONNECTION_HEALTH = "connection_health"
     MEMORY_HEALTH = "memory_health"
@@ -38,10 +40,11 @@ class HealthCheckType(Enum):
 @dataclass
 class HealthCheckResult:
     """Result of a health check."""
+
     check_type: HealthCheckType
     status: HealthStatus
     message: str
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     duration_ms: float = 0.0
 
@@ -49,10 +52,11 @@ class HealthCheckResult:
 @dataclass
 class HealthHistory:
     """Health check history entry."""
+
     timestamp: float
     overall_status: HealthStatus
-    checks: List[HealthCheckResult]
-    system_info: Dict[str, Any]
+    checks: list[HealthCheckResult]
+    system_info: dict[str, Any]
 
 
 class HealthChecker:
@@ -153,7 +157,7 @@ class HealthChecker:
                 timestamp=start_time,
                 overall_status=overall_health,
                 checks=checks,
-                system_info=self._get_system_info()
+                system_info=self._get_system_info(),
             )
             self._health_history.append(health_entry)
 
@@ -207,9 +211,9 @@ class HealthChecker:
                     "connection_count": stats["connections"],
                     "memory_bytes": stats["memory_bytes"],
                     "stream_count": stats["streams"],
-                    "limits": stats["limits"]
+                    "limits": stats["limits"],
                 },
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
@@ -218,7 +222,7 @@ class HealthChecker:
                 status=HealthStatus.CRITICAL,
                 message=f"Failed to check resource usage: {e}",
                 details={"error": str(e)},
-                duration_ms=(time.time() - start_time) * 1000
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
     def _check_connections(self) -> HealthCheckResult:
@@ -265,9 +269,9 @@ class HealthChecker:
                     "current_connections": current_connections,
                     "max_connections": max_connections,
                     "available_connections": available_connections,
-                    "connection_pool_stats": connection_pool_stats
+                    "connection_pool_stats": connection_pool_stats,
                 },
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
@@ -276,7 +280,7 @@ class HealthChecker:
                 status=HealthStatus.CRITICAL,
                 message=f"Failed to check connection health: {e}",
                 details={"error": str(e)},
-                duration_ms=(time.time() - start_time) * 1000
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
     def _check_memory(self) -> HealthCheckResult:
@@ -286,8 +290,19 @@ class HealthChecker:
         try:
             # Get system memory info
             system_memory = psutil.virtual_memory()
-            process = psutil.Process()
-            process_memory = process.memory_info()
+            # psutil.Process() returns a process object whose methods are
+            # dynamically provided by the psutil package. Static analysis
+            # tools may incorrectly infer bound-method signatures and
+            # report false positives such as `missing argument self` when
+            # calling `process.memory_info()`.  Annotate the local value
+            # as `Any` to suppress that false positive while preserving
+            # runtime behavior and type safety for callers of this module.
+            process: Any = psutil.Process()
+            # Call via getattr and add a type-ignore to avoid static analyzers
+            # incorrectly reporting a missing `self` argument for psutil's
+            # bound methods (they can be implemented with descriptors that
+            # confuse some checkers).
+            process_memory = getattr(process, "memory_info")()  # type: ignore
 
             # Get resource manager memory stats
             stats = self.rm.get_stats()
@@ -333,9 +348,9 @@ class HealthChecker:
                     "process_memory_percent": process_memory_percent,
                     "resource_memory_bytes": memory_bytes,
                     "resource_memory_percent": resource_memory_percent,
-                    "max_memory_bytes": max_memory_bytes
+                    "max_memory_bytes": max_memory_bytes,
                 },
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
@@ -344,7 +359,7 @@ class HealthChecker:
                 status=HealthStatus.CRITICAL,
                 message=f"Failed to check memory health: {e}",
                 details={"error": str(e)},
-                duration_ms=(time.time() - start_time) * 1000
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
     def _check_system(self) -> HealthCheckResult:
@@ -355,7 +370,7 @@ class HealthChecker:
             # Get system metrics
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            disk = psutil.disk_usage("/")
 
             # Check CPU health
             if isinstance(cpu_percent, (int, float)):
@@ -394,9 +409,9 @@ class HealthChecker:
                     "memory_total": memory.total,
                     "disk_percent": disk.percent,
                     "disk_free": disk.free,
-                    "disk_total": disk.total
+                    "disk_total": disk.total,
                 },
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
@@ -405,7 +420,7 @@ class HealthChecker:
                 status=HealthStatus.CRITICAL,
                 message=f"Failed to check system health: {e}",
                 details={"error": str(e)},
-                duration_ms=(time.time() - start_time) * 1000
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
     def _check_performance(self) -> HealthCheckResult:
@@ -440,10 +455,10 @@ class HealthChecker:
                     "stats_retrieval_time_ms": response_time,
                     "thresholds": {
                         "warning_ms": self._thresholds["response_time_warning"],
-                        "critical_ms": self._thresholds["response_time_critical"]
-                    }
+                        "critical_ms": self._thresholds["response_time_critical"],
+                    },
                 },
-                duration_ms=duration_ms
+                duration_ms=duration_ms,
             )
 
         except Exception as e:
@@ -452,7 +467,7 @@ class HealthChecker:
                 status=HealthStatus.CRITICAL,
                 message=f"Failed to check performance health: {e}",
                 details={"error": str(e)},
-                duration_ms=(time.time() - start_time) * 1000
+                duration_ms=(time.time() - start_time) * 1000,
             )
 
     def _get_status_from_percentage(
@@ -473,7 +488,7 @@ class HealthChecker:
             return HealthStatus.HEALTHY
 
     def _calculate_overall_health(
-        self, checks: List[HealthCheckResult]
+        self, checks: list[HealthCheckResult]
     ) -> HealthStatus:
         """Calculate overall health status from individual checks."""
         if not checks:
@@ -491,21 +506,21 @@ class HealthChecker:
         else:
             return HealthStatus.HEALTHY
 
-    def _get_system_info(self) -> Dict[str, Any]:
+    def _get_system_info(self) -> dict[str, Any]:
         """Get system information."""
         try:
             return {
                 "cpu_count": psutil.cpu_count(),
                 "memory_total": psutil.virtual_memory().total,
-                "disk_total": psutil.disk_usage('/').total,
+                "disk_total": psutil.disk_usage("/").total,
                 "boot_time": psutil.boot_time(),
                 "python_version": psutil.sys.version,
-                "platform": psutil.sys.platform
+                "platform": psutil.sys.platform,
             }
         except Exception:
             return {}
 
-    def get_health_endpoint(self) -> Dict[str, Any]:
+    def get_health_endpoint(self) -> dict[str, Any]:
         """
         Get health status for HTTP endpoint.
 
@@ -522,7 +537,8 @@ class HealthChecker:
             return {
                 "status": self._health_status.value,
                 "timestamp": self._last_check,
-                "uptime_seconds": time.time() - (
+                "uptime_seconds": time.time()
+                - (
                     self._health_history[0].timestamp
                     if self._health_history
                     else time.time()
@@ -540,18 +556,20 @@ class HealthChecker:
                             "status": check.status.value,
                             "message": check.message,
                             "duration_ms": check.duration_ms,
-                            "details": check.details
+                            "details": check.details,
                         }
                         for check in (latest_health.checks if latest_health else [])
                     ],
-                    "system_info": latest_health.system_info if latest_health else {}
-                } if latest_health else None,
+                    "system_info": latest_health.system_info if latest_health else {},
+                }
+                if latest_health
+                else None,
                 "health_history_size": len(self._health_history),
                 "check_interval": self.check_interval,
-                "thresholds": self._thresholds
+                "thresholds": self._thresholds,
             }
 
-    def get_health_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_health_history(self, limit: int = 10) -> list[dict[str, Any]]:
         """
         Get health check history.
 
@@ -573,11 +591,11 @@ class HealthChecker:
                             "type": check.check_type.value,
                             "status": check.status.value,
                             "message": check.message,
-                            "duration_ms": check.duration_ms
+                            "duration_ms": check.duration_ms,
                         }
                         for check in entry.checks
                     ],
-                    "system_info": entry.system_info
+                    "system_info": entry.system_info,
                 }
                 for entry in history
             ]
@@ -598,7 +616,8 @@ class HealthChecker:
     def is_unhealthy(self) -> bool:
         """Check if system is unhealthy."""
         return self.get_current_status() in [
-            HealthStatus.UNHEALTHY, HealthStatus.CRITICAL
+            HealthStatus.UNHEALTHY,
+            HealthStatus.CRITICAL,
         ]
 
     def set_threshold(self, metric: str, warning: float, critical: float) -> None:
@@ -615,7 +634,7 @@ class HealthChecker:
             self._thresholds[f"{metric}_warning"] = warning
             self._thresholds[f"{metric}_critical"] = critical
 
-    def get_thresholds(self) -> Dict[str, float]:
+    def get_thresholds(self) -> dict[str, float]:
         """Get current health check thresholds."""
         with self._lock:
             return dict(self._thresholds)

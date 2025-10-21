@@ -13,11 +13,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 import threading
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 class MetricType(Enum):
     """Types of metrics for monitoring."""
+
     COUNTER = "counter"
     GAUGE = "gauge"
     HISTOGRAM = "histogram"
@@ -26,6 +27,7 @@ class MetricType(Enum):
 
 class AlertSeverity(Enum):
     """Alert severity levels."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -35,10 +37,11 @@ class AlertSeverity(Enum):
 @dataclass
 class Metric:
     """A single metric measurement."""
+
     name: str
-    value: Union[int, float]
+    value: int | float
     metric_type: MetricType
-    labels: Dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     help_text: str = ""
 
@@ -46,12 +49,13 @@ class Metric:
 @dataclass
 class Alert:
     """An alert condition."""
+
     name: str
     condition: str
     severity: AlertSeverity
     message: str
-    threshold: Union[int, float]
-    current_value: Union[int, float]
+    threshold: int | float
+    current_value: int | float
     timestamp: float = field(default_factory=time.time)
     resolved: bool = False
 
@@ -59,11 +63,12 @@ class Alert:
 @dataclass
 class ConnectionDuration:
     """Connection duration tracking."""
+
     connection_id: str
     peer_id: str
     start_time: float
-    end_time: Optional[float] = None
-    duration: Optional[float] = None
+    end_time: float | None = None
+    duration: float | None = None
     protocol: str = "unknown"
     direction: str = "unknown"
 
@@ -80,7 +85,7 @@ class ProductionMonitor:
     def __init__(
         self,
         buffer_size: int = 1000,
-        alert_thresholds: Optional[Dict[str, float]] = None,
+        alert_thresholds: dict[str, float] | None = None,
         enable_connection_tracking: bool = True,
         enable_protocol_metrics: bool = True,
     ) -> None:
@@ -101,15 +106,15 @@ class ProductionMonitor:
 
         # Metrics storage
         self.metrics_buffer: deque[Metric] = deque(maxlen=buffer_size)
-        self.alerts: List[Alert] = []
+        self.alerts: list[Alert] = []
         self._lock = threading.RLock()
 
         # Connection tracking
-        self._connection_durations: Dict[str, ConnectionDuration] = {}
-        self._connection_establishment_times: Dict[str, float] = {}
+        self._connection_durations: dict[str, ConnectionDuration] = {}
+        self._connection_establishment_times: dict[str, float] = {}
 
         # Protocol metrics
-        self._protocol_metrics: Dict[str, Dict[str, Any]] = {}
+        self._protocol_metrics: dict[str, dict[str, Any]] = {}
 
         # System metrics
         self._start_time = time.time()
@@ -146,7 +151,7 @@ class ProductionMonitor:
         connection_id: str,
         peer_id: str,
         protocol: str = "unknown",
-        direction: str = "unknown"
+        direction: str = "unknown",
     ) -> None:
         """
         Record connection establishment for duration tracking.
@@ -171,7 +176,7 @@ class ProductionMonitor:
                 peer_id=peer_id,
                 start_time=current_time,
                 protocol=protocol,
-                direction=direction
+                direction=direction,
             )
             self._connection_durations[connection_id] = duration_tracker
 
@@ -183,16 +188,14 @@ class ProductionMonitor:
                 labels={
                     "protocol": protocol,
                     "direction": direction,
-                    "peer_id": peer_id
+                    "peer_id": peer_id,
                 },
-                help_text="Total number of connections established"
+                help_text="Total number of connections established",
             )
             self.record_metric(establishment_metric)
 
     def record_connection_closed(
-        self,
-        connection_id: str,
-        reason: str = "unknown"
+        self, connection_id: str, reason: str = "unknown"
     ) -> None:
         """
         Record connection closure and calculate duration.
@@ -222,9 +225,9 @@ class ProductionMonitor:
                 labels={
                     "protocol": duration_tracker.protocol,
                     "direction": duration_tracker.direction,
-                    "reason": reason
+                    "reason": reason,
                 },
-                help_text="Connection duration in seconds"
+                help_text="Connection duration in seconds",
             )
             self.record_metric(duration_metric)
 
@@ -236,9 +239,9 @@ class ProductionMonitor:
                 labels={
                     "protocol": duration_tracker.protocol,
                     "direction": duration_tracker.direction,
-                    "reason": reason
+                    "reason": reason,
                 },
-                help_text="Total number of connections closed"
+                help_text="Total number of connections closed",
             )
             self.record_metric(closed_metric)
 
@@ -251,8 +254,8 @@ class ProductionMonitor:
         self,
         protocol: str,
         metric_name: str,
-        value: Union[int, float],
-        labels: Optional[Dict[str, str]] = None
+        value: int | float,
+        labels: dict[str, str] | None = None,
     ) -> None:
         """
         Record protocol-specific metric.
@@ -282,16 +285,16 @@ class ProductionMonitor:
                 value=value,
                 metric_type=MetricType.GAUGE,
                 labels=metric_labels,
-                help_text=f"Protocol-specific metric: {metric_name}"
+                help_text=f"Protocol-specific metric: {metric_name}",
             )
             self.record_metric(metric)
 
     def record_resource_usage(
         self,
         resource_type: str,
-        current_value: Union[int, float],
-        limit_value: Union[int, float],
-        labels: Optional[Dict[str, str]] = None
+        current_value: int | float,
+        limit_value: int | float,
+        labels: dict[str, str] | None = None,
     ) -> None:
         """
         Record resource usage metrics.
@@ -312,7 +315,7 @@ class ProductionMonitor:
             value=current_value,
             metric_type=MetricType.GAUGE,
             labels=metric_labels,
-            help_text=f"Current {resource_type} usage"
+            help_text=f"Current {resource_type} usage",
         )
         self.record_metric(current_metric)
 
@@ -322,7 +325,7 @@ class ProductionMonitor:
             value=limit_value,
             metric_type=MetricType.GAUGE,
             labels=metric_labels,
-            help_text=f"Maximum {resource_type} limit"
+            help_text=f"Maximum {resource_type} limit",
         )
         self.record_metric(limit_metric)
 
@@ -333,15 +336,12 @@ class ProductionMonitor:
             value=percentage,
             metric_type=MetricType.GAUGE,
             labels=metric_labels,
-            help_text=f"{resource_type} usage percentage"
+            help_text=f"{resource_type} usage percentage",
         )
         self.record_metric(percentage_metric)
 
     def record_error(
-        self,
-        error_type: str,
-        error_code: str,
-        labels: Optional[Dict[str, str]] = None
+        self, error_type: str, error_code: str, labels: dict[str, str] | None = None
     ) -> None:
         """
         Record error metrics.
@@ -361,7 +361,7 @@ class ProductionMonitor:
             value=1,
             metric_type=MetricType.COUNTER,
             labels=metric_labels,
-            help_text="Total number of errors by type and code"
+            help_text="Total number of errors by type and code",
         )
         self.record_metric(error_metric)
 
@@ -384,7 +384,8 @@ class ProductionMonitor:
                     name=f"{resource_type}_limit_high",
                     condition=f"{resource_type} usage >= {threshold}%",
                     severity=(
-                        AlertSeverity.WARNING if metric.value < 95
+                        AlertSeverity.WARNING
+                        if metric.value < 95
                         else AlertSeverity.CRITICAL
                     ),
                     message=(
@@ -392,7 +393,7 @@ class ProductionMonitor:
                         f"(threshold: {threshold}%)"
                     ),
                     threshold=threshold,
-                    current_value=metric.value
+                    current_value=metric.value,
                 )
                 self._trigger_alert(alert)
 
@@ -457,14 +458,13 @@ class ProductionMonitor:
                     )
                 else:
                     lines.append(
-                        f"{metric.name} {metric.value} "
-                        f"{int(metric.timestamp * 1000)}"
+                        f"{metric.name} {metric.value} {int(metric.timestamp * 1000)}"
                     )
                 lines.append("")
 
             return "\n".join(lines)
 
-    def get_metrics_summary(self) -> Dict[str, Any]:
+    def get_metrics_summary(self) -> dict[str, Any]:
         """
         Get a summary of all metrics.
 
@@ -485,13 +485,13 @@ class ProductionMonitor:
                         "severity": alert.severity.value,
                         "message": alert.message,
                         "timestamp": alert.timestamp,
-                        "resolved": alert.resolved
+                        "resolved": alert.resolved,
                     }
                     for alert in self.alerts[-10:]  # Last 10 alerts
-                ]
+                ],
             }
 
-    def get_connection_durations(self) -> List[Dict[str, Any]]:
+    def get_connection_durations(self) -> list[dict[str, Any]]:
         """
         Get connection duration statistics.
 
@@ -502,19 +502,21 @@ class ProductionMonitor:
         with self._lock:
             durations = []
             for conn_id, duration_tracker in self._connection_durations.items():
-                durations.append({
-                    "connection_id": conn_id,
-                    "peer_id": duration_tracker.peer_id,
-                    "protocol": duration_tracker.protocol,
-                    "direction": duration_tracker.direction,
-                    "start_time": duration_tracker.start_time,
-                    "end_time": duration_tracker.end_time,
-                    "duration": duration_tracker.duration,
-                    "is_active": duration_tracker.end_time is None
-                })
+                durations.append(
+                    {
+                        "connection_id": conn_id,
+                        "peer_id": duration_tracker.peer_id,
+                        "protocol": duration_tracker.protocol,
+                        "direction": duration_tracker.direction,
+                        "start_time": duration_tracker.start_time,
+                        "end_time": duration_tracker.end_time,
+                        "duration": duration_tracker.duration,
+                        "is_active": duration_tracker.end_time is None,
+                    }
+                )
             return durations
 
-    def get_protocol_metrics(self) -> Dict[str, Dict[str, Any]]:
+    def get_protocol_metrics(self) -> dict[str, dict[str, Any]]:
         """
         Get protocol-specific metrics.
 
@@ -538,8 +540,9 @@ class ProductionMonitor:
             cutoff_time = current_time - max_age_seconds
 
             # Clear old metrics from buffer
-            while (self.metrics_buffer and
-                   self.metrics_buffer[0].timestamp < cutoff_time):
+            while (
+                self.metrics_buffer and self.metrics_buffer[0].timestamp < cutoff_time
+            ):
                 self.metrics_buffer.popleft()
 
             # Clear old alerts

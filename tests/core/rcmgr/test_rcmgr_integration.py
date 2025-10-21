@@ -2,13 +2,13 @@
 Test rcmgr module integration with core libp2p functionality.
 """
 
-
 from libp2p.rcmgr import Direction, ResourceLimits, ResourceManager
 
 
 def test_rcmgr_import():
     """Test that rcmgr module can be imported."""
     from libp2p.rcmgr import Direction, ResourceLimits, ResourceManager
+
     assert ResourceManager is not None
     assert Direction is not None
     assert ResourceLimits is not None

@@ -18,8 +18,6 @@ from libp2p.rcmgr import (
 )
 
 
-
-
 class TestResourceManager:
     """Test the core ResourceManager functionality."""
 
@@ -34,11 +32,7 @@ class TestResourceManager:
 
     def test_custom_limits(self):
         """Test resource manager with custom limits."""
-        limits = ResourceLimits(
-            max_connections=100,
-            max_memory_mb=200,
-            max_streams=50
-        )
+        limits = ResourceLimits(max_connections=100, max_memory_mb=200, max_streams=50)
         rm = new_resource_manager(limits=limits)
         assert rm.limits.max_connections == 100
         assert rm.limits.max_memory_bytes == 200 * 1024 * 1024
@@ -196,15 +190,15 @@ class TestResourceManager:
         rm = new_resource_manager()
 
         # Test with string peer_id
-        assert rm.open_connection("inbound", peer_id="peer1") is True
+        assert rm.open_connection(peer_id="peer1") is not None
 
         # Test with None peer_id
-        assert rm.open_connection("outbound", peer_id=None) is True
+        assert rm.open_connection(peer_id=None) is not None
 
         # Test with object peer_id
         mock_peer = Mock()
         mock_peer.__str__ = Mock(return_value="peer2")
-        assert rm.open_connection("inbound", peer_id=mock_peer) is True
+        assert rm.open_connection(peer_id=mock_peer) is not None
 
     def test_resource_limits_validation(self):
         """Test resource limits validation."""
