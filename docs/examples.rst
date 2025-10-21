@@ -12,6 +12,7 @@ Examples
    examples.echo_quic
    examples.ping
    examples.pubsub
+   examples.bitswap
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
