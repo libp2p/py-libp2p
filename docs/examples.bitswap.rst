@@ -6,7 +6,7 @@ This example demonstrates peer-to-peer file sharing using the Bitswap protocol w
 What is Bitswap?
 ----------------
 
-Bitswap is a data exchange protocol that enables peers to request and share content-addressed blocks. 
+Bitswap is a data exchange protocol that enables peers to request and share content-addressed blocks.
 Files are split into blocks, organized in a Merkle DAG (Directed Acyclic Graph), and transferred efficiently between peers.
 
 Quick Start
@@ -38,7 +38,7 @@ Share a file with other peers:
 
     # Share a file (auto port)
     python bitswap.py --mode provider --file document.pdf
-    
+
     # Share on specific port
     python bitswap.py --mode provider --file photo.jpg --port 8000
 
@@ -59,7 +59,7 @@ Download a file from a provider:
     python bitswap.py --mode client \
         --provider "/ip4/192.168.1.10/tcp/8000/p2p/QmProviderID..." \
         --cid "01701220abc..."
-    
+
     # Specify output directory
     python bitswap.py --mode client \
         --provider "<multiaddr>" \
@@ -104,20 +104,20 @@ Provider Output
       /ip4/192.168.1.101/tcp/50182/p2p/QmSK4bN4fDCxwvSVYvxxgHex2wob6VwzpEfpw8hc2Xxbow
       /ip4/127.0.0.1/tcp/50182/p2p/QmSK4bN4fDCxwvSVYvxxgHex2wob6VwzpEfpw8hc2Xxbow
     ✓ Bitswap started
-    
+
     Adding file to DAG...
       📤 completed: 100.0% (2.5 MB/2.5 MB)
-    
+
     ======================================================================
     FILE READY TO SHARE!
     ======================================================================
     Root CID:  01701220336d0f55eac9b5536e1d5f4a5429bbc9a7343f1e1d19b7757baf76b61f4f4731
-    
+
     📋 COPY THIS COMMAND TO RUN CLIENT:
     ======================================================================
     python bitswap.py --mode client --provider "..." --cid "..."
     ======================================================================
-    
+
     Provider is running. Press Ctrl+C to stop...
 
 Client Output
@@ -134,12 +134,12 @@ Client Output
     ======================================================================
     Client Peer ID: QmTaLxNyPszMamvE7X8oYaso1eFceB8Dqjqo3v157kfioY
     ✓ Bitswap started
-    
+
     Connecting to provider...
     ✓ Connected
-    
+
     Fetching file...
-    
+
     ======================================================================
     FETCH STATISTICS:
     ======================================================================
@@ -147,7 +147,7 @@ Client Output
       ✓ 1. 01701220... (256.0 KB)
       ✓ 2. 01551220... (256.0 KB)
       ...
-    
+
     ======================================================================
     FILE DOWNLOADED!
     ======================================================================

@@ -213,7 +213,9 @@ class TestChunkFileWithProgress:
             temp_path = f.name
 
         try:
-            chunks = list(chunk_file_with_progress(temp_path, chunk_size=MIN_CHUNK_SIZE))
+            chunks = list(
+                chunk_file_with_progress(temp_path, chunk_size=MIN_CHUNK_SIZE)
+            )
             assert len(chunks) == 4
             assert b"".join(chunks) == data
         finally:

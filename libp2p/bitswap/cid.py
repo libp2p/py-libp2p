@@ -137,12 +137,13 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
 
     """
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     # Compute hash of data
     digest = hashlib.sha256(data).digest()
-    
-    logger.info(f"      verify_cid:")
+
+    logger.info("      verify_cid:")
     logger.info(f"        CID: {cid.hex()}")
     logger.info(f"        Data size: {len(data)} bytes")
     logger.info(f"        Computed digest: {digest.hex()}")
@@ -165,7 +166,10 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         codec = cid[1]
         hash_type = cid[2]
         hash_length = cid[3]
-        logger.info(f"        CIDv1: codec={hex(codec)}, hash_type={hex(hash_type)}, length={hash_length}")
+        logger.info(
+            f"        CIDv1: codec={hex(codec)}, "
+            f"hash_type={hex(hash_type)}, length={hash_length}"
+        )
         if len(cid) >= 4 + hash_length:
             cid_digest = cid[4 : 4 + hash_length]
             match = digest == cid_digest
@@ -174,7 +178,7 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
             logger.info(f"        Computed digest: {digest.hex()}")
             return match
 
-    logger.info(f"        No valid CID format detected")
+    logger.info("        No valid CID format detected")
     return False
 
 

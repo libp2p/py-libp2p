@@ -6,20 +6,20 @@ in a Merkle DAG structure, enabling efficient storage and transfer of
 large files.
 """
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator, List, Optional
 
 # Default chunk size: 256 KB (IPFS default)
 DEFAULT_CHUNK_SIZE = 256 * 1024
 
 # Minimum chunk size: 64 KB
-MIN_CHUNK_SIZE = 50 * 1024
+MIN_CHUNK_SIZE = 64 * 1024
 
 # Maximum chunk size: 1 MB
 MAX_CHUNK_SIZE = 1024 * 1024
 
 
-def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[bytes]:
+def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[bytes]:
     """
     Split bytes into fixed-size chunks.
 
@@ -65,9 +65,7 @@ def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[bytes
     return chunks
 
 
-def chunk_file(
-    file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE
-) -> Iterator[bytes]:
+def chunk_file(file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterator[bytes]:
     """
     Stream file in chunks (memory efficient).
 
@@ -151,7 +149,7 @@ def optimal_chunk_size(file_size: int) -> int:
         return 60 * 1024  # 1 MB
 
 
-def estimate_chunk_count(file_size: int, chunk_size: Optional[int] = None) -> int:
+def estimate_chunk_count(file_size: int, chunk_size: int | None = None) -> int:
     """
     Estimate number of chunks for a given file size.
 
@@ -205,7 +203,7 @@ def get_file_size(file_path: str) -> int:
 def chunk_file_with_progress(
     file_path: str,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
-    progress_callback: Optional[Callable[[int, int, int], None]] = None,
+    progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> Iterator[bytes]:
     """
     Stream file in chunks with progress tracking.
@@ -222,7 +220,9 @@ def chunk_file_with_progress(
         >>> def on_progress(current, total, chunk_num):
         ...     percent = (current / total) * 100
         ...     print(f"Progress: {percent:.1f}% (chunk {chunk_num})")
-        >>> for chunk in chunk_file_with_progress('file.bin', progress_callback=on_progress):
+        >>> for chunk in chunk_file_with_progress(
+        ...     'file.bin', progress_callback=on_progress
+        ... ):
         ...     process(chunk)
 
     """
@@ -239,9 +239,6 @@ def chunk_file_with_progress(
 
         yield chunk
 
-
-# Type hints for Python 3.9+
-from typing import Callable, Optional
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",

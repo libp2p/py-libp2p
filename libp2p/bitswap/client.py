@@ -5,19 +5,18 @@ Supports v1.0.0, v1.1.0, and v1.2.0 protocols.
 
 import hashlib
 import logging
-from typing import Any
+from typing import Any, cast
 
 import trio
 import varint
 
 from libp2p.abc import IHost, INetStream
+from libp2p.custom_types import TProtocol
 from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.id import ID as PeerID
 
 from .block_store import BlockStore, MemoryBlockStore
 from .cid import (
-    CID_V0,
-    compute_cid,
     get_cid_prefix,
     reconstruct_cid_from_prefix_and_data,
     verify_cid,
@@ -89,7 +88,7 @@ class BitswapClient:
         # Set stream handler for all supported Bitswap protocols
         for protocol in BITSWAP_PROTOCOLS:
             self.host.set_stream_handler(
-                protocol,
+                cast(TProtocol, protocol),
                 self._handle_stream,  # type: ignore[arg-type]
             )
 
@@ -217,15 +216,18 @@ class BitswapClient:
 
         # Wait for response (simplified - in production, track Have/DontHave responses)
         # For now, check if block appeared in store
+        result = False
         try:
             with trio.fail_after(5.0):
                 while not await self.block_store.has_block(cid):
                     await trio.sleep(0.1)
-            return True
+            result = True
         except trio.TooSlowError:
-            return False
+            result = False
         finally:
             await self.cancel_want(cid)
+
+        return result
 
     async def cancel_want(self, cid: bytes) -> None:
         """
@@ -247,7 +249,7 @@ class BitswapClient:
     ) -> bytes:
         """Request a block from the network."""
         logger.info(f"📤 Requesting block: {cid.hex()}")
-        
+
         # Add to wantlist
         await self.want_block(cid)
 
@@ -260,10 +262,13 @@ class BitswapClient:
             logger.info(f"  → Sending wantlist to peer {peer_id}")
             await self._send_wantlist_to_peer(peer_id, [cid])
         else:
-            logger.info(f"  → Broadcasting wantlist")
+            logger.info("  → Broadcasting wantlist")
             await self._broadcast_wantlist([cid])
 
         # Wait for block to arrive
+        result: bytes | None = None
+        error: Exception | None = None
+
         try:
             logger.info(f"  ⏳ Waiting for block (timeout: {timeout}s)...")
             with trio.fail_after(timeout):
@@ -272,34 +277,47 @@ class BitswapClient:
             # Get the block from store
             data = await self.block_store.get_block(cid)
             if data is None:
-                raise BlockNotFoundError(f"Block {cid.hex()[:16]}... not found")
-
-            logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
-            return data
-        except trio.TooSlowError:
+                error = BlockNotFoundError(f"Block {cid.hex()[:16]}... not found")
+            else:
+                result = data
+                logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
+        except trio.TooSlowError as e:
             logger.error(f"  ✗ TIMEOUT waiting for block {cid.hex()}")
-            raise BitswapTimeoutError(f"Timeout waiting for block {cid.hex()[:16]}...")
+            error = BitswapTimeoutError(
+                f"Timeout waiting for block {cid.hex()[:16]}..."
+            )
+            error.__cause__ = e
         finally:
             # Cleanup
             await self.cancel_want(cid)
             if cid in self._pending_requests:
                 del self._pending_requests[cid]
 
+        if error:
+            raise error
+        assert result is not None
+        return result
+
     async def _send_wantlist_to_peer(self, peer_id: PeerID, cids: list[bytes]) -> None:
         """Send wantlist to a specific peer."""
         # Track expected blocks for this peer
         if peer_id not in self._expected_blocks:
             self._expected_blocks[peer_id] = set()
-        
+
         peer_id_str = str(peer_id)
-        logger.info(f"Adding {len(cids)} CIDs to expected_blocks for peer {peer_id_str}")
+        logger.info(
+            f"Adding {len(cids)} CIDs to expected_blocks for peer {peer_id_str}"
+        )
         for cid in cids:
             logger.info(f"  + {cid.hex()}")
-        
+
         self._expected_blocks[peer_id].update(cids)
-        
-        logger.info(f"Total expected blocks from {peer_id_str}: {len(self._expected_blocks[peer_id])}")
-        
+
+        logger.info(
+            f"Total expected blocks from {peer_id_str}: "
+            f"{len(self._expected_blocks[peer_id])}"
+        )
+
         try:
             # Create wantlist entries with full v1.2.0 information
             entries = []
@@ -341,14 +359,16 @@ class BitswapClient:
 
             await self._write_message(stream, msg)
             logger.debug(f"Sent wantlist to peer {peer_id}")
-            
+
             # Keep stream open and read responses
             # This allows the provider to send blocks back on the same stream
             if self._nursery:
-                self._nursery.start_soon(self._read_responses_from_stream, stream, peer_id)
+                self._nursery.start_soon(
+                    self._read_responses_from_stream, stream, peer_id
+                )
             else:
                 await self._read_responses_from_stream(stream, peer_id)
-            
+
         except Exception as e:
             logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
 
@@ -421,8 +441,9 @@ class BitswapClient:
     async def _read_responses_from_stream(
         self, stream: INetStream, peer_id: PeerID
     ) -> None:
-        """Read responses from a stream after sending a wantlist.
-        
+        """
+        Read responses from a stream after sending a wantlist.
+
         This keeps the stream open so the provider can send blocks back.
         Stops reading once all expected blocks are received.
         """
@@ -430,17 +451,22 @@ class BitswapClient:
             peer_id_str = str(peer_id)
             logger.info(f"📡 Reading responses from {peer_id_str} on stream")
             message_count = 0
-            
+
             while True:
                 # Check if we've received all expected blocks from this peer
                 if peer_id in self._expected_blocks:
                     remaining = len(self._expected_blocks[peer_id])
                     if remaining == 0:
-                        logger.info(f"✓ All expected blocks received from {peer_id_str}, closing stream")
+                        logger.info(
+                            f"✓ All expected blocks received from "
+                            f"{peer_id_str}, closing stream"
+                        )
                         break
                     else:
-                        logger.debug(f"Still expecting {remaining} blocks from {peer_id_str}")
-                
+                        logger.debug(
+                            f"Still expecting {remaining} blocks from {peer_id_str}"
+                        )
+
                 # Read message from provider WITHOUT timeout
                 # We rely on expected_blocks tracking to know when to stop
                 logger.debug(f"Waiting for message from {peer_id_str}...")
@@ -451,7 +477,7 @@ class BitswapClient:
 
                 message_count += 1
                 logger.info(f"📨 Received message #{message_count} from {peer_id_str}")
-                
+
                 # Process the response (blocks, presences, etc.)
                 await self._process_message(msg, peer_id, stream)
 
@@ -459,6 +485,7 @@ class BitswapClient:
             peer_id_str = str(peer_id)
             logger.error(f"Stream from {peer_id_str} ended with error: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
         finally:
             # Clean up expected blocks for this peer
@@ -466,16 +493,16 @@ class BitswapClient:
                 peer_id_str = str(peer_id)
                 remaining = len(self._expected_blocks[peer_id])
                 if remaining > 0:
-                    logger.error(f"")
-                    logger.error(f"=" * 70)
-                    logger.error(f"⚠️  STREAM CLOSED WITH MISSING BLOCKS")
-                    logger.error(f"=" * 70)
+                    logger.error("")
+                    logger.error("=" * 70)
+                    logger.error("⚠️  STREAM CLOSED WITH MISSING BLOCKS")
+                    logger.error("=" * 70)
                     logger.error(f"Peer: {peer_id_str}")
                     logger.error(f"Missing {remaining} blocks:")
                     for i, cid in enumerate(self._expected_blocks[peer_id]):
-                        logger.error(f"  {i+1}. {cid.hex()}")
-                    logger.error(f"=" * 70)
-                    logger.error(f"")
+                        logger.error(f"  {i + 1}. {cid.hex()}")
+                    logger.error("=" * 70)
+                    logger.error("")
                 del self._expected_blocks[peer_id]
             try:
                 await stream.close()
@@ -516,7 +543,7 @@ class BitswapClient:
 
         # Process blocks (v1.0.0 format)
         if msg.blocks:
-            await self._process_blocks_v100(msg.blocks, peer_id)  # type: ignore[arg-type]
+            await self._process_blocks_v100(list(msg.blocks), peer_id)
 
         # Process payload (v1.1.0+ format)
         if msg.payload:
@@ -601,82 +628,86 @@ class BitswapClient:
                     f"Sent {len(presences_to_send)} block presences to peer {peer_id}"
                 )
 
-    async def _process_blocks_v100(self, blocks: list[bytes], peer_id: bytes) -> None:
-        """Process received blocks (v1.0.0 format).
-        
+    async def _process_blocks_v100(self, blocks: list[bytes], peer_id: PeerID) -> None:
+        """
+        Process received blocks (v1.0.0 format).
+
         For v1.0.0, we can't reliably recompute CIDs from block data alone
         because we don't know which codec was used. Instead, we verify the
         block data against the CIDs we're expecting.
         """
-        peer_id_str = str(peer_id)[:16] if hasattr(peer_id, '__str__') else "unknown"
-        logger.info(f"=" * 70)
+        peer_id_str = str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
+        logger.info("=" * 70)
         logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
-        
+
         # Get the CIDs we're expecting from this peer
         expected_cids = self._expected_blocks.get(peer_id, set()).copy()
         logger.info(f"Expected {len(expected_cids)} blocks from this peer")
-        logger.info(f"Expected CIDs:")
+        logger.info("Expected CIDs:")
         for i, cid in enumerate(expected_cids):
-            logger.info(f"  {i+1}. {cid.hex()}")
-        logger.info(f"=" * 70)
-        
+            logger.info(f"  {i + 1}. {cid.hex()}")
+        logger.info("=" * 70)
+
         for idx, block_data in enumerate(blocks):
             block_hash = hashlib.sha256(block_data).hexdigest()
-            logger.info(f"")
-            logger.info(f"Block {idx+1}/{len(blocks)}:")
+            logger.info("")
+            logger.info(f"Block {idx + 1}/{len(blocks)}:")
             logger.info(f"  Size: {len(block_data)} bytes")
             logger.info(f"  SHA-256: {block_hash}")
             logger.info(f"  First 64 bytes: {block_data[:64].hex()}")
-            
+
             # Find which expected CID matches this block data
             matched_cid = None
             logger.info(f"  Checking against {len(expected_cids)} expected CIDs...")
             for i, cid in enumerate(expected_cids):
-                logger.info(f"    Attempt {i+1}: Checking CID {cid.hex()}")
+                logger.info(f"    Attempt {i + 1}: Checking CID {cid.hex()}")
                 if verify_cid(cid, block_data):
                     matched_cid = cid
                     logger.info(f"  ✓ MATCHED CID: {matched_cid.hex()}")
                     break
                 else:
-                    logger.info(f"    -> No match")
-            
+                    logger.info("    -> No match")
+
             if matched_cid:
                 # Store the block with the correct CID
                 await self.block_store.put_block(matched_cid, block_data)
-                logger.info(f"  ✓ Stored successfully")
-                
+                logger.info("  ✓ Stored successfully")
+
                 # Remove from expected blocks for all peers
                 for pid in self._expected_blocks:
                     if matched_cid in self._expected_blocks[pid]:
                         self._expected_blocks[pid].discard(matched_cid)
-                        pid_str = str(pid)[:16] if hasattr(pid, '__str__') else "unknown"
-                        logger.info(f"  ✓ Removed from expected blocks for peer {pid_str}")
-                
+                        pid_str = (
+                            str(pid)[:16] if hasattr(pid, "__str__") else "unknown"
+                        )
+                        logger.info(
+                            f"  ✓ Removed from expected blocks for peer {pid_str}"
+                        )
+
                 # Notify pending requests
                 if matched_cid in self._pending_requests:
-                    logger.info(f"  ✓ Notifying pending request")
+                    logger.info("  ✓ Notifying pending request")
                     self._pending_requests[matched_cid].set()
             else:
-                logger.error(f"  ✗ NO MATCH FOUND!")
-                logger.error(f"  Block doesn't match any expected CID")
+                logger.error("  ✗ NO MATCH FOUND!")
+                logger.error("  Block doesn't match any expected CID")
                 logger.error(f"  Expected CIDs ({len(expected_cids)}):")
                 for i, cid in enumerate(list(expected_cids)[:5]):
-                    logger.error(f"    {i+1}. {cid.hex()}")
+                    logger.error(f"    {i + 1}. {cid.hex()}")
                 if len(expected_cids) > 5:
                     logger.error(f"    ... and {len(expected_cids) - 5} more")
-        
-        logger.info(f"")
-        logger.info(f"=" * 70)
-        logger.info(f"Block processing complete. Remaining expected blocks:")
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("Block processing complete. Remaining expected blocks:")
         remaining = self._expected_blocks.get(peer_id, set())
         if remaining:
             logger.warning(f"  Still waiting for {len(remaining)} blocks:")
             for i, cid in enumerate(remaining):
-                logger.warning(f"    {i+1}. {cid.hex()}")
+                logger.warning(f"    {i + 1}. {cid.hex()}")
         else:
-            logger.info(f"  ✓ All blocks received from this peer!")
-        logger.info(f"=" * 70)
-
+            logger.info("  ✓ All blocks received from this peer!")
+        logger.info("=" * 70)
 
     async def _process_blocks_v110(self, blocks: list[Any]) -> None:
         """Process received blocks (v1.1.0+ format with prefix)."""
@@ -756,9 +787,7 @@ class BitswapClient:
 
             # Verify we read all expected bytes
             if len(msg_data) != length:
-                logger.error(
-                    f"Expected {length} bytes but got {len(msg_data)}"
-                )
+                logger.error(f"Expected {length} bytes but got {len(msg_data)}")
                 return None
 
             # Parse message
@@ -773,13 +802,15 @@ class BitswapClient:
         except Exception as e:
             logger.error(f"Error reading message: {e}")
             import traceback
+
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     async def _write_message(self, stream: INetStream, msg: Message) -> None:
-        """Write a length-prefixed message to the stream.
-        
-        Chunks large writes to avoid exceeding the stream's write limit (65535 bytes).
+        """
+        Write a length-prefixed message to the stream.
+
+        Chunks large writes to avoid exceeding the stream's write limit.
         """
         # Serialize message
         msg_bytes = msg.SerializeToString()
@@ -792,12 +823,12 @@ class BitswapClient:
         # Write length prefix and message
         length_prefix = varint.encode(len(msg_bytes))
         data_to_write = length_prefix + msg_bytes
-        
+
         # Chunk writes to avoid exceeding stream write limit (65535 bytes)
         MAX_WRITE_SIZE = 65535
         offset = 0
         while offset < len(data_to_write):
             chunk_size = min(MAX_WRITE_SIZE, len(data_to_write) - offset)
-            chunk = data_to_write[offset:offset + chunk_size]
+            chunk = data_to_write[offset : offset + chunk_size]
             await stream.write(chunk)
             offset += chunk_size

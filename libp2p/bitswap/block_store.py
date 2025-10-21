@@ -64,6 +64,17 @@ class BlockStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_all_cids(self) -> list[bytes]:
+        """
+        Get all CIDs in the block store.
+
+        Returns:
+            List of all CIDs
+
+        """
+        pass
+
 
 class MemoryBlockStore(BlockStore):
     """In-memory block store implementation."""

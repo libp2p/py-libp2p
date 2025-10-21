@@ -147,6 +147,7 @@ class TestEncodeDecode:
         # Should be identical
         assert encoded1 == encoded2
         assert decoded_links1[0].cid == decoded_links2[0].cid
+        assert decoded_data1 is not None and decoded_data2 is not None
         assert decoded_data1.filesize == decoded_data2.filesize
 
     def test_decode_invalid_data(self):
@@ -169,6 +170,7 @@ class TestFileNode:
         assert len(links) == 1
         assert links[0].cid == cid
         assert links[0].size == len(chunk)
+        assert unixfs_data is not None
         assert unixfs_data.type == "file"
         assert unixfs_data.filesize == len(chunk)
 
@@ -176,14 +178,14 @@ class TestFileNode:
         """Test creating file node with multiple chunks."""
         chunks = [b"chunk1" * 100, b"chunk2" * 200, b"chunk3" * 150]
         chunks_data = [
-            (compute_cid_v1(chunk, codec=CODEC_RAW), len(chunk))
-            for chunk in chunks
+            (compute_cid_v1(chunk, codec=CODEC_RAW), len(chunk)) for chunk in chunks
         ]
 
         node_data = create_file_node(chunks_data)
         links, unixfs_data = decode_dag_pb(node_data)
 
         assert len(links) == 3
+        assert unixfs_data is not None
         total_size = sum(len(chunk) for chunk in chunks)
         assert unixfs_data.filesize == total_size
         assert sum(unixfs_data.blocksizes) == total_size
@@ -205,8 +207,7 @@ class TestFileNode:
         """Test getting file size from node."""
         chunks = [b"a" * 100, b"b" * 200]
         chunks_data = [
-            (compute_cid_v1(chunk, codec=CODEC_RAW), len(chunk))
-            for chunk in chunks
+            (compute_cid_v1(chunk, codec=CODEC_RAW), len(chunk)) for chunk in chunks
         ]
 
         node_data = create_file_node(chunks_data)
@@ -224,6 +225,7 @@ class TestDirectoryNode:
         links, unixfs_data = decode_dag_pb(node_data)
 
         assert len(links) == 0
+        assert unixfs_data is not None
         assert unixfs_data.type == "directory"
 
     def test_create_directory_node_with_entries(self):
@@ -248,6 +250,7 @@ class TestDirectoryNode:
         assert links[0].cid == cid1
         assert links[1].name == "file2.txt"
         assert links[1].cid == cid2
+        assert unixfs_data is not None
         assert unixfs_data.type == "directory"
 
     def test_is_directory_node(self):

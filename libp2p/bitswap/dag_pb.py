@@ -6,7 +6,6 @@ which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 from .pb.dag_pb_pb2 import PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
@@ -37,7 +36,7 @@ class UnixFSData:
     type: str  # 'file', 'directory', 'raw', 'metadata', 'symlink'
     data: bytes = b""
     filesize: int = 0
-    blocksizes: List[int] = field(default_factory=list)
+    blocksizes: list[int] = field(default_factory=list)
     hash_type: int = 0
     fanout: int = 0
 
@@ -63,9 +62,7 @@ class UnixFSData:
             )
 
 
-def encode_dag_pb(
-    links: List[Link], unixfs_data: Optional[UnixFSData] = None
-) -> bytes:
+def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> bytes:
     """
     Encode links and UnixFS data as DAG-PB format.
 
@@ -101,7 +98,7 @@ def encode_dag_pb(
     if unixfs_data:
         # Create UnixFS data structure
         pb_unixfs = PBUnixFSData()
-        pb_unixfs.Type = UnixFSData.TYPE_MAP[unixfs_data.type]
+        pb_unixfs.Type = UnixFSData.TYPE_MAP[unixfs_data.type]  # type: ignore[assignment]
         pb_unixfs.Data = unixfs_data.data
         pb_unixfs.filesize = unixfs_data.filesize
 
@@ -121,7 +118,7 @@ def encode_dag_pb(
     return pb_node.SerializeToString()
 
 
-def decode_dag_pb(data: bytes) -> Tuple[List[Link], Optional[UnixFSData]]:
+def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
     """
     Decode DAG-PB format to links and UnixFS data.
 
@@ -146,7 +143,9 @@ def decode_dag_pb(data: bytes) -> Tuple[List[Link], Optional[UnixFSData]]:
     links = []
     for pb_link in pb_node.Links:
         link = Link(
-            cid=pb_link.Hash, name=pb_link.Name if pb_link.Name else "", size=pb_link.Tsize
+            cid=pb_link.Hash,
+            name=pb_link.Name if pb_link.Name else "",
+            size=pb_link.Tsize,
         )
         links.append(link)
 
@@ -175,7 +174,7 @@ def decode_dag_pb(data: bytes) -> Tuple[List[Link], Optional[UnixFSData]]:
     return links, unixfs_data
 
 
-def create_file_node(chunks: List[Tuple[bytes, int]]) -> bytes:
+def create_file_node(chunks: list[tuple[bytes, int]]) -> bytes:
     """
     Create a DAG-PB node for a file with multiple chunks.
 
@@ -199,14 +198,12 @@ def create_file_node(chunks: List[Tuple[bytes, int]]) -> bytes:
         blocksizes.append(size)
         total_size += size
 
-    unixfs_data = UnixFSData(
-        type="file", filesize=total_size, blocksizes=blocksizes
-    )
+    unixfs_data = UnixFSData(type="file", filesize=total_size, blocksizes=blocksizes)
 
     return encode_dag_pb(links, unixfs_data)
 
 
-def create_directory_node(entries: List[Tuple[str, bytes, int]]) -> bytes:
+def create_directory_node(entries: list[tuple[str, bytes, int]]) -> bytes:
     """
     Create a DAG-PB node for a directory.
 

@@ -98,6 +98,7 @@ class TestAddBytes:
         # Decode and verify structure
         links, unixfs_data = decode_dag_pb(root_data)
         assert len(links) > 0
+        assert unixfs_data is not None
         assert unixfs_data.filesize == len(data)
 
     @pytest.mark.trio
@@ -116,7 +117,9 @@ class TestAddBytes:
 
         # Add data with progress tracking
         data = b"y" * (1024 * 1024)  # 1 MB
-        await dag.add_bytes(data, chunk_size=256 * 1024, progress_callback=progress_callback)
+        await dag.add_bytes(
+            data, chunk_size=256 * 1024, progress_callback=progress_callback
+        )
 
         # Verify progress was reported
         assert len(progress_calls) > 0
@@ -194,6 +197,7 @@ class TestAddFile:
 
             # Verify filesize
             links, unixfs_data = decode_dag_pb(root_data)
+            assert unixfs_data is not None
             assert unixfs_data.filesize == file_size
         finally:
             Path(temp_path).unlink()
@@ -228,6 +232,7 @@ class TestAddFile:
 
             # Add with MIN chunk size
             from libp2p.bitswap.chunker import MIN_CHUNK_SIZE
+
             chunk_size = MIN_CHUNK_SIZE  # 64 KB
             await dag.add_file(temp_path, chunk_size=chunk_size)
 
@@ -276,6 +281,7 @@ class TestFetchFile:
 
         # Create DAG-PB root node
         from libp2p.bitswap.dag_pb import create_file_node
+
         chunks_data = [
             (cid1, len(chunk1)),
             (cid2, len(chunk2)),
@@ -323,6 +329,7 @@ class TestFetchFile:
         cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
 
         from libp2p.bitswap.dag_pb import create_file_node
+
         root_data = create_file_node([(cid1, len(chunk1)), (cid2, len(chunk2))])
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
 
@@ -386,6 +393,7 @@ class TestGetFileInfo:
         cids = [compute_cid_v1(chunk, codec=CODEC_RAW) for chunk in chunks]
 
         from libp2p.bitswap.dag_pb import create_file_node
+
         chunks_data = [(cid, len(chunk)) for cid, chunk in zip(cids, chunks)]
         root_data = create_file_node(chunks_data)
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
@@ -417,7 +425,6 @@ class TestEndToEnd:
 
         try:
             # Setup with real store
-            mock_host = MagicMock()
             store = MemoryBlockStore()
             mock_client = MagicMock(spec=BitswapClient)
             mock_client.block_store = store
@@ -528,9 +535,7 @@ class TestEndToEnd:
 
             # Add file
             root_cid = await dag.add_file(
-                temp_path,
-                chunk_size=1024 * 1024,
-                progress_callback=add_progress
+                temp_path, chunk_size=1024 * 1024, progress_callback=add_progress
             )
 
             # Verify progress during add
@@ -544,8 +549,7 @@ class TestEndToEnd:
 
             # Fetch file
             fetched_data = await dag.fetch_file(
-                root_cid,
-                progress_callback=fetch_progress
+                root_cid, progress_callback=fetch_progress
             )
 
             # Verify
