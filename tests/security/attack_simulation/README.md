@@ -34,6 +34,8 @@ tests/security/attack_simulation/
 ├── flooding_attack/   # Flooding attack simulation
 ├── connection_exhaustion/ # Connection exhaustion
 ├── protocol_attack/   # Protocol attack simulation
+├── replay_attack/     # Replay attack simulation
+├── routing_poisoning/ # Routing Poisoning attack simulation
 ├── utils/            # Shared utilities
 ├── config/           # Configurations
 └── results/          # Test results
