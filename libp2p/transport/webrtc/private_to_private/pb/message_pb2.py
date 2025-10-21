@@ -6,25 +6,31 @@
 """Generated protocol buffer code."""
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
-from google.protobuf import runtime_version as _runtime_version
+try:
+  from google.protobuf import runtime_version as _runtime_version
+except Exception:
+  _runtime_version = None
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
-_runtime_version.ValidateProtobufRuntimeVersion(
+if _runtime_version is not None and hasattr(_runtime_version, 'ValidateProtobufRuntimeVersion'):
+  _runtime_version.ValidateProtobufRuntimeVersion(
     _runtime_version.Domain.PUBLIC,
     6,
     31,
     1,
     '',
     'message.proto'
-)
+  )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
 
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rmessage.proto\"\x8a\x01\n\x07Message\x12 \n\x04type\x18\x01 \x01(\x0e\x32\r.Message.TypeH\x00\x88\x01\x01\x12\x11\n\x04\x64\x61ta\x18\x02 \x01(\tH\x01\x88\x01\x01\"8\n\x04Type\x12\r\n\tSDP_OFFER\x10\x00\x12\x0e\n\nSDP_ANSWER\x10\x01\x12\x11\n\rICE_CANDIDATE\x10\x02\x42\x07\n\x05_typeB\x07\n\x05_datab\x06proto3')
+try:
+  DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rmessage.proto"\x8a\x01\n\x07Message\x12 \n\x04type\x18\x01 \x01(\x0e\x32\r.Message.TypeH\x00\x88\x01\x01\x12\x11\n\x04\x64\x61ta\x18\x02 \x01(\tH\x01\x88\x01\x01"8\n\x04Type\x12\r\n\tSDP_OFFER\x10\x00\x12\x0e\n\nSDP_ANSWER\x10\x01\x12\x11\n\rICE_CANDIDATE\x10\x02\x42\x07\n\x05_typeB\x07\n\x05_datab\x06proto3')
+except Exception:
+  DESCRIPTOR = _descriptor_pool.Default().FindFileByName('message.proto')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)

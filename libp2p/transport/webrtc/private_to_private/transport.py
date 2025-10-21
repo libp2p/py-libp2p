@@ -308,6 +308,54 @@ class WebRTCTransport(ITransport):
         except Exception as e:
             logger.error(f"Error in connection cleanup for {conn_id}: {e}")
 
+    async def _on_protocol(self, stream: Any) -> None:
+        """
+        Handle incoming signaling stream (following JS pattern).
+        
+        Reference: _onProtocol method in transport.ts
+        """
+        if not self.host:
+            logger.error("Cannot handle signaling stream: Host not set")
+            return
+
+        logger.debug("Handling incoming signaling protocol stream")
+        
+        try:
+            ice_servers = pick_random_ice_servers(self.ice_servers)
+            rtc_ice_servers = [
+                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                for s in ice_servers
+            ]
+            rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
+            
+            async with open_loop():
+                peer_connection = RTCPeerConnection(rtc_config)
+                
+                result = await handle_incoming_stream(
+                    stream=stream,
+                    rtc_config=rtc_config,
+                    connection_info=None,
+                    host=self.host,
+                    timeout=DEFAULT_DIAL_TIMEOUT,
+                )
+                
+                if result:
+                    remote_peer_id = getattr(result, "remote_peer_id", None)
+                    conn_id = str(remote_peer_id) if remote_peer_id else str(id(result))
+                    self.active_connections[conn_id] = result
+                    
+                    logger.info(f"Successfully handled WebRTC connection from {remote_peer_id}")
+                else:
+                    logger.warning("Signaling stream handling failed")
+                    
+        except Exception as e:
+            logger.error(f"Error in _on_protocol: {e}")
+            try:
+                if hasattr(stream, 'close'):
+                    await stream.close()
+            except Exception:
+                pass
+
     def set_host(self, host: IHost) -> None:
         """Set the libp2p host for this transport."""
         self.host = host
@@ -341,3 +389,4 @@ class WebRTCTransport(ITransport):
 
         # TODO: Return circuit relay addresses that can be used for WebRTC signaling
         return []
+    

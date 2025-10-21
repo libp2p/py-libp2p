@@ -7,7 +7,6 @@ implementations.
 
 import sys
 from .private_to_private.transport import WebRTCTransport
-from .private_to_public.transport import WebRTCDirectTransport
 from .constants import (
     DEFAULT_ICE_SERVERS,
     SIGNALING_PROTOCOL,
@@ -164,6 +163,8 @@ def webrtc(config: dict[str, Any] | None = None) -> WebRTCTransport:
     return WebRTCTransport(config)
 
 
-def webrtc_direct() -> WebRTCDirectTransport:
+def webrtc_direct() -> "WebRTCDirectTransport":
     """Create a WebRTC-Direct transport instance (private-to-public)."""
+    from .private_to_public.transport import WebRTCDirectTransport
+
     return WebRTCDirectTransport()

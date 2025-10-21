@@ -6,25 +6,36 @@
 """Generated protocol buffer code."""
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
-from google.protobuf import runtime_version as _runtime_version
+try:
+  from google.protobuf import runtime_version as _runtime_version
+except Exception:
+  _runtime_version = None
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
-_runtime_version.ValidateProtobufRuntimeVersion(
+if _runtime_version is not None and hasattr(_runtime_version, 'ValidateProtobufRuntimeVersion'):
+  _runtime_version.ValidateProtobufRuntimeVersion(
     _runtime_version.Domain.PUBLIC,
     6,
     31,
     1,
     '',
     'message.proto'
-)
+  )
 # @@protoc_insertion_point(imports)
+
+_sym_db = _symbol_database.Default()
+
+try:
+    DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+        b'\n\rmessage.proto"\x91\x01\n\x07Message\x12 \n\x04\x66lag\x18\x01 \x01(\x0e\x32\r.Message.FlagH\x00\x88\x01\x01\x12\x14\n\x07message\x18\x02 \x01(\x0cH\x01\x88\x01\x01"9\n\x04\x46lag\x12\x07\n\x03\x46IN\x10\x00\x12\x10\n\x0cSTOP_SENDING\x10\x01\x12\t\n\x05RESET\x10\x02\x12\x0b\n\x07\x46IN_ACK\x10\x03\x42\x07\n\x05_flagB\n\n\x08_messageb\x06proto3'
+    )
+except Exception:
+    DESCRIPTOR = _descriptor_pool.Default().FindFileByName('message.proto')
 
 _sym_db = _symbol_database.Default()
 
 
 
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rmessage.proto\"\x91\x01\n\x07Message\x12 \n\x04\x66lag\x18\x01 \x01(\x0e\x32\r.Message.FlagH\x00\x88\x01\x01\x12\x14\n\x07message\x18\x02 \x01(\x0cH\x01\x88\x01\x01\"9\n\x04\x46lag\x12\x07\n\x03\x46IN\x10\x00\x12\x10\n\x0cSTOP_SENDING\x10\x01\x12\t\n\x05RESET\x10\x02\x12\x0b\n\x07\x46IN_ACK\x10\x03\x42\x07\n\x05_flagB\n\n\x08_messageb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)

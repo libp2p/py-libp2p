@@ -60,6 +60,8 @@ WEBRTC_CONNECTION_STATES = {
     "closed": "closed",
 }
 
+WEBRTC_PROTOCOL = "webrtc"
+
 # Data channel states
 DATA_CHANNEL_STATES = {
     "connecting": "connecting",

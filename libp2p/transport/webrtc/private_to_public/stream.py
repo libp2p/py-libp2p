@@ -13,6 +13,12 @@ import trio
 
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
+else:
+    try:
+        from libp2p.abc import IMuxedStream
+    except Exception:
+        class IMuxedStream:
+            pass
 import varint
 
 from ..constants import (

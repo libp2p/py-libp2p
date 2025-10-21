@@ -96,7 +96,7 @@ async def handle_incoming_stream(
         try:
             answer_message = Message()
             answer_message.type = Message.SDP_ANSWER
-            answer_message.data = answer_message.data
+            answer_message.data = answer.sdp
             await stream.write(answer_message.SerializeToString())
             logger.info("Sent SDP answer")
 
