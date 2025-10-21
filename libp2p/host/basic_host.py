@@ -16,10 +16,12 @@ import multiaddr
 
 from libp2p.abc import (
     IHost,
+    IMuxedConn,
     INetConn,
     INetStream,
     INetworkService,
     IPeerStore,
+    IRawConnection,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -60,9 +62,7 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 from libp2p.tools.async_service import (
     background_trio_service,
 )
-from libp2p.network.connection.raw_connection import (
-    RawConnection,
-)
+
 if TYPE_CHECKING:
     from collections import (
         OrderedDict,
@@ -352,9 +352,11 @@ class BasicHost(IHost):
         """
         return self._network.connections.get(peer_id)
 
-    async def upgrade_outbound_connection(self, raw_conn: RawConnection, peer_id: ID) -> INetConn:
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
         """
-        Upgrade a raw outbound connection for the given peer_id using the underlying network.
+        Upgrade a raw outbound connection for the peer_id using the underlying network.
 
         :param raw_conn: The raw connection to upgrade.
         :param peer_id: The peer this connection is to.
@@ -363,7 +365,9 @@ class BasicHost(IHost):
         """
         return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
 
-    async def upgrade_inbound_connection(self, raw_conn: RawConnection, maddr: Multiaddr) -> INetConn:
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection using the underlying network.
 

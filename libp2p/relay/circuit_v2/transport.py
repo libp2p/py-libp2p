@@ -5,20 +5,20 @@ This module implements the transport layer for Circuit Relay v2,
 allowing peers to establish connections through relay nodes.
 """
 
-from collections.abc import Awaitable, Callable
 import logging
 
 import multiaddr
 import trio
 
-from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.abc import (
     IHost,
     IListener,
     INetConn,
     INetStream,
     ITransport,
-    ReadWriteCloser,
+)
+from libp2p.custom_types import (
+    THandler,
 )
 from libp2p.network.connection.raw_connection import (
     RawConnection,
@@ -42,7 +42,6 @@ from .discovery import (
 )
 from .pb.circuit_pb2 import (
     HopMessage,
-    StopMessage,
 )
 from .protocol import (
     PROTOCOL_ID,
@@ -94,7 +93,7 @@ class CircuitV2Transport(ITransport):
             max_relays=config.max_relays,
         )
 
-    async def dial(
+    async def dial(  # type: ignore[override]
         self,
         maddr: multiaddr.Multiaddr,
     ) -> INetConn:
@@ -127,7 +126,7 @@ class CircuitV2Transport(ITransport):
         for idx, (proto, value) in enumerate(maddr.items()):
             if proto.name == "p2p-circuit":
                 found_circuit = True
-                relay_maddr_end_index = idx 
+                relay_maddr_end_index = idx
             elif proto.name == "p2p":
                 if not found_circuit and relay_id_str is None:
                     relay_id_str = value
@@ -135,11 +134,15 @@ class CircuitV2Transport(ITransport):
                     dest_id_str = value
 
         if relay_id_str is not None and relay_maddr_end_index is not None:
-            relay_maddr = multiaddr.Multiaddr("/".join(str(maddr).split("/")[:relay_maddr_end_index*2+1]))
+            relay_maddr = multiaddr.Multiaddr(
+                "/".join(str(maddr).split("/")[: relay_maddr_end_index * 2 + 1])
+            )
         if not relay_id_str:
             raise ConnectionError("Multiaddr does not contain relay peer ID")
         if not dest_id_str:
-            raise ConnectionError("Multiaddr does not contain destination peer ID after p2p-circuit")
+            raise ConnectionError(
+                "Multiaddr does not contain destination peer ID after p2p-circuit"
+            )
 
         logger.debug(f"Relay peer ID: {relay_id_str} , \n {relay_maddr}")
 
@@ -152,11 +155,16 @@ class CircuitV2Transport(ITransport):
             relay_peer_id = relay_id_str
         else:
             raise ConnectionError("relay_id_str must be a string or ID")
-        relay_peer_info = PeerInfo(relay_peer_id, [relay_maddr])
-        raw_conn = await self.dial_peer_info(dest_info=dest_info, relay_info=relay_peer_info)
-        i_net_conn = await self.host.upgrade_outbound_connection(raw_conn, dest_info.peer_id)
+        relay_addrs = [relay_maddr] if relay_maddr is not None else []
+        relay_peer_info = PeerInfo(relay_peer_id, relay_addrs)
+        raw_conn = await self.dial_peer_info(
+            dest_info=dest_info, relay_info=relay_peer_info
+        )
+        i_net_conn = await self.host.upgrade_outbound_connection(
+            raw_conn, dest_info.peer_id
+        )
         return i_net_conn
-        
+
     async def dial_peer_info(
         self,
         dest_info: PeerInfo,
@@ -164,34 +172,34 @@ class CircuitV2Transport(ITransport):
         relay_info: PeerInfo | None = None,
     ) -> RawConnection:
         """
-        Dial a peer through a relay.
+        Dial a destination peer using a relay.
 
         Parameters
         ----------
-        peer_info : PeerInfo
-            The peer to dial
-        relay_peer_id : Optional[ID], optional
-            Optional specific relay peer to use
+        dest_info : PeerInfo
+            The destination peer to dial.
+        relay_info : Optional[PeerInfo], optional
+            An optional specific relay peer to use.
 
         Returns
         -------
         RawConnection
-            The established connection
+            The established raw connection to the destination peer through the relay.
 
         Raises
         ------
         ConnectionError
-            If the connection cannot be established
+            If the connection cannot be established.
 
         """
         # If no specific relay is provided, try to find one
-        relay_peer_id = relay_info.peer_id
         if relay_info is None:
             relay_peer_id = await self._select_relay(dest_info)
             if not relay_peer_id:
                 raise ConnectionError("No suitable relay found")
             relay_info = self.host.get_peerstore().peer_info(relay_peer_id)
         await self.host.connect(relay_info)
+        relay_peer_id = relay_info.peer_id
         # Get a stream to the relay
         try:
             logger.debug(
@@ -223,13 +231,13 @@ class CircuitV2Transport(ITransport):
             #     peer=peer_info.peer_id.to_bytes(),
             # )
             # await relay_stream.write(hop_msg.SerializeToString())
-            
+
             connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
                 peer=dest_info.peer_id.to_bytes(),
             )
             await relay_stream.write(connect_msg.SerializeToString())
-            
+
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 resp_bytes = await relay_stream.read(1024)
@@ -308,7 +316,7 @@ class CircuitV2Transport(ITransport):
                 type=HopMessage.RESERVE,
                 peer=self.host.get_id().to_bytes(),
             )
-            
+
             try:
                 await stream.write(reserve_msg.SerializeToString())
                 logger.debug("Successfully sent reservation request")
@@ -355,14 +363,21 @@ class CircuitV2Transport(ITransport):
             logger.error("Error making reservation: %s", str(e))
             return False
 
-    def create_listener(self) -> IListener:
+    def create_listener(self, handler_function: THandler) -> IListener:
         """
-        Create a listener for incoming relay connections.
+        Create a listener on the transport.
+
+        Parameters
+        ----------
+        handler_function : THandler
+            A function that is called when a new connection is received.
+            The function should accept a connection (that implements the
+            connection interface) as its argument.
 
         Returns
         -------
         IListener
-            The created listener
+            A listener instance.
 
         """
         return CircuitV2Listener(self.host, self.protocol, self.config)
@@ -397,46 +412,6 @@ class CircuitV2Listener(Service, IListener):
         self.multiaddrs: list[
             multiaddr.Multiaddr
         ] = []  # Store multiaddrs as Multiaddr objects
-
-    async def handle_incoming_connection(
-        self,
-        stream: INetStream,
-        remote_peer_id: ID,
-    ) -> INetConn:
-        """
-        Handle an incoming relay connection.
-
-        Parameters
-        ----------
-        stream : INetStream
-            The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
-
-        Returns
-        -------
-        INetConn
-            The established connection
-
-        Raises
-        ------
-        ConnectionError
-            If the connection cannot be established
-
-        """
-        if not self.config.enable_stop:
-            raise ConnectionError("Stop role is not enabled")
-
-        try:
-            # Create raw connection
-            raw_conn = RawConnection(stream=stream, initiator=False)
-            ma = multiaddr.Multiaddr(remote_peer_id)
-            i_net_conn = self.host.upgrade_inbound_connection(raw_conn, ma)
-            return i_net_conn
-            
-        except Exception as e:
-            await stream.close()
-            raise ConnectionError(f"Failed to handle incoming connection: {str(e)}")
 
     async def run(self) -> None:
         """Run the listener service."""

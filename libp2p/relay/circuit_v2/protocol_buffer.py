@@ -8,9 +8,7 @@ to make them easier to work with in type-checked code.
 from enum import (
     IntEnum,
 )
-from typing import (
-    Any,
-)
+from typing import Any, cast
 
 from .pb.circuit_pb2 import Status as PbStatus
 
@@ -46,7 +44,7 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
     """
     pb_obj = PbStatus()
 
-    pb_obj.code = code
+    pb_obj.code = cast(Any, int(code))
     pb_obj.message = message
 
     return pb_obj

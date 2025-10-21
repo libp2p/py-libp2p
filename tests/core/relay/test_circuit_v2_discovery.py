@@ -57,7 +57,7 @@ async def simple_stream_handler(stream):
         if request.type == proto.HopMessage.RESERVE:
             # Create a valid response
             response = proto.HopMessage(
-                type=proto.HopMessage.RESERVE,
+                type=proto.HopMessage.STATUS,
                 status=proto.Status(
                     code=proto.Status.OK,
                     message="Test reservation accepted",

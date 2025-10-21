@@ -1473,10 +1473,13 @@ class INetwork(ABC):
             The newly created network stream.
 
         """
+
     @abstractmethod
-    async def upgrade_outbound_raw_conn(self, raw_conn: IRawConnection, peer_id: ID) -> INetConn:
+    async def upgrade_outbound_raw_conn(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
         """
-        Secure and upgrade a raw outbound connection to a multiplexed network connection.
+        Secure and upgrade a raw outbound connection to a multiplexed network connection
 
         Parameters
         ----------
@@ -1494,12 +1497,15 @@ class INetwork(ABC):
         ------
         SwarmException
             If upgrading security or multiplexing the connection fails.
+
         """
 
     @abstractmethod
-    async def upgrade_inbound_raw_conn(self, raw_conn: IRawConnection, maddr: Multiaddr) -> INetConn:
+    async def upgrade_inbound_raw_conn(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
         """
-        Secure and upgrade a raw inbound connection to a multiplexed network connection.
+        Secure and upgrade a raw inbound connection to a multiplexed network connection
 
         Parameters
         ----------
@@ -1510,13 +1516,14 @@ class INetwork(ABC):
 
         Returns
         -------
-        INetConn
+        IMuxedConn
             The upgraded, secure, and multiplexed network connection.
 
         Raises
         ------
         SwarmException
             If upgrading security or multiplexing the connection fails.
+
         """
 
     @abstractmethod
@@ -1877,14 +1884,14 @@ class IHost(ABC):
         Close the host and all underlying connections and services.
 
         """
-        
-    @abstractmethod
-    async def upgrade_outbound_connection(self, raw_conn: IRawConnection, peer_id: ID) -> INetConn:
-        """
-        Upgrade a raw outbound connection to a fully secure and multiplexed network connection for the specified peer.
 
-        This method takes an existing raw connection and applies the necessary protocol upgrades to establish a secure
-        and multiplexed INetConn. It is typically used by relays or when building advanced connection transports.
+    @abstractmethod
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Upgrade a raw outbound connection to a fully secure and
+        multiplexed network connection for the specified peer.
 
         Parameters
         ----------
@@ -1896,21 +1903,23 @@ class IHost(ABC):
         Returns
         -------
         INetConn
-            The upgraded and authenticated network connection with security and multiplexing.
+            The upgraded and authenticated network connection
+            with security and multiplexing.
 
         Raises
         ------
         SwarmException
-            If the upgrade process (security handshake or stream multiplexer negotiation) fails.
+            If the upgrade process (security handshake or multiplexer negotiation) fails
+
         """
 
     @abstractmethod
-    async def upgrade_inbound_connection(self, raw_conn: IRawConnection, maddr: Multiaddr) -> INetConn:
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
         """
-        Upgrade a raw inbound connection to a fully secure and multiplexed network connection for the given multiaddress.
-
-        This method takes an inbound raw connection and applies the necessary protocol upgrades to establish a secure
-        and multiplexed INetConn using the provided multiaddress.
+        Upgrade a raw inbound connection to a fully secure and
+        multiplexed network connection for the given multiaddress.
 
         Parameters
         ----------
@@ -1921,13 +1930,14 @@ class IHost(ABC):
 
         Returns
         -------
-        INetConn
-            The upgraded and authenticated inbound network connection.
+        IMuxedConn
+            The upgraded and authenticated inbound muxed connection.
 
         Raises
         ------
         SwarmException
-            If the upgrade process (security handshake or stream multiplexer negotiation) fails.
+            If the upgrade process (security handshake or multiplexer negotiation) fails
+
         """
 
 
