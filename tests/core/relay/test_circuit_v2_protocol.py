@@ -872,6 +872,7 @@ async def test_reservation_fails_with_invalid_record_transfer():
             corrupt_key_pair = create_new_key_pair()
 
             original_env = client_host.get_peerstore().get_local_record()
+            assert original_env is not None
 
             corrupted_env = Envelope(
                 public_key=corrupt_key_pair.public_key,  # Wrong public key
