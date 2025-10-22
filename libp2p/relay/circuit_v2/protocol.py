@@ -307,6 +307,7 @@ class CircuitV2Protocol(Service):
         """
         try:
             # Try to get peer ID first
+            remote_peer_id = None
             try:
                 # Cast to extended interface with get_remote_peer_id
                 stream_with_peer_id = cast(INetStreamWithExtras, stream)
