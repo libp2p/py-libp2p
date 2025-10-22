@@ -16,7 +16,9 @@ python:
       extra_requirements:
         - docs
         - test
-      constraints: constraints.txt
+
+    - method: pip
+      requirements: constraints.txt
 
 formats:
   - epub
