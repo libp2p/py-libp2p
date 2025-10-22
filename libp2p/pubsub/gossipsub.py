@@ -169,6 +169,9 @@ class GossipSub(IPubsubRouter, Service):
 
         # Scoring
         self.scorer: PeerScorer | None = PeerScorer(score_params or ScoreParams())
+        # Gossipsub v1.2 features
+        self.dont_send_message_ids = dict()
+        self.max_idontwant_messages = max_idontwant_messages
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -178,9 +181,6 @@ class GossipSub(IPubsubRouter, Service):
         :return: True if peer supports v1.1 features, False otherwise
         """
         return self.peer_protocol.get(peer_id) == PROTOCOL_ID_V11
-        # Gossipsub v1.2 features
-        self.dont_send_message_ids = dict()
-        self.max_idontwant_messages = max_idontwant_messages
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -586,7 +586,7 @@ class GossipSub(IPubsubRouter, Service):
             # scorer decay step
             if self.scorer is not None:
                 self.scorer.on_heartbeat()
-                
+
             # Prune old IDONTWANT entries to prevent memory leaks
             self._prune_idontwant_entries()
 
