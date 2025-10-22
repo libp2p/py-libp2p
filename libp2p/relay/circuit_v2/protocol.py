@@ -465,6 +465,8 @@ class CircuitV2Protocol(Service):
 
         This handler processes incoming relay connections from the destination side.
         """
+        remote_peer_id = stream.muxed_conn.peer_id
+
         try:
             # Read the incoming message with timeout
             with trio.fail_after(self.read_timeout):
@@ -473,9 +475,7 @@ class CircuitV2Protocol(Service):
                 stop_msg.ParseFromString(msg_bytes)
 
             if stop_msg.HasField("senderRecord"):
-                if not maybe_consume_signed_record(
-                    stop_msg, self.host, ID(stop_msg.peer)
-                ):
+                if not maybe_consume_signed_record(stop_msg, self.host, remote_peer_id):
                     logger.error("Received invalid senderRecord. Closing stream")
                     await self._close_stream(stream)
                     return
