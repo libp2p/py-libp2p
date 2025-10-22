@@ -21,6 +21,10 @@ class Direction(IntEnum):
     INBOUND = 0
     OUTBOUND = 1
 
+    def __str__(self) -> str:
+        """Return string representation as numeric value."""
+        return str(self.value)
+
 
 class MetricType(IntEnum):
     """Enumeration of metric types for array indexing."""
@@ -36,6 +40,10 @@ class MetricType(IntEnum):
     PEAK_CONNECTIONS = 8
     PEAK_MEMORY = 9
     PEAK_STREAMS = 10
+
+    def __str__(self) -> str:
+        """Return string representation as numeric value."""
+        return str(self.value)
 
 
 @dataclass
