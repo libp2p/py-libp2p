@@ -89,6 +89,8 @@ async def handle_incoming_stream(
 
         # Create and set local description (answer)
         answer = await aio_as_trio(peer_connection.createAnswer())
+        if answer is None:
+            raise WebRTCError("Failed to create SDP answer")
         await aio_as_trio(peer_connection.setLocalDescription(answer))
         logger.info("Created and set local description (answer)")
 

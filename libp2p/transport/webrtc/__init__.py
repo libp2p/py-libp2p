@@ -5,8 +5,8 @@ Provides both private-to-private and private-to-public WebRTC transport
 implementations.
 """
 
-import sys
 from .private_to_private.transport import WebRTCTransport
+from .private_to_public.transport import WebRTCDirectTransport
 from .constants import (
     DEFAULT_ICE_SERVERS,
     SIGNALING_PROTOCOL,
@@ -19,14 +19,8 @@ from .constants import (
     CODEC_WEBRTC,
     CODEC_WEBRTC_DIRECT,
     CODEC_CERTHASH,
-    PROTOCOL_WEBRTC,
-    PROTOCOL_WEBRTC_DIRECT,
-    PROTOCOL_CERTHASH,
 )
-from typing import Dict, Any, Protocol as TypingProtocol
-from multiaddr import protocols
-from multiaddr.protocols import Protocol
-from multiaddr import codecs
+from typing import Any
 
 
 class WebRTCCodec:
@@ -92,55 +86,6 @@ class CerthashCodec:
         b64_hash = base64.urlsafe_b64encode(b).decode().rstrip('=')
         return f"uEi{b64_hash}"
 
-
-# Register WebRTC protocols with multiaddr
-try:
-
-    # Create codec instances
-    webrtc_codec = WebRTCCodec()
-    webrtc_direct_codec = WebRTCDirectCodec()
-    certhash_codec = CerthashCodec()
-
-    # Register codec modules for multiaddr
-    sys.modules['multiaddr.codecs.webrtc'] = webrtc_codec  # type: ignore
-    sys.modules['multiaddr.codecs.webrtc_direct'] = webrtc_direct_codec  # type: ignore
-    sys.modules['multiaddr.codecs.certhash'] = certhash_codec  # type: ignore
-
-    setattr(codecs, 'webrtc', webrtc_codec)
-    setattr(codecs, 'webrtc_direct', webrtc_direct_codec)
-    setattr(codecs, 'certhash', certhash_codec)
-
-    # Create Protocol objects with string codec names
-    webrtc_protocol = Protocol(
-        code=CODEC_WEBRTC,
-        name=PROTOCOL_WEBRTC,
-        codec="webrtc"
-    )
-
-    webrtc_direct_protocol = Protocol(
-        code=CODEC_WEBRTC_DIRECT,
-        name=PROTOCOL_WEBRTC_DIRECT,
-        codec="webrtc_direct"
-    )
-
-    certhash_protocol = Protocol(
-        code=CODEC_CERTHASH,
-        name=PROTOCOL_CERTHASH,
-        codec="certhash"
-    )
-
-    # Register protocols using the add_protocol function
-    protocols.add_protocol(webrtc_protocol)
-    protocols.add_protocol(webrtc_direct_protocol)
-    protocols.add_protocol(certhash_protocol)
-
-    print("✅ WebRTC protocols registered with multiaddr")
-
-except ImportError as e:
-    print(f"⚠️ Failed to register WebRTC protocols: {e}")
-except Exception as e:
-    print(f"⚠️ Error registering WebRTC protocols: {e}")
-
 __all__ = [
     "WebRTCTransport",
     "WebRTCDirectTransport",
@@ -163,8 +108,6 @@ def webrtc(config: dict[str, Any] | None = None) -> WebRTCTransport:
     return WebRTCTransport(config)
 
 
-def webrtc_direct() -> "WebRTCDirectTransport":
+def webrtc_direct() -> WebRTCDirectTransport:
     """Create a WebRTC-Direct transport instance (private-to-public)."""
-    from .private_to_public.transport import WebRTCDirectTransport
-
     return WebRTCDirectTransport()

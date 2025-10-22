@@ -110,7 +110,9 @@ class WebRTCDirectTransport(ITransport):
             # Extract port from multiaddr
             port = 9000  # Default port
             try:
-                port = int(maddr.value_for_protocol("udp"))
+                udp_value = maddr.value_for_protocol("udp")
+                if udp_value is not None:
+                    port = int(udp_value)
             except Exception:
                 logger.warning("No UDP port in multiaddr, using default 9000")
 

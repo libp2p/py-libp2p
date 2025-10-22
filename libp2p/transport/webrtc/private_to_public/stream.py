@@ -17,8 +17,11 @@ else:
     try:
         from libp2p.abc import IMuxedStream
     except Exception:
+
         class IMuxedStream:
             pass
+
+
 import varint
 
 from ..constants import (

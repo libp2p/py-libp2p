@@ -99,6 +99,10 @@ test = [
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
 ]
+webrtc = [
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
+]
 
 [tool.setuptools]
 include-package-data = true

@@ -3,21 +3,26 @@ import asyncio
 import logging
 import secrets
 import sys
+from typing import TYPE_CHECKING, Any
 
 try:
-    import trio
     from multiaddr import Multiaddr
+    import trio
+
     from libp2p import new_host
     from libp2p.crypto.secp256k1 import create_new_key_pair
-    from libp2p.transport.webrtc.private_to_private import WebRTCTransport
+    from libp2p.custom_types import TProtocol
     from libp2p.transport.webrtc.multiaddr_protocols import register_webrtc_protocols
+    from libp2p.transport.webrtc.private_to_private import WebRTCTransport
+
+    if TYPE_CHECKING:
+        from libp2p.abc import IHost
 except ImportError as e:
     print(f"Import error: {e}")
     exit(1)
 
 logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -25,11 +30,11 @@ logger = logging.getLogger(__name__)
 class WebRTCListenerTest:
     def __init__(self, port: int = 9090):
         self.port = port
-        self.host = None
-        self.transport = None
-        self.protocol = "/webrtc-pvp-test/1.0.0"
-    
-    async def create_host(self):
+        self.host: IHost | None = None
+        self.transport: WebRTCTransport | None = None
+        self.protocol = TProtocol("/webrtc-pvp-test/1.0.0")
+
+    async def create_host(self) -> bool:
         try:
             register_webrtc_protocols()
             logger.info("WebRTC protocols registered")
@@ -41,9 +46,12 @@ class WebRTCListenerTest:
         except Exception as e:
             logger.error(f"Host creation failed: {e}", exc_info=True)
             return False
-    
-    async def setup_webrtc_transport(self):
+
+    async def setup_webrtc_transport(self) -> bool:
         try:
+            if self.host is None:
+                logger.error("Host not created")
+                return False
             self.transport = WebRTCTransport()
             self.transport.set_host(self.host)
             await self.transport.start()
@@ -52,15 +60,19 @@ class WebRTCListenerTest:
         except Exception as e:
             logger.error(f"WebRTC transport setup failed: {e}", exc_info=True)
             return False
-    
-    async def handle_stream(self, stream):
+
+    async def handle_stream(self, stream: Any) -> None:
         try:
-            peer_id = getattr(getattr(stream, "muxed_conn", None), "peer_id", getattr(stream, "peer_id", "unknown"))
+            peer_id = getattr(
+                getattr(stream, "muxed_conn", None),
+                "peer_id",
+                getattr(stream, "peer_id", "unknown"),
+            )
             data = await asyncio.wait_for(stream.read(), timeout=30.0)
             if data:
-                message = data.decode('utf-8', errors='ignore')
+                message = data.decode("utf-8", errors="ignore")
                 response = f"WebRTC Listener Echo: {message}"
-                await stream.write(response.encode('utf-8'))
+                await stream.write(response.encode("utf-8"))
         except asyncio.TimeoutError:
             logger.info(f"Timeout for {peer_id}")
         except Exception as e:
@@ -68,20 +80,26 @@ class WebRTCListenerTest:
         finally:
             try:
                 await stream.close()
-            except:
+            except Exception:
                 pass
-    
-    async def register_protocol(self):
+
+    async def register_protocol(self) -> bool:
         try:
+            if self.host is None:
+                logger.error("Host not created")
+                return False
             self.host.set_stream_handler(self.protocol, self.handle_stream)
             logger.info(f"Protocol registered: {self.protocol}")
             return True
         except Exception as e:
             logger.error(f"Protocol registration failed: {e}")
             return False
-    
-    async def create_listener(self):
+
+    async def create_listener(self) -> tuple[Any, Any]:
         try:
+            if self.transport is None:
+                logger.error("Transport not created")
+                return None, None
             listener = self.transport.create_listener(self.handle_stream)
             async with trio.open_nursery() as nursery:
                 dummy_addr = Multiaddr("/ip4/0.0.0.0/tcp/0")
@@ -94,8 +112,8 @@ class WebRTCListenerTest:
         except Exception as e:
             logger.error(f"Listener creation failed: {e}", exc_info=True)
             return None, None
-    
-    async def start_listener(self):
+
+    async def start_listener(self) -> bool:
         if not await self.create_host():
             return False
         if not await self.setup_webrtc_transport():
@@ -103,6 +121,9 @@ class WebRTCListenerTest:
         if not await self.register_protocol():
             return False
         try:
+            if self.host is None:
+                logger.error("Host not created")
+                return False
             tcp_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/{self.port}")
             async with self.host.run(listen_addrs=[tcp_addr]):
                 print("=" * 60)
@@ -121,7 +142,7 @@ class WebRTCListenerTest:
         return True
 
 
-async def main():
+async def main() -> None:
     port = 9090
     if len(sys.argv) > 1:
         try:

@@ -54,8 +54,10 @@ async def initiate_connection(
                 continue
             else:
                 # This is the target peer
-                target_peer_id = ID.from_base58(maddr.value_for_protocol("p2p"))
-                break
+                p2p_value = maddr.value_for_protocol("p2p")
+                if p2p_value is not None:
+                    target_peer_id = ID.from_base58(p2p_value)
+                    break
 
     if not target_peer_id:
         raise WebRTCError(f"Cannot extract target peer ID from multiaddr: {maddr}")
@@ -75,8 +77,10 @@ async def initiate_connection(
             if protocol.name == "p2p":
                 if i + 1 < len(protocols) and protocols[i + 1].name == "p2p-circuit":
                     # This is the relay peer
-                    relay_peer_id = ID.from_base58(maddr.value_for_protocol("p2p"))
-                    break
+                    p2p_value = maddr.value_for_protocol("p2p")
+                    if p2p_value is not None:
+                        relay_peer_id = ID.from_base58(p2p_value)
+                        break
 
         if not relay_peer_id:
             raise WebRTCError(f"Cannot extract relay peer ID from multiaddr: {maddr}")
