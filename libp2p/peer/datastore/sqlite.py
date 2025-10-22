@@ -4,10 +4,11 @@ SQLite datastore implementation for persistent peer storage.
 This provides a SQLite-based datastore for persistent peer storage.
 """
 
-import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 import sqlite3
+
+import trio
 
 from .base import IBatch, IBatchingDatastore
 
@@ -66,7 +67,7 @@ class SQLiteDatastore(IBatchingDatastore):
         """
         self.path = Path(path)
         self.connection: sqlite3.Connection | None = None
-        self._lock = asyncio.Lock()
+        self._lock = trio.Lock()
 
     async def _ensure_connection(self) -> None:
         """Ensure database connection is established."""

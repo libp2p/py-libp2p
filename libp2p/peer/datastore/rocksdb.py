@@ -6,10 +6,12 @@ RocksDB is a persistent key-value store for fast storage based
 on Log-Structured Merge Trees.
 """
 
-import asyncio
 from collections.abc import Iterator
+import importlib
 from pathlib import Path
 from typing import Any
+
+import trio
 
 from .base import IBatch, IBatchingDatastore
 
@@ -71,7 +73,7 @@ class RocksDBDatastore(IBatchingDatastore):
         """
         self.path = Path(path)
         self.db: Any | None = None
-        self._lock = asyncio.Lock()
+        self._lock = trio.Lock()
 
     async def _ensure_connection(self) -> None:
         """Ensure database connection is established."""
@@ -79,10 +81,7 @@ class RocksDBDatastore(IBatchingDatastore):
             async with self._lock:
                 if self.db is None:
                     try:
-                        # Lazy import to avoid static import errors under pyrefly
-                        import importlib
-
-                        rocksdb = importlib.import_module("rocksdb")  # type: ignore
+                        rocksdb = importlib.import_module("rocksdb")
 
                         # Create directory if it doesn't exist
                         self.path.mkdir(parents=True, exist_ok=True)
@@ -133,12 +132,8 @@ class RocksDBDatastore(IBatchingDatastore):
         """Query key-value pairs with optional prefix."""
         # query is synchronous per interface; ensure DB is open sync if needed
         if self.db is None:
-            # Can't await here; open lazily via importlib
             try:
-                # Lazy import to avoid hard dependency during static checks
-                import importlib
-
-                rocksdb = importlib.import_module("rocksdb")  # type: ignore
+                rocksdb = importlib.import_module("rocksdb")
 
                 self.path.mkdir(parents=True, exist_ok=True)
                 opts = rocksdb.Options()

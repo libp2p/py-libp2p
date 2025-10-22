@@ -4,8 +4,9 @@ In-memory datastore implementation.
 This provides a simple in-memory datastore for testing and development.
 """
 
-import asyncio
 from collections.abc import Iterator
+
+import trio
 
 from .base import IBatch, IBatchingDatastore
 
@@ -46,7 +47,7 @@ class MemoryDatastore(IBatchingDatastore):
 
     def __init__(self) -> None:
         self._data: dict[bytes, bytes] = {}
-        self._lock = asyncio.Lock()
+        self._lock = trio.Lock()
 
     async def get(self, key: bytes) -> bytes | None:
         """Retrieve a value by key."""

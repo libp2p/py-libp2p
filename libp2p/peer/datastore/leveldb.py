@@ -5,10 +5,12 @@ This provides a LevelDB-based datastore for high-performance persistent storage.
 LevelDB is a fast key-value storage library written at Google.
 """
 
-import asyncio
 from collections.abc import Iterator
+import importlib
 from pathlib import Path
 from typing import Any
+
+import trio
 
 from .base import IBatch, IBatchingDatastore
 
@@ -70,7 +72,7 @@ class LevelDBDatastore(IBatchingDatastore):
         """
         self.path = Path(path)
         self.db: Any | None = None
-        self._lock = asyncio.Lock()
+        self._lock = trio.Lock()
 
     async def _ensure_connection(self) -> None:
         """Ensure database connection is established."""
@@ -78,10 +80,7 @@ class LevelDBDatastore(IBatchingDatastore):
             async with self._lock:
                 if self.db is None:
                     try:
-                        # Lazy import to avoid static import errors under pyrefly
-                        import importlib
-
-                        plyvel = importlib.import_module("plyvel")  # type: ignore
+                        plyvel = importlib.import_module("plyvel")
 
                         # Create directory if it doesn't exist
                         self.path.mkdir(parents=True, exist_ok=True)
@@ -125,9 +124,7 @@ class LevelDBDatastore(IBatchingDatastore):
         # Ensure DB exists synchronously if needed
         if self.db is None:
             try:
-                import importlib
-
-                plyvel = importlib.import_module("plyvel")  # type: ignore
+                plyvel = importlib.import_module("plyvel")
 
                 self.path.mkdir(parents=True, exist_ok=True)
                 self.db = plyvel.DB(str(self.path), create_if_missing=True)
