@@ -4,7 +4,7 @@ export class TestResults {
         this.errors = []
         this.startTime = Date.now()
     }
-    
+
     addResult(testName, success, details = null) {
         this.results[testName] = {
             success,
@@ -13,11 +13,11 @@ export class TestResults {
             duration: Date.now() - this.startTime
         }
     }
-    
+
     addError(error) {
         this.errors.push(error.toString())
     }
-    
+
     toJSON() {
         return {
             results: this.results,
@@ -28,7 +28,7 @@ export class TestResults {
             totalDuration: Date.now() - this.startTime
         }
     }
-    
+
     printSummary() {
         const data = this.toJSON()
         console.log('\n' + '='.repeat(50))
@@ -38,12 +38,12 @@ export class TestResults {
         console.log(`Passed: ${data.passed}`)
         console.log(`Failed: ${data.failed}`)
         console.log(`Duration: ${data.totalDuration}ms`)
-        
+
         if (this.errors.length > 0) {
             console.log(`\nErrors (${this.errors.length}):`)
             this.errors.forEach(error => console.log(`  - ${error}`))
         }
-        
+
         console.log('\nDetailed Results:')
         Object.entries(this.results).forEach(([testName, result]) => {
             const status = result.success ? '✓ PASS' : '✗ FAIL'
@@ -57,10 +57,10 @@ export class TestResults {
 
 export async function waitForServerReady(host, port, timeout = 10000) {
     const startTime = Date.now()
-    
+
     while (Date.now() - startTime < timeout) {
         try {
-            const response = await fetch(`http://${host}:${port}`, { 
+            const response = await fetch(`http://${host}:${port}`, {
                 method: 'HEAD',
                 signal: AbortSignal.timeout(1000)
             })
@@ -69,7 +69,7 @@ export async function waitForServerReady(host, port, timeout = 10000) {
             await new Promise(resolve => setTimeout(resolve, 500))
         }
     }
-    
+
     return false
 }
 

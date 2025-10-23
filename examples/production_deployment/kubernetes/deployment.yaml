@@ -1,0 +1,211 @@
+# Kubernetes deployment for Python libp2p WebSocket Transport
+# Based on patterns from js-libp2p and go-libp2p implementations
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: libp2p-websocket
+  namespace: libp2p-production
+  labels:
+    app: libp2p-websocket
+    component: transport
+    version: v1.0.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: libp2p-websocket
+  template:
+    metadata:
+      labels:
+        app: libp2p-websocket
+        component: transport
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: libp2p-websocket
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: libp2p-websocket
+        image: libp2p-websocket:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: AUTO_TLS_ENABLED
+          value: "true"
+        - name: AUTO_TLS_DOMAIN
+          value: "libp2p.local"
+        - name: REDIS_URL
+          value: "redis://redis-service:6379"
+        - name: METRICS_ENABLED
+          value: "true"
+        - name: HTTP_PORT
+          value: "8080"
+        - name: HTTPS_PORT
+          value: "8443"
+        - name: HEALTH_PORT
+          value: "8080"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: certs
+          mountPath: /app/certs
+          readOnly: false
+        - name: logs
+          mountPath: /app/logs
+          readOnly: false
+        - name: data
+          mountPath: /app/data
+          readOnly: false
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: certs
+        persistentVolumeClaim:
+          claimName: libp2p-certs-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: libp2p-logs-pvc
+      - name: data
+        persistentVolumeClaim:
+          claimName: libp2p-data-pvc
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - libp2p-websocket
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: libp2p-websocket-service
+  namespace: libp2p-production
+  labels:
+    app: libp2p-websocket
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: https
+    port: 8443
+    targetPort: 8443
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: libp2p-websocket
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: libp2p-websocket
+  namespace: libp2p-production
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libp2p-certs-pvc
+  namespace: libp2p-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libp2p-logs-pvc
+  namespace: libp2p-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libp2p-data-pvc
+  namespace: libp2p-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard

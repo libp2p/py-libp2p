@@ -9,23 +9,23 @@ const __dirname = dirname(__filename)
 async function testJSClientPyServer() {
   const results = new TestResults()
   let pyProcess = null
-  
+
   try {
     const pyServerPath = join(__dirname, '..', 'py_node', 'py_websocket_node.py')
-    
+
     console.log('Starting Python server...')
     pyProcess = spawn('python', [
       pyServerPath, 'server', '8004', 'false', '30'
     ], { stdio: 'pipe' })
-    
+
     await new Promise(resolve => setTimeout(resolve, 3000))
     console.log('Python server should be ready on port 8004')
-    
+
     const targetUrl = 'http://127.0.0.1:8004'
     const testMessage = 'Hello from JS client'
-    
+
     console.log(`Sending message to Python server: ${testMessage}`)
-    
+
     try {
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -34,11 +34,11 @@ async function testJSClientPyServer() {
           'Content-Type': 'text/plain'
         }
       })
-      
+
       if (response.ok) {
         const responseText = await response.text()
         console.log(`Received response: ${responseText}`)
-        
+
         if (responseText.includes(testMessage)) {
           results.addResult('js_to_py_communication', true, {
             sent: testMessage,
@@ -65,18 +65,18 @@ async function testJSClientPyServer() {
       })
       console.log(`JS to Python test failed: ${error.message}`)
     }
-    
+
   } catch (error) {
     results.addError(`Test error: ${error}`)
     console.error('Test error:', error)
-    
+
   } finally {
     if (pyProcess) {
       console.log('\nStopping Python server...')
       pyProcess.kill()
     }
   }
-  
+
   return results.toJSON()
 }
 
