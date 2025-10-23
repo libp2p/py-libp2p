@@ -307,16 +307,8 @@ class CircuitV2Protocol(Service):
         """
         try:
             # Try to get peer ID first
-            remote_peer_id = None
-            try:
-                # Cast to extended interface with get_remote_peer_id
-                stream_with_peer_id = cast(INetStreamWithExtras, stream)
-                remote_peer_id = stream_with_peer_id.get_remote_peer_id()
-                remote_id = str(remote_peer_id)
-            except Exception:
-                # Fall back to address if peer ID not available
-                remote_addr = stream.get_remote_address()
-                remote_id = f"peer at {remote_addr}" if remote_addr else "unknown peer"
+            remote_peer_id = stream.muxed_conn.peer_id
+            remote_id = str(remote_peer_id)
 
             logger.debug("Handling hop stream from %s", remote_id)
 
@@ -512,11 +504,11 @@ class CircuitV2Protocol(Service):
             self._active_relays[peer_id] = (src_stream, stream)
 
             # Get the source peer's SPR to send to destination
-            src_peer_id = cast(INetStreamWithExtras, src_stream).get_remote_peer_id()
+            src_peer_id = src_stream.muxed_conn.peer_id
             src_peer_envelope = self.host.get_peerstore().get_peer_record(src_peer_id)
 
             # Get the destination peer's SPR to send to source
-            dst_peer_id = cast(INetStreamWithExtras, stream).get_remote_peer_id()
+            dst_peer_id = stream.muxed_conn.peer_id
             dst_peer_envelope = self.host.get_peerstore().get_peer_record(dst_peer_id)
 
             # Send success status to both sides
