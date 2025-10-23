@@ -23,7 +23,7 @@ libp2p.security.pnet.psk_conn module
 Module contents
 ---------------
 
-.. automodule:: libp2p.security.insecure
+.. automodule:: libp2p.security.pnet
    :members:
    :undoc-members:
    :show-inheritance:
