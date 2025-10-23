@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any
+from typing import Any, Optional
 
 from multiaddr import Multiaddr
 import trio
@@ -18,11 +18,14 @@ except ImportError:
     WebSocketServer = None  # type: ignore
 
 from libp2p.abc import IListener
+from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
 
+from .autotls import AutoTLSConfig, AutoTLSManager
 from .connection import P2PWebSocketConnection
+from .tls_config import WebSocketTLSConfig
 
 logger = logging.getLogger("libp2p.transport.websocket.listener")
 
@@ -33,6 +36,12 @@ class WebsocketListenerConfig:
 
     # TLS configuration
     tls_config: ssl.SSLContext | None = None
+
+    # AutoTLS configuration
+    autotls_config: Optional[AutoTLSConfig] = None
+
+    # Advanced TLS configuration
+    advanced_tls_config: Optional[WebSocketTLSConfig] = None
 
     # Connection settings
     max_connections: int = 1000
@@ -95,6 +104,10 @@ class WebsocketListener(IListener):
         self._tls_config = self._config.tls_config
         self._is_wss = self._tls_config is not None
 
+        # AutoTLS support
+        self._autotls_manager: Optional[AutoTLSManager] = None
+        self._autotls_initialized = False
+
         logger.debug("WebsocketListener initialized")
 
     def _track_connection(self, conn: P2PWebSocketConnection) -> None:
@@ -110,6 +123,47 @@ class WebsocketListener(IListener):
         if str(conn_id) in self._connections:
             del self._connections[str(conn_id)]
             self._current_connections -= 1
+
+    async def _initialize_autotls(self, peer_id: ID) -> None:
+        """Initialize AutoTLS if configured."""
+        if self._autotls_initialized:
+            return
+
+        if self._config.autotls_config and self._config.autotls_config.enabled:
+            try:
+                from .autotls import initialize_autotls
+                self._autotls_manager = await initialize_autotls(
+                    self._config.autotls_config
+                )
+                logger.info(f"AutoTLS initialized for listener with peer {peer_id}")
+                self._autotls_initialized = True
+            except Exception as e:
+                logger.error(f"Failed to initialize AutoTLS: {e}")
+                raise
+
+    async def _get_ssl_context(
+        self,
+        peer_id: Optional[ID] = None,
+        sni_name: Optional[str] = None,
+    ) -> Optional[ssl.SSLContext]:
+        """Get SSL context for connection."""
+        # Check AutoTLS first
+        if self._autotls_manager and peer_id:
+            domain = sni_name or (
+                self._config.autotls_config.default_domain
+                if self._config.autotls_config
+                else "libp2p.local"
+            )
+            context = self._autotls_manager.get_ssl_context(peer_id, domain)
+            if context:
+                return context
+
+        # Check advanced TLS configuration
+        if self._config.advanced_tls_config:
+            return self._config.advanced_tls_config.get_ssl_context(peer_id, sni_name)
+
+        # Fall back to legacy TLS configuration
+        return self._tls_config
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """

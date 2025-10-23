@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
@@ -10,12 +10,15 @@ import trio
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
 from libp2p.network.connection.raw_connection import RawConnection
+from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
 
+from .autotls import AutoTLSConfig, AutoTLSManager, initialize_autotls
 from .connection import P2PWebSocketConnection
 from .listener import WebsocketListener
+from .tls_config import WebSocketTLSConfig
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,12 @@ class WebsocketConfig:
     # TLS configuration
     tls_client_config: ssl.SSLContext | None = None
     tls_server_config: ssl.SSLContext | None = None
+
+    # Advanced TLS configuration
+    tls_config: Optional[WebSocketTLSConfig] = None
+
+    # AutoTLS configuration
+    autotls_config: Optional[AutoTLSConfig] = None
 
     # Connection settings
     handshake_timeout: float = 15.0
@@ -57,22 +66,32 @@ class WebsocketConfig:
         ):
             raise ValueError("proxy_url must be a SOCKS5 URL")
 
+        # Validate TLS configuration
+        if self.tls_config:
+            self.tls_config.validate()
+
+        # Validate AutoTLS configuration
+        if self.autotls_config:
+            self.autotls_config.validate()
+
+
 def WithProxy(proxy_url: str, auth: tuple[str, str] | None = None) -> WebsocketConfig:
     """
     Create a WebsocketConfig with SOCKS proxy settings.
-    
+
     Convenience method similar to go-libp2p's WithTLSClientConfig.
-    
+
     Args:
         proxy_url: SOCKS proxy URL (e.g., 'socks5://localhost:1080')
         auth: Optional (username, password) tuple for proxy authentication
-        
+
     Returns:
         WebsocketConfig with proxy settings configured
-        
+
     Example:
         >>> config = WithProxy('socks5://proxy.corp.com:1080', ('user', 'pass'))
         >>> transport = WebsocketTransport(upgrader, config=config)
+
     """
     return WebsocketConfig(proxy_url=proxy_url, proxy_auth=auth)
 
@@ -80,38 +99,136 @@ def WithProxy(proxy_url: str, auth: tuple[str, str] | None = None) -> WebsocketC
 def WithProxyFromEnvironment() -> WebsocketConfig:
     """
     Create a WebsocketConfig that will use proxy from environment variables.
-    
+
     This is the default behavior, but this method makes it explicit.
     Reads HTTP_PROXY for ws:// and HTTPS_PROXY for wss:// connections.
-    
+
     Returns:
         WebsocketConfig with no explicit proxy (will use environment)
-        
+
     Example:
         >>> import os
         >>> os.environ['HTTPS_PROXY'] = 'socks5://localhost:1080'
         >>> config = WithProxyFromEnvironment()
         >>> transport = WebsocketTransport(upgrader, config=config)
+
     """
     return WebsocketConfig(proxy_url=None)  # None = use environment
+
+
+def WithAutoTLS(
+    domain: str = "libp2p.local",
+    storage_path: str = "autotls-certs",
+    renewal_threshold_hours: int = 24,
+    cert_validity_days: int = 90,
+) -> WebsocketConfig:
+    """
+    Create a WebsocketConfig with AutoTLS enabled.
+
+    Args:
+        domain: Default domain for certificates
+        storage_path: Path for certificate storage
+        renewal_threshold_hours: Hours before expiry to renew certificate
+        cert_validity_days: Certificate validity period in days
+
+    Returns:
+        WebsocketConfig with AutoTLS enabled
+
+    Example:
+        >>> config = WithAutoTLS(domain="myapp.local")
+        >>> transport = WebsocketTransport(upgrader, config=config)
+
+    """
+    autotls_config = AutoTLSConfig(
+        enabled=True,
+        storage_path=storage_path,
+        renewal_threshold_hours=renewal_threshold_hours,
+        cert_validity_days=cert_validity_days,
+        default_domain=domain,
+    )
+
+    tls_config = WebSocketTLSConfig(
+        autotls_enabled=True,
+        autotls_domain=domain,
+        autotls_storage_path=storage_path,
+    )
+
+    return WebsocketConfig(
+        tls_config=tls_config,
+        autotls_config=autotls_config,
+    )
+
+
+def WithAdvancedTLS(
+    cert_file: Optional[str] = None,
+    key_file: Optional[str] = None,
+    ca_file: Optional[str] = None,
+    verify_peer: bool = True,
+    verify_hostname: bool = True,
+) -> WebsocketConfig:
+    """
+    Create a WebsocketConfig with advanced TLS settings.
+
+    Args:
+        cert_file: Certificate file path
+        key_file: Private key file path
+        ca_file: CA certificate file path
+        verify_peer: Verify peer certificates
+        verify_hostname: Verify hostname
+
+    Returns:
+        WebsocketConfig with advanced TLS settings
+
+    Example:
+        >>> config = WithAdvancedTLS(
+        ...     cert_file="server.crt",
+        ...     key_file="server.key",
+        ...     ca_file="ca.crt"
+        ... )
+        >>> transport = WebsocketTransport(upgrader, config=config)
+
+    """
+    from .tls_config import CertificateConfig, CertificateValidationMode, TLSConfig
+
+    certificate = None
+    if cert_file and key_file:
+        certificate = CertificateConfig(
+            cert_file=cert_file,
+            key_file=key_file,
+            ca_file=ca_file,
+            validation_mode=(
+                CertificateValidationMode.STRICT
+                if verify_peer
+                else CertificateValidationMode.BASIC
+            ),
+            verify_peer=verify_peer,
+            verify_hostname=verify_hostname,
+        )
+
+    tls_config = WebSocketTLSConfig(
+        tls_config=TLSConfig(certificate=certificate) if certificate else None,
+    )
+
+    return WebsocketConfig(tls_config=tls_config)
 
 
 def WithTLSClientConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
     """
     Create a WebsocketConfig with custom TLS client configuration.
-    
+
     Args:
         tls_config: SSL context for client TLS configuration
-        
+
     Returns:
         WebsocketConfig with TLS settings configured
-        
+
     Example:
         >>> import ssl
         >>> ctx = ssl.create_default_context()
         >>> ctx.check_hostname = False
         >>> config = WithTLSClientConfig(ctx)
         >>> transport = WebsocketTransport(upgrader, config=config)
+
     """
     return WebsocketConfig(tls_client_config=tls_config)
 
@@ -119,18 +236,19 @@ def WithTLSClientConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
 def WithTLSServerConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
     """
     Create a WebsocketConfig with custom TLS server configuration.
-    
+
     Args:
         tls_config: SSL context for server TLS configuration
-        
+
     Returns:
         WebsocketConfig with server TLS settings configured
-        
+
     Example:
         >>> import ssl
         >>> ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         >>> ctx.load_cert_chain('server.crt', 'server.key')
         >>> config = WithTLSServerConfig(ctx)
+
     """
     return WebsocketConfig(tls_server_config=tls_config)
 
@@ -138,16 +256,17 @@ def WithTLSServerConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
 def WithHandshakeTimeout(timeout: float) -> WebsocketConfig:
     """
     Create a WebsocketConfig with custom handshake timeout.
-    
+
     Args:
         timeout: Handshake timeout in seconds
-        
+
     Returns:
         WebsocketConfig with timeout configured
-        
+
     Example:
         >>> config = WithHandshakeTimeout(30.0)
         >>> transport = WebsocketTransport(upgrader, config=config)
+
     """
     if timeout <= 0:
         raise ValueError("Handshake timeout must be positive")
@@ -157,16 +276,17 @@ def WithHandshakeTimeout(timeout: float) -> WebsocketConfig:
 def WithMaxConnections(max_connections: int) -> WebsocketConfig:
     """
     Create a WebsocketConfig with custom connection limit.
-    
+
     Args:
         max_connections: Maximum number of concurrent connections
-        
+
     Returns:
         WebsocketConfig with connection limit configured
-        
+
     Example:
         >>> config = WithMaxConnections(500)
         >>> transport = WebsocketTransport(upgrader, config=config)
+
     """
     if max_connections <= 0:
         raise ValueError("Max connections must be positive")
@@ -176,37 +296,38 @@ def WithMaxConnections(max_connections: int) -> WebsocketConfig:
 def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
     """
     Combine multiple WebsocketConfig objects.
-    
+
     Later configs override earlier configs for non-None values.
-    
+
     Args:
         *configs: Variable number of WebsocketConfig objects
-        
+
     Returns:
         Combined WebsocketConfig
-        
+
     Example:
         >>> proxy_config = WithProxy('socks5://localhost:1080')
         >>> tls_config = WithTLSClientConfig(my_ssl_context)
         >>> timeout_config = WithHandshakeTimeout(30.0)
         >>> final = combine_configs(proxy_config, tls_config, timeout_config)
         >>> transport = WebsocketTransport(upgrader, config=final)
+
     """
     result = WebsocketConfig()
-    
+
     for config in configs:
         # Proxy settings
         if config.proxy_url is not None:
             result.proxy_url = config.proxy_url
         if config.proxy_auth is not None:
             result.proxy_auth = config.proxy_auth
-        
+
         # TLS settings
         if config.tls_client_config is not None:
             result.tls_client_config = config.tls_client_config
         if config.tls_server_config is not None:
             result.tls_server_config = config.tls_server_config
-        
+
         # Connection settings
         if config.handshake_timeout != 15.0:  # Not default
             result.handshake_timeout = config.handshake_timeout
@@ -214,7 +335,7 @@ def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
             result.max_buffered_amount = config.max_buffered_amount
         if config.max_connections != 1000:  # Not default
             result.max_connections = config.max_connections
-        
+
         # Advanced settings
         if config.ping_interval != 20.0:  # Not default
             result.ping_interval = config.ping_interval
@@ -224,8 +345,9 @@ def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
             result.close_timeout = config.close_timeout
         if config.max_message_size != 32 * 1024 * 1024:  # Not default
             result.max_message_size = config.max_message_size
-    
+
     return result
+
 
 class WebsocketTransport(ITransport):
     """
@@ -285,6 +407,10 @@ class WebsocketTransport(ITransport):
         self._tls_client_config = self._config.tls_client_config
         self._tls_server_config = self._config.tls_server_config
 
+        # AutoTLS support
+        self._autotls_manager: Optional[AutoTLSManager] = None
+        self._autotls_initialized = False
+
     async def can_dial(self, maddr: Multiaddr) -> bool:
         """Check if we can dial the given multiaddr."""
         try:
@@ -292,6 +418,50 @@ class WebsocketTransport(ITransport):
             return True  # If parsing succeeds, it's a valid WebSocket multiaddr
         except (ValueError, KeyError):
             return False
+
+    async def _initialize_autotls(self, peer_id: ID) -> None:
+        """Initialize AutoTLS if configured."""
+        if self._autotls_initialized:
+            return
+
+        if self._config.autotls_config and self._config.autotls_config.enabled:
+            try:
+                self._autotls_manager = await initialize_autotls(
+                    self._config.autotls_config
+                )
+                logger.info(f"AutoTLS initialized for peer {peer_id}")
+                self._autotls_initialized = True
+            except Exception as e:
+                logger.error(f"Failed to initialize AutoTLS: {e}")
+                raise
+
+    async def _get_ssl_context(
+        self,
+        peer_id: Optional[ID] = None,
+        sni_name: Optional[str] = None,
+        is_server: bool = True,
+    ) -> Optional[ssl.SSLContext]:
+        """Get SSL context for connection."""
+        # Check AutoTLS first
+        if self._autotls_manager and peer_id:
+            domain = sni_name or (
+                self._config.autotls_config.default_domain
+                if self._config.autotls_config
+                else "libp2p.local"
+            )
+            context = self._autotls_manager.get_ssl_context(peer_id, domain)
+            if context:
+                return context
+
+        # Check advanced TLS configuration
+        if self._config.tls_config:
+            return self._config.tls_config.get_ssl_context(peer_id, sni_name)
+
+        # Fall back to legacy TLS configuration
+        if is_server:
+            return self._config.tls_server_config
+        else:
+            return self._config.tls_client_config
 
     async def _track_connection(self, conn: P2PWebSocketConnection) -> None:
         """Track a new connection."""
@@ -317,21 +487,22 @@ class WebsocketTransport(ITransport):
     ) -> P2PWebSocketConnection:
         """
         Create a new WebSocket connection.
-        
+
         Proxy configuration precedence (highest to lowest):
         1. Explicit proxy_url parameter
         2. self._config.proxy_url from WebsocketConfig
         3. Environment variables (HTTP_PROXY/HTTPS_PROXY)
-        
+
         Args:
             proto_info: Parsed WebSocket multiaddr information
             proxy_url: Optional explicit proxy URL (overrides config and environment)
-            
+
         Returns:
             P2PWebSocketConnection instance
-            
+
         Raises:
             OpenConnectionError: If connection fails
+
         """
         # Extract host and port from the rest_multiaddr
         host = (
@@ -345,39 +516,49 @@ class WebsocketTransport(ITransport):
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
         ws_url = f"{protocol}://{host}:{port}/"
-        
+
         # ✅ NEW: Determine proxy configuration with precedence:
         # 1. Explicit proxy_url parameter (highest priority)
         # 2. Config proxy_url from WebsocketConfig
         # 3. Environment variables HTTP_PROXY/HTTPS_PROXY (like go-libp2p)
         final_proxy_url = proxy_url
-        
+
         if final_proxy_url is None:
             final_proxy_url = self._config.proxy_url
             if final_proxy_url:
                 logger.debug(f"Using proxy from config: {final_proxy_url}")
-        
+
         if final_proxy_url is None:
             # ✅ NEW: Check environment variables (mimics go-libp2p behavior)
             from .proxy_env import get_proxy_from_environment
+
             final_proxy_url = get_proxy_from_environment(ws_url)
             if final_proxy_url:
                 logger.debug(f"Using proxy from environment: {final_proxy_url}")
-        
+
         try:
             # Prepare SSL context for WSS connections
             ssl_context = None
             if proto_info.is_wss:
-                if self._config.tls_client_config:
-                    ssl_context = self._config.tls_client_config
-                    logger.debug("Using custom TLS client config")
-                else:
-                    # Create default SSL context for client
-                    ssl_context = ssl.create_default_context()
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-                    logger.debug("Using default TLS client config (insecure)")
-            
+                # Try to get SSL context from AutoTLS or advanced TLS config
+                ssl_context = await self._get_ssl_context(
+                    peer_id=None,  # No peer ID for client connections
+                    sni_name=host,
+                    is_server=False,
+                )
+
+                if ssl_context is None:
+                    # Fall back to legacy TLS configuration
+                    if self._config.tls_client_config:
+                        ssl_context = self._config.tls_client_config
+                        logger.debug("Using custom TLS client config")
+                    else:
+                        # Create default SSL context for client
+                        ssl_context = ssl.create_default_context()
+                        ssl_context.check_hostname = False
+                        ssl_context.verify_mode = ssl.CERT_NONE
+                        logger.debug("Using default TLS client config (insecure)")
+
             # Handle proxy connections
             if final_proxy_url:
                 logger.info(f"Using SOCKS proxy: {final_proxy_url} for {ws_url}")
@@ -389,16 +570,16 @@ class WebsocketTransport(ITransport):
                 # Direct connection (no proxy)
                 logger.debug(f"Direct connection to {ws_url} (no proxy)")
                 conn = await self._create_direct_connection(proto_info, ssl_context)
-            
+
             if not conn:
                 raise OpenConnectionError(f"Failed to create connection to {ws_url}")
-            
+
             # Track connection
             await self._track_connection(conn)
-            
+
             logger.info(f"Connection established to {ws_url}")
             return conn
-            
+
         except trio.TooSlowError as e:
             self._failed_connections += 1
             logger.error(f"Connection timeout after {self._config.handshake_timeout}s")
@@ -454,35 +635,33 @@ class WebsocketTransport(ITransport):
                 return conn
 
     async def _create_proxy_connection(
-        self, 
-        proto_info: Any, 
-        proxy_url: str, 
-        ssl_context: ssl.SSLContext | None
+        self, proto_info: Any, proxy_url: str, ssl_context: ssl.SSLContext | None
     ) -> P2PWebSocketConnection:
         """
         Create a WebSocket connection through SOCKS proxy.
-        
+
         Args:
             proto_info: Parsed WebSocket multiaddr info
             proxy_url: SOCKS proxy URL
             ssl_context: SSL context for secure connections
-            
+
         Returns:
             P2PWebSocketConnection wrapper
-            
+
         Raises:
             OpenConnectionError: If proxy connection fails
+
         """
         try:
             from .proxy import SOCKSConnectionManager
-            
+
             # Create proxy manager
             proxy_manager = SOCKSConnectionManager(
                 proxy_url=proxy_url,
                 auth=self._config.proxy_auth,
                 timeout=self._config.handshake_timeout,
             )
-            
+
             # Extract host and port from multiaddr
             host = (
                 proto_info.rest_multiaddr.value_for_protocol("ip4")
@@ -493,9 +672,9 @@ class WebsocketTransport(ITransport):
                 or "localhost"
             )
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
-            
+
             logger.debug(f"Connecting through SOCKS proxy to {host}:{port}")
-            
+
             # ✅ FIX: Create temporary nursery for proxy connection
             # This is necessary because trio-websocket requires a nursery
             async with trio.open_nursery() as temp_nursery:
@@ -506,7 +685,7 @@ class WebsocketTransport(ITransport):
                     port=port,
                     ssl_context=ssl_context,
                 )
-                
+
                 # Create our connection wrapper
                 conn = P2PWebSocketConnection(
                     ws_connection,
@@ -514,10 +693,10 @@ class WebsocketTransport(ITransport):
                     is_secure=proto_info.is_wss,
                     max_buffered_amount=self._config.max_buffered_amount,
                 )
-                
-                logger.debug(f"Proxy connection established, tracking connection")
+
+                logger.debug("Proxy connection established, tracking connection")
                 return conn
-                
+
         except ImportError:
             raise OpenConnectionError(
                 "SOCKS proxy support requires trio-socks package. "
@@ -590,6 +769,9 @@ class WebsocketTransport(ITransport):
                 ping_interval=self._config.ping_interval,
                 ping_timeout=self._config.ping_timeout,
                 close_timeout=self._config.close_timeout,
+                # Pass AutoTLS and advanced TLS configuration
+                autotls_config=self._config.autotls_config,
+                advanced_tls_config=self._config.tls_config,
             ),
         )
 
