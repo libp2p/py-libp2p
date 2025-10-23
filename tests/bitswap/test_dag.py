@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE, MIN_CHUNK_SIZE
+from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE
 from libp2p.bitswap.cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
@@ -230,15 +230,14 @@ class TestAddFile:
 
             dag = MerkleDag(mock_client)
 
-            # Add with MIN chunk size
-            from libp2p.bitswap.chunker import MIN_CHUNK_SIZE
+            # Add with smaller chunk size for testing
+            chunk_size = 16 * 1024  # 16 KB for testing
 
-            chunk_size = MIN_CHUNK_SIZE  # 64 KB
             await dag.add_file(temp_path, chunk_size=chunk_size)
 
             # Should have many chunks
-            # (3.2MB / 64KB = 50 chunks) + 1 root = 51 calls
-            assert mock_client.add_block.call_count == 51
+            # (3.2MB / 16KB = 200 chunks) + 1 root = 201 calls
+            assert mock_client.add_block.call_count == 201
         finally:
             Path(temp_path).unlink()
 
@@ -448,8 +447,9 @@ class TestEndToEnd:
 
             dag = MerkleDag(mock_client)
 
-            # Add file (use MIN_CHUNK_SIZE)
-            root_cid = await dag.add_file(temp_path, chunk_size=MIN_CHUNK_SIZE)
+            # Add file (use smaller chunk size for testing)
+            chunk_size = 16 * 1024  # 16 KB for testing
+            root_cid = await dag.add_file(temp_path, chunk_size=chunk_size)
 
             # Fetch file
             fetched_data = await dag.fetch_file(root_cid)

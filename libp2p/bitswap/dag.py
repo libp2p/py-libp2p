@@ -15,11 +15,11 @@ from libp2p.peer.id import ID as PeerID
 
 from .block_store import BlockStore
 from .chunker import (
+    DEFAULT_CHUNK_SIZE,
     chunk_bytes,
     chunk_file,
     estimate_chunk_count,
     get_file_size,
-    optimal_chunk_size,
 )
 from .cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
 from .client import BitswapClient
@@ -141,7 +141,7 @@ class MerkleDag:
 
         # Determine chunk size
         if chunk_size is None:
-            chunk_size = optimal_chunk_size(file_size)
+            chunk_size = DEFAULT_CHUNK_SIZE
 
         logger.debug(f"Using chunk size: {chunk_size} bytes")
 
@@ -299,7 +299,7 @@ class MerkleDag:
 
         # Determine chunk size
         if chunk_size is None:
-            chunk_size = optimal_chunk_size(file_size)
+            chunk_size = DEFAULT_CHUNK_SIZE
 
         # If data is small, store as single block
         if file_size <= chunk_size:

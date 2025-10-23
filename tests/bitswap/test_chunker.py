@@ -7,14 +7,11 @@ import pytest
 
 from libp2p.bitswap.chunker import (
     DEFAULT_CHUNK_SIZE,
-    MAX_CHUNK_SIZE,
-    MIN_CHUNK_SIZE,
     chunk_bytes,
     chunk_file,
     chunk_file_with_progress,
     estimate_chunk_count,
     get_file_size,
-    optimal_chunk_size,
 )
 
 
@@ -23,39 +20,44 @@ class TestChunkBytes:
 
     def test_chunk_exact_fit(self):
         """Test chunking data that fits exactly."""
-        data = b"x" * (MIN_CHUNK_SIZE * 4)
-        chunks = list(chunk_bytes(data, chunk_size=MIN_CHUNK_SIZE))
+        chunk_size = 16 * 1024  # 16 KB for testing
+        data = b"x" * (chunk_size * 4)
+        chunks = list(chunk_bytes(data, chunk_size=chunk_size))
 
         assert len(chunks) == 4
-        assert all(len(chunk) == MIN_CHUNK_SIZE for chunk in chunks)
+        assert all(len(chunk) == chunk_size for chunk in chunks)
         assert b"".join(chunks) == data
 
     def test_chunk_with_remainder(self):
         """Test chunking with remainder."""
-        data = b"x" * (MIN_CHUNK_SIZE * 4 + 5000)
-        chunks = list(chunk_bytes(data, chunk_size=MIN_CHUNK_SIZE))
+        chunk_size = 16 * 1024  # 16 KB for testing
+        data = b"x" * (chunk_size * 4 + 5000)
+        chunks = list(chunk_bytes(data, chunk_size=chunk_size))
 
         assert len(chunks) == 5
-        assert all(len(chunk) == MIN_CHUNK_SIZE for chunk in chunks[:4])
+        assert all(len(chunk) == chunk_size for chunk in chunks[:4])
         assert len(chunks[4]) == 5000
         assert b"".join(chunks) == data
 
     def test_chunk_smaller_than_size(self):
         """Test chunking data smaller than chunk size."""
         data = b"small" * 1000
-        chunks = list(chunk_bytes(data, chunk_size=MIN_CHUNK_SIZE))
+        chunk_size = 16 * 1024  # 16 KB for testing
+        chunks = list(chunk_bytes(data, chunk_size=chunk_size))
 
         assert len(chunks) == 1
         assert chunks[0] == data
 
     def test_chunk_empty_data(self):
         """Test chunking empty data."""
-        chunks = list(chunk_bytes(b"", chunk_size=MIN_CHUNK_SIZE))
+        chunk_size = 16 * 1024  # 16 KB for testing
+        chunks = list(chunk_bytes(b"", chunk_size=chunk_size))
         assert len(chunks) == 0
 
     def test_chunk_single_byte(self):
         """Test chunking single byte."""
-        chunks = list(chunk_bytes(b"x", chunk_size=MIN_CHUNK_SIZE))
+        chunk_size = 16 * 1024  # 16 KB for testing
+        chunks = list(chunk_bytes(b"x", chunk_size=chunk_size))
         assert len(chunks) == 1
         assert chunks[0] == b"x"
 
@@ -75,29 +77,31 @@ class TestChunkFile:
     def test_chunk_file_exact_fit(self):
         """Test chunking file that fits exactly."""
         # Create temp file
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"x" * (MIN_CHUNK_SIZE * 4)
+            data = b"x" * (chunk_size * 4)
             f.write(data)
             temp_path = f.name
 
         try:
-            chunks = list(chunk_file(temp_path, chunk_size=MIN_CHUNK_SIZE))
+            chunks = list(chunk_file(temp_path, chunk_size=chunk_size))
 
             assert len(chunks) == 4
-            assert all(len(chunk) == MIN_CHUNK_SIZE for chunk in chunks)
+            assert all(len(chunk) == chunk_size for chunk in chunks)
             assert b"".join(chunks) == data
         finally:
             Path(temp_path).unlink()
 
     def test_chunk_file_with_remainder(self):
         """Test chunking file with remainder."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"y" * (MIN_CHUNK_SIZE * 4 + 5000)
+            data = b"y" * (chunk_size * 4 + 5000)
             f.write(data)
             temp_path = f.name
 
         try:
-            chunks = list(chunk_file(temp_path, chunk_size=MIN_CHUNK_SIZE))
+            chunks = list(chunk_file(temp_path, chunk_size=chunk_size))
 
             assert len(chunks) == 5
             assert len(chunks[4]) == 5000
@@ -107,11 +111,12 @@ class TestChunkFile:
 
     def test_chunk_empty_file(self):
         """Test chunking empty file."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
             temp_path = f.name
 
         try:
-            chunks = list(chunk_file(temp_path, chunk_size=MIN_CHUNK_SIZE))
+            chunks = list(chunk_file(temp_path, chunk_size=chunk_size))
             assert len(chunks) == 0
         finally:
             Path(temp_path).unlink()
@@ -174,8 +179,9 @@ class TestChunkFileWithProgress:
 
     def test_chunk_with_progress_callback(self):
         """Test chunking with progress callback."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"x" * (MIN_CHUNK_SIZE * 4)
+            data = b"x" * (chunk_size * 4)
             f.write(data)
             temp_path = f.name
 
@@ -187,7 +193,7 @@ class TestChunkFileWithProgress:
 
             chunks = list(
                 chunk_file_with_progress(
-                    temp_path, chunk_size=MIN_CHUNK_SIZE, progress_callback=callback
+                    temp_path, chunk_size=chunk_size, progress_callback=callback
                 )
             )
 
@@ -197,25 +203,24 @@ class TestChunkFileWithProgress:
 
             # Verify progress calls
             assert len(progress_calls) == 4
-            file_size = MIN_CHUNK_SIZE * 4
-            assert progress_calls[0] == (MIN_CHUNK_SIZE, file_size, 1)
-            assert progress_calls[1] == (MIN_CHUNK_SIZE * 2, file_size, 2)
-            assert progress_calls[2] == (MIN_CHUNK_SIZE * 3, file_size, 3)
-            assert progress_calls[3] == (MIN_CHUNK_SIZE * 4, file_size, 4)
+            file_size = chunk_size * 4
+            assert progress_calls[0] == (chunk_size, file_size, 1)
+            assert progress_calls[1] == (chunk_size * 2, file_size, 2)
+            assert progress_calls[2] == (chunk_size * 3, file_size, 3)
+            assert progress_calls[3] == (chunk_size * 4, file_size, 4)
         finally:
             Path(temp_path).unlink()
 
     def test_chunk_with_progress_no_callback(self):
         """Test chunking without callback (should still work)."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"x" * (MIN_CHUNK_SIZE * 4)
+            data = b"x" * (chunk_size * 4)
             f.write(data)
             temp_path = f.name
 
         try:
-            chunks = list(
-                chunk_file_with_progress(temp_path, chunk_size=MIN_CHUNK_SIZE)
-            )
+            chunks = list(chunk_file_with_progress(temp_path, chunk_size=chunk_size))
             assert len(chunks) == 4
             assert b"".join(chunks) == data
         finally:
@@ -255,81 +260,38 @@ class TestGetFileSize:
             get_file_size("/nonexistent/file.txt")
 
 
-class TestOptimalChunkSize:
-    """Test optimal_chunk_size function."""
-
-    def test_optimal_small_file(self):
-        """Test optimal size for small file."""
-        # Files < 1 MB -> MIN_CHUNK_SIZE
-        size = optimal_chunk_size(500 * 1024)  # 500 KB
-        assert size == MIN_CHUNK_SIZE
-
-    def test_optimal_medium_file(self):
-        """Test optimal size for medium file."""
-        # Files 1-100 MB -> DEFAULT_CHUNK_SIZE
-        size = optimal_chunk_size(50 * 1024 * 1024)  # 50 MB
-        assert size == DEFAULT_CHUNK_SIZE
-
-    def test_optimal_large_file(self):
-        """Test optimal size for large file."""
-        # Files > 100 MB -> MAX_CHUNK_SIZE
-        size = optimal_chunk_size(500 * 1024 * 1024)  # 500 MB
-        assert size == MAX_CHUNK_SIZE
-
-    def test_optimal_boundary_1mb(self):
-        """Test boundary at 1 MB."""
-        # Just under 1 MB
-        size = optimal_chunk_size(1024 * 1024 - 1)
-        assert size == MIN_CHUNK_SIZE
-
-        # At 1 MB
-        size = optimal_chunk_size(1024 * 1024)
-        assert size == DEFAULT_CHUNK_SIZE
-
-    def test_optimal_boundary_100mb(self):
-        """Test boundary at 100 MB."""
-        # Just under 100 MB
-        size = optimal_chunk_size(100 * 1024 * 1024 - 1)
-        assert size == DEFAULT_CHUNK_SIZE
-
-        # At 100 MB
-        size = optimal_chunk_size(100 * 1024 * 1024)
-        assert size == MAX_CHUNK_SIZE
-
-    def test_optimal_zero_size(self):
-        """Test with zero size."""
-        size = optimal_chunk_size(0)
-        assert size == MIN_CHUNK_SIZE
-
-
 class TestEstimateChunkCount:
     """Test estimate_chunk_count function."""
 
     def test_estimate_exact_fit(self):
         """Test estimate when file fits exactly."""
-        count = estimate_chunk_count(MIN_CHUNK_SIZE * 4, MIN_CHUNK_SIZE)
+        chunk_size = 16 * 1024  # 16 KB for testing
+        count = estimate_chunk_count(chunk_size * 4, chunk_size)
         assert count == 4
 
     def test_estimate_with_remainder(self):
         """Test estimate with remainder."""
-        count = estimate_chunk_count(MIN_CHUNK_SIZE * 4 + 5000, MIN_CHUNK_SIZE)
+        chunk_size = 16 * 1024  # 16 KB for testing
+        count = estimate_chunk_count(chunk_size * 4 + 5000, chunk_size)
         assert count == 5
 
     def test_estimate_smaller_than_chunk(self):
         """Test estimate when file is smaller than chunk."""
-        count = estimate_chunk_count(1000, MIN_CHUNK_SIZE)
+        chunk_size = 16 * 1024  # 16 KB for testing
+        count = estimate_chunk_count(1000, chunk_size)
         assert count == 1
 
     def test_estimate_zero_size(self):
         """Test estimate with zero size."""
-        count = estimate_chunk_count(0, MIN_CHUNK_SIZE)
+        count = estimate_chunk_count(0)
         assert count == 0
 
     def test_estimate_large_file(self):
         """Test estimate for large file."""
-        # 1 GB file with 256 KB chunks
+        # 1 GB file with DEFAULT_CHUNK_SIZE
         count = estimate_chunk_count(1024 * 1024 * 1024, DEFAULT_CHUNK_SIZE)
-        assert count == 4096
+        expected = (1024 * 1024 * 1024 + DEFAULT_CHUNK_SIZE - 1) // DEFAULT_CHUNK_SIZE
+        assert count == expected
 
 
 class TestIntegration:
@@ -344,12 +306,11 @@ class TestIntegration:
             temp_path = f.name
 
         try:
-            # Get optimal chunk size
+            # Get file size
             file_size = get_file_size(temp_path)
-            chunk_size = optimal_chunk_size(file_size)
 
-            # Chunk file
-            chunks = list(chunk_file(temp_path, chunk_size))
+            # Chunk file with default chunk size
+            chunks = list(chunk_file(temp_path, DEFAULT_CHUNK_SIZE))
 
             # Reconstruct
             reconstructed = b"".join(chunks)
@@ -361,14 +322,14 @@ class TestIntegration:
 
     def test_estimate_accuracy(self):
         """Test that estimate_chunk_count is accurate."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"x" * (MIN_CHUNK_SIZE * 12 + 5000)
+            data = b"x" * (chunk_size * 12 + 5000)
             f.write(data)
             temp_path = f.name
 
         try:
             file_size = get_file_size(temp_path)
-            chunk_size = MIN_CHUNK_SIZE
 
             # Estimate
             estimated = estimate_chunk_count(file_size, chunk_size)
@@ -382,8 +343,9 @@ class TestIntegration:
 
     def test_progress_tracking_complete(self):
         """Test that progress tracking reports complete file."""
+        chunk_size = 16 * 1024  # 16 KB for testing
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            data = b"x" * (MIN_CHUNK_SIZE * 5)
+            data = b"x" * (chunk_size * 5)
             f.write(data)
             temp_path = f.name
 
@@ -399,7 +361,7 @@ class TestIntegration:
 
             chunks = list(
                 chunk_file_with_progress(
-                    temp_path, chunk_size=MIN_CHUNK_SIZE, progress_callback=callback
+                    temp_path, chunk_size=chunk_size, progress_callback=callback
                 )
             )
 
