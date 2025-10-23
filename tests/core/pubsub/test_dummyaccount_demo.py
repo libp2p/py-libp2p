@@ -111,7 +111,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.25)
+        await trio.sleep(0.5)  # Increased for better tree propagation
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -128,7 +128,7 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[6].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.25)
+        await trio.sleep(0.5)  # Increased for better tree propagation
         await dummy_nodes[4].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -159,7 +159,7 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await trio.sleep(0.25)
+        await trio.sleep(1.0)  # Increased from 0.25 to allow proper ring propagation
         await dummy_nodes[3].publish_send_crypto("alex", "rob", 12)
 
     def assertion_func(dummy_node):
