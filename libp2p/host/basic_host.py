@@ -16,10 +16,12 @@ import multiaddr
 
 from libp2p.abc import (
     IHost,
+    IMuxedConn,
     INetConn,
     INetStream,
     INetworkService,
     IPeerStore,
+    IRawConnection,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -66,6 +68,7 @@ if TYPE_CHECKING:
     from collections import (
         OrderedDict,
     )
+from multiaddr import Multiaddr
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
@@ -383,4 +386,30 @@ class BasicHost(IHost):
         :param peer_id: ID of the peer to get info for
         :return: Connection object if peer is connected, None otherwise
         """
-        return self._network.get_connection(peer_id)
+        return self._network.connections.get(peer_id)
+
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Upgrade a raw outbound connection for the peer_id using the underlying network.
+
+        :param raw_conn: The raw connection to upgrade.
+        :param peer_id: The peer this connection is to.
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
+
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Upgrade a raw inbound connection using the underlying network.
+
+        :param raw_conn: The inbound raw connection to upgrade.
+        :param maddr: The multiaddress this connection arrived on.
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        return await self._network.upgrade_inbound_raw_conn(raw_conn, maddr)

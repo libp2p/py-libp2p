@@ -19,6 +19,7 @@ from libp2p.abc import (
     INetworkService,
     INotifee,
     IPeerStore,
+    IRawConnection,
     ITransport,
 )
 from libp2p.custom_types import (
@@ -343,7 +344,23 @@ class Swarm(Service, INetworkService):
             return swarm_conn
 
         logger.debug("dialed peer %s over base transport", peer_id)
+        swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id)
 
+        logger.debug("successfully dialed peer %s", peer_id)
+
+        return swarm_conn
+
+    async def upgrade_outbound_raw_conn(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Secure the outgoing raw connection and upgrade it to a multiplexed connection.
+
+        :param raw_conn: the raw connection to upgrade
+        :param peer_id: the peer this connection is to
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
         # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
         # the conn and then mux the conn
         try:
@@ -514,33 +531,7 @@ class Swarm(Service, INetworkService):
                     return
 
                 raw_conn = RawConnection(read_write_closer, False)
-
-                # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
-                # secure the conn and then mux the conn
-                try:
-                    secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-                except SecurityUpgradeFailure as error:
-                    logger.debug("failed to upgrade security for peer at %s", maddr)
-                    await raw_conn.close()
-                    raise SwarmException(
-                        f"failed to upgrade security for peer at {maddr}"
-                    ) from error
-                peer_id = secured_conn.get_remote_peer()
-
-                try:
-                    muxed_conn = await self.upgrader.upgrade_connection(
-                        secured_conn, peer_id
-                    )
-                except MuxerUpgradeFailure as error:
-                    logger.debug("fail to upgrade mux for peer %s", peer_id)
-                    await secured_conn.close()
-                    raise SwarmException(
-                        f"fail to upgrade mux for peer {peer_id}"
-                    ) from error
-                logger.debug("upgraded mux for peer %s", peer_id)
-
-                await self.add_conn(muxed_conn)
-                logger.debug("successfully opened connection to peer %s", peer_id)
+                await self.upgrade_inbound_raw_conn(raw_conn, maddr)
 
                 # NOTE: This is a intentional barrier to prevent from the handler
                 # exiting and closing the connection.
@@ -572,6 +563,40 @@ class Swarm(Service, INetworkService):
 
         # Return true if at least one address succeeded
         return success_count > 0
+
+    async def upgrade_inbound_raw_conn(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Secure the inbound raw connection and upgrade it to a multiplexed connection.
+
+        :param raw_conn: the inbound raw connection to upgrade
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        # secure the conn and then mux the conn
+        try:
+            secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
+        except SecurityUpgradeFailure as error:
+            logger.error("failed to upgrade security for peer at %s", maddr)
+            await raw_conn.close()
+            raise SwarmException(
+                f"failed to upgrade security for peer at {maddr}"
+            ) from error
+        peer_id = secured_conn.get_remote_peer()
+
+        try:
+            muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+        except MuxerUpgradeFailure as error:
+            logger.error("fail to upgrade mux for peer %s", peer_id)
+            await secured_conn.close()
+            raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
+        logger.debug("upgraded mux for peer %s", peer_id)
+
+        await self.add_conn(muxed_conn)
+        logger.debug("successfully opened connection to peer %s", peer_id)
+
+        return muxed_conn
 
     async def close(self) -> None:
         """
