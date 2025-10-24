@@ -35,7 +35,8 @@ class LevelDBBatch(IBatch):
         try:
             # Create a write batch
             db = self.db.db
-            assert db is not None
+            if db is None:
+                raise ValueError("LevelDB database is not initialized")
             write_batch = db.WriteBatch()
 
             for operation, key, value in self.operations:
@@ -96,7 +97,8 @@ class LevelDBDatastore(IBatchingDatastore):
         """Retrieve a value by key."""
         await self._ensure_connection()
         try:
-            assert self.db is not None
+            if self.db is None:
+                raise ValueError("LevelDB database is not initialized")
             return self.db.get(key)
         except Exception:
             return None
@@ -104,19 +106,22 @@ class LevelDBDatastore(IBatchingDatastore):
     async def put(self, key: bytes, value: bytes) -> None:
         """Store a key-value pair."""
         await self._ensure_connection()
-        assert self.db is not None
+        if self.db is None:
+            raise ValueError("LevelDB database is not initialized")
         self.db.put(key, value)
 
     async def delete(self, key: bytes) -> None:
         """Delete a key-value pair."""
         await self._ensure_connection()
-        assert self.db is not None
+        if self.db is None:
+            raise ValueError("LevelDB database is not initialized")
         self.db.delete(key)
 
     async def has(self, key: bytes) -> bool:
         """Check if a key exists."""
         await self._ensure_connection()
-        assert self.db is not None
+        if self.db is None:
+            raise ValueError("LevelDB database is not initialized")
         return self.db.get(key) is not None
 
     def query(self, prefix: bytes = b"") -> Iterator[tuple[bytes, bytes]]:
@@ -131,7 +136,8 @@ class LevelDBDatastore(IBatchingDatastore):
             except Exception:
                 yield from ()
 
-        assert self.db is not None
+        if self.db is None:
+            raise ValueError("LevelDB database is not initialized")
         if prefix:
             iterator = self.db.iterator(prefix=prefix)
         else:

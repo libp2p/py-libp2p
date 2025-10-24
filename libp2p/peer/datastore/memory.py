@@ -30,7 +30,8 @@ class MemoryBatch(IBatch):
         """Commit all operations in the batch."""
         for op_type, key, value in self.operations:
             if op_type == "put":
-                assert value is not None
+                if value is None:
+                    raise ValueError("Cannot put None value in memory datastore")
                 self.datastore._data[key] = value
             elif op_type == "delete":
                 self.datastore._data.pop(key, None)

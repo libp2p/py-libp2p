@@ -91,7 +91,8 @@ class SQLiteDatastore(IBatchingDatastore):
     async def get(self, key: bytes) -> bytes | None:
         """Retrieve a value by key."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         cursor = self.connection.cursor()
         cursor.execute("SELECT value FROM datastore WHERE key = ?", (key,))
         result = cursor.fetchone()
@@ -100,7 +101,8 @@ class SQLiteDatastore(IBatchingDatastore):
     async def put(self, key: bytes, value: bytes) -> None:
         """Store a key-value pair."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         cursor = self.connection.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)", (key, value)
@@ -110,7 +112,8 @@ class SQLiteDatastore(IBatchingDatastore):
     async def delete(self, key: bytes) -> None:
         """Delete a key-value pair."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         cursor = self.connection.cursor()
         cursor.execute("DELETE FROM datastore WHERE key = ?", (key,))
         self.connection.commit()
@@ -118,7 +121,8 @@ class SQLiteDatastore(IBatchingDatastore):
     async def has(self, key: bytes) -> bool:
         """Check if a key exists."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         cursor = self.connection.cursor()
         cursor.execute("SELECT 1 FROM datastore WHERE key = ?", (key,))
         return cursor.fetchone() is not None
@@ -144,7 +148,8 @@ class SQLiteDatastore(IBatchingDatastore):
             )
             self.connection.commit()
 
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         cursor = self.connection.cursor()
         if prefix:
             cursor.execute(
@@ -159,13 +164,15 @@ class SQLiteDatastore(IBatchingDatastore):
     async def batch(self) -> IBatch:
         """Create a new batch for atomic operations."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         return SQLiteBatch(self.connection)
 
     async def sync(self, prefix: bytes) -> None:
         """Flush pending writes to disk (commit current transaction)."""
         await self._ensure_connection()
-        assert self.connection is not None
+        if self.connection is None:
+            raise ValueError("SQLite connection is not initialized")
         self.connection.commit()
 
     async def close(self) -> None:
