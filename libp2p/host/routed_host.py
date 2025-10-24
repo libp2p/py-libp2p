@@ -1,3 +1,4 @@
+from __future__ import annotations  
 from libp2p.abc import (
     INetworkService,
     IPeerRouting,
@@ -11,6 +12,10 @@ from libp2p.host.exceptions import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from libp2p.rcmgr.manager import ResourceManager
 
 
 # RoutedHost is a p2p Host that includes a routing system.
@@ -25,8 +30,15 @@ class RoutedHost(BasicHost):
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
+    resource_manager: Optional["libp2p.rcmgr.manager.ResourceManager"] = None,
     ):
-        super().__init__(network, enable_mDNS, enable_upnp, bootstrap)
+        super().__init__(
+            network,
+            enable_mDNS,
+            enable_upnp,
+            bootstrap,
+            resource_manager=resource_manager,
+        )
         self._router = router
 
     async def connect(self, peer_info: PeerInfo) -> None:
