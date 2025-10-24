@@ -1,5 +1,7 @@
 from typing import Any
+
 import trio
+
 from ..utils.attack_metrics import AttackMetrics
 
 
@@ -17,10 +19,7 @@ class ReplayAttacker:
         await trio.sleep(0)
 
     async def replay_messages(
-        self,
-        targets: list[str],
-        times: int = 1,
-        delay: float = 0.01
+        self, targets: list[str], times: int = 1, delay: float = 0.01
     ):
         if not targets:
             return
@@ -55,9 +54,7 @@ class ReplayAttackScenario:
         }
 
     async def _simulate_capture_and_replay(
-        self,
-        attacker: ReplayAttacker,
-        duration: float
+        self, attacker: ReplayAttacker, duration: float
     ):
         end = trio.current_time() + duration
         i = 0
@@ -73,7 +70,6 @@ class ReplayAttackScenario:
         total_captured = sum(len(a.captured_messages) for a in self.attackers)
         total_replayed = sum(a.replayed_count for a in self.attackers)
 
-        
         if not getattr(self.metrics, "lookup_success_rate", None):
             self.metrics.lookup_success_rate = [0.99, 0.99, 0.99]
         if not getattr(self.metrics, "network_connectivity", None):
@@ -110,28 +106,27 @@ class ReplayAttackScenario:
         replay_density = total_replayed / max(1, total_honest)
 
         self.metrics.replay_success_rate = (
-            min(1.0, replay_density / max(1, capture_ratio)) if capture_ratio > 0 else 0.0
+            min(1.0, replay_density / max(1.0, capture_ratio))
+            if capture_ratio > 0
+            else 0.0
         )
-        self.metrics.state_inconsistency_count = int(max(0, replay_density - capture_ratio))
+        self.metrics.state_inconsistency_count = int(
+            max(0.0, replay_density - capture_ratio)
+        )
         self.metrics.lookup_success_rate = [
             0.99,
             max(0.99 - replay_density * 0.1, 0.5),
-            0.97
+            0.97,
         ]
         self.metrics.network_connectivity = [
             1.0,
             max(1.0 - replay_density * 0.05, 0.7),
-            0.95
+            0.95,
         ]
         self.metrics.routing_incorrect_rate = min(0.05 + capture_ratio * 0.1, 1.0)
-        self.metrics.avg_lookup_latency = [
-            0.03,
-            0.03 + replay_density * 0.02,
-            0.04
-        ]
-        self.metrics.resilience_score = (
-            (1 - self.metrics.routing_incorrect_rate)
-            * (1 - (self.metrics.state_inconsistency_count / max(1, total_honest)))
+        self.metrics.avg_lookup_latency = [0.03, 0.03 + replay_density * 0.02, 0.04]
+        self.metrics.resilience_score = (1 - self.metrics.routing_incorrect_rate) * (
+            1 - (self.metrics.state_inconsistency_count / max(1, total_honest))
         )
         self.metrics.time_to_recovery = 10 + replay_density * 10
         self.metrics.affected_nodes_percentage = min(replay_density * 10, 100)

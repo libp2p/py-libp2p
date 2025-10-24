@@ -1,5 +1,7 @@
 import pytest
+
 from .replay_attack import ReplayAttacker, ReplayAttackScenario
+
 
 @pytest.mark.trio
 async def test_replay_attacker_capture_and_replay():
@@ -10,6 +12,7 @@ async def test_replay_attacker_capture_and_replay():
     honest = ["h1", "h2"]
     await attacker.replay_messages(honest, times=1, delay=0.0)
     assert attacker.replayed_count == 5 * len(honest)
+
 
 @pytest.mark.trio
 async def test_replay_scenario_basic_execution():

@@ -35,6 +35,39 @@ class AttackMetrics:
         self.peer_table_flooding_rate: float = 0.0
         self.routing_disruption_level: float = 0.0
 
+        # Additional metrics for existing attack types
+        self.avg_lookup_latency: list[float] = []
+        self.routing_incorrect_rate: float = 0.0
+        self.resilience_score: float = 0.0
+        self.time_to_recovery: float = 0.0
+        self.replay_success_rate: float = 0.0
+        self.state_inconsistency_count: int = 0
+        self.lookup_failure_rate: float = 0.0
+
+        # Extended Threat Model Metrics (Polkadot/Smoldot-inspired)
+        # Bootnode Poisoning Metrics
+        self.bootnode_isolation_rate: float = 0.0
+        self.fallback_peer_recovery_rate: float = 0.0
+        self.permanent_isolation_rate: float = 0.0
+
+        # Long-Range Fork Metrics
+        self.fork_replay_success_rate: float = 0.0
+        self.fork_detection_rate: float = 0.0
+        self.false_acceptance_rate: float = 0.0
+        self.resync_success_rate: float = 0.0
+
+        # Invalid Block Propagation Metrics
+        self.light_client_acceptance_rate: float = 0.0
+        self.full_node_acceptance_rate: float = 0.0
+        self.vulnerability_gap: float = 0.0
+        self.post_finality_detection_rate: float = 0.0
+
+        # Finality Stall Metrics
+        self.memory_exhaustion_rate: float = 0.0
+        self.peak_memory_usage_mb: float = 0.0
+        self.memory_growth_rate_mb_per_sec: float = 0.0
+        self.finality_timeout_detection_rate: float = 0.0
+
     def measure_lookup_failures(self, before: float, during: float, after: float):
         """Measure lookup success rate changes during attack"""
         self.lookup_success_rate = [before, during, after]
@@ -167,17 +200,97 @@ class AttackMetrics:
 
         # Penalize for various attack impacts
         lookup_penalty = (
-            self.lookup_success_rate[0] - self.lookup_success_rate[1]
-        ) * 50
-        contamination_penalty = max(self.peer_table_contamination) * 30
+            (self.lookup_success_rate[0] - self.lookup_success_rate[1]) * 50
+            if self.lookup_success_rate
+            else 0
+        )
+        contamination_penalty = (
+            max(self.peer_table_contamination) * 30
+            if self.peer_table_contamination
+            else 0
+        )
         connectivity_penalty = (
-            self.network_connectivity[0] - self.network_connectivity[1]
-        ) * 20
+            (self.network_connectivity[0] - self.network_connectivity[1]) * 20
+            if self.network_connectivity
+            else 0
+        )
+
+        # Additional penalties for extended threat model attacks
+        extended_penalties = 0.0
+
+        # Bootnode poisoning penalties
+        if self.bootnode_isolation_rate > 0:
+            extended_penalties += self.bootnode_isolation_rate * 15
+
+        # Fork attack penalties
+        if self.fork_replay_success_rate > 0:
+            extended_penalties += self.fork_replay_success_rate * 20
+
+        # Invalid block propagation penalties
+        if self.light_client_acceptance_rate > 0:
+            extended_penalties += self.light_client_acceptance_rate * 15
+
+        # Finality stall penalties
+        if self.memory_exhaustion_rate > 0:
+            extended_penalties += self.memory_exhaustion_rate * 20
 
         resilience_score = (
-            base_score - lookup_penalty - contamination_penalty - connectivity_penalty
+            base_score
+            - lookup_penalty
+            - contamination_penalty
+            - connectivity_penalty
+            - extended_penalties
         )
         return max(0.0, min(100.0, resilience_score))
+
+    def calculate_bootnode_poisoning_metrics(
+        self,
+        isolation_rate: float,
+        recovery_rate: float,
+        permanent_isolation_rate: float,
+    ):
+        """Calculate metrics specific to bootnode poisoning attacks"""
+        self.bootnode_isolation_rate = isolation_rate
+        self.fallback_peer_recovery_rate = recovery_rate
+        self.permanent_isolation_rate = permanent_isolation_rate
+
+    def calculate_fork_replay_metrics(
+        self,
+        fork_success_rate: float,
+        detection_rate: float,
+        false_acceptance: float,
+        resync_rate: float,
+    ):
+        """Calculate metrics specific to long-range fork attacks"""
+        self.fork_replay_success_rate = fork_success_rate
+        self.fork_detection_rate = detection_rate
+        self.false_acceptance_rate = false_acceptance
+        self.resync_success_rate = resync_rate
+
+    def calculate_invalid_block_metrics(
+        self,
+        light_client_acceptance: float,
+        full_node_acceptance: float,
+        post_finality_detection: float,
+    ):
+        """Calculate metrics specific to invalid block propagation attacks"""
+        self.light_client_acceptance_rate = light_client_acceptance
+        self.full_node_acceptance_rate = full_node_acceptance
+        self.vulnerability_gap = light_client_acceptance - full_node_acceptance
+        self.post_finality_detection_rate = post_finality_detection
+
+    def calculate_finality_stall_metrics(
+        self,
+        exhaustion_rate: float,
+        peak_memory_mb: float,
+        growth_rate: float,
+        timeout_detection_rate: float,
+    ):
+        """Calculate metrics specific to finality stall attacks"""
+        self.memory_exhaustion_rate = exhaustion_rate
+        self.peak_memory_usage_mb = peak_memory_mb
+        self.memory_growth_rate_mb_per_sec = growth_rate
+        self.finality_timeout_detection_rate = timeout_detection_rate
 
 
 class AttackMetricsUtils:

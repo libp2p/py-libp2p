@@ -1,5 +1,7 @@
 import pytest
+
 from .routing_poisoning_attack import RoutingPoisoner, RoutingPoisoningScenario
+
 
 @pytest.mark.trio
 async def test_routing_poisoner_creation():
@@ -8,6 +10,7 @@ async def test_routing_poisoner_creation():
     assert len(entries) == 3
     assert all("attacker_1_rpoison_" in e["peer_id"] for e in entries)
     assert len(p.advertised_entries) == 3
+
 
 @pytest.mark.trio
 async def test_advertise_to_targets_and_basic_scenario():
