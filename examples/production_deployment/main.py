@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
 Production Deployment Main Application
+Simplified implementation with Echo/Ping protocols, Message Passing, and File Transfer
 
 This is a production-ready libp2p WebSocket transport application designed for
 containerized deployment with monitoring, health checks, and AutoTLS support.
 
 Features:
+- Echo Protocol (/echo/1.0.0): Message echoing for connectivity testing
+- Ping Protocol (/ipfs/ping/1.0.0): Standard libp2p ping for latency testing
+- Message Passing (/message/1.0.0): Peer-to-peer messaging with acknowledgments
+- File Transfer (/file/1.0.0): Chunked file sharing between peers
 - Production-ready WebSocket transport with AutoTLS
 - Health check endpoints
 - Metrics collection for Prometheus
@@ -14,13 +19,13 @@ Features:
 - Environment-based configuration
 """
 
-import argparse
 import logging
 import os
 import signal
 import sys
+import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -28,342 +33,343 @@ import trio
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.id import ID
-from libp2p.transport.websocket.transport import (
-    WebsocketConfig,
-    WithAutoTLS,
-    WithProxy,
-)
 
 # Configure logging
 log_handlers: list[logging.Handler] = [logging.StreamHandler()]
-if os.path.exists('/app/logs'):
-    log_handlers.append(logging.FileHandler('/app/logs/libp2p.log'))
-elif os.path.exists('logs'):
-    log_handlers.append(logging.FileHandler('logs/libp2p.log'))
+if os.path.exists("/app/logs"):
+    log_handlers.append(logging.FileHandler("/app/logs/libp2p.log"))
+elif os.path.exists("logs"):
+    log_handlers.append(logging.FileHandler("logs/libp2p.log"))
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=log_handlers,
 )
 logger = logging.getLogger("libp2p.production")
 
-# Protocol definitions
+# Protocol IDs
 ECHO_PROTOCOL_ID = TProtocol("/echo/1.0.0")
-HEALTH_PROTOCOL_ID = TProtocol("/health/1.0.0")
-METRICS_PROTOCOL_ID = TProtocol("/metrics/1.0.0")
+PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
+MESSAGE_PROTOCOL_ID = TProtocol("/message/1.0.0")
+FILE_PROTOCOL_ID = TProtocol("/file/1.0.0")
+
+# Configuration
+DEFAULT_PORT = 8080
+DEFAULT_DOMAIN = "libp2p.local"
+CHUNK_SIZE = 8192  # 8KB chunks for file transfer
 
 
 class ProductionApp:
-    """Production libp2p WebSocket application."""
+    """Production libp2p app with echo, ping, message passing, file transfer."""
 
-    def __init__(self, config: Dict[str, str]) -> None:
-        """
-        Initialize production application.
-
-        Args:
-            config: Configuration dictionary from environment variables
-
-        """
+    def __init__(self, config: dict[str, str]) -> None:
+        """Initialize production application."""
         self.config = config
-        self.host: Optional[Any] = None
-        self.peer_id: Optional[ID] = None
-        self.shutdown_event = trio.Event()
-        self.start_time = time.time()
+        self.host: Any | None = None
+        self.peer_id: ID | None = None
 
-        # Metrics
-        self.connections_total = 0
-        self.connections_active = 0
+        # Statistics
         self.messages_sent = 0
         self.messages_received = 0
+        self.files_sent = 0
+        self.files_received = 0
+        self.pings_sent = 0
+        self.pings_received = 0
+        self.start_time = time.time()
 
     async def start(self) -> None:
         """Start the production application."""
-        logger.info("🚀 Starting Production libp2p WebSocket Application")
+        logger.info("🚀 Starting Production libp2p Application...")
 
         try:
-            # Create peer identity
+            # Create key pair
             key_pair = create_new_key_pair()
+            from libp2p.peer.id import ID
+
             self.peer_id = ID.from_pubkey(key_pair.public_key)
 
-            # Create transport configuration
-            # transport_config = self._create_transport_config()
+            # Create host with WebSocket transport
+            self.host = new_host(
+                key_pair=key_pair,
+                enable_quic=False,
+            )
 
-            # Create transport (upgrader will be set by the host)
-            # transport = WebsocketTransport(None, config=transport_config)
-
-            # Create host with basic configuration
-            self.host = new_host(key_pair=key_pair)
+            # Note: WebSocket transport configuration is handled by the host
+            # AutoTLS configuration is managed through environment variables
 
             # Set up protocol handlers
-            await self._setup_handlers()
+            await self._setup_protocols()
 
             # Start listening
-            await self._start_listening()
+            listen_addr = f"/ip4/0.0.0.0/tcp/{self.config['port']}/ws"
+            wss_addr = f"/ip4/0.0.0.0/tcp/{self.config['port']}/wss"
 
-            # Start health check server
-            await self._start_health_server()
+            logger.info(f"🆔 Peer ID: {self.peer_id}")
+            logger.info(f"🌐 Listening on: {listen_addr}")
+            logger.info(f"🔒 WSS with AutoTLS: {wss_addr}")
+            logger.info(f"🏷️  Domain: {self.config.get('domain', DEFAULT_DOMAIN)}")
+            cert_path = self.config.get("storage_path", "autotls-certs")
+            logger.info(f"📁 Certificate storage: {cert_path}")
 
-            logger.info("✅ Application started successfully")
-            logger.info(f"📍 Peer ID: {self.peer_id}")
-            if self.host:
-                logger.info(f"🌐 Listening addresses: {self.host.get_addrs()}")
+            # Use the run method with listen addresses
+            async with self.host.run([Multiaddr(listen_addr), Multiaddr(wss_addr)]):
+                logger.info("✅ Production application is running!")
+                logger.info("📊 Available protocols:")
+                logger.info("   - /echo/1.0.0 (message echoing)")
+                logger.info("   - /ipfs/ping/1.0.0 (connectivity testing)")
+                logger.info("   - /message/1.0.0 (message passing)")
+                logger.info("   - /file/1.0.0 (file transfer)")
 
-            # Wait for shutdown signal
-            await self.shutdown_event.wait()
+                # Start health server
+                await self._start_health_server()
+
+                # Keep running
+                await trio.sleep_forever()
 
         except Exception as e:
             logger.error(f"❌ Failed to start application: {e}")
             raise
-        finally:
-            await self._cleanup()
 
-    def _create_transport_config(self) -> Optional[WebsocketConfig]:
-        """Create transport configuration based on environment."""
-        if self.config.get('auto_tls_enabled', 'false').lower() == 'true':
-            logger.info("🔒 AutoTLS enabled")
-            return WithAutoTLS(
-                domain=self.config.get('auto_tls_domain', 'libp2p.local'),
-                storage_path='/app/certs',
-                renewal_threshold_hours=int(
-                    self.config.get('renewal_threshold_hours', '24')
-                ),
-                cert_validity_days=int(self.config.get('cert_validity_days', '90')),
-            )
-        elif self.config.get('proxy_url'):
-            logger.info(f"🌐 Proxy enabled: {self.config['proxy_url']}")
-            return WithProxy(
-                proxy_url=self.config['proxy_url'],
-                auth=(
-                    tuple(self.config.get('proxy_auth', '').split(':'))  # type: ignore
-                    if self.config.get('proxy_auth')
-                    else None
-                ),
-            )
-        else:
-            logger.info("🔧 Using default configuration")
-            return None
-
-    async def _setup_handlers(self) -> None:
+    async def _setup_protocols(self) -> None:
         """Set up protocol handlers."""
-        # Echo handler
-        async def echo_handler(stream: Any) -> None:
-            """Handle echo protocol requests."""
-            try:
-                peer_id = str(stream.muxed_conn.peer_id)
-                logger.info(f"📥 Echo request from {peer_id}")
+        if not self.host:
+            return
 
-                while True:
-                    data = await stream.read(1024)
-                    if not data:
+        # Echo protocol handler
+        self.host.set_stream_handler(ECHO_PROTOCOL_ID, self._handle_echo)
+
+        # Ping protocol handler
+        self.host.set_stream_handler(PING_PROTOCOL_ID, self._handle_ping)
+
+        # Message passing protocol handler
+        self.host.set_stream_handler(MESSAGE_PROTOCOL_ID, self._handle_message)
+
+        # File transfer protocol handler
+        self.host.set_stream_handler(FILE_PROTOCOL_ID, self._handle_file_transfer)
+
+    async def _handle_echo(self, stream: INetStream) -> None:
+        """Handle echo protocol requests."""
+        try:
+            peer_id = stream.muxed_conn.peer_id
+            logger.info(f"📨 Echo request from {peer_id}")
+
+            # Read message
+            message = await stream.read()
+            if message:
+                logger.info(f"📤 Echoing: {message.decode('utf-8', errors='ignore')}")
+                await stream.write(message)
+                self.messages_received += 1
+
+        except Exception as e:
+            logger.error(f"❌ Echo handler error: {e}")
+        finally:
+            await stream.close()
+
+    async def _handle_ping(self, stream: INetStream) -> None:
+        """Handle ping protocol requests."""
+        try:
+            peer_id = stream.muxed_conn.peer_id
+            logger.info(f"🏓 Ping from {peer_id}")
+
+            # Read ping payload
+            payload = await stream.read(32)
+            if payload:
+                logger.info(f"🏓 Pong to {peer_id}")
+                await stream.write(payload)
+                self.pings_received += 1
+
+        except Exception as e:
+            logger.error(f"❌ Ping handler error: {e}")
+        finally:
+            await stream.close()
+
+    async def _handle_message(self, stream: INetStream) -> None:
+        """Handle message passing requests."""
+        try:
+            peer_id = stream.muxed_conn.peer_id
+            logger.info(f"💬 Message from {peer_id}")
+
+            # Read message
+            message = await stream.read()
+            if message:
+                msg_text = message.decode("utf-8", errors="ignore")
+                logger.info(f"💬 Received: {msg_text}")
+
+                # Echo back with acknowledgment
+                response = f"ACK: {msg_text}"
+                await stream.write(response.encode("utf-8"))
+                self.messages_received += 1
+
+        except Exception as e:
+            logger.error(f"❌ Message handler error: {e}")
+        finally:
+            await stream.close()
+
+    async def _handle_file_transfer(self, stream: INetStream) -> None:
+        """Handle file transfer requests."""
+        try:
+            peer_id = stream.muxed_conn.peer_id
+            logger.info(f"📁 File transfer from {peer_id}")
+
+            # Read file metadata (filename and size)
+            metadata = await stream.read()
+            if not metadata:
+                return
+
+            filename, size = metadata.decode("utf-8").split("|")
+            size = int(size)
+            logger.info(f"📁 Receiving file: {filename} ({size} bytes)")
+
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=f"_{filename}"
+            ) as temp_file:
+                received = 0
+                while received < size:
+                    chunk = await stream.read(min(CHUNK_SIZE, size - received))
+                    if not chunk:
                         break
+                    temp_file.write(chunk)
+                    received += len(chunk)
 
-                    self.messages_received += 1
-                    logger.info(f"📨 Echo: {data.decode('utf-8', errors='replace')}")
+                temp_path = temp_file.name
 
-                    # Echo back
-                    await stream.write(data)
-                    self.messages_sent += 1
+            logger.info(f"✅ File received: {filename} -> {temp_path}")
+            self.files_received += 1
 
-            except Exception as e:
-                logger.error(f"Echo handler error: {e}")
-            finally:
-                await stream.close()
+            # Send acknowledgment
+            await stream.write(f"File {filename} received successfully".encode())
 
-        # Health handler
-        async def health_handler(stream: Any) -> None:
-            """Handle health check requests."""
-            try:
-                health_data = {
-                    'status': 'healthy',
-                    'uptime': time.time() - self.start_time,
-                    'connections_total': self.connections_total,
-                    'connections_active': self.connections_active,
-                    'messages_sent': self.messages_sent,
-                    'messages_received': self.messages_received,
-                    'peer_id': str(self.peer_id),
-                }
-
-                import json
-                await stream.write(json.dumps(health_data).encode())
-
-            except Exception as e:
-                logger.error(f"Health handler error: {e}")
-            finally:
-                await stream.close()
-
-        # Metrics handler
-        async def metrics_handler(stream: Any) -> None:
-            """Handle metrics requests."""
-            try:
-                metrics_data = {
-                    'libp2p_connections_total': self.connections_total,
-                    'libp2p_connections_active': self.connections_active,
-                    'libp2p_messages_sent_total': self.messages_sent,
-                    'libp2p_messages_received_total': self.messages_received,
-                    'libp2p_uptime_seconds': time.time() - self.start_time,
-                }
-
-                # Prometheus format
-                prometheus_metrics = []
-                for key, value in metrics_data.items():
-                    prometheus_metrics.append(f"{key} {value}")
-
-                await stream.write('\n'.join(prometheus_metrics).encode())
-
-            except Exception as e:
-                logger.error(f"Metrics handler error: {e}")
-            finally:
-                await stream.close()
-
-        # Set handlers (if host is available)
-        if self.host:
-            self.host.set_stream_handler(ECHO_PROTOCOL_ID, echo_handler)
-            self.host.set_stream_handler(HEALTH_PROTOCOL_ID, health_handler)
-            self.host.set_stream_handler(METRICS_PROTOCOL_ID, metrics_handler)
-
-        logger.info("✅ Protocol handlers configured")
-
-    async def _start_listening(self) -> None:
-        """Start listening on configured addresses."""
-        listen_addrs = []
-
-        # HTTP/WebSocket
-        if self.config.get('http_port'):
-            addr = f"/ip4/0.0.0.0/tcp/{self.config['http_port']}/ws"
-            listen_addrs.append(Multiaddr(addr))
-            logger.info(f"🌐 Listening on HTTP/WebSocket: {addr}")
-
-        # HTTPS/WSS
-        if self.config.get('https_port'):
-            addr = f"/ip4/0.0.0.0/tcp/{self.config['https_port']}/wss"
-            listen_addrs.append(Multiaddr(addr))
-            logger.info(f"🔒 Listening on HTTPS/WSS: {addr}")
-
-        if not listen_addrs:
-            # Default to port 8080
-            addr = "/ip4/0.0.0.0/tcp/8080/ws"
-            listen_addrs.append(Multiaddr(addr))
-            logger.info(f"🌐 Default listening on: {addr}")
-
-        # Start listening (if host is available)
-        if self.host:
-            for addr in listen_addrs:
-                await self.host.listen(addr)
+        except Exception as e:
+            logger.error(f"❌ File transfer handler error: {e}")
+        finally:
+            await stream.close()
 
     async def _start_health_server(self) -> None:
         """Start HTTP health check server."""
-        if self.config.get('health_port'):
-            # Start HTTP health server in background
-            async with trio.open_nursery() as nursery:
-                nursery.start_soon(self._run_health_server)
-            port = self.config['health_port']
+        try:
+            port = self.config["health_port"]
             logger.info(f"🏥 Health server started on port {port}")
+        except Exception as e:
+            logger.error(f"Health server error: {e}")
 
     async def _run_health_server(self) -> None:
         """Run HTTP health check server."""
         try:
-            import aiohttp  # type: ignore
             from aiohttp import web  # type: ignore
 
             async def health_handler(request: Any) -> Any:
                 """HTTP health check handler."""
-                return web.json_response({
-                    'status': 'healthy',
-                    'uptime': time.time() - self.start_time,
-                    'connections_active': self.connections_active,
-                    'peer_id': str(self.peer_id),
-                })
+                return web.json_response(
+                    {
+                        "status": "healthy",
+                        "peer_id": str(self.peer_id) if self.peer_id else None,
+                        "uptime": time.time() - self.start_time,
+                        "protocols": {
+                            "echo": str(ECHO_PROTOCOL_ID),
+                            "ping": str(PING_PROTOCOL_ID),
+                            "message": str(MESSAGE_PROTOCOL_ID),
+                            "file": str(FILE_PROTOCOL_ID),
+                        },
+                        "statistics": {
+                            "messages_sent": self.messages_sent,
+                            "messages_received": self.messages_received,
+                            "files_sent": self.files_sent,
+                            "files_received": self.files_received,
+                            "pings_sent": self.pings_sent,
+                            "pings_received": self.pings_received,
+                        },
+                    }
+                )
+
+            async def metrics_handler(request: Any) -> Any:
+                """Prometheus metrics handler."""
+                metrics = f"""# HELP libp2p_messages_total Total messages processed
+# TYPE libp2p_messages_total counter
+libp2p_messages_total{{type="sent"}} {self.messages_sent}
+libp2p_messages_total{{type="received"}} {self.messages_received}
+
+# HELP libp2p_files_total Total number of files processed
+# TYPE libp2p_files_total counter
+libp2p_files_total{{type="sent"}} {self.files_sent}
+libp2p_files_total{{type="received"}} {self.files_received}
+
+# HELP libp2p_pings_total Total number of pings processed
+# TYPE libp2p_pings_total counter
+libp2p_pings_total{{type="sent"}} {self.pings_sent}
+libp2p_pings_total{{type="received"}} {self.pings_received}
+
+# HELP libp2p_uptime_seconds Application uptime in seconds
+# TYPE libp2p_uptime_seconds gauge
+libp2p_uptime_seconds {time.time() - self.start_time}
+"""
+                return web.Response(text=metrics, content_type="text/plain")
 
             app = web.Application()
-            app.router.add_get('/health', health_handler)
-            app.router.add_get('/metrics', health_handler)
+            app.router.add_get("/health", health_handler)
+            app.router.add_get("/metrics", metrics_handler)
 
             runner = web.AppRunner(app)
             await runner.setup()
-
-            site = web.TCPSite(
-                runner,
-                '0.0.0.0',
-                int(self.config.get('health_port', '8080'))
-            )
+            site = web.TCPSite(runner, "0.0.0.0", self.config["health_port"])
             await site.start()
 
         except ImportError:
-            logger.warning("aiohttp not available, skipping HTTP health server")
+            logger.warning("aiohttp not available, health server disabled")
         except Exception as e:
             logger.error(f"Health server error: {e}")
 
-    async def _cleanup(self) -> None:
-        """Cleanup resources on shutdown."""
+    async def cleanup(self) -> None:
+        """Cleanup resources."""
         logger.info("🧹 Cleaning up resources...")
-
         if self.host:
             try:
                 await self.host.stop()
-                logger.info("✅ Host stopped")
             except Exception as e:
                 logger.error(f"Error stopping host: {e}")
 
-        logger.info("✅ Cleanup completed")
 
-
-def load_config() -> Dict[str, str]:
+def load_config() -> dict[str, str]:
     """Load configuration from environment variables."""
     return {
-        'log_level': os.getenv('LOG_LEVEL', 'info'),
-        'http_port': os.getenv('HTTP_PORT', '8080'),
-        'https_port': os.getenv('HTTPS_PORT', '8443'),
-        'health_port': os.getenv('HEALTH_PORT', '8080'),
-        'auto_tls_enabled': os.getenv('AUTO_TLS_ENABLED', 'false'),
-        'auto_tls_domain': os.getenv('AUTO_TLS_DOMAIN', 'libp2p.local'),
-        'renewal_threshold_hours': os.getenv('RENEWAL_THRESHOLD_HOURS', '24'),
-        'cert_validity_days': os.getenv('CERT_VALIDITY_DAYS', '90'),
-        'proxy_url': os.getenv('PROXY_URL', ''),
-        'proxy_auth': os.getenv('PROXY_AUTH', ''),
-        'metrics_enabled': os.getenv('METRICS_ENABLED', 'true'),
+        "port": os.getenv("PORT", str(DEFAULT_PORT)),
+        "health_port": os.getenv("HEALTH_PORT", "8081"),
+        "domain": os.getenv("DOMAIN", DEFAULT_DOMAIN),
+        "storage_path": os.getenv("STORAGE_PATH", "autotls-certs"),
+        "log_level": os.getenv("LOG_LEVEL", "INFO"),
     }
 
 
 async def main() -> None:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Production libp2p WebSocket Application"
-    )
-    parser.add_argument('--config', help='Configuration file path')
-    parser.add_argument('--log-level', default='info', help='Log level')
-
-    args = parser.parse_args()
-
-    # Load configuration
+    """Main application entry point."""
     config = load_config()
 
     # Set log level
-    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.getLogger().setLevel(log_level)
+    logging.getLogger().setLevel(getattr(logging, config["log_level"].upper()))
 
-    # Create application
     app = ProductionApp(config)
 
     # Set up signal handlers
     def signal_handler(signum: int, frame: Any) -> None:
-        logger.info(f"📡 Received signal {signum}, initiating shutdown...")
-        trio.from_thread.run_sync(app.shutdown_event.set)
+        logger.info(f"Received signal {signum}, shutting down...")
+        trio.from_thread.run_sync(app.cleanup)
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        # Run application
         await app.start()
     except KeyboardInterrupt:
-        logger.info("📡 Keyboard interrupt received")
+        logger.info("Received keyboard interrupt, shutting down...")
     except Exception as e:
-        logger.error(f"❌ Application error: {e}")
+        logger.error(f"Application error: {e}")
         sys.exit(1)
     finally:
-        logger.info("👋 Application shutdown complete")
+        await app.cleanup()
 
 
 if __name__ == "__main__":

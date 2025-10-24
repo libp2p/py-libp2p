@@ -1,5 +1,5 @@
-# Production Docker Compose for Python libp2p WebSocket Transport
-# Based on patterns from js-libp2p and go-libp2p implementations
+# Simple Docker Compose for libp2p WebSocket Production Deployment
+# Local testing with Docker only
 
 version: '3.8'
 
@@ -7,133 +7,61 @@ services:
   # Main libp2p WebSocket service
   libp2p-websocket:
     build:
-      context: ../..
-      dockerfile: examples/production_deployment/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: libp2p-websocket
     ports:
-      - "8080:8080"  # HTTP/WebSocket
-      - "8443:8443"  # HTTPS/WSS
-      - "9090:9090"  # Metrics
+      - "8080:8080"  # WebSocket port
+      - "8081:8081"  # Health check port
     environment:
-      - NODE_ENV=production
-      - LOG_LEVEL=info
-      - METRICS_ENABLED=true
-      - AUTO_TLS_ENABLED=true
-      - AUTO_TLS_DOMAIN=libp2p.local
-      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+      - DOMAIN=libp2p.local
+      - STORAGE_PATH=/app/autotls-certs
+      - PORT=8080
+      - HEALTH_PORT=8081
     volumes:
-      - ./data:/app/data
-      - ./certs:/app/certs
+      - ./autotls-certs:/app/autotls-certs
       - ./logs:/app/logs
-    depends_on:
-      - redis
-      - prometheus
     networks:
       - libp2p-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health', timeout=5)"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8081/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # Redis for inter-node communication
-  redis:
-    image: redis:7-alpine
-    container_name: libp2p-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - libp2p-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Prometheus for metrics collection
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: libp2p-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    networks:
-      - libp2p-network
-    restart: unless-stopped
-
-  # Grafana for monitoring dashboards
-  grafana:
-    image: grafana/grafana:latest
-    container_name: libp2p-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources
-    depends_on:
-      - prometheus
-    networks:
-      - libp2p-network
-    restart: unless-stopped
-
-  # Load balancer for multiple instances
-  nginx:
-    image: nginx:alpine
-    container_name: libp2p-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/ssl:/etc/nginx/ssl
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      - libp2p-websocket
-    networks:
-      - libp2p-network
-    restart: unless-stopped
-
-  # AutoTLS certificate manager
+  # Certificate manager service
   cert-manager:
     build:
-      context: ../..
-      dockerfile: examples/production_deployment/cert-manager.Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: libp2p-cert-manager
+    command: ["python", "cert_manager.py"]
     environment:
-      - AUTO_TLS_DOMAIN=libp2p.local
-      - CERT_STORAGE_PATH=/app/certs
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+      - STORAGE_PATH=/app/autotls-certs
       - RENEWAL_THRESHOLD_HOURS=24
+      - CERT_VALIDITY_DAYS=90
     volumes:
-      - ./certs:/app/certs
+      - ./autotls-certs:/app/autotls-certs
+      - ./logs:/app/logs
     networks:
       - libp2p-network
     restart: unless-stopped
-
-volumes:
-  redis-data:
-  prometheus-data:
-  grafana-data:
+    depends_on:
+      - libp2p-websocket
 
 networks:
   libp2p-network:
     driver: bridge
+    name: libp2p-production
+
+volumes:
+  autotls-certs:
+    driver: local
+  logs:
+    driver: local

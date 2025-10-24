@@ -19,20 +19,20 @@ import os
 import signal
 import sys
 import time
-from typing import Any, Dict
+from typing import Any
 
 import trio
 
 # Configure logging
 log_handlers: list[logging.Handler] = [logging.StreamHandler()]
-if os.path.exists('/app/logs'):
-    log_handlers.append(logging.FileHandler('/app/logs/libp2p.log'))
-elif os.path.exists('logs'):
-    log_handlers.append(logging.FileHandler('logs/libp2p.log'))
+if os.path.exists("/app/logs"):
+    log_handlers.append(logging.FileHandler("/app/logs/libp2p.log"))
+elif os.path.exists("logs"):
+    log_handlers.append(logging.FileHandler("logs/libp2p.log"))
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=log_handlers,
 )
 logger = logging.getLogger("libp2p.production")
@@ -41,7 +41,7 @@ logger = logging.getLogger("libp2p.production")
 class SimpleProductionApp:
     """Simplified production libp2p WebSocket application."""
 
-    def __init__(self, config: Dict[str, str]) -> None:
+    def __init__(self, config: dict[str, str]) -> None:
         """Initialize production application."""
         self.config = config
         self.shutdown_event = trio.Event()
@@ -74,38 +74,39 @@ class SimpleProductionApp:
 
     async def _start_health_server(self) -> None:
         """Start HTTP health check server."""
-        if self.config.get('health_port'):
+        if self.config.get("health_port"):
             # Start HTTP health server in background
             # Start health server in background
             async with trio.open_nursery() as nursery:
                 nursery.start_soon(self._run_health_server)
-            port = self.config['health_port']
+            port = self.config["health_port"]
             logger.info(f"🏥 Health server started on port {port}")
 
     async def _run_health_server(self) -> None:
         """Run HTTP health check server."""
         try:
-            import aiohttp  # type: ignore
             from aiohttp import web  # type: ignore
 
             async def health_handler(request: Any) -> Any:
                 """HTTP health check handler."""
-                return web.json_response({
-                    'status': 'healthy',
-                    'uptime': time.time() - self.start_time,
-                    'connections_active': self.connections_active,
-                    'messages_sent': self.messages_sent,
-                    'messages_received': self.messages_received,
-                })
+                return web.json_response(
+                    {
+                        "status": "healthy",
+                        "uptime": time.time() - self.start_time,
+                        "connections_active": self.connections_active,
+                        "messages_sent": self.messages_sent,
+                        "messages_received": self.messages_received,
+                    }
+                )
 
             async def metrics_handler(request: Any) -> Any:
                 """Metrics handler."""
                 metrics = {
-                    'libp2p_connections_total': self.connections_total,
-                    'libp2p_connections_active': self.connections_active,
-                    'libp2p_messages_sent_total': self.messages_sent,
-                    'libp2p_messages_received_total': self.messages_received,
-                    'libp2p_uptime_seconds': time.time() - self.start_time,
+                    "libp2p_connections_total": self.connections_total,
+                    "libp2p_connections_active": self.connections_active,
+                    "libp2p_messages_sent_total": self.messages_sent,
+                    "libp2p_messages_received_total": self.messages_received,
+                    "libp2p_uptime_seconds": time.time() - self.start_time,
                 }
 
                 # Prometheus format
@@ -113,19 +114,17 @@ class SimpleProductionApp:
                 for key, value in metrics.items():
                     prometheus_metrics.append(f"{key} {value}")
 
-                return web.Response(text='\n'.join(prometheus_metrics))
+                return web.Response(text="\n".join(prometheus_metrics))
 
             app = web.Application()
-            app.router.add_get('/health', health_handler)
-            app.router.add_get('/metrics', metrics_handler)
+            app.router.add_get("/health", health_handler)
+            app.router.add_get("/metrics", metrics_handler)
 
             runner = web.AppRunner(app)
             await runner.setup()
 
             site = web.TCPSite(
-                runner,
-                '0.0.0.0',
-                int(self.config.get('health_port', '8080'))
+                runner, "0.0.0.0", int(self.config.get("health_port", "8080"))
             )
             await site.start()
 
@@ -140,16 +139,16 @@ class SimpleProductionApp:
         logger.info("✅ Cleanup completed")
 
 
-def load_config() -> Dict[str, str]:
+def load_config() -> dict[str, str]:
     """Load configuration from environment variables."""
     return {
-        'log_level': os.getenv('LOG_LEVEL', 'info'),
-        'http_port': os.getenv('HTTP_PORT', '8080'),
-        'https_port': os.getenv('HTTPS_PORT', '8443'),
-        'health_port': os.getenv('HEALTH_PORT', '8080'),
-        'auto_tls_enabled': os.getenv('AUTO_TLS_ENABLED', 'false'),
-        'auto_tls_domain': os.getenv('AUTO_TLS_DOMAIN', 'libp2p.local'),
-        'metrics_enabled': os.getenv('METRICS_ENABLED', 'true'),
+        "log_level": os.getenv("LOG_LEVEL", "info"),
+        "http_port": os.getenv("HTTP_PORT", "8080"),
+        "https_port": os.getenv("HTTPS_PORT", "8443"),
+        "health_port": os.getenv("HEALTH_PORT", "8080"),
+        "auto_tls_enabled": os.getenv("AUTO_TLS_ENABLED", "false"),
+        "auto_tls_domain": os.getenv("AUTO_TLS_DOMAIN", "libp2p.local"),
+        "metrics_enabled": os.getenv("METRICS_ENABLED", "true"),
     }
 
 
@@ -158,8 +157,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Simple Production libp2p WebSocket Application"
     )
-    parser.add_argument('--config', help='Configuration file path')
-    parser.add_argument('--log-level', default='info', help='Log level')
+    parser.add_argument("--config", help="Configuration file path")
+    parser.add_argument("--log-level", default="info", help="Log level")
 
     args = parser.parse_args()
 
