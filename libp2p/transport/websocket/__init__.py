@@ -9,6 +9,8 @@ from .transport import (
     WithTLSServerConfig,
     WithHandshakeTimeout,
     WithMaxConnections,
+    WithAdvancedTLS,
+    WithAutoTLS,
     combine_configs,
 )
 from .connection import P2PWebSocketConnection
@@ -26,5 +28,7 @@ __all__ = [
     "WithTLSServerConfig",
     "WithHandshakeTimeout",
     "WithMaxConnections",
+    "WithAdvancedTLS",
+    "WithAutoTLS",
     "combine_configs",
 ]

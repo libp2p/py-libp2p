@@ -33,16 +33,8 @@ class TestTLSCertificate:
         key_pair = create_new_key_pair()
         peer_id = ID.from_pubkey(key_pair.public_key)
 
-        cert_pem = (
-            "-----BEGIN CERTIFICATE-----\n"
-            "MOCK_CERT\n"
-            "-----END CERTIFICATE-----"
-        )
-        key_pem = (
-            "-----BEGIN PRIVATE KEY-----\n"
-            "MOCK_KEY\n"
-            "-----END PRIVATE KEY-----"
-        )
+        cert_pem = "-----BEGIN CERTIFICATE-----\nMOCK_CERT\n-----END CERTIFICATE-----"
+        key_pem = "-----BEGIN PRIVATE KEY-----\nMOCK_KEY\n-----END PRIVATE KEY-----"
         expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
         cert = TLSCertificate(
@@ -99,15 +91,9 @@ class TestFileCertificateStorage:
             peer_id = ID.from_pubkey(key_pair.public_key)
 
             cert_pem = (
-                "-----BEGIN CERTIFICATE-----\n"
-                "MOCK_CERT\n"
-                "-----END CERTIFICATE-----"
+                "-----BEGIN CERTIFICATE-----\nMOCK_CERT\n-----END CERTIFICATE-----"
             )
-            key_pem = (
-                "-----BEGIN PRIVATE KEY-----\n"
-                "MOCK_KEY\n"
-                "-----END PRIVATE KEY-----"
-            )
+            key_pem = "-----BEGIN PRIVATE KEY-----\nMOCK_KEY\n-----END PRIVATE KEY-----"
             expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
             cert = TLSCertificate(
@@ -192,10 +178,7 @@ class TestTLSConfig:
 
         assert tls_config.certificate is not None
         assert tls_config.certificate.cert_file == "cert.pem"
-        assert (
-            tls_config.certificate.validation_mode ==
-            CertificateValidationMode.BASIC
-        )
+        assert tls_config.certificate.validation_mode == CertificateValidationMode.BASIC
         assert tls_config.cipher_suites is not None
         assert "TLS_AES_256_GCM_SHA384" in tls_config.cipher_suites
 

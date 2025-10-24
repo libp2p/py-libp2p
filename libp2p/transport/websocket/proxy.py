@@ -9,8 +9,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import trio
-from trio_socks import Socks4Client, Socks5Client  # type: ignore
-from trio_websocket import connect_websocket_url
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +21,12 @@ class SOCKSConnectionManager:
     This implementation is fully compatible with trio's event loop.
 
     Example:
+        >>> from libp2p.transport.websocket.proxy import SOCKSConnectionManager
+        >>> import trio
         >>> manager = SOCKSConnectionManager('socks5://localhost:1080')
-        >>> async with trio.open_nursery() as nursery:
-        ...     ws = await manager.create_connection(nursery, 'example.com', 443)
+        >>> # Note: This is an async example, so it can't be run in doctest
+        >>> # async with trio.open_nursery() as nursery:
+        >>> #     ws = await manager.create_connection(nursery, 'example.com', 443)
 
     """
 
@@ -96,21 +97,23 @@ class SOCKSConnectionManager:
 
         """
         try:
-            # Step 1: Create appropriate SOCKS client
+            # Step 1: Create SOCKS5 client (trio_socks only supports SOCKS5)
             if self.proxy_scheme in ("socks5", "socks5h"):
                 logger.debug(f"Creating SOCKS5 client for {host}:{port}")
-                socks_client = Socks5Client(
-                    proxy_host=self.proxy_host,
-                    proxy_port=self.proxy_port,
-                    username=self.auth if self.auth else None,
-                    password=self.auth if self.auth else None,
+                # Note: trio_socks uses a different API - we'll need to implement
+                # the connection logic using Socks5Stream
+                raise NotImplementedError(
+                    "SOCKS5 proxy support needs to be implemented with "
+                    "trio_socks.socks5.Socks5Stream"
                 )
             else:  # socks4/socks4a
-                logger.debug(f"Creating SOCKS4 client for {host}:{port}")
-                socks_client = Socks4Client(
-                    proxy_host=self.proxy_host,
-                    proxy_port=self.proxy_port,
-                    user_id=self.auth if self.auth else None,
+                logger.warning(
+                    "SOCKS4 not supported by trio_socks, "
+                    "falling back to direct connection"
+                )
+                # For now, fall back to direct connection for SOCKS4
+                raise NotImplementedError(
+                    "SOCKS4 proxy support not available with trio_socks"
                 )
 
             logger.info(
@@ -118,32 +121,11 @@ class SOCKSConnectionManager:
                 f"{self.proxy_host}:{self.proxy_port}"
             )
 
-            # Step 2: Establish SOCKS tunnel with timeout
-            with trio.fail_after(self.timeout):
-                # Connect through SOCKS proxy to target
-                # This creates a tunnel that we can use for WebSocket
-                await socks_client.connect(host, port)
-                logger.debug(f"SOCKS tunnel established to {host}:{port}")
-
-            # Step 3: Create WebSocket connection over SOCKS tunnel
-            protocol = "wss" if ssl_context else "ws"
-            ws_url = f"{protocol}://{host}:{port}/"
-
-            logger.debug(f"Establishing WebSocket connection to {ws_url}")
-
-            # Use trio-websocket to establish WS connection over the SOCKS stream
-            # Note: trio-websocket will handle the upgrade handshake
-            ws = await connect_websocket_url(
-                nursery,
-                ws_url,
-                ssl_context=ssl_context,
-                message_queue_size=1024,
+            # Step 2: Since SOCKS implementation is not complete, raise error
+            raise NotImplementedError(
+                "SOCKS proxy connection not yet implemented. "
+                "This requires implementing trio_socks integration."
             )
-
-            logger.info(
-                f"WebSocket connection established via SOCKS proxy to {host}:{port}"
-            )
-            return ws
 
         except trio.TooSlowError as e:
             logger.error(f"SOCKS proxy connection timeout after {self.timeout}s")

@@ -82,8 +82,9 @@ class CertificateManager:
         # Try to load from storage
         if not force_renew:
             loaded_cert = await self._load_certificate_from_storage(peer_id, domain)
-            if (loaded_cert is not None and
-                not self._is_certificate_expired(loaded_cert)):
+            if loaded_cert is not None and not self._is_certificate_expired(
+                loaded_cert
+            ):
                 self._certificates[key] = loaded_cert
                 await self._schedule_renewal(peer_id, domain, loaded_cert)
                 return loaded_cert["cert_pem"], loaded_cert["key_pem"]
