@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import ssl
-from typing import Dict, List, Optional, Tuple
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -50,15 +49,15 @@ class CertificateManager:
         self.cert_validity_days = cert_validity_days
         self.renewal_threshold_hours = renewal_threshold_hours
 
-        self._certificates: Dict[Tuple[ID, str], Dict] = {}
-        self._renewal_tasks: Dict[Tuple[ID, str], asyncio.Task] = {}
+        self._certificates: dict[tuple[ID, str], dict] = {}
+        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task] = {}
 
     async def get_certificate(
         self,
         peer_id: ID,
         domain: str,
         force_renew: bool = False,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """
         Get or generate certificate for peer ID and domain.
 
@@ -104,7 +103,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> Dict:
+    ) -> dict:
         """Generate a new TLS certificate."""
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -117,34 +116,36 @@ class CertificateManager:
         expires_at = now + timedelta(days=self.cert_validity_days)
 
         # Create certificate
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
-            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "CA"),  # type: ignore
-            x509.NameAttribute(NameOID.LOCALITY_NAME, "San Francisco"),  # type: ignore
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p"),  # type: ignore
-            x509.NameAttribute(NameOID.COMMON_NAME, domain),  # type: ignore
-        ])
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "CA"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "San Francisco"),  # type: ignore
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p"),  # type: ignore
+                x509.NameAttribute(NameOID.COMMON_NAME, domain),  # type: ignore
+            ]
+        )
 
-        cert = x509.CertificateBuilder().subject_name(
-            subject
-        ).issuer_name(
-            issuer
-        ).public_key(
-            private_key.public_key()
-        ).serial_number(
-            x509.random_serial_number()
-        ).not_valid_before(
-            now
-        ).not_valid_after(
-            expires_at
-        ).add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName(domain),
-                x509.DNSName(f"*.{domain}"),  # Wildcard for subdomains
-                x509.DNSName("localhost"),  # Always include localhost
-            ]),
-            critical=False,
-        ).sign(private_key, hashes.SHA256())
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(expires_at)
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName(domain),
+                        x509.DNSName(f"*.{domain}"),  # Wildcard for subdomains
+                        x509.DNSName("localhost"),  # Always include localhost
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
 
         # Serialize to PEM
         cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
@@ -163,12 +164,12 @@ class CertificateManager:
             "expires_at": expires_at.isoformat(),
         }
 
-    def _is_certificate_expired(self, cert_data: Dict) -> bool:
+    def _is_certificate_expired(self, cert_data: dict) -> bool:
         """Check if certificate is expired."""
         expires_at = datetime.fromisoformat(cert_data["expires_at"])
         return datetime.utcnow() >= expires_at
 
-    def _is_certificate_expiring_soon(self, cert_data: Dict) -> bool:
+    def _is_certificate_expiring_soon(self, cert_data: dict) -> bool:
         """Check if certificate expires within threshold."""
         expires_at = datetime.fromisoformat(cert_data["expires_at"])
         threshold = datetime.utcnow() + timedelta(hours=self.renewal_threshold_hours)
@@ -178,7 +179,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-        cert_data: Dict,
+        cert_data: dict,
     ) -> None:
         """Schedule certificate renewal."""
         key = (peer_id, domain)
@@ -228,7 +229,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """Load certificate from storage."""
         cert_path = self._get_cert_path(peer_id, domain)
 
@@ -237,7 +238,8 @@ class CertificateManager:
 
         try:
             import json
-            with open(cert_path, "r") as f:
+
+            with open(cert_path) as f:
                 return json.load(f)
         except (KeyError, ValueError, FileNotFoundError):
             return None
@@ -246,12 +248,13 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-        cert_data: Dict,
+        cert_data: dict,
     ) -> None:
         """Store certificate to storage."""
         cert_path = self._get_cert_path(peer_id, domain)
 
         import json
+
         with open(cert_path, "w") as f:
             json.dump(cert_data, f, indent=2)
 
@@ -259,7 +262,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> Optional[ssl.SSLContext]:
+    ) -> ssl.SSLContext | None:
         """Get SSL context for peer ID and domain."""
         key = (peer_id, domain)
         if key not in self._certificates:
@@ -274,14 +277,15 @@ class CertificateManager:
 
         # Create temporary files for certificate and key
         import tempfile
+
         with tempfile.NamedTemporaryFile(
-            mode='w', suffix='.pem', delete=False
+            mode="w", suffix=".pem", delete=False
         ) as cert_file:
             cert_file.write(cert_data["cert_pem"])
             cert_path = cert_file.name
 
         with tempfile.NamedTemporaryFile(
-            mode='w', suffix='.pem', delete=False
+            mode="w", suffix=".pem", delete=False
         ) as key_file:
             key_file.write(cert_data["key_pem"])
             key_path = key_file.name
@@ -291,6 +295,7 @@ class CertificateManager:
         finally:
             # Clean up temporary files
             import os
+
             try:
                 os.unlink(cert_path)
                 os.unlink(key_path)
@@ -326,7 +331,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """Get certificate information."""
         key = (peer_id, domain)
         if key not in self._certificates:
@@ -342,7 +347,7 @@ class CertificateManager:
             "is_expiring_soon": self._is_certificate_expiring_soon(cert_data),
         }
 
-    async def list_certificates(self) -> List[Dict]:
+    async def list_certificates(self) -> list[dict]:
         """List all certificates."""
         certificates = []
 

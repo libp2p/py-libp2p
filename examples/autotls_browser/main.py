@@ -14,12 +14,12 @@ Features:
 
 import argparse
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
 
-from libp2p import create_yamux_muxer_option, new_host
+from libp2p import create_yamux_muxer_option
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
@@ -62,8 +62,8 @@ class AutoTLSBrowserDemo:
         self.domain = domain
         self.storage_path = storage_path
         self.port = port
-        self.host: Optional[Any] = None
-        self.peer_id: Optional[ID] = None
+        self.host: Any | None = None
+        self.peer_id: ID | None = None
 
     async def start_server(self) -> None:
         """Start the AutoTLS-enabled server."""
@@ -71,6 +71,8 @@ class AutoTLSBrowserDemo:
 
         # Create peer identity
         key_pair = create_new_key_pair()
+        from libp2p.peer.id import ID
+
         self.peer_id = ID.from_pubkey(key_pair.public_key)
 
         # Create AutoTLS configuration
@@ -82,25 +84,32 @@ class AutoTLSBrowserDemo:
         )
 
         # Create host with AutoTLS transport (simplified approach)
-        from libp2p.transport.upgrader import TransportUpgrader
         from libp2p.host.basic_host import BasicHost
         from libp2p.network.swarm import Swarm
-        from libp2p.peer.peerstore import PeerStore
         from libp2p.peer.id import ID
-        
+        from libp2p.peer.peerstore import PeerStore
+        from libp2p.transport.upgrader import TransportUpgrader
+
         # Create upgrader
         upgrader = TransportUpgrader(
-            secure_transports_by_protocol={PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)},
+            secure_transports_by_protocol={
+                PLAINTEXT_PROTOCOL_ID: InsecureTransport(key_pair)
+            },
             muxer_transports_by_protocol=create_yamux_muxer_option(),
         )
-        
+
         # Create transport
         transport = WebsocketTransport(upgrader, config=autotls_config)
-        
+
         # Create host
         peer_store = PeerStore()
         peer_id = ID.from_pubkey(key_pair.public_key)
-        swarm = Swarm(peer_id=peer_id, peerstore=peer_store, upgrader=upgrader, transport=transport)
+        swarm = Swarm(
+            peer_id=peer_id,
+            peerstore=peer_store,
+            upgrader=upgrader,
+            transport=transport,
+        )
         self.host = BasicHost(swarm)
 
         # Set up protocol handlers
@@ -109,13 +118,13 @@ class AutoTLSBrowserDemo:
         # Start listening
         listen_addr = f"/ip4/0.0.0.0/tcp/{self.port}/ws"
         wss_addr = f"/ip4/0.0.0.0/tcp/{self.port}/wss"
-        
+
         logger.info(f"Server started with peer ID: {self.peer_id}")
         logger.info(f"Listening on: {listen_addr}")
         logger.info(f"Listening on: {wss_addr}")
         logger.info(f"AutoTLS domain: {self.domain}")
         logger.info(f"Certificate storage: {self.storage_path}")
-        
+
         # Use the run method with listen addresses
         async with self.host.run([Multiaddr(listen_addr), Multiaddr(wss_addr)]):
             # Keep the host running
@@ -126,6 +135,7 @@ class AutoTLSBrowserDemo:
 
     async def _setup_protocols(self) -> None:
         """Set up protocol handlers."""
+
         # Echo protocol handler
         async def echo_handler(stream) -> None:
             """Handle echo protocol requests."""
@@ -167,9 +177,9 @@ class AutoTLSBrowserDemo:
 
     def _print_connection_info(self) -> None:
         """Print connection information for browser clients."""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("AutoTLS Browser Integration Demo")
-        print("="*60)
+        print("=" * 60)
         print(f"Peer ID: {self.peer_id}")
         print(f"Domain: {self.domain}")
         print(f"Port: {self.port}")
@@ -180,7 +190,7 @@ class AutoTLSBrowserDemo:
         print("1. Open browser to: http://localhost:8080")
         print("2. The page will automatically connect via WSS")
         print("3. Certificates are automatically managed")
-        print("="*60)
+        print("=" * 60)
 
     async def create_html_page(self) -> str:
         """Create HTML page for browser demo."""
@@ -387,20 +397,19 @@ class AutoTLSBrowserDemo:
     async def serve_html(self) -> None:
         """Serve HTML page for browser demo."""
         try:
-            import aiohttp  # type: ignore
             from aiohttp import web  # type: ignore
 
             html_content = await self.create_html_page()
 
             async def handle(request):
-                return web.Response(text=html_content, content_type='text/html')
+                return web.Response(text=html_content, content_type="text/html")
 
             app = web.Application()
-            app.router.add_get('/', handle)
+            app.router.add_get("/", handle)
 
             runner = web.AppRunner(app)
             await runner.setup()
-            site = web.TCPSite(runner, 'localhost', 8080)
+            site = web.TCPSite(runner, "localhost", 8080)
             await site.start()
 
             logger.info("HTML server started at http://localhost:8080")
@@ -416,23 +425,18 @@ async def main() -> None:
     parser.add_argument(
         "--domain",
         default="libp2p.local",
-        help="Domain for AutoTLS certificates (default: libp2p.local)"
+        help="Domain for AutoTLS certificates (default: libp2p.local)",
     )
     parser.add_argument(
         "--storage-path",
         default="autotls-certs",
-        help="Path for certificate storage (default: autotls-certs)"
+        help="Path for certificate storage (default: autotls-certs)",
     )
     parser.add_argument(
-        "--port",
-        type=int,
-        default=8080,
-        help="Port to listen on (default: 8080)"
+        "--port", type=int, default=8080, help="Port to listen on (default: 8080)"
     )
     parser.add_argument(
-        "--serve-html",
-        action="store_true",
-        help="Serve HTML page for browser demo"
+        "--serve-html", action="store_true", help="Serve HTML page for browser demo"
     )
 
     args = parser.parse_args()

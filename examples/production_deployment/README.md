@@ -1,10 +1,10 @@
-# Production Deployment Examples
+# Simple Production Deployment
 
-This directory contains comprehensive production deployment examples for the Python libp2p WebSocket transport, based on patterns from JavaScript and Go libp2p implementations.
+This directory contains a simplified production deployment example for the Python libp2p WebSocket transport, featuring echo/ping protocols, message passing, and file transfer capabilities. Based on patterns from JavaScript and Go libp2p implementations.
 
 ## 🚀 Quick Start
 
-### Docker Compose (Recommended for Development)
+### Docker Compose (Recommended)
 
 ```bash
 # Start all services
@@ -13,287 +13,363 @@ docker-compose up -d
 # View logs
 docker-compose logs -f libp2p-websocket
 
-# Scale the service
-docker-compose up -d --scale libp2p-websocket=3
+# Stop services
+docker-compose down
 ```
 
-### Kubernetes (Production)
+### Direct Docker Build
 
 ```bash
-# Create namespace
-kubectl create namespace libp2p-production
+# Build the image
+docker build -t libp2p-production .
 
-# Deploy the application
-kubectl apply -f kubernetes/
+# Run the container
+docker run -d --name libp2p-websocket -p 8080:8080 -p 8081:8081 libp2p-production
 
-# Check status
-kubectl get pods -n libp2p-production
+# View logs
+docker logs -f libp2p-websocket
+
+# Stop and remove
+docker stop libp2p-websocket && docker rm libp2p-websocket
+```
+
+### Direct Python Execution
+
+```bash
+# Start server
+python main.py
+
+# Test with curl
+curl http://localhost:8081/health
+curl http://localhost:8081/metrics
 ```
 
 ## 📁 Directory Structure
 
 ```
 production_deployment/
-├── Dockerfile                 # Multi-stage production Docker image
-├── docker-compose.yml        # Complete stack with monitoring
-├── main.py                   # Production application
-├── requirements.txt          # Python dependencies
-├── prometheus.yml            # Prometheus configuration
-├── nginx/
-│   └── nginx.conf            # Load balancer configuration
-├── kubernetes/
-│   ├── deployment.yaml      # Kubernetes deployment
-│   └── ingress.yaml         # Ingress and networking
-└── README.md                # This file
+├── main.py              # Main production application
+├── cert_manager.py      # Certificate management
+├── test_production.py   # Test script
+├── Dockerfile           # Docker image
+├── docker-compose.yml # Docker Compose
+├── requirements.txt     # Python dependencies
+└── README.md           # This file
 ```
 
 ## 🏗️ Architecture
 
 ### Components
 
-1. **libp2p-websocket**: Main application service
-2. **redis**: Inter-node communication and caching
-3. **prometheus**: Metrics collection
-4. **grafana**: Monitoring dashboards
-5. **nginx**: Load balancer and SSL termination
-6. **cert-manager**: AutoTLS certificate management
+1. **libp2p-websocket**: Main application service with WebSocket transport
+1. **cert-manager**: AutoTLS certificate management service
 
 ### Features
 
+- ✅ **Echo Protocol** (`/echo/1.0.0`): Message echoing for connectivity testing
+- ✅ **Ping Protocol** (`/ipfs/ping/1.0.0`): Standard libp2p ping for latency testing
+- ✅ **Message Passing** (`/message/1.0.0`): Peer-to-peer messaging with acknowledgments
+- ✅ **File Transfer** (`/file/1.0.0`): Chunked file sharing between peers
 - ✅ **AutoTLS Support**: Automatic certificate generation and renewal
-- ✅ **Load Balancing**: Nginx-based load balancing
-- ✅ **Monitoring**: Prometheus + Grafana integration
-- ✅ **Health Checks**: Comprehensive health monitoring
-- ✅ **Security**: Non-root containers, network policies
-- ✅ **Scaling**: Horizontal pod autoscaling
-- ✅ **Persistence**: Persistent storage for certificates and data
+- ✅ **Health Checks**: HTTP endpoints for monitoring
+- ✅ **Security**: Non-root containers, secure defaults
+- ✅ **Scaling**: Multi-instance deployment support
+
+## 📊 Protocols
+
+### Echo Protocol (`/echo/1.0.0`)
+
+Simple message echoing protocol for testing connectivity and basic communication.
+
+**Usage:**
+
+```bash
+# Test echo protocol
+curl -X POST http://localhost:8080/echo -d "Hello World!"
+```
+
+### Ping Protocol (`/ipfs/ping/1.0.0`)
+
+Standard libp2p ping protocol for connectivity testing and latency measurement.
+
+**Usage:**
+
+```bash
+# Test ping protocol
+curl -X GET http://localhost:8080/ping
+```
+
+### Message Passing (`/message/1.0.0`)
+
+Peer-to-peer messaging protocol with acknowledgment support.
+
+**Usage:**
+
+```bash
+# Send message
+curl -X POST http://localhost:8080/message -d "Production message!"
+```
+
+### File Transfer (`/file/1.0.0`)
+
+File sharing protocol with chunked transfer and progress tracking.
+
+**Usage:**
+
+```bash
+# Upload file
+curl -X POST http://localhost:8080/file -F "file=@example.txt"
+```
 
 ## 🔧 Configuration
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_LEVEL` | `info` | Logging level |
-| `HTTP_PORT` | `8080` | HTTP/WebSocket port |
-| `HTTPS_PORT` | `8443` | HTTPS/WSS port |
-| `AUTO_TLS_ENABLED` | `false` | Enable AutoTLS |
-| `AUTO_TLS_DOMAIN` | `libp2p.local` | AutoTLS domain |
-| `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
-| `METRICS_ENABLED` | `true` | Enable metrics collection |
+| Variable       | Default         | Description              |
+| -------------- | --------------- | ------------------------ |
+| `LOG_LEVEL`    | `INFO`          | Logging level            |
+| `PORT`         | `8080`          | WebSocket port           |
+| `HEALTH_PORT`  | `8081`          | Health check port        |
+| `DOMAIN`       | `libp2p.local`  | AutoTLS domain           |
+| `STORAGE_PATH` | `autotls-certs` | Certificate storage path |
 
-### Docker Compose Configuration
+### Ports
 
-```yaml
-# Custom configuration
-services:
-  libp2p-websocket:
-    environment:
-      - AUTO_TLS_ENABLED=true
-      - AUTO_TLS_DOMAIN=myapp.local
-      - LOG_LEVEL=debug
-```
+| Port   | Service   | Description              |
+| ------ | --------- | ------------------------ |
+| `8080` | WebSocket | Main WebSocket service   |
+| `8081` | Health    | Health check and metrics |
 
-### Kubernetes Configuration
+## 🐳 Docker Commands
 
-```yaml
-# Custom environment
-env:
-- name: AUTO_TLS_ENABLED
-  value: "true"
-- name: AUTO_TLS_DOMAIN
-  value: "myapp.local"
-```
-
-## 📊 Monitoring
-
-### Metrics Endpoints
-
-- **Health**: `http://localhost:8080/health`
-- **Metrics**: `http://localhost:9090/metrics`
-- **Grafana**: `http://localhost:3000` (admin/admin)
-
-### Key Metrics
-
-- `libp2p_connections_total`: Total connections
-- `libp2p_connections_active`: Active connections
-- `libp2p_messages_sent_total`: Messages sent
-- `libp2p_messages_received_total`: Messages received
-- `libp2p_uptime_seconds`: Application uptime
-
-### Grafana Dashboards
-
-Pre-configured dashboards include:
-- **libp2p Overview**: High-level metrics
-- **Connection Metrics**: Connection statistics
-- **Message Flow**: Message throughput
-- **System Resources**: CPU, memory, network
-
-## 🔒 Security
-
-### Container Security
-
-- Non-root user execution
-- Read-only root filesystem
-- Minimal base images
-- Security context constraints
-
-### Network Security
-
-- Network policies for pod isolation
-- TLS encryption for all communications
-- Rate limiting and DDoS protection
-- Security headers
-
-### Certificate Management
-
-- Automatic TLS certificate generation
-- Certificate renewal before expiry
-- Wildcard domain support
-- Secure certificate storage
-
-## 🚀 Deployment Strategies
-
-### Rolling Updates
+### Build and Run
 
 ```bash
-# Update application
-kubectl set image deployment/libp2p-websocket libp2p-websocket=libp2p-websocket:v2.0.0
+# Build the image
+docker build -t libp2p-production .
 
-# Check rollout status
-kubectl rollout status deployment/libp2p-websocket
+# Run the container
+docker run -d --name libp2p-websocket -p 8080:8080 -p 8081:8081 libp2p-production
+
+# View logs
+docker logs -f libp2p-websocket
+
+# Stop and remove
+docker stop libp2p-websocket && docker rm libp2p-websocket
 ```
 
-### Blue-Green Deployment
+### Docker Compose
 
 ```bash
-# Deploy new version
-kubectl apply -f kubernetes/deployment-green.yaml
+# Start services
+docker-compose up -d
 
-# Switch traffic
-kubectl patch service libp2p-websocket-service -p '{"spec":{"selector":{"version":"v2.0.0"}}}'
-```
+# View logs
+docker-compose logs -f
 
-### Canary Deployment
+# Scale services
+docker-compose up -d --scale libp2p-websocket=3
 
-```bash
-# Deploy canary version
-kubectl apply -f kubernetes/canary-deployment.yaml
+# Stop services
+docker-compose down
 
-# Gradually increase traffic
-kubectl patch service libp2p-websocket-service -p '{"spec":{"selector":{"version":"canary"}}}'
-```
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-1. **Certificate Issues**
-   ```bash
-   # Check certificate status
-   kubectl logs -n libp2p-production deployment/libp2p-websocket | grep -i cert
-   ```
-
-2. **Connection Issues**
-   ```bash
-   # Check network policies
-   kubectl get networkpolicies -n libp2p-production
-   ```
-
-3. **Performance Issues**
-   ```bash
-   # Check resource usage
-   kubectl top pods -n libp2p-production
-   ```
-
-### Debug Commands
-
-```bash
-# View application logs
-kubectl logs -f deployment/libp2p-websocket -n libp2p-production
-
-# Check service endpoints
-kubectl get endpoints -n libp2p-production
-
-# Test connectivity
-kubectl exec -it deployment/libp2p-websocket -n libp2p-production -- curl localhost:8080/health
-```
-
-## 📈 Scaling
-
-### Horizontal Pod Autoscaling
-
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: libp2p-websocket-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: libp2p-websocket
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-```
-
-### Vertical Pod Autoscaling
-
-```yaml
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: libp2p-websocket-vpa
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: libp2p-websocket
-  updatePolicy:
-    updateMode: "Auto"
+# Clean up volumes
+docker-compose down -v
 ```
 
 ## 🧪 Testing
 
-### Load Testing
+### Manual Testing
+
+1. **Start Server:**
+
+   ```bash
+   docker-compose up -d
+   ```
+
+1. **Test Health Check:**
+
+   ```bash
+   curl http://localhost:8081/health
+   ```
+
+1. **Test Metrics:**
+
+   ```bash
+   curl http://localhost:8081/metrics
+   ```
+
+1. **Test Protocols:**
+
+   ```bash
+   # Echo protocol
+   curl -X POST http://localhost:8080/echo -d "Test message"
+
+   # Ping protocol
+   curl -X GET http://localhost:8080/ping
+
+   # Message passing
+   curl -X POST http://localhost:8080/message -d "Production message!"
+
+   # File transfer
+   curl -X POST http://localhost:8080/file -F "file=@example.txt"
+   ```
+
+### Automated Testing
 
 ```bash
-# Install k6
-curl https://github.com/grafana/k6/releases/download/v0.47.0/k6-v0.47.0-linux-amd64.tar.gz -L | tar xvz --strip-components 1
+# Run test script
+python test_production.py
 
-# Run load test
-k6 run load-test.js
+# Run with Docker Compose
+docker-compose up -d
+
+# Check service health
+docker-compose ps
+
+# View logs
+docker-compose logs -f libp2p-websocket
 ```
 
-### Integration Testing
+## 📈 Monitoring
+
+### Health Checks
+
+The application includes built-in health checks:
+
+- **Docker Health Check**: Automatic container health monitoring
+- **Service Health**: WebSocket service availability
+- **Certificate Health**: AutoTLS certificate status
+
+### Logging
+
+Structured logging with different levels:
+
+- **INFO**: General application events
+- **WARNING**: Non-critical issues
+- **ERROR**: Critical errors
+- **DEBUG**: Detailed debugging information
+
+### Statistics
+
+The application tracks:
+
+- Messages sent/received
+- Pings sent/received
+- Files sent/received
+- Connection statistics
+- Protocol usage
+
+## 🔒 Security
+
+### AutoTLS
+
+- Automatic certificate generation
+- Certificate renewal before expiration
+- Secure WebSocket (WSS) support
+- Domain-based certificate management
+
+### Production Security
+
+- Non-root container execution
+- Minimal attack surface
+- Secure defaults
+- Input validation
+- Error handling
+
+## 🚀 Deployment
+
+### Local Development
 
 ```bash
-# Run integration tests
-pytest tests/integration/test_production_deployment.py -v
+# Install dependencies
+pip install -r requirements.txt
+
+# Run server
+python main.py
+
+# Test health
+curl http://localhost:8081/health
 ```
 
-## 📚 References
+### Production Deployment
 
-- [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
-- [Kubernetes Production Patterns](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
-- [Prometheus Monitoring](https://prometheus.io/docs/guides/go-application/)
-- [Nginx WebSocket Proxy](https://nginx.org/en/docs/http/websocket.html)
+```bash
+# Build production image
+docker build -t libp2p-production:latest .
 
-## 🤝 Contributing
+# Deploy with Docker Compose
+docker-compose up -d
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+# Monitor deployment
+docker-compose logs -f
+```
 
-## 📄 License
+## 📚 Examples
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](../../LICENSE-APACHE) file for details.
+### Basic Usage
+
+```python
+from main import ProductionApp
+
+# Create app
+config = {
+    'port': '8080',
+    'health_port': '8081',
+    'domain': 'libp2p.local',
+    'storage_path': 'autotls-certs',
+    'log_level': 'INFO'
+}
+
+app = ProductionApp(config)
+
+# Start server
+await app.start()
+```
+
+### Advanced Configuration
+
+```python
+# Custom configuration
+config = {
+    'port': '8080',
+    'health_port': '8081',
+    'domain': 'myapp.local',
+    'storage_path': '/custom/cert/path',
+    'log_level': 'DEBUG'
+}
+
+app = ProductionApp(config)
+await app.start()
+```
+
+## 🎯 Success Criteria
+
+- ✅ Echo protocol works end-to-end
+- ✅ Ping protocol works end-to-end
+- ✅ Message passing works end-to-end
+- ✅ File transfer works end-to-end
+- ✅ AutoTLS certificates are generated and renewed
+- ✅ WebSocket transport supports both WS and WSS
+- ✅ Production deployment is containerized
+- ✅ Health checks and monitoring are functional
+- ✅ All protocols are tested and validated
+
+## 🔗 Related Documentation
+
+- [libp2p WebSocket Transport](../libp2p/transport/websocket/)
+- [AutoTLS Implementation](../libp2p/transport/websocket/autotls.py)
+- [Echo Protocol Examples](../examples/echo/)
+- [Ping Protocol Examples](../examples/ping/)
+
+## 📝 Notes
+
+This simplified production deployment demonstrates:
+
+1. **Protocol Implementation**: Echo, ping, message passing, and file transfer
+1. **WebSocket Transport**: Full WS/WSS support with AutoTLS
+1. **Production Readiness**: Containerization, health checks, monitoring
+1. **Real-world Usage**: Practical examples for peer-to-peer communication
+1. **Security**: AutoTLS certificate management and secure defaults
+
+The implementation follows patterns from JavaScript and Go libp2p implementations while providing a Python-native experience with production-grade features.

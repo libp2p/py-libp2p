@@ -18,7 +18,7 @@ import os
 import signal
 import sys
 import time
-from typing import Any, Optional
+from typing import Any
 
 import trio
 
@@ -27,14 +27,14 @@ from libp2p.transport.websocket.autotls import AutoTLSConfig, AutoTLSManager
 
 # Configure logging
 log_handlers: list[logging.Handler] = [logging.StreamHandler()]
-if os.path.exists('/app/logs'):
-    log_handlers.append(logging.FileHandler('/app/logs/cert-manager.log'))
-elif os.path.exists('logs'):
-    log_handlers.append(logging.FileHandler('logs/cert-manager.log'))
+if os.path.exists("/app/logs"):
+    log_handlers.append(logging.FileHandler("/app/logs/cert-manager.log"))
+elif os.path.exists("logs"):
+    log_handlers.append(logging.FileHandler("logs/cert-manager.log"))
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=log_handlers,
 )
 logger = logging.getLogger("libp2p.cert-manager")
@@ -52,7 +52,7 @@ class CertificateManager:
 
         """
         self.config = config
-        self.autotls_manager: Optional[AutoTLSManager] = None
+        self.autotls_manager: AutoTLSManager | None = None
         self.shutdown_event = trio.Event()
         self.start_time = time.time()
 
@@ -68,16 +68,17 @@ class CertificateManager:
         try:
             # Create AutoTLS configuration
             autotls_config = AutoTLSConfig(
-                storage_path=self.config.get('cert_storage_path', '/app/certs'),
+                storage_path=self.config.get("cert_storage_path", "/app/certs"),
                 renewal_threshold_hours=int(
-                    self.config.get('renewal_threshold_hours', '24')
+                    self.config.get("renewal_threshold_hours", "24")
                 ),
-                cert_validity_days=int(self.config.get('cert_validity_days', '90')),
+                cert_validity_days=int(self.config.get("cert_validity_days", "90")),
             )
 
             # Create AutoTLS manager
             from libp2p.transport.websocket.autotls import FileCertificateStorage
-            storage = FileCertificateStorage(self.config.get('storage_path', './certs'))
+
+            storage = FileCertificateStorage(self.config.get("storage_path", "./certs"))
             self.autotls_manager = AutoTLSManager(
                 storage=storage,
                 renewal_threshold_hours=autotls_config.renewal_threshold_hours,
@@ -89,7 +90,7 @@ class CertificateManager:
 
             logger.info("✅ Certificate Manager started successfully")
             logger.info(f"📁 Certificate storage: {autotls_config.storage_path}")
-            domain = self.config.get('auto_tls_domain', 'libp2p.local')
+            domain = self.config.get("auto_tls_domain", "libp2p.local")
             logger.info(f"🌐 Domain: {domain}")
 
             # Start monitoring loop
@@ -124,8 +125,9 @@ class CertificateManager:
 
         try:
             # Get all certificates (simplified for production)
-            domain = self.config.get('auto_tls_domain', 'libp2p.local')
+            domain = self.config.get("auto_tls_domain", "libp2p.local")
             from libp2p.peer.id import ID
+
             # Create a dummy peer ID for certificate management
             dummy_peer_id = ID.from_base58("12D3KooWTestPeerIdForCertManagement")
             certificates = [
@@ -190,11 +192,11 @@ class CertificateManager:
 def load_config() -> dict[str, str]:
     """Load configuration from environment variables."""
     return {
-        'auto_tls_domain': os.getenv('AUTO_TLS_DOMAIN', 'libp2p.local'),
-        'cert_storage_path': os.getenv('CERT_STORAGE_PATH', '/app/certs'),
-        'renewal_threshold_hours': os.getenv('RENEWAL_THRESHOLD_HOURS', '24'),
-        'cert_validity_days': os.getenv('CERT_VALIDITY_DAYS', '90'),
-        'log_level': os.getenv('LOG_LEVEL', 'info'),
+        "auto_tls_domain": os.getenv("AUTO_TLS_DOMAIN", "libp2p.local"),
+        "cert_storage_path": os.getenv("CERT_STORAGE_PATH", "/app/certs"),
+        "renewal_threshold_hours": os.getenv("RENEWAL_THRESHOLD_HOURS", "24"),
+        "cert_validity_days": os.getenv("CERT_VALIDITY_DAYS", "90"),
+        "log_level": os.getenv("LOG_LEVEL", "info"),
     }
 
 
@@ -204,7 +206,7 @@ async def main() -> None:
     config = load_config()
 
     # Set log level
-    log_level = getattr(logging, config['log_level'].upper(), logging.INFO)
+    log_level = getattr(logging, config["log_level"].upper(), logging.INFO)
     logging.getLogger().setLevel(log_level)
 
     # Create certificate manager

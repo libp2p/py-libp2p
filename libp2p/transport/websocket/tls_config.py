@@ -8,13 +8,13 @@ SNI support, certificate validation, and advanced TLS features.
 from dataclasses import dataclass, field
 from enum import Enum
 import ssl
-from typing import Dict, List, Optional
 
 from libp2p.peer.id import ID
 
 
 class TLSVersion(Enum):
     """TLS version enumeration."""
+
     TLS_1_0 = "TLSv1"
     TLS_1_1 = "TLSv1.1"
     TLS_1_2 = "TLSv1.2"
@@ -23,6 +23,7 @@ class TLSVersion(Enum):
 
 class CertificateValidationMode(Enum):
     """Certificate validation mode."""
+
     NONE = "none"  # No validation
     BASIC = "basic"  # Basic certificate validation
     STRICT = "strict"  # Strict certificate validation
@@ -35,10 +36,10 @@ class SNIConfig:
 
     enabled: bool = True
     default_domain: str = "localhost"
-    domain_mapping: Dict[str, str] = field(default_factory=dict)
+    domain_mapping: dict[str, str] = field(default_factory=dict)
     wildcard_support: bool = True
 
-    def get_domain_for_sni(self, sni_name: Optional[str]) -> str:
+    def get_domain_for_sni(self, sni_name: str | None) -> str:
         """
         Get domain for SNI name.
 
@@ -70,10 +71,10 @@ class CertificateConfig:
     """Certificate configuration."""
 
     # Certificate sources
-    cert_file: Optional[str] = None
-    key_file: Optional[str] = None
-    cert_data: Optional[str] = None
-    key_data: Optional[str] = None
+    cert_file: str | None = None
+    key_file: str | None = None
+    cert_data: str | None = None
+    key_data: str | None = None
 
     # Certificate validation
     validation_mode: CertificateValidationMode = CertificateValidationMode.BASIC
@@ -81,15 +82,15 @@ class CertificateConfig:
     verify_hostname: bool = True
 
     # Certificate chain
-    ca_file: Optional[str] = None
-    ca_data: Optional[str] = None
-    ca_path: Optional[str] = None
+    ca_file: str | None = None
+    ca_data: str | None = None
+    ca_path: str | None = None
 
     # Client certificates
-    client_cert_file: Optional[str] = None
-    client_key_file: Optional[str] = None
-    client_cert_data: Optional[str] = None
-    client_key_data: Optional[str] = None
+    client_cert_file: str | None = None
+    client_key_file: str | None = None
+    client_cert_data: str | None = None
+    client_key_data: str | None = None
 
     def validate(self) -> None:
         """Validate certificate configuration."""
@@ -121,13 +122,13 @@ class TLSConfig:
     max_version: TLSVersion = TLSVersion.TLS_1_3
 
     # Certificate configuration
-    certificate: Optional[CertificateConfig] = None
+    certificate: CertificateConfig | None = None
 
     # SNI configuration
-    sni: Optional[SNIConfig] = None
+    sni: SNIConfig | None = None
 
     # Cipher suites
-    cipher_suites: Optional[List[str]] = None
+    cipher_suites: list[str] | None = None
     prefer_server_ciphers: bool = True
 
     # Session management
@@ -139,11 +140,11 @@ class TLSConfig:
     allow_insecure_ciphers: bool = False
 
     # ALPN (Application-Layer Protocol Negotiation)
-    alpn_protocols: List[str] = field(default_factory=lambda: ["h2", "http/1.1"])
+    alpn_protocols: list[str] = field(default_factory=lambda: ["h2", "http/1.1"])
 
     # Client settings
     client_auth: bool = False
-    client_ca_file: Optional[str] = None
+    client_ca_file: str | None = None
 
     # Performance settings
     renegotiation: bool = False
@@ -192,14 +193,15 @@ class TLSConfig:
             elif self.certificate.cert_data and self.certificate.key_data:
                 # Create temporary files for certificate and key
                 import tempfile
+
                 with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.pem', delete=False
+                    mode="w", suffix=".pem", delete=False
                 ) as cert_file:
                     cert_file.write(self.certificate.cert_data)
                     cert_path = cert_file.name
 
                 with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.pem', delete=False
+                    mode="w", suffix=".pem", delete=False
                 ) as key_file:
                     key_file.write(self.certificate.key_data)
                     key_path = key_file.name
@@ -209,6 +211,7 @@ class TLSConfig:
                 finally:
                     # Clean up temporary files
                     import os
+
                     try:
                         os.unlink(cert_path)
                         os.unlink(key_path)
@@ -224,12 +227,16 @@ class TLSConfig:
                 context.load_verify_locations(capath=self.certificate.ca_path)
 
         # Configure validation
-        if (self.certificate and
-            self.certificate.validation_mode == CertificateValidationMode.NONE):
+        if (
+            self.certificate
+            and self.certificate.validation_mode == CertificateValidationMode.NONE
+        ):
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-        elif (self.certificate and
-              self.certificate.validation_mode == CertificateValidationMode.STRICT):
+        elif (
+            self.certificate
+            and self.certificate.validation_mode == CertificateValidationMode.STRICT
+        ):
             context.check_hostname = True
             context.verify_mode = ssl.CERT_REQUIRED
         else:
@@ -237,7 +244,8 @@ class TLSConfig:
                 self.certificate.verify_hostname if self.certificate else True
             )
             context.verify_mode = (
-                ssl.CERT_REQUIRED if (self.certificate and self.certificate.verify_peer)
+                ssl.CERT_REQUIRED
+                if (self.certificate and self.certificate.verify_peer)
                 else ssl.CERT_NONE
             )
 
@@ -249,9 +257,9 @@ class TLSConfig:
             context.options |= ssl.OP_CIPHER_SERVER_PREFERENCE
 
         # Configure session management (if supported)
-        if hasattr(context, 'session_cache_size'):
+        if hasattr(context, "session_cache_size"):
             context.session_cache_size = self.session_cache_size  # type: ignore
-        if hasattr(context, 'session_timeout'):
+        if hasattr(context, "session_timeout"):
             context.session_timeout = self.session_timeout  # type: ignore
 
         # Configure security options
@@ -290,7 +298,7 @@ class WebSocketTLSConfig:
     """WebSocket-specific TLS configuration."""
 
     # Basic TLS settings
-    tls_config: Optional[TLSConfig] = None
+    tls_config: TLSConfig | None = None
 
     # AutoTLS settings
     autotls_enabled: bool = False
@@ -298,7 +306,7 @@ class WebSocketTLSConfig:
     autotls_storage_path: str = "autotls-certs"
 
     # WebSocket-specific settings
-    websocket_subprotocols: List[str] = field(default_factory=lambda: ["libp2p"])
+    websocket_subprotocols: list[str] = field(default_factory=lambda: ["libp2p"])
     websocket_compression: bool = True
     websocket_max_message_size: int = 32 * 1024 * 1024  # 32MB
 
@@ -322,9 +330,9 @@ class WebSocketTLSConfig:
 
     def get_ssl_context(
         self,
-        peer_id: Optional[ID] = None,
-        sni_name: Optional[str] = None,
-    ) -> Optional[ssl.SSLContext]:
+        peer_id: ID | None = None,
+        sni_name: str | None = None,
+    ) -> ssl.SSLContext | None:
         """
         Get SSL context for WebSocket connection.
 

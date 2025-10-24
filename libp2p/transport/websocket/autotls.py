@@ -9,12 +9,13 @@ Based on patterns from JavaScript and Go libp2p implementations.
 """
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 import ssl
 import tempfile
-from typing import Callable, Dict, Optional, Protocol, Tuple, Union
+from typing import Protocol
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -36,7 +37,7 @@ class TLSCertificate:
         peer_id: ID,
         domain: str,
         expires_at: datetime,
-        created_at: Optional[datetime] = None,
+        created_at: datetime | None = None,
     ) -> None:
         """
         Initialize TLS certificate.
@@ -73,13 +74,13 @@ class TLSCertificate:
 
         # Create temporary files for certificate and key
         with tempfile.NamedTemporaryFile(
-            mode='w', suffix='.pem', delete=False
+            mode="w", suffix=".pem", delete=False
         ) as cert_file:
             cert_file.write(self.cert_pem)
             cert_path = cert_file.name
 
         with tempfile.NamedTemporaryFile(
-            mode='w', suffix='.pem', delete=False
+            mode="w", suffix=".pem", delete=False
         ) as key_file:
             key_file.write(self.key_pem)
             key_path = key_file.name
@@ -89,6 +90,7 @@ class TLSCertificate:
         finally:
             # Clean up temporary files
             import os
+
             try:
                 os.unlink(cert_path)
                 os.unlink(key_path)
@@ -105,9 +107,7 @@ class CertificateStorage(Protocol):
         """Store certificate."""
         ...
 
-    async def load_certificate(
-        self, peer_id: ID, domain: str
-    ) -> Optional[TLSCertificate]:
+    async def load_certificate(self, peer_id: ID, domain: str) -> TLSCertificate | None:
         """Load certificate for peer ID and domain."""
         ...
 
@@ -119,7 +119,7 @@ class CertificateStorage(Protocol):
 class FileCertificateStorage:
     """File-based certificate storage implementation."""
 
-    def __init__(self, storage_path: Union[str, Path]) -> None:
+    def __init__(self, storage_path: str | Path) -> None:
         """
         Initialize file storage.
 
@@ -149,12 +149,11 @@ class FileCertificateStorage:
         }
 
         import json
+
         with open(cert_path, "w") as f:
             json.dump(cert_data, f, indent=2)
 
-    async def load_certificate(
-        self, peer_id: ID, domain: str
-    ) -> Optional[TLSCertificate]:
+    async def load_certificate(self, peer_id: ID, domain: str) -> TLSCertificate | None:
         """Load certificate from file."""
         cert_path = self._get_cert_path(peer_id, domain)
 
@@ -163,7 +162,8 @@ class FileCertificateStorage:
 
         try:
             import json
-            with open(cert_path, "r") as f:
+
+            with open(cert_path) as f:
                 cert_data = json.load(f)
 
             return TLSCertificate(
@@ -194,11 +194,11 @@ class AutoTLSManager:
 
     def __init__(
         self,
-        storage: Optional[CertificateStorage] = None,
+        storage: CertificateStorage | None = None,
         renewal_threshold_hours: int = 24,
         cert_validity_days: int = 90,
-        on_certificate_provision: Optional[Callable[[TLSCertificate], None]] = None,
-        on_certificate_renew: Optional[Callable[[TLSCertificate], None]] = None,
+        on_certificate_provision: Callable[[TLSCertificate], None] | None = None,
+        on_certificate_renew: Callable[[TLSCertificate], None] | None = None,
     ) -> None:
         """
         Initialize AutoTLS manager.
@@ -217,8 +217,8 @@ class AutoTLSManager:
         self.on_certificate_provision = on_certificate_provision
         self.on_certificate_renew = on_certificate_renew
 
-        self._active_certificates: Dict[Tuple[ID, str], TLSCertificate] = {}
-        self._renewal_tasks: Dict[Tuple[ID, str], asyncio.Task[None]] = {}
+        self._active_certificates: dict[tuple[ID, str], TLSCertificate] = {}
+        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task[None]] = {}
         self._shutdown_event = asyncio.Event()
 
     async def start(self) -> None:
@@ -264,8 +264,9 @@ class AutoTLSManager:
         # Check if we have a valid cached certificate
         if not force_renew and key in self._active_certificates:
             cert = self._active_certificates[key]
-            if (not cert.is_expired and
-                not cert.is_expiring_soon(self.renewal_threshold_hours)):
+            if not cert.is_expired and not cert.is_expiring_soon(
+                self.renewal_threshold_hours
+            ):
                 return cert
 
         # Try to load from storage
@@ -306,33 +307,35 @@ class AutoTLSManager:
         expires_at = now + timedelta(days=self.cert_validity_days)
 
         # Create certificate
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
-            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "CA"),  # type: ignore
-            x509.NameAttribute(NameOID.LOCALITY_NAME, "San Francisco"),  # type: ignore
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p"),  # type: ignore
-            x509.NameAttribute(NameOID.COMMON_NAME, domain),  # type: ignore
-        ])
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "CA"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "San Francisco"),  # type: ignore
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "libp2p"),  # type: ignore
+                x509.NameAttribute(NameOID.COMMON_NAME, domain),  # type: ignore
+            ]
+        )
 
-        cert = x509.CertificateBuilder().subject_name(
-            subject
-        ).issuer_name(
-            issuer
-        ).public_key(
-            private_key.public_key()
-        ).serial_number(
-            x509.random_serial_number()
-        ).not_valid_before(
-            now
-        ).not_valid_after(
-            expires_at
-        ).add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName(domain),
-                x509.DNSName(f"*.{domain}"),  # Wildcard for subdomains
-            ]),
-            critical=False,
-        ).sign(private_key, hashes.SHA256())
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(expires_at)
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName(domain),
+                        x509.DNSName(f"*.{domain}"),  # Wildcard for subdomains
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
 
         # Serialize to PEM
         cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
@@ -396,7 +399,7 @@ class AutoTLSManager:
 
         self._renewal_tasks[key] = asyncio.create_task(renew_certificate())
 
-    def get_ssl_context(self, peer_id: ID, domain: str) -> Optional[ssl.SSLContext]:
+    def get_ssl_context(self, peer_id: ID, domain: str) -> ssl.SSLContext | None:
         """Get SSL context for peer ID and domain."""
         key = (peer_id, domain)
         if key not in self._active_certificates:
@@ -415,7 +418,7 @@ class AutoTLSConfig:
     def __init__(
         self,
         enabled: bool = True,
-        storage_path: Union[str, Path] = "autotls-certs",
+        storage_path: str | Path = "autotls-certs",
         renewal_threshold_hours: int = 24,
         cert_validity_days: int = 90,
         default_domain: str = "libp2p.local",
@@ -451,10 +454,10 @@ class AutoTLSConfig:
 
 
 # Global AutoTLS manager instance
-_autotls_manager: Optional[AutoTLSManager] = None
+_autotls_manager: AutoTLSManager | None = None
 
 
-def get_autotls_manager() -> Optional[AutoTLSManager]:
+def get_autotls_manager() -> AutoTLSManager | None:
     """Get the global AutoTLS manager instance."""
     return _autotls_manager
 

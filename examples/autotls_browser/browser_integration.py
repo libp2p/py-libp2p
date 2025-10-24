@@ -8,7 +8,6 @@ clients, and connection management.
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 from libp2p.peer.id import ID
 
@@ -41,7 +40,7 @@ class BrowserIntegration:
         self,
         peer_id: ID,
         title: str = "AutoTLS Browser Demo",
-        styles: Optional[Dict[str, str]] = None,
+        styles: dict[str, str] | None = None,
     ) -> str:
         """
         Generate HTML page for browser integration.
@@ -121,7 +120,7 @@ class BrowserIntegration:
 </html>
         """
 
-    def _get_default_styles(self) -> Dict[str, str]:
+    def _get_default_styles(self) -> dict[str, str]:
         """Get default CSS styles."""
         return {
             "body": """
@@ -258,7 +257,7 @@ class BrowserIntegration:
             """,
         }
 
-    def _generate_css(self, styles: Dict[str, str]) -> str:
+    def _generate_css(self, styles: dict[str, str]) -> str:
         """Generate CSS from styles dictionary."""
         css = ""
         for selector, properties in styles.items():
@@ -428,7 +427,7 @@ class BrowserIntegration:
             log('AutoTLS automatically manages TLS certificates', 'info');
             log('Ready to connect to Python libp2p server', 'info');
 
-            {'connect();' if self.auto_connect else ''}
+            {"connect();" if self.auto_connect else ""}
         }};
 
         // Handle page unload
@@ -457,7 +456,7 @@ class BrowserIntegration:
         html_content = self.generate_html_page(peer_id, title)
 
         output_file = Path(output_path)
-        output_file.write_text(html_content, encoding='utf-8')
+        output_file.write_text(html_content, encoding="utf-8")
 
         logger.info(f"HTML page saved to {output_file.absolute()}")
 
@@ -529,7 +528,7 @@ Features:
         """
         try:
             import websockets  # type: ignore
-    
+
             ws_url = f"wss://localhost:{self.port}/"
 
             async with websockets.connect(ws_url, timeout=timeout) as websocket:
@@ -547,14 +546,14 @@ Features:
             logger.error(f"Connection test failed: {e}")
             return False
 
-    def get_connection_urls(self) -> Dict[str, str]:
+    def get_connection_urls(self) -> dict[str, str]:
         """Get connection URLs."""
         return {
             "ws": f"ws://localhost:{self.port}/",
             "wss": f"wss://localhost:{self.port}/",
         }
 
-    def get_certificate_info(self) -> Dict[str, str]:
+    def get_certificate_info(self) -> dict[str, str]:
         """Get certificate information."""
         return {
             "domain": self.domain,

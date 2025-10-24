@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
@@ -32,10 +32,10 @@ class WebsocketConfig:
     tls_server_config: ssl.SSLContext | None = None
 
     # Advanced TLS configuration
-    tls_config: Optional[WebSocketTLSConfig] = None
+    tls_config: WebSocketTLSConfig | None = None
 
     # AutoTLS configuration
-    autotls_config: Optional[AutoTLSConfig] = None
+    autotls_config: AutoTLSConfig | None = None
 
     # Connection settings
     handshake_timeout: float = 15.0
@@ -160,9 +160,9 @@ def WithAutoTLS(
 
 
 def WithAdvancedTLS(
-    cert_file: Optional[str] = None,
-    key_file: Optional[str] = None,
-    ca_file: Optional[str] = None,
+    cert_file: str | None = None,
+    key_file: str | None = None,
+    ca_file: str | None = None,
     verify_peer: bool = True,
     verify_hostname: bool = True,
 ) -> WebsocketConfig:
@@ -408,7 +408,7 @@ class WebsocketTransport(ITransport):
         self._tls_server_config = self._config.tls_server_config
 
         # AutoTLS support
-        self._autotls_manager: Optional[AutoTLSManager] = None
+        self._autotls_manager: AutoTLSManager | None = None
         self._autotls_initialized = False
 
     async def can_dial(self, maddr: Multiaddr) -> bool:
@@ -437,10 +437,10 @@ class WebsocketTransport(ITransport):
 
     async def _get_ssl_context(
         self,
-        peer_id: Optional[ID] = None,
-        sni_name: Optional[str] = None,
+        peer_id: ID | None = None,
+        sni_name: str | None = None,
         is_server: bool = True,
-    ) -> Optional[ssl.SSLContext]:
+    ) -> ssl.SSLContext | None:
         """Get SSL context for connection."""
         # Check AutoTLS first
         if self._autotls_manager and peer_id:

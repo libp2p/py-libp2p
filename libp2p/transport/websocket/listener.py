@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any, Optional
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -38,10 +38,10 @@ class WebsocketListenerConfig:
     tls_config: ssl.SSLContext | None = None
 
     # AutoTLS configuration
-    autotls_config: Optional[AutoTLSConfig] = None
+    autotls_config: AutoTLSConfig | None = None
 
     # Advanced TLS configuration
-    advanced_tls_config: Optional[WebSocketTLSConfig] = None
+    advanced_tls_config: WebSocketTLSConfig | None = None
 
     # Connection settings
     max_connections: int = 1000
@@ -105,7 +105,7 @@ class WebsocketListener(IListener):
         self._is_wss = self._tls_config is not None
 
         # AutoTLS support
-        self._autotls_manager: Optional[AutoTLSManager] = None
+        self._autotls_manager: AutoTLSManager | None = None
         self._autotls_initialized = False
 
         logger.debug("WebsocketListener initialized")
@@ -132,6 +132,7 @@ class WebsocketListener(IListener):
         if self._config.autotls_config and self._config.autotls_config.enabled:
             try:
                 from .autotls import initialize_autotls
+
                 self._autotls_manager = await initialize_autotls(
                     self._config.autotls_config
                 )
@@ -143,9 +144,9 @@ class WebsocketListener(IListener):
 
     async def _get_ssl_context(
         self,
-        peer_id: Optional[ID] = None,
-        sni_name: Optional[str] = None,
-    ) -> Optional[ssl.SSLContext]:
+        peer_id: ID | None = None,
+        sni_name: str | None = None,
+    ) -> ssl.SSLContext | None:
         """Get SSL context for connection."""
         # Check AutoTLS first
         if self._autotls_manager and peer_id:
