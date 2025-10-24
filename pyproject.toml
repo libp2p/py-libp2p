@@ -8,12 +8,13 @@ version = "0.3.0"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
-license = { text = "MIT AND Apache-2.0" }
+license = "MIT AND Apache-2.0"
 keywords = ["libp2p", "p2p"]
 maintainers = [
     { name = "pacrob", email = "pacrob-py-libp2p@proton.me" },
     { name = "Manu Sheel Gupta", email = "manu@seeta.in" },
     { name = "Dave Grantham", email = "dwg@linuxprogrammer.org" },
+    { name = "Luca (acul71)" },
 ]
 dependencies = [
     "aioquic>=1.2.0",
@@ -23,6 +24,7 @@ dependencies = [
     "fastecdsa==2.3.2; sys_platform != 'win32'",
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
+    "miniupnpc>=2.3",
     "multiaddr>=0.0.11",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
@@ -34,7 +36,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
-    "zeroconf (>=0.147.0,<0.148.0)",
+    "zeroconf (>=0.147.0,<0.148.0)"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
