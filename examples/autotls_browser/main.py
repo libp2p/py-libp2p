@@ -98,12 +98,33 @@ class AutoTLSBrowserDemo:
             muxer_transports_by_protocol=create_yamux_muxer_option(),
         )
 
-        # Create transport
+        # Create transport with AutoTLS configuration
+        from libp2p.transport.websocket.autotls import AutoTLSConfig
+
+        # Create AutoTLS configuration
+        autotls_config_obj = AutoTLSConfig(
+            enabled=True,
+            storage_path=self.storage_path,
+            renewal_threshold_hours=24,
+            cert_validity_days=90,
+            default_domain=self.domain,
+            wildcard_domain=True,
+        )
+
+        # Set AutoTLS configuration in the WebSocket config
+        autotls_config.autotls_config = autotls_config_obj
+
+        # Create transport with AutoTLS
         transport = WebsocketTransport(upgrader, config=autotls_config)
 
         # Create host
         peer_store = PeerStore()
         peer_id = ID.from_pubkey(key_pair.public_key)
+
+        # Add peer information to peerstore
+        peer_store.add_privkey(peer_id, key_pair.private_key)
+        peer_store.add_pubkey(peer_id, key_pair.public_key)
+
         swarm = Swarm(
             peer_id=peer_id,
             peerstore=peer_store,
@@ -125,8 +146,8 @@ class AutoTLSBrowserDemo:
         logger.info(f"AutoTLS domain: {self.domain}")
         logger.info(f"Certificate storage: {self.storage_path}")
 
-        # Use the run method with listen addresses
-        async with self.host.run([Multiaddr(listen_addr), Multiaddr(wss_addr)]):
+        # Use the run method with listen addresses (start with WS only for testing)
+        async with self.host.run([Multiaddr(listen_addr)]):
             # Keep the host running
             await trio.sleep_forever()
 
@@ -137,7 +158,7 @@ class AutoTLSBrowserDemo:
         """Set up protocol handlers."""
 
         # Echo protocol handler
-        async def echo_handler(stream) -> None:
+        async def echo_handler(stream: Any) -> None:
             """Handle echo protocol requests."""
             try:
                 while True:
@@ -152,7 +173,7 @@ class AutoTLSBrowserDemo:
                 await stream.close()
 
         # Chat protocol handler
-        async def chat_handler(stream) -> None:
+        async def chat_handler(stream: Any) -> None:
             """Handle chat protocol requests."""
             try:
                 while True:
@@ -401,7 +422,7 @@ class AutoTLSBrowserDemo:
 
             html_content = await self.create_html_page()
 
-            async def handle(request):
+            async def handle(request: Any) -> Any:
                 return web.Response(text=html_content, content_type="text/html")
 
             app = web.Application()

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import ssl
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -49,8 +50,8 @@ class CertificateManager:
         self.cert_validity_days = cert_validity_days
         self.renewal_threshold_hours = renewal_threshold_hours
 
-        self._certificates: dict[tuple[ID, str], dict] = {}
-        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task] = {}
+        self._certificates: dict[tuple[ID, str], dict[Any, Any]] = {}
+        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task[Any]] = {}
 
     async def get_certificate(
         self,
@@ -80,11 +81,12 @@ class CertificateManager:
 
         # Try to load from storage
         if not force_renew:
-            cert_data = await self._load_certificate_from_storage(peer_id, domain)
-            if cert_data and not self._is_certificate_expired(cert_data):
-                self._certificates[key] = cert_data
-                await self._schedule_renewal(peer_id, domain, cert_data)
-                return cert_data["cert_pem"], cert_data["key_pem"]
+            loaded_cert = await self._load_certificate_from_storage(peer_id, domain)
+            if (loaded_cert is not None and
+                not self._is_certificate_expired(loaded_cert)):
+                self._certificates[key] = loaded_cert
+                await self._schedule_renewal(peer_id, domain, loaded_cert)
+                return loaded_cert["cert_pem"], loaded_cert["key_pem"]
 
         # Generate new certificate
         logger.info(f"Generating new certificate for {peer_id} on {domain}")
@@ -103,7 +105,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> dict:
+    ) -> dict[Any, Any]:
         """Generate a new TLS certificate."""
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -164,12 +166,12 @@ class CertificateManager:
             "expires_at": expires_at.isoformat(),
         }
 
-    def _is_certificate_expired(self, cert_data: dict) -> bool:
+    def _is_certificate_expired(self, cert_data: dict[Any, Any]) -> bool:
         """Check if certificate is expired."""
         expires_at = datetime.fromisoformat(cert_data["expires_at"])
         return datetime.utcnow() >= expires_at
 
-    def _is_certificate_expiring_soon(self, cert_data: dict) -> bool:
+    def _is_certificate_expiring_soon(self, cert_data: dict[Any, Any]) -> bool:
         """Check if certificate expires within threshold."""
         expires_at = datetime.fromisoformat(cert_data["expires_at"])
         threshold = datetime.utcnow() + timedelta(hours=self.renewal_threshold_hours)
@@ -179,7 +181,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-        cert_data: dict,
+        cert_data: dict[Any, Any],
     ) -> None:
         """Schedule certificate renewal."""
         key = (peer_id, domain)
@@ -229,7 +231,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> dict | None:
+    ) -> dict[Any, Any] | None:
         """Load certificate from storage."""
         cert_path = self._get_cert_path(peer_id, domain)
 
@@ -248,7 +250,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-        cert_data: dict,
+        cert_data: dict[Any, Any],
     ) -> None:
         """Store certificate to storage."""
         cert_path = self._get_cert_path(peer_id, domain)
@@ -331,7 +333,7 @@ class CertificateManager:
         self,
         peer_id: ID,
         domain: str,
-    ) -> dict | None:
+    ) -> dict[Any, Any] | None:
         """Get certificate information."""
         key = (peer_id, domain)
         if key not in self._certificates:
@@ -347,7 +349,7 @@ class CertificateManager:
             "is_expiring_soon": self._is_certificate_expiring_soon(cert_data),
         }
 
-    async def list_certificates(self) -> list[dict]:
+    async def list_certificates(self) -> list[dict[Any, Any]]:
         """List all certificates."""
         certificates = []
 

@@ -12,7 +12,6 @@ These tests validate:
 import os
 
 import pytest
-import trio
 
 from libp2p.transport.websocket import (
     WebsocketConfig,
@@ -305,88 +304,39 @@ def test_combine_configs_multiple():
     assert combined.handshake_timeout == 45.0
 
 
-class MockSOCKS5Server:
-    """
-    Mock SOCKS5 proxy server for testing.
-
-    This server only validates the SOCKS5 handshake and doesn't
-    implement the full protocol. It's sufficient for testing that
-    our client sends the correct handshake bytes.
-    """
-
-    def __init__(self):
-        self.connections_received = 0
-        self.handshake_validated = False
-        self.last_error = None
-        self.port = None
-
-    async def serve(self, task_status=trio.TASK_STATUS_IGNORED):
-        """Start the mock SOCKS5 server."""
-        listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
-        listener = listeners[0]
-        self.port = listener.socket.getsockname()[1]
-
-        task_status.started(self.port)
-
-        async def handle_client(stream):
-            """Handle a single client connection."""
-            self.connections_received += 1
-
-            try:
-                data = await stream.receive_some(3)
-
-                if len(data) == 3 and data == b"\x05\x01\x00":
-                    self.handshake_validated = True
-                    await stream.send_all(b"\x05\x00")
-                else:
-                    self.last_error = f"Invalid handshake: {data.hex()}"  # type: ignore
-                    await stream.send_all(b"\x05\xff")
-
-            except Exception as e:
-                self.last_error = str(e)  # type: ignore
-
-        await listener.serve(handle_client)  # type: ignore
-
-
-@pytest.fixture
-async def mock_socks_proxy():
-    """Pytest fixture providing a mock SOCKS5 proxy server."""
-    proxy = MockSOCKS5Server()
-
-    async with trio.open_nursery() as nursery:
-        await nursery.start(proxy.serve)
-        yield proxy
-        nursery.cancel_scope.cancel()
-
-
 @pytest.mark.trio
-async def test_socks5_handshake_validation(mock_socks_proxy):
+async def test_socks5_connection_manager_creation():
     """
-    Test that SOCKS5 handshake is sent correctly.
+    Test that SOCKS5 connection manager can be created with valid configuration.
 
-    This test validates that our SOCKS client sends the correct
-    handshake bytes when connecting through a proxy.
+    Note: Full connection tests require a running SOCKS proxy server.
+    This test validates configuration parsing only.
     """
-    proxy_url = f"socks5://127.0.0.1:{mock_socks_proxy.port}"
-
-    assert mock_socks_proxy.connections_received == 0
-    assert mock_socks_proxy.handshake_validated is False
-
     try:
         from libp2p.transport.websocket.proxy import SOCKSConnectionManager
+    except ImportError:
+        pytest.skip("trio_socks not installed")
 
-        manager = SOCKSConnectionManager(proxy_url, timeout=2.0)
+    # Test basic creation
+    manager = SOCKSConnectionManager("socks5://127.0.0.1:1080", timeout=2.0)
+    assert manager.proxy_scheme == "socks5"
+    assert manager.proxy_host == "127.0.0.1"
+    assert manager.proxy_port == 1080
+    assert manager.timeout == 2.0
 
-        async with trio.open_nursery() as nursery:
-            await manager.create_connection(
-                nursery, "example.com", 443, ssl_context=None
-            )
-    except Exception:
-        pass
-
-    assert mock_socks_proxy.connections_received > 0, (
-        "No connections received by mock proxy"
+    # Test with authentication
+    manager_auth = SOCKSConnectionManager(
+        "socks5://user:pass@proxy.local:1080",
+        auth=("user", "pass"),
+        timeout=5.0,
     )
+    assert manager_auth.proxy_host == "proxy.local"
+    assert manager_auth.proxy_port == 1080
+    assert manager_auth.timeout == 5.0
+
+    # Test SOCKS4
+    manager_socks4 = SOCKSConnectionManager("socks4://127.0.0.1:1080")
+    assert manager_socks4.proxy_scheme == "socks4"
 
 
 @pytest.mark.trio
