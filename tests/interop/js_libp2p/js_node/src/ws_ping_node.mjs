@@ -1,7 +1,7 @@
 import { createLibp2p }          from 'libp2p'
 import { webSockets }            from '@libp2p/websockets'
 import { ping }                  from '@libp2p/ping'
-import { noise }                 from '@chainsafe/libp2p-noise'
+import { Noise }                 from '@chainsafe/libp2p-noise'
 import { plaintext }             from '@libp2p/plaintext'
 import { yamux }                 from '@chainsafe/libp2p-yamux'
 // import { identify }              from '@libp2p/identify' // Commented out for compatibility
@@ -51,7 +51,7 @@ async function main() {
   // Security configuration
   switch (SECURITY) {
     case 'noise':
-      options.connectionEncryption = [noise()]
+      options.connectionEncryption = [new Noise()]
       break
     case 'plaintext':
       options.connectionEncryption = [plaintext()]

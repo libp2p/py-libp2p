@@ -89,6 +89,9 @@ def WithProxy(proxy_url: str, auth: tuple[str, str] | None = None) -> WebsocketC
         WebsocketConfig with proxy settings configured
 
     Example:
+        >>> from libp2p.transport.websocket import WithProxy, WebsocketTransport
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> config = WithProxy('socks5://proxy.corp.com:1080', ('user', 'pass'))
         >>> transport = WebsocketTransport(upgrader, config=config)
 
@@ -108,6 +111,11 @@ def WithProxyFromEnvironment() -> WebsocketConfig:
 
     Example:
         >>> import os
+        >>> from libp2p.transport.websocket import (
+        ...     WithProxyFromEnvironment, WebsocketTransport
+        ... )
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> os.environ['HTTPS_PROXY'] = 'socks5://localhost:1080'
         >>> config = WithProxyFromEnvironment()
         >>> transport = WebsocketTransport(upgrader, config=config)
@@ -135,6 +143,9 @@ def WithAutoTLS(
         WebsocketConfig with AutoTLS enabled
 
     Example:
+        >>> from libp2p.transport.websocket import WithAutoTLS, WebsocketTransport
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> config = WithAutoTLS(domain="myapp.local")
         >>> transport = WebsocketTransport(upgrader, config=config)
 
@@ -180,12 +191,14 @@ def WithAdvancedTLS(
         WebsocketConfig with advanced TLS settings
 
     Example:
+        >>> from libp2p.transport.websocket import WithAdvancedTLS
         >>> config = WithAdvancedTLS(
         ...     cert_file="server.crt",
         ...     key_file="server.key",
         ...     ca_file="ca.crt"
         ... )
-        >>> transport = WebsocketTransport(upgrader, config=config)
+        >>> # Note: Creating transport would require actual certificate files
+        >>> # transport = WebsocketTransport(upgrader, config=config)
 
     """
     from .tls_config import CertificateConfig, CertificateValidationMode, TLSConfig
@@ -224,6 +237,11 @@ def WithTLSClientConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
 
     Example:
         >>> import ssl
+        >>> from libp2p.transport.websocket import (
+        ...     WithTLSClientConfig, WebsocketTransport
+        ... )
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> ctx = ssl.create_default_context()
         >>> ctx.check_hostname = False
         >>> config = WithTLSClientConfig(ctx)
@@ -245,8 +263,10 @@ def WithTLSServerConfig(tls_config: ssl.SSLContext) -> WebsocketConfig:
 
     Example:
         >>> import ssl
+        >>> from libp2p.transport.websocket import WithTLSServerConfig
         >>> ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        >>> ctx.load_cert_chain('server.crt', 'server.key')
+        >>> # Note: This would fail in doctest due to missing files
+        >>> # ctx.load_cert_chain('server.crt', 'server.key')
         >>> config = WithTLSServerConfig(ctx)
 
     """
@@ -264,6 +284,11 @@ def WithHandshakeTimeout(timeout: float) -> WebsocketConfig:
         WebsocketConfig with timeout configured
 
     Example:
+        >>> from libp2p.transport.websocket import (
+        ...     WithHandshakeTimeout, WebsocketTransport
+        ... )
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> config = WithHandshakeTimeout(30.0)
         >>> transport = WebsocketTransport(upgrader, config=config)
 
@@ -284,6 +309,11 @@ def WithMaxConnections(max_connections: int) -> WebsocketConfig:
         WebsocketConfig with connection limit configured
 
     Example:
+        >>> from libp2p.transport.websocket import (
+        ...     WithMaxConnections, WebsocketTransport
+        ... )
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> upgrader = TransportUpgrader({}, {})
         >>> config = WithMaxConnections(500)
         >>> transport = WebsocketTransport(upgrader, config=config)
 
@@ -300,12 +330,20 @@ def combine_configs(*configs: WebsocketConfig) -> WebsocketConfig:
     Later configs override earlier configs for non-None values.
 
     Args:
-        *configs: Variable number of WebsocketConfig objects
+        configs: Variable number of WebsocketConfig objects
 
     Returns:
         Combined WebsocketConfig
 
     Example:
+        >>> from libp2p.transport.websocket import (
+        ...     WithProxy, WithTLSClientConfig, WithHandshakeTimeout,
+        ...     combine_configs, WebsocketTransport
+        ... )
+        >>> from libp2p.transport.upgrader import TransportUpgrader
+        >>> import ssl
+        >>> my_ssl_context = ssl.create_default_context()
+        >>> upgrader = TransportUpgrader({}, {})
         >>> proxy_config = WithProxy('socks5://localhost:1080')
         >>> tls_config = WithTLSClientConfig(my_ssl_context)
         >>> timeout_config = WithHandshakeTimeout(30.0)

@@ -27,6 +27,8 @@ def get_proxy_from_environment(target_url: str) -> str | None:
         Proxy URL string or None if no proxy configured
 
     Examples:
+        >>> import os
+        >>> from libp2p.transport.websocket.proxy_env import get_proxy_from_environment
         >>> os.environ['HTTP_PROXY'] = 'socks5://localhost:1080'
         >>> get_proxy_from_environment('ws://example.com')
         'socks5://localhost:1080'
