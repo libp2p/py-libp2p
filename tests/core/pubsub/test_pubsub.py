@@ -8,8 +8,10 @@ from typing import (
 from unittest.mock import patch
 
 import pytest
+import multiaddr
 import trio
 
+from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.custom_types import AsyncValidatorFn
 from libp2p.exceptions import (
     ValidationError,
@@ -17,9 +19,11 @@ from libp2p.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamEOF,
 )
+from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peer_record import PeerRecord
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
@@ -88,6 +92,45 @@ async def test_re_unsubscribe():
 
 
 @pytest.mark.trio
+async def test_reissue_when_listen_addrs_change():
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Yield to let 0 notify 1
+        await trio.sleep(1)
+        assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        # Check whether signed-records were transfered properly in the subscribe call
+        envelope_b_sub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_sub, Envelope)
+
+        # Simulate pubsubs_fsub[1].host listen addrs changing (different port)
+        new_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+
+        # Patch just for the duration we force A to unsubscribe
+        with patch.object(pubsubs_fsub[0].host, "get_addrs", return_value=[new_addr]):
+            # Unsubscribe from A's side so that a new_record is issued
+            await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
+            await trio.sleep(1)
+
+        # B should be holding A's new record with bumped seq
+        envelope_b_unsub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_unsub, Envelope)
+
+        # This proves that a freshly signed record was issued rather than
+        # the latest-cached-one creating one.
+        assert envelope_b_sub.record().seq < envelope_b_unsub.record().seq
+
+
+@pytest.mark.trio
 async def test_peers_subscribe():
     async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
@@ -95,10 +138,70 @@ async def test_peers_subscribe():
         # Yield to let 0 notify 1
         await trio.sleep(1)
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        # Check whether signed-records were transfered properly in the subscribe call
+        envelope_b_sub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_sub, Envelope)
+
         await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
         # Yield to let 0 notify 1
         await trio.sleep(1)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+
+        envelope_b_unsub = (
+            pubsubs_fsub[1]
+            .host.get_peerstore()
+            .get_peer_record(pubsubs_fsub[0].host.get_id())
+        )
+        assert isinstance(envelope_b_unsub, Envelope)
+
+        # This proves that the latest-cached-record was re-issued rather than
+        # freshly creating one.
+        assert envelope_b_sub.record().seq == envelope_b_unsub.record().seq
+
+
+@pytest.mark.trio
+async def test_peer_subscribe_fail_upon_invald_record_transfer():
+    async with PubsubFactory.create_batch_with_floodsub(2) as pubsubs_fsub:
+        await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+
+        # Corrupt host_a's local peer record
+        envelope = pubsubs_fsub[0].host.get_peerstore().get_local_record()
+        if envelope is not None:
+            true_record = envelope.record()
+        key_pair = create_new_key_pair()
+
+        if envelope is not None:
+            envelope.public_key = key_pair.public_key
+            pubsubs_fsub[0].host.get_peerstore().set_local_record(envelope)
+
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Yeild to let 0 notify 1
+        await trio.sleep(1)
+        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
+            TESTING_TOPIC, set()
+        )
+
+        # Create a corrupt envelope with correct signature but false peer-id
+        false_record = PeerRecord(
+            ID.from_pubkey(key_pair.public_key), true_record.addrs
+        )
+        false_envelope = seal_record(
+            false_record, pubsubs_fsub[0].host.get_private_key()
+        )
+
+        pubsubs_fsub[0].host.get_peerstore().set_local_record(false_envelope)
+
+        await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
+        # Yeild to let 0 notify 1
+        await trio.sleep(1)
+        assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
+            TESTING_TOPIC, set()
+        )
 
 
 @pytest.mark.trio
@@ -1138,3 +1241,39 @@ async def test_blacklist_tears_down_existing_connection():
         else:
             # It’s also fine if the entire topic entry was pruned
             assert TESTING_TOPIC not in pubsub0.peer_topics
+
+
+@pytest.mark.trio
+async def test_get_message_id():
+    """Test that the get_message_id method provides correct message ID construction."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        # Create a test message
+        msg = make_pubsub_msg(
+            origin_id=pubsub.my_id,
+            topic_ids=[TESTING_TOPIC],
+            data=TESTING_DATA,
+            seqno=b"\x00\x00\x00\x00\x00\x00\x00\x01",
+        )
+
+        # Test that get_message_id returns the same result as the internal method
+        public_msg_id = pubsub.get_message_id(msg)
+        internal_msg_id = pubsub._msg_id_constructor(msg)
+
+        assert public_msg_id == internal_msg_id
+
+        # Test that it works with different message ID constructors
+        def custom_msg_id_constructor(msg):
+            return msg.data + msg.from_id
+
+        # Create a new pubsub instance with custom constructor
+        async with PubsubFactory.create_batch_with_floodsub(
+            1, msg_id_constructor=custom_msg_id_constructor
+        ) as custom_pubsubs:
+            custom_pubsub = custom_pubsubs[0]
+
+            custom_msg_id = custom_pubsub.get_message_id(msg)
+            expected_custom_id = msg.data + msg.from_id
+
+            assert custom_msg_id == expected_custom_id

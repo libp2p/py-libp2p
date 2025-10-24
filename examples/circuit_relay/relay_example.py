@@ -33,7 +33,7 @@ from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
-from libp2p.relay.circuit_v2.config import RelayConfig
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
@@ -121,9 +121,7 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
     )
 
     relay_config = RelayConfig(
-        enable_hop=True,  # Act as a relay
-        enable_stop=True,  # Accept relayed connections
-        enable_client=True,  # Use other relays if needed
+        roles=RelayRole.HOP | RelayRole.STOP | RelayRole.CLIENT,  # All capabilities
         limits=limits,
     )
 
@@ -200,9 +198,7 @@ async def setup_destination_node(
     )
 
     relay_config = RelayConfig(
-        enable_hop=False,  # Not acting as a relay
-        enable_stop=True,  # Accept relayed connections
-        enable_client=True,  # Use relays for dialing
+        roles=RelayRole.STOP | RelayRole.CLIENT,  # Accept connections and use relays
         limits=limits,
     )
 
@@ -341,9 +337,7 @@ async def setup_source_node(
     )
 
     relay_config = RelayConfig(
-        enable_hop=False,  # Not acting as a relay
-        enable_stop=True,  # Accept relayed connections
-        enable_client=True,  # Use relays for dialing
+        roles=RelayRole.STOP | RelayRole.CLIENT,  # Accept connections and use relays
         limits=limits,
     )
 

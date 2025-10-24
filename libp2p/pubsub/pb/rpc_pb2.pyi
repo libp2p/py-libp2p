@@ -44,6 +44,8 @@ class RPC(google.protobuf.message.Message):
     SUBSCRIPTIONS_FIELD_NUMBER: builtins.int
     PUBLISH_FIELD_NUMBER: builtins.int
     CONTROL_FIELD_NUMBER: builtins.int
+    SENDERRECORD_FIELD_NUMBER: builtins.int
+    senderRecord: builtins.bytes
     @property
     def subscriptions(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___RPC.SubOpts]: ...
     @property
@@ -56,9 +58,10 @@ class RPC(google.protobuf.message.Message):
         subscriptions: collections.abc.Iterable[global___RPC.SubOpts] | None = ...,
         publish: collections.abc.Iterable[global___Message] | None = ...,
         control: global___ControlMessage | None = ...,
+        senderRecord: builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["control", b"control"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["control", b"control", "publish", b"publish", "subscriptions", b"subscriptions"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["control", b"control", "senderRecord", b"senderRecord"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["control", b"control", "publish", b"publish", "senderRecord", b"senderRecord", "subscriptions", b"subscriptions"]) -> None: ...
 
 global___RPC = RPC
 
@@ -102,6 +105,7 @@ class ControlMessage(google.protobuf.message.Message):
     IWANT_FIELD_NUMBER: builtins.int
     GRAFT_FIELD_NUMBER: builtins.int
     PRUNE_FIELD_NUMBER: builtins.int
+    IDONTWANT_FIELD_NUMBER: builtins.int
     @property
     def ihave(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlIHave]: ...
     @property
@@ -110,6 +114,8 @@ class ControlMessage(google.protobuf.message.Message):
     def graft(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlGraft]: ...
     @property
     def prune(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlPrune]: ...
+    @property
+    def idontwant(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlIDontWant]: ...
     def __init__(
         self,
         *,
@@ -117,8 +123,9 @@ class ControlMessage(google.protobuf.message.Message):
         iwant: collections.abc.Iterable[global___ControlIWant] | None = ...,
         graft: collections.abc.Iterable[global___ControlGraft] | None = ...,
         prune: collections.abc.Iterable[global___ControlPrune] | None = ...,
+        idontwant: collections.abc.Iterable[global___ControlIDontWant] | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["graft", b"graft", "ihave", b"ihave", "iwant", b"iwant", "prune", b"prune"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["graft", b"graft", "idontwant", b"idontwant", "ihave", b"ihave", "iwant", b"iwant", "prune", b"prune"]) -> None: ...
 
 global___ControlMessage = ControlMessage
 
@@ -196,6 +203,22 @@ class ControlPrune(google.protobuf.message.Message):
     def ClearField(self, field_name: typing.Literal["backoff", b"backoff", "peers", b"peers", "topicID", b"topicID"]) -> None: ...
 
 global___ControlPrune = ControlPrune
+
+@typing.final
+class ControlIDontWant(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    MESSAGEIDS_FIELD_NUMBER: builtins.int
+    @property
+    def messageIDs(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]: ...
+    def __init__(
+        self,
+        *,
+        messageIDs: collections.abc.Iterable[builtins.bytes] | None = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["messageIDs", b"messageIDs"]) -> None: ...
+
+global___ControlIDontWant = ControlIDontWant
 
 @typing.final
 class PeerInfo(google.protobuf.message.Message):

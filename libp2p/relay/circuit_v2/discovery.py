@@ -31,6 +31,11 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from .config import (
+    DEFAULT_DISCOVERY_INTERVAL,
+    DEFAULT_DISCOVERY_STREAM_TIMEOUT,
+    DEFAULT_PEER_PROTOCOL_TIMEOUT,
+)
 from .pb.circuit_pb2 import (
     HopMessage,
 )
@@ -43,10 +48,8 @@ from .protocol_buffer import (
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
 
-# Constants
+# Discovery constants
 MAX_RELAYS_TO_TRACK = 10
-DEFAULT_DISCOVERY_INTERVAL = 60  # seconds
-STREAM_TIMEOUT = 10  # seconds
 
 
 # Extended interfaces for type checking
@@ -86,6 +89,8 @@ class RelayDiscovery(Service):
         auto_reserve: bool = False,
         discovery_interval: int = DEFAULT_DISCOVERY_INTERVAL,
         max_relays: int = MAX_RELAYS_TO_TRACK,
+        stream_timeout: int = DEFAULT_DISCOVERY_STREAM_TIMEOUT,
+        peer_protocol_timeout: int = DEFAULT_PEER_PROTOCOL_TIMEOUT,
     ) -> None:
         """
         Initialize the discovery service.
@@ -100,6 +105,10 @@ class RelayDiscovery(Service):
             How often to run discovery, in seconds
         max_relays : int
             Maximum number of relays to track
+        stream_timeout : int
+            Timeout for stream operations during discovery, in seconds
+        peer_protocol_timeout : int
+            Timeout for checking peer protocol support, in seconds
 
         """
         super().__init__()
@@ -107,6 +116,8 @@ class RelayDiscovery(Service):
         self.auto_reserve = auto_reserve
         self.discovery_interval = discovery_interval
         self.max_relays = max_relays
+        self.stream_timeout = stream_timeout
+        self.peer_protocol_timeout = peer_protocol_timeout
         self._discovered_relays: dict[ID, RelayInfo] = {}
         self._protocol_cache: dict[
             ID, set[str]
@@ -165,8 +176,8 @@ class RelayDiscovery(Service):
                     self._discovered_relays[peer_id].last_seen = time.time()
                     continue
 
-                # Check if peer supports the relay protocol
-                with trio.move_on_after(5):  # Don't wait too long for protocol info
+                # Don't wait too long for protocol info
+                with trio.move_on_after(self.peer_protocol_timeout):
                     if await self._supports_relay_protocol(peer_id):
                         await self._add_relay(peer_id)
 
@@ -264,7 +275,7 @@ class RelayDiscovery(Service):
     async def _check_via_direct_connection(self, peer_id: ID) -> bool | None:
         """Check protocol support via direct connection."""
         try:
-            with trio.fail_after(STREAM_TIMEOUT):
+            with trio.fail_after(self.stream_timeout):
                 stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
                 if stream:
                     await stream.close()
@@ -370,7 +381,7 @@ class RelayDiscovery(Service):
 
             # Open a stream to the relay with timeout
             try:
-                with trio.fail_after(STREAM_TIMEOUT):
+                with trio.fail_after(self.stream_timeout):
                     stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
                     if not stream:
                         logger.error("Failed to open stream to relay %s", peer_id)
@@ -386,7 +397,7 @@ class RelayDiscovery(Service):
                     peer=self.host.get_id().to_bytes(),
                 )
 
-                with trio.fail_after(STREAM_TIMEOUT):
+                with trio.fail_after(self.stream_timeout):
                     await stream.write(request.SerializeToString())
 
                     # Wait for response
