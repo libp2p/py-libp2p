@@ -49,7 +49,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
-logger = logging.getLogger("kademlia-example")
+logger = logging.getLogger(__name__)
 
 # Configure DHT module loggers to inherit from the parent logger
 # This ensures all kademlia-example.* loggers use the same configuration
@@ -65,7 +65,7 @@ for module in [
     "routing_table",
     "provider_store",
 ]:
-    child_logger = logging.getLogger(f"kademlia-example.{module}")
+    child_logger = logging.getLogger(f"__name__.{module}")
     child_logger.setLevel(logging.INFO)
     child_logger.propagate = True  # Allow propagation to parent
 
