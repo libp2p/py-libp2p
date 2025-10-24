@@ -539,7 +539,7 @@ Features:
                 # Wait for response
                 response = await websocket.recv()
 
-                logger.info(f"Connection test successful: {response}")
+                logger.info(f"Connection test successful: {response!r}")
                 return True
 
         except Exception as e:
