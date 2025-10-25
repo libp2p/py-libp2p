@@ -20,6 +20,11 @@ def get_proxy_from_environment(url: str) -> str | None:
     - Checks both lowercase and uppercase variants (uppercase takes precedence)
     - Returns None if NO_PROXY matches the target
 
+    Platform-specific behavior:
+    - On Linux/Unix: HTTP_PROXY and http_proxy are distinct variables, uppercase is checked first
+    - On Windows: Environment variables are case-insensitive, so HTTP_PROXY and http_proxy are 
+                  treated as the same variable; whichever was set last takes effect
+    
     Args:
         url: The WebSocket URL being dialed (ws:// or wss://)
 
