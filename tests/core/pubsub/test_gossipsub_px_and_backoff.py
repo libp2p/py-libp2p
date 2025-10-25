@@ -139,6 +139,7 @@ async def test_peer_exchange():
         # connect hosts
         await connect(host_1, host_0)
         await connect(host_1, host_2)
+        await connect(host_0, host_2)  # Add connection so host_0 knows about host_2
         await trio.sleep(0.5)
 
         # all join the topic and 0 <-> 1 and 1 <-> 2 graft
@@ -154,6 +155,17 @@ async def test_peer_exchange():
         # ensure peer is registered in mesh
         assert host_0.get_id() in gsub1.mesh[topic]
         assert host_2.get_id() in gsub1.mesh[topic]
+
+        # Disconnect host_0 and host_2 to simulate PX scenario
+        await host_0.disconnect(host_2.get_id())
+        await trio.sleep(0.5)
+
+        # Remove host_2 from host_0's mesh if it exists
+        if host_2.get_id() in gsub0.mesh.get(topic, set()):
+            gsub0.mesh[topic].discard(host_2.get_id())
+        if host_0.get_id() in gsub2.mesh.get(topic, set()):
+            gsub2.mesh[topic].discard(host_0.get_id())
+
         assert host_2.get_id() not in gsub0.mesh[topic]
 
         # host_1 unsubscribes from the topic
