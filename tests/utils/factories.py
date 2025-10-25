@@ -176,7 +176,7 @@ def secio_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
     return NoiseTransport(
         libp2p_keypair=key_pair,
-        noise_privkey=noise_static_key_factory(),
+        noise_privkey=key_pair.private_key,  # Use the same key type as libp2p identity
         early_data=None,
         with_noise_pipes=False,
     )
@@ -254,10 +254,10 @@ async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
     remote_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
 
     local_secure_conn: ISecureConn | None = None
