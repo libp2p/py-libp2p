@@ -148,8 +148,8 @@ class TestAddFile:
 
             dag = MerkleDag(mock_client)
 
-            # Add file
-            root_cid = await dag.add_file(temp_path)
+            # Add file (disable directory wrapping for this test)
+            root_cid = await dag.add_file(temp_path, wrap_with_directory=False)
 
             # Verify
             assert root_cid is not None
@@ -181,8 +181,8 @@ class TestAddFile:
 
             dag = MerkleDag(mock_client)
 
-            # Add file
-            root_cid = await dag.add_file(temp_path)
+            # Add file (disable directory wrapping for this test)
+            root_cid = await dag.add_file(temp_path, wrap_with_directory=False)
 
             # Verify
             assert root_cid is not None
@@ -230,10 +230,14 @@ class TestAddFile:
 
             dag = MerkleDag(mock_client)
 
-            # Add with smaller chunk size for testing
+            # Add with smaller chunk size for testing (disable directory wrapping)
             chunk_size = 16 * 1024  # 16 KB for testing
 
-            await dag.add_file(temp_path, chunk_size=chunk_size)
+            await dag.add_file(
+                temp_path, 
+                chunk_size=chunk_size, 
+                wrap_with_directory=False
+            )
 
             # Should have many chunks
             # (3.2MB / 16KB = 200 chunks) + 1 root = 201 calls
@@ -260,10 +264,11 @@ class TestFetchFile:
         dag = MerkleDag(mock_client)
 
         # Fetch
-        fetched_data = await dag.fetch_file(cid)
+        fetched_data, filename = await dag.fetch_file(cid, timeout=30.0)
 
         # Verify
         assert fetched_data == data
+        assert filename is None  # Single RAW block doesn't have filename
         mock_client.get_block.assert_called_once_with(cid, None, 30.0)
 
     @pytest.mark.trio
@@ -308,11 +313,12 @@ class TestFetchFile:
         dag = MerkleDag(mock_client)
 
         # Fetch
-        fetched_data = await dag.fetch_file(root_cid)
+        fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
 
         # Verify
         expected_data = chunk1 + chunk2 + chunk3
         assert fetched_data == expected_data
+        assert filename is None  # File node without directory wrapper
 
         # Should have fetched root + 3 chunks
         assert mock_client.get_block.call_count == 4
@@ -447,15 +453,16 @@ class TestEndToEnd:
 
             dag = MerkleDag(mock_client)
 
-            # Add file (use smaller chunk size for testing)
+            # Add file (use smaller chunk size for testing, disable directory wrapping)
             chunk_size = 16 * 1024  # 16 KB for testing
-            root_cid = await dag.add_file(temp_path, chunk_size=chunk_size)
+            root_cid = await dag.add_file(temp_path, chunk_size=chunk_size, wrap_with_directory=False)
 
             # Fetch file
-            fetched_data = await dag.fetch_file(root_cid)
+            fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
 
             # Verify
             assert fetched_data == original_data
+            assert filename is None  # No directory wrapping
         finally:
             Path(temp_path).unlink()
 
@@ -488,10 +495,11 @@ class TestEndToEnd:
         root_cid = await dag.add_bytes(original_data, chunk_size=256 * 1024)
 
         # Fetch
-        fetched_data = await dag.fetch_file(root_cid)
+        fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
 
         # Verify
         assert fetched_data == original_data
+        assert filename is None  # add_bytes doesn't create directory wrapper
 
     @pytest.mark.trio
     async def test_large_file_handling(self):
@@ -533,9 +541,9 @@ class TestEndToEnd:
             def fetch_progress(current, total, status):
                 progress_fetch.append((current, total, status))
 
-            # Add file
+            # Add file (disable directory wrapping)
             root_cid = await dag.add_file(
-                temp_path, chunk_size=1024 * 1024, progress_callback=add_progress
+                temp_path, chunk_size=1024 * 1024, progress_callback=add_progress, wrap_with_directory=False
             )
 
             # Verify progress during add
@@ -548,12 +556,13 @@ class TestEndToEnd:
             assert info["chunks"] == 50
 
             # Fetch file
-            fetched_data = await dag.fetch_file(
-                root_cid, progress_callback=fetch_progress
+            fetched_data, filename = await dag.fetch_file(
+                root_cid, progress_callback=fetch_progress, timeout=30.0
             )
 
             # Verify
             assert len(fetched_data) == file_size
             assert len(progress_fetch) > 0
+            assert filename is None  # No directory wrapping
         finally:
             Path(temp_path).unlink()

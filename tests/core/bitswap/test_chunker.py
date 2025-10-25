@@ -168,7 +168,12 @@ class TestChunkFile:
 
             # Can iterate through all without memory issues
             chunk_count = 2 + sum(1 for _ in chunk_iter)
-            expected_count = (50 * 1024 * 1024) // DEFAULT_CHUNK_SIZE
+            # File size: 50*1024*1024 = 52428800 bytes
+            # Chunk size: 64512 bytes
+            # Expected chunks: ceil(52428800 / 64512) = 813 (last chunk is partial)
+            import math
+            file_size = 50 * 1024 * 1024
+            expected_count = math.ceil(file_size / DEFAULT_CHUNK_SIZE)
             assert chunk_count == expected_count
         finally:
             Path(temp_path).unlink()

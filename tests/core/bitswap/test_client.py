@@ -212,15 +212,16 @@ class TestBitswapClientBlockOperations:
     @pytest.mark.trio
     async def test_get_nonexistent_block(self):
         """Test getting block that doesn't exist locally."""
+        from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
+
         mock_host = MagicMock()
         client = BitswapClient(mock_host)
 
         cid = compute_cid_v1(b"nonexistent")
 
-        # Should return None or raise depending on implementation
-        result = await client.get_block(cid, timeout=0.1)
-        # Either None or BlockNotFoundError is acceptable
-        assert result is None or isinstance(result, type(None))
+        # Should timeout when block doesn't exist
+        with pytest.raises(BitswapTimeoutError):
+            await client.get_block(cid, timeout=0.1)
 
 
 class TestBitswapClientPeerManagement:
