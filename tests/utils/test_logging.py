@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import os
+import platform
 from pathlib import (
     Path,
 )
@@ -23,6 +24,45 @@ from libp2p.utils.logging import (
 )
 
 
+def _is_windows():
+    """Check if running on Windows."""
+    return platform.system() == "Windows"
+
+
+def _wait_for_file_operation(file_path: Path, operation: str = "read", max_attempts: int = 3):
+    """
+    Wait for a file operation to succeed, with retries for Windows file locking.
+    
+    Args:
+        file_path: Path to the file
+        operation: Type of operation ('read', 'exists', 'write')
+        max_attempts: Maximum number of retry attempts
+    
+    Returns:
+        Result of the operation or None if all attempts failed
+    """
+    import time
+    
+    for attempt in range(max_attempts):
+        try:
+            if operation == "read":
+                return file_path.read_text()
+            elif operation == "exists":
+                return file_path.exists()
+            elif operation == "write":
+                return file_path.write_text("test")
+        except (PermissionError, OSError) as e:
+            if attempt < max_attempts - 1:  # Not the last attempt
+                # Wait longer on Windows due to file locking
+                wait_time = 0.1 if _is_windows() else 0.05
+                time.sleep(wait_time)
+                continue
+            else:
+                raise e
+    
+    return None
+
+
 def _reset_logging():
     """Reset all logging state."""
     global _current_listener, _listener_ready, _current_handlers
@@ -33,10 +73,20 @@ def _reset_logging():
         _current_listener = None
 
     # Close all file handlers to ensure proper cleanup on Windows
+    # Add a small delay to allow Windows to release file handles
+    import time
     for handler in _current_handlers:
         if isinstance(handler, logging.FileHandler):
-            handler.close()
+            try:
+                handler.flush()  # Ensure all writes are flushed before closing
+                handler.close()
+            except Exception:
+                # Ignore errors during cleanup to prevent test failures
+                pass
     _current_handlers.clear()
+    
+    # Small delay for Windows file handle release
+    time.sleep(0.01)
 
     # Reset the event
     _listener_ready = threading.Event()
@@ -174,26 +224,33 @@ async def test_custom_log_file(clean_env):
         logger = logging.getLogger("libp2p")
         logger.info("Test message")
 
-        # Give the listener time to process the message
-        await trio.sleep(0.1)
+        # Give the listener more time to process the message (Windows needs more time)
+        await trio.sleep(0.2)
 
         # Stop the listener to ensure all messages are written
         if _current_listener is not None:
             _current_listener.stop()
 
-        # Give a moment for the listener to fully stop
-        await trio.sleep(0.05)
+        # Give more time for the listener to fully stop (Windows file locking)
+        await trio.sleep(0.1)
 
-        # Close all file handlers to release the file
+        # Close all file handlers to release the file with proper Windows handling
         for handler in _current_handlers:
             if isinstance(handler, logging.FileHandler):
                 handler.flush()  # Ensure all writes are flushed
                 handler.close()
+        
+        # Additional wait for Windows file handle release
+        await trio.sleep(0.05)
 
-        # Check if the file exists and contains our message
-        assert log_file.exists()
-        content = log_file.read_text()
-        assert "Test message" in content
+        # Check if the file exists and contains our message with robust error handling
+        file_exists = _wait_for_file_operation(log_file, "exists")
+        assert file_exists, f"Log file {log_file} was not created"
+        
+        # Read the file content with retry logic for Windows file locking
+        content = _wait_for_file_operation(log_file, "read")
+        assert content is not None, "Failed to read log file content"
+        assert "Test message" in content, f"Expected 'Test message' in log content, got: {content}"
 
 
 @pytest.mark.trio
@@ -219,26 +276,33 @@ async def test_default_log_file(clean_env):
         logger = logging.getLogger("libp2p")
         logger.info("Test message")
 
-        # Give the listener time to process the message
-        await trio.sleep(0.1)
+        # Give the listener more time to process the message (Windows needs more time)
+        await trio.sleep(0.2)
 
         # Stop the listener to ensure all messages are written
         if _current_listener is not None:
             _current_listener.stop()
 
-        # Give a moment for the listener to fully stop
-        await trio.sleep(0.05)
+        # Give more time for the listener to fully stop (Windows file locking)
+        await trio.sleep(0.1)
 
-        # Close all file handlers to release the file
+        # Close all file handlers to release the file with proper Windows handling
         for handler in _current_handlers:
             if isinstance(handler, logging.FileHandler):
                 handler.flush()  # Ensure all writes are flushed
                 handler.close()
+        
+        # Additional wait for Windows file handle release
+        await trio.sleep(0.05)
 
-        # Check the mocked temp file
-        if mock_temp_file.exists():
-            content = mock_temp_file.read_text()
-            assert "Test message" in content
+        # Check the mocked temp file with more robust error handling
+        file_exists = _wait_for_file_operation(mock_temp_file, "exists")
+        assert file_exists, f"Log file {mock_temp_file} was not created"
+        
+        # Read the file content with retry logic for Windows file locking
+        content = _wait_for_file_operation(mock_temp_file, "read")
+        assert content is not None, "Failed to read log file content"
+        assert "Test message" in content, f"Expected 'Test message' in log content, got: {content}"
 
 
 def test_invalid_log_level(clean_env):
