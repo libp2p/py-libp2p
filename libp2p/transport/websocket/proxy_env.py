@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-
 def get_proxy_from_environment(url: str) -> str | None:
     """
     Get proxy URL from environment variables with uppercase precedence.
@@ -21,26 +20,17 @@ def get_proxy_from_environment(url: str) -> str | None:
     - Returns None if NO_PROXY matches the target
 
     Platform-specific behavior:
-    - On Linux/Unix: HTTP_PROXY and http_proxy are distinct variables, uppercase is checked first
-    - On Windows: Environment variables are case-insensitive, so HTTP_PROXY and http_proxy are 
-                  treated as the same variable; whichever was set last takes effect
-    
+    - On Linux/Unix: HTTP_PROXY and http_proxy are distinct variables,
+    uppercase is checked first
+    - On Windows: Environment variables are case-insensitive,
+    so HTTP_PROXY and http_proxy are treated as the same variable;
+    whichever was set last takes effect
+
     Args:
         url: The WebSocket URL being dialed (ws:// or wss://)
 
     Returns:
         Proxy URL string or None if no proxy configured
-
-    Examples:
-        >>> import os
-        >>> from libp2p.transport.websocket.proxy_env import get_proxy_from_environment
-        >>> os.environ['HTTP_PROXY'] = 'socks5://localhost:1080'
-        >>> get_proxy_from_environment('ws://example.com')
-        'socks5://localhost:1080'
-
-        >>> os.environ['HTTPS_PROXY'] = 'socks5://proxy.corp:1080'
-        >>> get_proxy_from_environment('wss://example.com')
-        'socks5://proxy.corp:1080'
 
     """
     try:

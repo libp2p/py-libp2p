@@ -78,12 +78,11 @@ def test_proxy_from_environment_lowercase():
 
 
 def test_proxy_uppercase_takes_precedence():
-    """Test that uppercase environment variables take precedence.
-    
+    """
+    Test that uppercase environment variables take precedence.
     Note: This test behavior differs on Windows vs Linux:
     - On Linux: HTTP_PROXY and http_proxy are distinct variables
     - On Windows: Environment variables are case-insensitive, so they're the same
-    
     The implementation correctly handles both:
     - On Linux: uppercase is checked first via os.environ.get("HTTP_PROXY")
     - On Windows: whichever was set in os.environ last takes effect
@@ -96,13 +95,13 @@ def test_proxy_uppercase_takes_precedence():
         # Clear both to start fresh
         os.environ.pop("HTTP_PROXY", None)
         os.environ.pop("http_proxy", None)
-        
+
         # Set uppercase first, then lowercase
         os.environ["HTTP_PROXY"] = "socks5://uppercase-proxy:1080"
         os.environ["http_proxy"] = "socks5://lowercase-proxy:1080"
 
         proxy = get_proxy_from_environment("ws://target.example.com")
-        
+
         # On Windows, case-insensitive env vars mean lowercase overwrites uppercase
         # On Linux, they're distinct and uppercase takes precedence via our logic
         if platform.system() == "Windows":
