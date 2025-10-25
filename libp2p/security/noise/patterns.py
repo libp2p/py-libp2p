@@ -80,6 +80,8 @@ class BasePattern(IPattern):
     def make_handshake_payload(
         self, extensions: NoiseExtensions | None = None
     ) -> NoiseHandshakePayload:
+        # Sign the X25519 public key (not the Ed25519 public key)
+        # The Noise protocol uses X25519 keys for the DH exchange
         signature = make_handshake_payload_sig(
             self.libp2p_privkey, self.noise_static_key.get_public_key()
         )

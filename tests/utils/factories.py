@@ -151,7 +151,10 @@ def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> Pee
 
 
 def noise_static_key_factory() -> PrivateKey:
-    return create_ed25519_key_pair().private_key
+    # Generate X25519 key for Noise static key (as per Noise spec)
+    from libp2p.crypto.x25519 import X25519PrivateKey
+
+    return X25519PrivateKey.new()
 
 
 def noise_handshake_payload_factory() -> NoiseHandshakePayload:
@@ -176,7 +179,7 @@ def secio_transport_factory(key_pair: KeyPair) -> ISecureTransport:
 def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
     return NoiseTransport(
         libp2p_keypair=key_pair,
-        noise_privkey=key_pair.private_key,  # Use the same key type as libp2p identity
+        noise_privkey=noise_static_key_factory(),
         early_data=None,
         with_noise_pipes=False,
     )
