@@ -76,7 +76,8 @@ class BitswapClient:
             PeerID, dict[bytes, dict[str, Any]]
         ] = {}  # peer -> wantlist
         self._pending_requests: dict[bytes, trio.Event] = {}  # CID -> event
-        self._dont_have_responses: dict[bytes, set[PeerID]] = {}  # CID -> peers who sent DontHave
+        # CID -> peers who sent DontHave
+        self._dont_have_responses: dict[bytes, set[PeerID]] = {}
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
         self._expected_blocks: dict[PeerID, set[bytes]] = {}  # peer -> expected CIDs
         self._nursery: trio.Nursery | None = None
@@ -747,7 +748,7 @@ class BitswapClient:
     ) -> None:
         """
         Process received block presences (v1.2.0).
-        
+
         Tracks both Have and DontHave messages for optimization and logging.
         DontHave messages help us know which peers don't have blocks, but we
         don't fail the request - we continue waiting for other peers or timeout.
@@ -774,7 +775,7 @@ class BitswapClient:
                 if cid not in self._dont_have_responses:
                     self._dont_have_responses[cid] = set()
                 self._dont_have_responses[cid].add(peer_id)
-                
+
                 logger.info(
                     f"  ℹ️  Peer {peer_id} doesn't have block {cid.hex()[:16]}... "
                     f"(DontHave response) - will try other peers or timeout"

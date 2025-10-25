@@ -11,7 +11,7 @@ from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE
 from libp2p.bitswap.cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
-from libp2p.bitswap.dag_pb import decode_dag_pb, is_file_node
+from libp2p.bitswap.dag_pb import create_file_node, decode_dag_pb, is_file_node
 
 
 class TestMerkleDagInit:
@@ -234,9 +234,7 @@ class TestAddFile:
             chunk_size = 16 * 1024  # 16 KB for testing
 
             await dag.add_file(
-                temp_path, 
-                chunk_size=chunk_size, 
-                wrap_with_directory=False
+                temp_path, chunk_size=chunk_size, wrap_with_directory=False
             )
 
             # Should have many chunks
@@ -284,8 +282,6 @@ class TestFetchFile:
         cid3 = compute_cid_v1(chunk3, codec=CODEC_RAW)
 
         # Create DAG-PB root node
-        from libp2p.bitswap.dag_pb import create_file_node
-
         chunks_data = [
             (cid1, len(chunk1)),
             (cid2, len(chunk2)),
@@ -332,8 +328,6 @@ class TestFetchFile:
 
         cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
         cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
-
-        from libp2p.bitswap.dag_pb import create_file_node
 
         root_data = create_file_node([(cid1, len(chunk1)), (cid2, len(chunk2))])
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
@@ -397,8 +391,6 @@ class TestGetFileInfo:
         chunks = [b"x" * 1000, b"y" * 2000, b"z" * 1500]
         cids = [compute_cid_v1(chunk, codec=CODEC_RAW) for chunk in chunks]
 
-        from libp2p.bitswap.dag_pb import create_file_node
-
         chunks_data = [(cid, len(chunk)) for cid, chunk in zip(cids, chunks)]
         root_data = create_file_node(chunks_data)
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
@@ -455,7 +447,11 @@ class TestEndToEnd:
 
             # Add file (use smaller chunk size for testing, disable directory wrapping)
             chunk_size = 16 * 1024  # 16 KB for testing
-            root_cid = await dag.add_file(temp_path, chunk_size=chunk_size, wrap_with_directory=False)
+            root_cid = await dag.add_file(
+                temp_path,
+                chunk_size=chunk_size,
+                wrap_with_directory=False,
+            )
 
             # Fetch file
             fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
@@ -543,7 +539,10 @@ class TestEndToEnd:
 
             # Add file (disable directory wrapping)
             root_cid = await dag.add_file(
-                temp_path, chunk_size=1024 * 1024, progress_callback=add_progress, wrap_with_directory=False
+                temp_path,
+                chunk_size=1024 * 1024,
+                progress_callback=add_progress,
+                wrap_with_directory=False,
             )
 
             # Verify progress during add

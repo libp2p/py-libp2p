@@ -11,6 +11,7 @@ from libp2p.bitswap.config import (
     BITSWAP_PROTOCOL_V100,
     BITSWAP_PROTOCOL_V120,
 )
+from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
 from libp2p.peer.id import ID as PeerID
 
 
@@ -212,8 +213,6 @@ class TestBitswapClientBlockOperations:
     @pytest.mark.trio
     async def test_get_nonexistent_block(self):
         """Test getting block that doesn't exist locally."""
-        from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
-
         mock_host = MagicMock()
         client = BitswapClient(mock_host)
 

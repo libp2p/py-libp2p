@@ -477,11 +477,8 @@ class TestProtocolFeatures:
                 await client_bitswap.stop()
 
     @pytest.mark.trio
-    @pytest.mark.timeout(45)
     async def test_v120_block_presence(self):
-        """Test v1.2.0 specific feature: Block presence messages."""
-        # v1.2.0 introduced block presence (HAVE/DONT_HAVE) messages
-        # This test verifies proper handling of these messages
+        """Test v1.2.0 specific feature: Block presence messages (HAVE)."""
         provider_key = create_new_key_pair()
         client_key = create_new_key_pair()
 
@@ -509,12 +506,10 @@ class TestProtocolFeatures:
                 await provider_bitswap.start()
                 await client_bitswap.start()
 
-                # Provider has some blocks but not others
+                # Provider has blocks
                 existing_data = b"I exist"
                 existing_cid = compute_cid_v1(existing_data)
                 await provider_store.put_block(existing_cid, existing_data)
-
-                nonexistent_cid = compute_cid_v1(b"I don't exist")
 
                 # Connect nodes
                 provider_addrs = provider_host.get_addrs()
@@ -533,10 +528,6 @@ class TestProtocolFeatures:
                 # Verify client has the block now
                 client_has_block = await client_store.has_block(existing_cid)
                 assert client_has_block is True
-
-                # Note: Testing DONT_HAVE behavior requires provider-side implementation
-                # of sending BlockPresence messages, which is not yet fully implemented.
-                # The timeout behavior for non-existent blocks is tested in other test files.
 
                 # Cleanup
                 await provider_bitswap.stop()

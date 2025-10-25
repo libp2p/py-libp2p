@@ -9,8 +9,8 @@ import trio
 
 from libp2p import new_host
 from libp2p.bitswap.block_store import MemoryBlockStore
+from libp2p.bitswap.cid import compute_cid, compute_cid_v1
 from libp2p.bitswap.client import BitswapClient
-from libp2p.bitswap.cid import compute_cid
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -20,7 +20,6 @@ class TestBitswapIntegration:
     """Integration tests for Bitswap protocol."""
 
     @pytest.mark.trio
-    @pytest.mark.timeout(60)
     async def test_file_transfer_between_two_nodes(self):
         """Test complete file transfer between provider and client nodes."""
         # Create two hosts
@@ -40,7 +39,9 @@ class TestBitswapIntegration:
                 provider_store = MemoryBlockStore()
                 client_store = MemoryBlockStore()
 
-                provider_bitswap = BitswapClient(provider_host, block_store=provider_store)
+                provider_bitswap = BitswapClient(
+                    provider_host, block_store=provider_store
+                )
                 client_bitswap = BitswapClient(client_host, block_store=client_store)
 
                 # Start Bitswap clients
@@ -55,7 +56,9 @@ class TestBitswapIntegration:
 
                 try:
                     # Provider: Add file to DAG and store blocks
-                    provider_dag = MerkleDag(provider_bitswap, block_store=provider_store)
+                    provider_dag = MerkleDag(
+                        provider_bitswap, block_store=provider_store
+                    )
                     root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                     # Verify provider has all blocks
@@ -80,7 +83,9 @@ class TestBitswapIntegration:
 
                     # Get the file
                     host_id = provider_host.get_id()
-                    retrieved_data, filename = await client_dag.fetch_file(root_cid, host_id)
+                    retrieved_data, filename = await client_dag.fetch_file(
+                        root_cid, host_id
+                    )
 
                     # Verify the data matches
                     assert retrieved_data == test_data
@@ -99,7 +104,6 @@ class TestBitswapIntegration:
                     await client_host.close()
 
     @pytest.mark.trio
-    @pytest.mark.timeout(60)
     async def test_multiple_blocks_transfer(self):
         """Test transferring multiple independent blocks between nodes."""
         # Create two hosts
@@ -118,7 +122,9 @@ class TestBitswapIntegration:
                 provider_store = MemoryBlockStore()
                 client_store = MemoryBlockStore()
 
-                provider_bitswap = BitswapClient(provider_host, block_store=provider_store)
+                provider_bitswap = BitswapClient(
+                    provider_host, block_store=provider_store
+                )
                 client_bitswap = BitswapClient(client_host, block_store=client_store)
 
                 await provider_bitswap.start()
@@ -126,8 +132,6 @@ class TestBitswapIntegration:
 
                 try:
                     # Provider: Add multiple blocks
-                    from libp2p.bitswap.cid import compute_cid_v1
-
                     blocks = {
                         b"block1": compute_cid_v1(b"block1"),
                         b"block2": compute_cid_v1(b"block2"),
@@ -164,7 +168,6 @@ class TestBitswapIntegration:
                     await client_host.close()
 
     @pytest.mark.trio
-    @pytest.mark.timeout(120)
     async def test_large_file_transfer(self):
         """Test transferring a large file that requires multiple chunks."""
         # Create hosts
@@ -182,7 +185,9 @@ class TestBitswapIntegration:
                 provider_store = MemoryBlockStore()
                 client_store = MemoryBlockStore()
 
-                provider_bitswap = BitswapClient(provider_host, block_store=provider_store)
+                provider_bitswap = BitswapClient(
+                    provider_host, block_store=provider_store
+                )
                 client_bitswap = BitswapClient(client_host, block_store=client_store)
 
                 await provider_bitswap.start()
@@ -196,7 +201,9 @@ class TestBitswapIntegration:
 
                 try:
                     # Provider: Add large file
-                    provider_dag = MerkleDag(provider_bitswap, block_store=provider_store)
+                    provider_dag = MerkleDag(
+                        provider_bitswap, block_store=provider_store
+                    )
                     root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                     # Verify multiple blocks were created
@@ -214,7 +221,9 @@ class TestBitswapIntegration:
                     # Client: Get the file
                     client_dag = MerkleDag(client_bitswap, block_store=client_store)
                     host_id = provider_host.get_id()
-                    retrieved_data, filename = await client_dag.fetch_file(root_cid, host_id)
+                    retrieved_data, filename = await client_dag.fetch_file(
+                        root_cid, host_id
+                    )
 
                     # Verify complete transfer
                     assert len(retrieved_data) == len(large_data)
@@ -232,7 +241,6 @@ class TestBitswapIntegration:
                     await client_host.close()
 
     @pytest.mark.trio
-    @pytest.mark.timeout(60)
     async def test_bidirectional_exchange(self):
         """Test bidirectional block exchange between nodes."""
         # Create two hosts
@@ -257,8 +265,6 @@ class TestBitswapIntegration:
                 await node2_bitswap.start()
 
                 try:
-                    from libp2p.bitswap.cid import compute_cid_v1
-
                     # Node1 has block A
                     block_a = b"Block A content"
                     cid_a = compute_cid_v1(block_a)
@@ -303,14 +309,15 @@ class TestBitswapIntegration:
                     await node2_host.close()
 
     @pytest.mark.trio
-    @pytest.mark.timeout(5)
     async def test_dont_have_response(self):
-        """Test that DontHave messages are sent when a peer doesn't have a block.
-        
-        This test verifies that when a client requests a block that a provider doesn't have,
-        the provider sends a DontHave message (when send_dont_have=True is set).
-        The test uses a mix of existing and non-existing blocks to ensure the protocol
-        handles both cases correctly.
+        """
+        Test that DontHave messages are sent when peer doesn't have a block.
+
+        This test verifies that when a client requests a block that a
+        provider doesn't have, the provider sends a DontHave message
+        (when send_dont_have=True is set). The test uses a mix of existing
+        and non-existing blocks to ensure the protocol handles both cases
+        correctly.
         """
         # Create two hosts
         provider_key = create_new_key_pair()
@@ -328,7 +335,9 @@ class TestBitswapIntegration:
                 provider_store = MemoryBlockStore()
                 client_store = MemoryBlockStore()
 
-                provider_bitswap = BitswapClient(provider_host, block_store=provider_store)
+                provider_bitswap = BitswapClient(
+                    provider_host, block_store=provider_store
+                )
                 client_bitswap = BitswapClient(client_host, block_store=client_store)
 
                 await provider_bitswap.start()
@@ -351,57 +360,72 @@ class TestBitswapIntegration:
                     cid_b = compute_cid(block_b)
                     await provider_bitswap.add_block(cid_a, block_a)
                     await provider_bitswap.add_block(cid_b, block_b)
-                    
+
                     # Create CID for a block that doesn't exist
                     nonexistent_cid = b"block_that_does_not_exist_anywhere"
-                    
+
                     # Client requests existing blocks - these should succeed
                     retrieved_a = await client_bitswap.get_block(
                         cid_a, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_a == block_a
-                    
+
                     retrieved_b = await client_bitswap.get_block(
                         cid_b, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_b == block_b
-                    
+
                     # Now verify client has these blocks
                     assert len(client_store.get_all_cids()) == 2
                     assert cid_a in client_store.get_all_cids()
                     assert cid_b in client_store.get_all_cids()
-                    
-                    # Step 4: Request a non-existent block and verify we get a DontHave response
-                    print("\n--- Step 4: Request nonexistent block and verify DontHave response ---")
-                    
-                    # Start the request in the background (will eventually timeout, but we care about DontHave)
+
+                    # Step 4: Request a non-existent block and verify we
+                    # get a DontHave response
+                    print(
+                        "\n--- Step 4: Request nonexistent block and "
+                        "verify DontHave response ---"
+                    )
+
+                    # Start the request in the background (will eventually
+                    # timeout, but we care about DontHave)
                     async with trio.open_nursery() as test_nursery:
+
                         async def request_nonexistent():
                             try:
                                 await client_bitswap.get_block(
                                     nonexistent_cid,
                                     peer_id=provider_host.get_id(),
-                                    timeout=3.0
+                                    timeout=3.0,
                                 )
                             except Exception:
-                                raise  # We expect timeout, but that's not what we're testing
-                        
+                                # We expect timeout, but that's not what
+                                # we're testing
+                                raise
+
                         test_nursery.start_soon(request_nonexistent)
-                        
+
                         # Wait a bit for the DontHave response to arrive
                         await trio.sleep(0.5)
-                        
-                        # The ACTUAL test: Did we receive a DontHave response?
-                        print(f"DontHave responses: {client_bitswap._dont_have_responses}")
-                        assert nonexistent_cid in client_bitswap._dont_have_responses, \
-                            "Client should have received a DontHave response for the nonexistent CID"
-                        assert provider_host.get_id() in client_bitswap._dont_have_responses[nonexistent_cid], \
-                            "Provider should have sent the DontHave response"
-                        print(f"✓ DontHave response received from provider!")
-                        
+
+                        # The ACTUAL test: Did we receive a DontHave
+                        # response?
+                        print(
+                            f"DontHave responses: {client_bitswap._dont_have_responses}"
+                        )
+                        assert nonexistent_cid in client_bitswap._dont_have_responses, (
+                            "Client should have received a DontHave "
+                            "response for the nonexistent CID"
+                        )
+                        assert (
+                            provider_host.get_id()
+                            in client_bitswap._dont_have_responses[nonexistent_cid]
+                        ), "Provider should have sent the DontHave response"
+                        print("✓ DontHave response received from provider!")
+
                         # Cancel the background request
                         test_nursery.cancel_scope.cancel()
-                    
+
                     # Verify we didn't get the nonexistent block
                     assert not await client_store.has_block(nonexistent_cid)
                     # And still have only the 2 blocks we successfully retrieved

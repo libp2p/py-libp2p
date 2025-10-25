@@ -1,5 +1,6 @@
 """Tests for file chunker."""
 
+import math
 from pathlib import Path
 import tempfile
 
@@ -171,7 +172,7 @@ class TestChunkFile:
             # File size: 50*1024*1024 = 52428800 bytes
             # Chunk size: 64512 bytes
             # Expected chunks: ceil(52428800 / 64512) = 813 (last chunk is partial)
-            import math
+
             file_size = 50 * 1024 * 1024
             expected_count = math.ceil(file_size / DEFAULT_CHUNK_SIZE)
             assert chunk_count == expected_count
