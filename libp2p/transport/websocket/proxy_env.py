@@ -10,18 +10,18 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 
-def get_proxy_from_environment(target_url: str) -> str | None:
+def get_proxy_from_environment(url: str) -> str | None:
     """
-    Get proxy URL from environment variables.
+    Get proxy URL from environment variables with uppercase precedence.
 
     Mimics Go's http.ProxyFromEnvironment behavior:
     - Uses HTTP_PROXY for ws:// URLs
     - Uses HTTPS_PROXY for wss:// URLs
-    - Checks both lowercase and uppercase variants
+    - Checks both lowercase and uppercase variants (uppercase takes precedence)
     - Returns None if NO_PROXY matches the target
 
     Args:
-        target_url: The WebSocket URL being dialed (ws:// or wss://)
+        url: The WebSocket URL being dialed (ws:// or wss://)
 
     Returns:
         Proxy URL string or None if no proxy configured
@@ -39,24 +39,21 @@ def get_proxy_from_environment(target_url: str) -> str | None:
 
     """
     try:
-        parsed = urlparse(target_url)
-        scheme = parsed.scheme.lower()
-
-        # Determine which proxy environment variable to use
-        if scheme == "wss":
-            # For secure WebSocket, check HTTPS_PROXY
+        # Simple and direct precedence logic
+        if url.startswith("wss://"):
             proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-        elif scheme == "ws":
-            # For insecure WebSocket, check HTTP_PROXY
+        elif url.startswith("ws://"):
             proxy_url = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
         else:
-            logger.debug(f"Unknown scheme '{scheme}', no proxy detection")
+            logger.debug(f"Unknown scheme in URL '{url}', no proxy detection")
             return None
 
         if not proxy_url:
-            logger.debug(f"No proxy configured for {scheme}:// connections")
+            logger.debug(f"No proxy configured for {url}")
             return None
 
+        # Check NO_PROXY bypass rules
+        parsed = urlparse(url)
         if _should_bypass_proxy(parsed.hostname, parsed.port):
             logger.debug(
                 f"Bypassing proxy for {parsed.hostname}:{parsed.port} "
@@ -64,7 +61,7 @@ def get_proxy_from_environment(target_url: str) -> str | None:
             )
             return None
 
-        logger.debug(f"Using proxy from environment for {target_url}: {proxy_url}")
+        logger.debug(f"Using proxy from environment for {url}: {proxy_url}")
         return proxy_url
 
     except Exception as e:
