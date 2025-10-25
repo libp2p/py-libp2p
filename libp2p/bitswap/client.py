@@ -76,6 +76,7 @@ class BitswapClient:
             PeerID, dict[bytes, dict[str, Any]]
         ] = {}  # peer -> wantlist
         self._pending_requests: dict[bytes, trio.Event] = {}  # CID -> event
+        self._dont_have_responses: dict[bytes, set[PeerID]] = {}  # CID -> peers who sent DontHave
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
         self._expected_blocks: dict[PeerID, set[bytes]] = {}  # peer -> expected CIDs
         self._nursery: trio.Nursery | None = None
@@ -106,6 +107,7 @@ class BitswapClient:
         self._wantlist.clear()
         self._peer_wantlists.clear()
         self._pending_requests.clear()
+        self._dont_have_responses.clear()
         self._peer_protocols.clear()
         self._expected_blocks.clear()
         logger.info("Bitswap client stopped")
@@ -251,8 +253,8 @@ class BitswapClient:
         """Request a block from the network."""
         logger.info(f"📤 Requesting block: {cid.hex()}")
 
-        # Add to wantlist
-        await self.want_block(cid)
+        # Add to wantlist with sendDontHave=True for v1.2.0
+        await self.want_block(cid, send_dont_have=True)
 
         # Create pending request event
         if cid not in self._pending_requests:
@@ -293,6 +295,8 @@ class BitswapClient:
             await self.cancel_want(cid)
             if cid in self._pending_requests:
                 del self._pending_requests[cid]
+            if cid in self._dont_have_responses:
+                del self._dont_have_responses[cid]
 
         if error:
             raise error
@@ -555,7 +559,7 @@ class BitswapClient:
 
         # Process block presences (v1.2.0 format)
         if msg.blockPresences:
-            await self._process_block_presences(msg.blockPresences)
+            await self._process_block_presences(msg.blockPresences, peer_id)
 
     async def _process_wantlist(
         self, wantlist: Message.Wantlist, peer_id: PeerID, stream: INetStream
@@ -738,19 +742,43 @@ class BitswapClient:
             else:
                 logger.debug(f"No pending request for {cid.hex()[:16]}...")
 
-    async def _process_block_presences(self, presences: Sequence[Any]) -> None:
-        """Process received block presences (v1.2.0)."""
+    async def _process_block_presences(
+        self, presences: Sequence[Any], peer_id: PeerID
+    ) -> None:
+        """
+        Process received block presences (v1.2.0).
+        
+        Tracks both Have and DontHave messages for optimization and logging.
+        DontHave messages help us know which peers don't have blocks, but we
+        don't fail the request - we continue waiting for other peers or timeout.
+        This matches IPFS Bitswap behavior.
+        """
         for presence in presences:
             cid = presence.cid
             has_block = presence.type == Message.Have
 
             logger.debug(
-                f"Received presence for {cid.hex()[:16]}...: "
+                f"Received presence from {peer_id} for {cid.hex()[:16]}...: "
                 f"{'Have' if has_block else 'DontHave'}"
             )
 
-            # Could implement more sophisticated tracking here
-            # For now, just log the information
+            if has_block:
+                # Peer has the block - we can expect it to arrive soon
+                # Track which peer has it
+                if peer_id not in self._expected_blocks:
+                    self._expected_blocks[peer_id] = set()
+                self._expected_blocks[peer_id].add(cid)
+            else:
+                # DontHave - peer confirms they don't have this block
+                # Track DontHave responses for metrics/optimization
+                if cid not in self._dont_have_responses:
+                    self._dont_have_responses[cid] = set()
+                self._dont_have_responses[cid].add(peer_id)
+                
+                logger.info(
+                    f"  ℹ️  Peer {peer_id} doesn't have block {cid.hex()[:16]}... "
+                    f"(DontHave response) - will try other peers or timeout"
+                )
 
     async def _read_message(self, stream: INetStream) -> Message | None:
         """Read a length-prefixed message from the stream."""

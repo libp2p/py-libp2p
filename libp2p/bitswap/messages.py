@@ -71,7 +71,9 @@ def create_block_message_v100(blocks: list[bytes]) -> Message:
 
     """
     msg = Message()
-    msg.blocks.extend(blocks)
+    for data in blocks:
+        block = msg.payload.add()
+        block.data = data
     return msg
 
 

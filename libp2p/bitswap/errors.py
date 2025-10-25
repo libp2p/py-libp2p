@@ -39,6 +39,12 @@ class BlockNotFoundError(BitswapError):
     pass
 
 
+class BlockUnavailableError(BitswapError):
+    """Raised when a peer confirms they don't have a requested block (DontHave)."""
+
+    pass
+
+
 class InvalidCIDError(BitswapError):
     """Raised when a CID is invalid."""
 
