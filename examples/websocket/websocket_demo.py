@@ -83,7 +83,6 @@ def create_websocket_host(listen_addrs=None, use_plaintext=False):
             libp2p_keypair=key_pair,
             noise_privkey=noise_key_pair.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
 
         # Create transport upgrader with Noise security

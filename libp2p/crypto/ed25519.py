@@ -1,3 +1,10 @@
+"""
+Ed25519 cryptographic key implementation.
+
+This module provides Ed25519 public and private key implementations using
+the PyNaCl library. Ed25519 is used for libp2p peer identity signatures.
+"""
+
 from nacl.exceptions import (
     BadSignatureError,
 )
@@ -15,6 +22,13 @@ from libp2p.crypto.keys import (
 
 
 class Ed25519PublicKey(PublicKey):
+    """
+    Ed25519 public key implementation.
+
+    Provides cryptographic operations for Ed25519 public keys including
+    signature verification. Used for libp2p peer identity verification.
+    """
+
     def __init__(self, impl: PublicKeyImpl) -> None:
         self.impl = impl
 
@@ -37,6 +51,14 @@ class Ed25519PublicKey(PublicKey):
 
 
 class Ed25519PrivateKey(PrivateKey):
+    """
+    Ed25519 private key implementation.
+
+    Provides cryptographic operations for Ed25519 private keys including
+    signature generation and public key derivation. Used for libp2p peer
+    identity signing.
+    """
+
     def __init__(self, impl: PrivateKeyImpl) -> None:
         self.impl = impl
 

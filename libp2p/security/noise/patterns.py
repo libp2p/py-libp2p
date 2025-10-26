@@ -1,3 +1,12 @@
+"""
+Noise protocol handshake patterns implementation.
+
+This module provides the core handshake patterns for the Noise protocol,
+including the abstract interface and concrete implementations like the XX pattern.
+The XX pattern is the standard for libp2p Noise connections, providing mutual
+authentication and forward secrecy through a three-message handshake.
+"""
+
 from abc import (
     ABC,
     abstractmethod,
@@ -52,16 +61,66 @@ logger = logging.getLogger(__name__)
 
 
 class IPattern(ABC):
+    """
+    Abstract interface for Noise protocol handshake patterns.
+
+    Defines the contract that all Noise handshake implementations must follow,
+    ensuring consistent behavior across different protocol patterns.
+    """
+
     @abstractmethod
-    async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn: ...
+    async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
+        """
+        Perform inbound handshake as responder.
+
+        Args:
+            conn: Raw connection to perform handshake on
+
+        Returns:
+            ISecureConn: Established secure connection
+
+        Raises:
+            NoiseStateError: If handshake state is invalid
+            InvalidSignature: If signature verification fails
+            HandshakeHasNotFinished: If handshake doesn't complete properly
+
+        """
+        ...
 
     @abstractmethod
     async def handshake_outbound(
         self, conn: IRawConnection, remote_peer: ID
-    ) -> ISecureConn: ...
+    ) -> ISecureConn:
+        """
+        Perform outbound handshake as initiator.
+
+        Args:
+            conn: Raw connection to perform handshake on
+            remote_peer: Expected remote peer ID for verification
+
+        Returns:
+            ISecureConn: Established secure connection
+
+        Raises:
+            NoiseStateError: If handshake state is invalid
+            InvalidSignature: If signature verification fails
+            PeerIDMismatchesPubkey: If peer ID doesn't match public key
+            HandshakeHasNotFinished: If handshake doesn't complete properly
+
+        """
+        ...
 
 
 class BasePattern(IPattern):
+    """
+    Base implementation for Noise protocol handshake patterns.
+
+    Provides common functionality for Noise handshake patterns including:
+    - Noise state creation and management
+    - Handshake payload generation with early data support
+    - Protocol-specific configuration
+    """
+
     protocol_name: bytes
     noise_static_key: PrivateKey
     local_peer: ID
@@ -126,6 +185,18 @@ class BasePattern(IPattern):
 
 
 class PatternXX(BasePattern):
+    """
+    Noise XX handshake pattern implementation.
+
+    The XX pattern provides mutual authentication and forward secrecy through
+    a three-message handshake:
+    1. Initiator sends empty message
+    2. Responder sends static public key + handshake payload
+    3. Initiator sends static public key + handshake payload
+
+    This pattern is the standard for libp2p Noise connections.
+    """
+
     def __init__(
         self,
         local_peer: ID,
@@ -227,7 +298,7 @@ class PatternXX(BasePattern):
         if handshake_state.rs is None:
             raise NoiseStateError(
                 "something is wrong in the underlying noise `handshake_state`: "
-                "we received and consumed msg#3, which should have included the "
+                "we received and consumed msg#2, which should have included the "
                 "remote static public key, but it is not present in the handshake_state"
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)

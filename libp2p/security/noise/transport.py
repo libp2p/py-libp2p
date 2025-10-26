@@ -1,3 +1,12 @@
+"""
+Enhanced Noise transport implementation.
+
+This module provides an enhanced Noise transport with support for advanced
+features including early data, WebTransport integration, and rekey management.
+The transport uses the XX handshake pattern for mutual authentication and
+forward secrecy.
+"""
+
 from libp2p.abc import (
     IRawConnection,
     ISecureConn,
@@ -32,7 +41,6 @@ class Transport(ISecureTransport):
     noise_privkey: PrivateKey
     local_peer: ID
     early_data: bytes | None
-    with_noise_pipes: bool
     webtransport_support: WebTransportSupport
     early_data_manager: EarlyDataManager
     rekey_manager: RekeyManager
@@ -42,7 +50,6 @@ class Transport(ISecureTransport):
         libp2p_keypair: KeyPair,
         noise_privkey: PrivateKey,
         early_data: bytes | None = None,
-        with_noise_pipes: bool = False,
         early_data_handler: EarlyDataHandler | None = None,
         rekey_policy: RekeyPolicy | None = None,
     ) -> None:
@@ -53,7 +60,6 @@ class Transport(ISecureTransport):
             libp2p_keypair: libp2p key pair
             noise_privkey: Noise private key
             early_data: Optional early data
-            with_noise_pipes: Enable noise pipes support
             early_data_handler: Optional early data handler
             rekey_policy: Optional rekey policy
 
@@ -62,7 +68,6 @@ class Transport(ISecureTransport):
         self.noise_privkey = noise_privkey
         self.local_peer = ID.from_pubkey(libp2p_keypair.public_key)
         self.early_data = early_data
-        self.with_noise_pipes = with_noise_pipes
 
         # Initialize advanced features
         self.webtransport_support = WebTransportSupport()

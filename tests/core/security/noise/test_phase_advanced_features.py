@@ -302,7 +302,6 @@ class TestEnhancedTransport:
             libp2p_keypair=libp2p_keypair,
             noise_privkey=noise_keypair.private_key,
             early_data=b"test_early_data",
-            with_noise_pipes=True,
             early_data_handler=BufferingEarlyDataHandler(),
             rekey_policy=TimeBasedRekeyPolicy(max_time_seconds=3600),
         )
@@ -312,7 +311,6 @@ class TestEnhancedTransport:
         assert transport.early_data_manager is not None
         assert transport.rekey_manager is not None
         assert hasattr(transport, "_static_key_cache")
-        assert transport.with_noise_pipes is True
         assert transport.early_data == b"test_early_data"
 
     def test_pattern_selection(self, key_pairs):
@@ -322,7 +320,6 @@ class TestEnhancedTransport:
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
             noise_privkey=noise_keypair.private_key,
-            with_noise_pipes=True,
         )
 
         # Test default pattern (XX)
@@ -334,13 +331,12 @@ class TestEnhancedTransport:
         assert pattern.__class__.__name__ == "PatternXX"
 
     def test_static_key_caching(self, key_pairs):
-        """Test static key caching for IK pattern optimization."""
+        """Test static key caching for performance optimization."""
         libp2p_keypair, noise_keypair = key_pairs
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
             noise_privkey=noise_keypair.private_key,
-            with_noise_pipes=True,
         )
 
         # Test caching static key
@@ -433,7 +429,6 @@ class TestEnhancedTransport:
         assert transport.noise_privkey is not None
         assert transport.local_peer is not None
         assert transport.early_data is None
-        assert transport.with_noise_pipes is False
 
         # Test that advanced features are still available
         assert transport.webtransport_support is not None
