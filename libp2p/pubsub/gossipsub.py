@@ -62,6 +62,8 @@ from .utils import (
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
+PROTOCOL_ID_V13 = TProtocol("/meshsub/1.3.0")
+PROTOCOL_ID_V14 = TProtocol("/meshsub/1.4.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
@@ -182,6 +184,56 @@ class GossipSub(IPubsubRouter, Service):
         """
         return self.protocols
 
+    def supports_protocol_feature(self, peer_id: ID, feature: str) -> bool:
+        """
+        Check if a peer supports a specific protocol feature based on its
+        supported protocol versions.
+
+        :param peer_id: ID of the peer to check
+        :param feature: Feature name to check support for
+        :return: True if the peer supports the feature, False otherwise
+        """
+        if peer_id not in self.peer_protocol:
+            return False
+
+        protocol = self.peer_protocol[peer_id]
+
+        # Define feature support by protocol version
+        if feature == "px":  # Peer Exchange
+            return protocol in (
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V14,
+            )
+        elif feature == "idontwant":  # IDONTWANT message
+            return protocol in (PROTOCOL_ID_V12, PROTOCOL_ID_V13, PROTOCOL_ID_V14)
+        elif feature == "extensions":  # Extensions control message
+            return protocol in (PROTOCOL_ID_V13, PROTOCOL_ID_V14)
+        elif feature == "adaptive_gossip":  # Adaptive gossip parameters
+            return protocol == PROTOCOL_ID_V14
+        elif feature == "scoring":  # Peer scoring system
+            return protocol in (
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V14,
+            )
+        elif feature == "extended_scoring":  # Extended peer scoring (P5-P7)
+            return protocol == PROTOCOL_ID_V14
+
+        # Default to not supported for unknown features
+        return False
+
+    def supports_scoring(self, peer_id: ID) -> bool:
+        """
+        Check if a peer supports the scoring system.
+
+        :param peer_id: ID of the peer to check
+        :return: True if the peer supports scoring, False otherwise
+        """
+        return self.supports_protocol_feature(peer_id, "scoring")
+
     def attach(self, pubsub: Pubsub) -> None:
         """
         Attach is invoked by the PubSub constructor to attach the router to a
@@ -215,6 +267,8 @@ class GossipSub(IPubsubRouter, Service):
             PROTOCOL_ID,
             PROTOCOL_ID_V11,
             PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
             floodsub.PROTOCOL_ID,
         ):
             # We should never enter here. Becuase the `protocol_id` is registered by
