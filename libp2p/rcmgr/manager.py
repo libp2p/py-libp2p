@@ -17,6 +17,7 @@ from .memory_limits import (
 from .memory_pool import MemoryPool
 from .memory_stats import MemoryStatsCache
 from .metrics import Direction, Metrics
+from .prometheus_exporter import PrometheusExporter, create_prometheus_exporter
 
 """
 Resource Manager implementation.
@@ -93,6 +94,9 @@ class ResourceManager:
         enable_memory_pooling: bool = True,
         enable_circuit_breaker: bool = True,
         enable_graceful_degradation: bool = True,
+        enable_prometheus: bool = False,
+        prometheus_port: int = 8000,
+        prometheus_exporter: PrometheusExporter | None = None,
     ) -> None:
         # Resource limits
         self.limits = limits or ResourceLimits()
@@ -116,14 +120,25 @@ class ResourceManager:
         else:
             self.metrics = None  # type: ignore
 
+        # Prometheus setup
+        self.prometheus_exporter: PrometheusExporter | None
+        if prometheus_exporter is not None:
+            self.prometheus_exporter = prometheus_exporter
+        elif enable_prometheus:
+            self.prometheus_exporter = create_prometheus_exporter(
+                port=prometheus_port, enable_server=True
+            )
+        else:
+            self.prometheus_exporter = None
+
         # Thread safety
         self._lock = threading.RLock()
         self._closed: bool = False
 
         # Resource tracking
-        self._current_connections = 0
-        self._current_memory = 0
-        self._current_streams = 0
+        self._current_connections: int = 0
+        self._current_memory: int = 0
+        self._current_streams: int = 0
 
         # Connection tracking
         self.connection_tracker: ConnectionTracker | None = None
@@ -165,6 +180,23 @@ class ResourceManager:
         if enable_graceful_degradation:
             self.graceful_degradation = GracefulDegradation(self)
 
+    def _update_prometheus_metrics(self) -> None:
+        """Update Prometheus metrics from internal metrics."""
+        if self.prometheus_exporter and self.metrics:
+            self.prometheus_exporter.update_from_metrics(self.metrics)
+
+    def _record_blocked_resource(
+        self, resource_type: str, direction: str = "unknown", scope: str = "system"
+    ) -> None:
+        """Record blocked resource in both internal metrics and Prometheus."""
+        if self.metrics:
+            self.metrics.record_block(resource_type)
+
+        if self.prometheus_exporter:
+            self.prometheus_exporter.record_blocked_resource(
+                direction=direction, scope=scope, resource=resource_type
+            )
+
     def acquire_connection(self, peer_id: str = "") -> bool:
         """Acquire a connection resource"""
         # Check circuit breaker
@@ -202,10 +234,13 @@ class ResourceManager:
                         ):
                             # Retry after degradation
                             if self._current_connections >= self.limits.max_connections:
+                                self._record_blocked_resource("connection", "inbound")
                                 return False
                         else:
+                            self._record_blocked_resource("connection", "inbound")
                             return False
                     else:
+                        self._record_blocked_resource("connection", "inbound")
                         return False
 
                 self._current_connections += 1
@@ -214,6 +249,9 @@ class ResourceManager:
                 # record allowed connections so metrics reflect activity.
                 if self.metrics:
                     self.metrics.allow_conn("inbound", use_fd=True)
+
+                # Update Prometheus metrics
+                self._update_prometheus_metrics()
 
                 return True
 
@@ -233,6 +271,9 @@ class ResourceManager:
 
                 if self.metrics:
                     self.metrics.remove_conn("inbound", use_fd=True)
+
+                # Update Prometheus metrics
+                self._update_prometheus_metrics()
 
     def acquire_memory(self, size: int) -> bool:
         """Acquire memory resource"""
@@ -275,16 +316,22 @@ class ResourceManager:
                                 self._current_memory + size
                                 > self.limits.max_memory_bytes
                             ):
+                                self._record_blocked_resource("memory")
                                 return False
                         else:
+                            self._record_blocked_resource("memory")
                             return False
                     else:
+                        self._record_blocked_resource("memory")
                         return False
 
                 self._current_memory += size
 
                 if self.metrics:
                     self.metrics.allow_memory(size)
+
+                # Update Prometheus metrics
+                self._update_prometheus_metrics()
 
                 return True
 
@@ -303,6 +350,9 @@ class ResourceManager:
 
             if self.metrics:
                 self.metrics.release_memory(size)
+
+            # Update Prometheus metrics
+            self._update_prometheus_metrics()
 
     def acquire_stream(self, peer_id: str, direction: Direction) -> bool:
         """Acquire a stream resource"""
@@ -326,6 +376,10 @@ class ResourceManager:
                 allowlisted = False
 
             if not allowlisted and self._current_streams >= self.limits.max_streams:
+                direction_str = (
+                    "inbound" if direction == Direction.INBOUND else "outbound"
+                )
+                self._record_blocked_resource("stream", direction_str)
                 return False
 
             self._current_streams += 1
@@ -343,6 +397,9 @@ class ResourceManager:
                     peer_id_str = str(peer_id)
                 self.metrics.allow_stream(peer_id_str, direction_str)
 
+            # Update Prometheus metrics
+            self._update_prometheus_metrics()
+
             return True
 
     def release_stream(self, peer_id: str, direction: Direction) -> None:
@@ -356,6 +413,9 @@ class ResourceManager:
                         "inbound" if direction == Direction.INBOUND else "outbound"
                     )
                     self.metrics.remove_stream(direction_str)
+
+                # Update Prometheus metrics
+                self._update_prometheus_metrics()
 
     def get_stats(self) -> dict[str, Any]:
         """Get current resource statistics"""

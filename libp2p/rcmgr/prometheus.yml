@@ -2,7 +2,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   scrape_timeout: 10s
-  # scrape timeout should be less than then the scrape interval 
+  # scrape timeout should be less than then the scrape interval
 alerting:
   alertmanagers:
     - static_configs:
@@ -26,7 +26,7 @@ scrape_configs:
     static_configs:
       - targets: ['host.docker.internal:8000']  # Default py-libp2p metrics port
     scrape_interval: 5s   # More frequent scraping for libp2p metrics
-    scrape_timeout: 1s  # again the scrape timeout should be less than the interval, otherwise prometheus will skip the scrape and give an error
+    scrape_timeout: 1s  # Again the scrape timeout should be less than the interval, otherwise prometheus will skip the scrape and give an error
     metrics_path: /metrics
     scheme: http
     # Add labels to identify this as py-libp2p
@@ -40,8 +40,8 @@ scrape_configs:
         regex: 'true'
         replacement: 'py-libp2p'
 
-  # Node Exporter metrics 
-  # Useful for monitoring system-level metrics of the host 
+  # Node Exporter metrics
+  # Useful for monitoring system-level metrics of the host
   - job_name: 'node-exporter'
     static_configs:
       - targets: ['node-exporter:9100']
@@ -49,4 +49,3 @@ scrape_configs:
     scrape_timeout: 10s
     metrics_path: /metrics
     scheme: http
-

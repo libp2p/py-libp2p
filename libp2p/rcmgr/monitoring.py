@@ -1,9 +1,10 @@
 """
-Production-grade monitoring and alerting system.
+monitoring and alerting system.
 
 This module provides comprehensive monitoring capabilities including
 OpenMetrics format export, real-time metrics collection, connection
-duration tracking, and protocol-specific metrics.
+duration tracking, and protocol-specific metrics. Now integrated with
+Prometheus metrics export for compatibility with go-libp2p dashboards.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from enum import Enum
 import threading
 import time
 from typing import Any
+
+from .prometheus_exporter import PrometheusExporter, create_prometheus_exporter
 
 
 class MetricType(Enum):
@@ -73,13 +76,11 @@ class ConnectionDuration:
     direction: str = "unknown"
 
 
-class ProductionMonitor:
+class Monitor:
     """
-    Production-grade monitoring and alerting system.
+    Monitoring and alerting system.
 
-    Provides comprehensive monitoring capabilities including OpenMetrics
-    format export, real-time metrics collection, connection duration
-    tracking, and protocol-specific metrics.
+    Provides monitoring capabilities such as real-time metrics collection.
     """
 
     def __init__(
@@ -88,6 +89,9 @@ class ProductionMonitor:
         alert_thresholds: dict[str, float] | None = None,
         enable_connection_tracking: bool = True,
         enable_protocol_metrics: bool = True,
+        enable_prometheus: bool = False,
+        prometheus_port: int = 8000,
+        prometheus_exporter: PrometheusExporter | None = None,
     ) -> None:
         """
         Initialize production monitor.
@@ -97,12 +101,26 @@ class ProductionMonitor:
             alert_thresholds: Custom alert thresholds
             enable_connection_tracking: Enable connection duration tracking
             enable_protocol_metrics: Enable protocol-specific metrics
+            enable_prometheus: Enable Prometheus metrics export
+            prometheus_port: Port for Prometheus metrics server
+            prometheus_exporter: Custom Prometheus exporter instance
 
         """
         self.buffer_size = buffer_size
         self.alert_thresholds = alert_thresholds or {}
         self.enable_connection_tracking = enable_connection_tracking
         self.enable_protocol_metrics = enable_protocol_metrics
+
+        # Prometheus integration
+        self.prometheus_exporter: PrometheusExporter | None
+        if prometheus_exporter is not None:
+            self.prometheus_exporter = prometheus_exporter
+        elif enable_prometheus:
+            self.prometheus_exporter = create_prometheus_exporter(
+                port=prometheus_port, enable_server=True
+            )
+        else:
+            self.prometheus_exporter = None
 
         # Metrics storage
         self.metrics_buffer: deque[Metric] = deque(maxlen=buffer_size)
@@ -133,6 +151,43 @@ class ProductionMonitor:
         # Merge custom thresholds
         self.alert_thresholds = {**self._default_thresholds, **self.alert_thresholds}
 
+    def _export_to_prometheus(self, metric: Metric) -> None:
+        """
+        Export metric to Prometheus if exporter is available.
+
+        Args:
+            metric: The metric to export
+
+        """
+        if not self.prometheus_exporter:
+            return
+
+        try:
+            # Map Monitor metrics to Prometheus format
+            if metric.name.startswith("libp2p_connections_"):
+                metric.labels.get("direction", "unknown")
+                if metric.name.endswith("_total"):
+                    # This is a connection establishment/closure event
+                    # We'll let the resource manager handle direct Prometheus updates
+                    pass
+
+            elif metric.name.startswith("libp2p_resource_usage"):
+                resource_type = metric.labels.get("resource_type", "unknown")
+                if metric.name.endswith("_percentage"):
+                    # Update blocked resources if percentage is high
+                    if metric.value >= 90:  # High usage threshold
+                        self.prometheus_exporter.record_blocked_resource(
+                            direction="", scope="system", resource=resource_type
+                        )
+
+            elif metric.name == "libp2p_errors_total":
+                metric.labels.get("error_type", "unknown")
+                # Could record error-based blocked resources
+
+        except Exception as e:
+            # Don't let Prometheus export failures affect main monitoring
+            print(f"Warning: Failed to export metric to Prometheus: {e}")
+
     def record_metric(self, metric: Metric) -> None:
         """
         Record a metric with buffering for performance.
@@ -145,6 +200,9 @@ class ProductionMonitor:
             self.metrics_buffer.append(metric)
             self._total_metrics_recorded += 1
             self._check_alerts(metric)
+
+            # Export to Prometheus if enabled
+            self._export_to_prometheus(metric)
 
     def record_connection_establishment(
         self,
@@ -365,6 +423,104 @@ class ProductionMonitor:
         )
         self.record_metric(error_metric)
 
+    def record_blocked_resource(
+        self,
+        resource_type: str,
+        direction: str = "unknown",
+        scope: str = "system",
+        count: int = 1,
+    ) -> None:
+        """
+        Record blocked resource event for both internal monitoring and Prometheus.
+
+        Args:
+            resource_type: Type of resource (connection, stream, memory)
+            direction: Direction (inbound, outbound, or empty)
+            scope: Resource scope (system, transient, peer, etc.)
+            count: Number of resources blocked
+
+        """
+        # Record internal metric
+        metric = Metric(
+            name="libp2p_rcmgr_blocked_resources",
+            value=count,
+            metric_type=MetricType.COUNTER,
+            labels={
+                "resource": resource_type,
+                "direction": direction,
+                "scope": scope,
+            },
+            help_text="Number of blocked resources",
+        )
+        self.record_metric(metric)
+
+        # Export directly to Prometheus
+        if self.prometheus_exporter:
+            self.prometheus_exporter.record_blocked_resource(
+                direction=direction,
+                scope=scope,
+                resource=resource_type,
+                count=count,
+            )
+
+    def record_peer_resource_change(
+        self,
+        peer_id: str,
+        resource_type: str,
+        direction: str,
+        old_value: int,
+        new_value: int,
+    ) -> None:
+        """
+        Record peer-level resource changes for histogram metrics.
+
+        Args:
+            peer_id: Peer identifier
+            resource_type: Type of resource (connections, streams, memory)
+            direction: Direction for connections/streams
+            old_value: Previous resource count/amount
+            new_value: New resource count/amount
+
+        """
+        if not self.prometheus_exporter:
+            return
+
+        try:
+            if resource_type == "connections":
+                self.prometheus_exporter.record_peer_connections(
+                    peer_id=peer_id,
+                    direction=direction,
+                    old_count=old_value,
+                    new_count=new_value,
+                )
+            elif resource_type == "streams":
+                self.prometheus_exporter.record_peer_streams(
+                    peer_id=peer_id,
+                    direction=direction,
+                    old_count=old_value,
+                    new_count=new_value,
+                )
+            elif resource_type == "memory":
+                self.prometheus_exporter.record_peer_memory(
+                    peer_id=peer_id,
+                    old_bytes=old_value,
+                    new_bytes=new_value,
+                )
+        except Exception as e:
+            print(f"Warning: Failed to record peer resource change: {e}")
+
+    def get_prometheus_metrics(self) -> str | None:
+        """
+        Get metrics in Prometheus text format.
+
+        Returns:
+            Metrics in Prometheus format or None if exporter not available
+
+        """
+        if self.prometheus_exporter:
+            return self.prometheus_exporter.get_metrics_text()
+        return None
+
     def _check_alerts(self, metric: Metric) -> None:
         """
         Check for alert conditions based on metric.
@@ -561,3 +717,7 @@ class ProductionMonitor:
             self._total_metrics_recorded = 0
             self._total_alerts_triggered = 0
             self._start_time = time.time()
+
+            # Reset Prometheus metrics if available
+            if self.prometheus_exporter:
+                self.prometheus_exporter.reset()
