@@ -29,6 +29,10 @@ class TrioTCPStream(ReadWriteCloser):
             try:
                 await self.stream.send_all(data)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
+                # Underlying socket is closed or broken — surface this as an
+                # IOException so higher layers (RawConnection/NetStream) can
+                # react appropriately (e.g., mark stream closed/reset).
+                logger.debug("Write attempted on closed/broken resource: %s", error)
                 raise IOException from error
 
     async def read(self, n: int | None = None) -> bytes:
@@ -38,7 +42,11 @@ class TrioTCPStream(ReadWriteCloser):
             try:
                 return await self.stream.receive_some(n)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
-                raise IOException from error
+                # Underlying socket is closed/broken. Return empty bytes to
+                # indicate EOF/closure and allow higher layers to handle removal
+                # without raising additional exceptions during their cleanup.
+                logger.debug("Read attempted on closed/broken resource: %s", error)
+                return b""
 
     async def close(self) -> None:
         await self.stream.aclose()

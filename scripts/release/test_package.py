@@ -12,7 +12,8 @@ def create_venv(parent_path: Path) -> Path:
     venv_path = parent_path / "package-smoke-test"
     venv.create(venv_path, with_pip=True)
     subprocess.run(
-        [venv_path / "bin" / "pip", "install", "-U", "pip", "setuptools"], check=True
+        [venv_path / "bin" / "uv", "pip", "install", "-U", "pip", "setuptools"],
+        check=True,
     )
     return venv_path
 
@@ -31,12 +32,19 @@ def find_wheel(project_path: Path) -> Path:
 
 def install_wheel(venv_path: Path, wheel_path: Path) -> None:
     subprocess.run(
-        [venv_path / "bin" / "pip", "install", f"{wheel_path}"],
+        [venv_path / "bin" / "uv", "pip", "install", f"{wheel_path}"],
         check=True,
     )
 
 
 def test_install_local_wheel() -> None:
+    # Check if wheel exists before running test
+    wheels = list(Path(".").glob("dist/*.whl"))
+    if not wheels:
+        import pytest
+
+        pytest.skip("No wheel found in dist/ directory. Run 'make dist' first.")
+
     with TemporaryDirectory() as tmpdir:
         venv_path = create_venv(Path(tmpdir))
         wheel_path = find_wheel(Path("."))
