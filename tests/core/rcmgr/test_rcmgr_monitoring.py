@@ -12,16 +12,16 @@ from libp2p.rcmgr.monitoring import (
     AlertSeverity,
     Metric,
     MetricType,
-    ProductionMonitor,
+    Monitor,
 )
 
 
-class TestProductionMonitor:
+class TestMonitor:
     """Test the production monitoring system."""
 
     def test_monitor_initialization(self):
         """Test monitor initialization."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
         assert monitor is not None
         assert len(monitor.metrics_buffer) == 0
         assert len(monitor.alerts) == 0
@@ -29,7 +29,7 @@ class TestProductionMonitor:
 
     def test_record_connection_establishment(self):
         """Test recording connection establishment."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record connection establishment
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -45,7 +45,7 @@ class TestProductionMonitor:
 
     def test_record_connection_closed(self):
         """Test recording connection closure."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record connection establishment first
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -58,7 +58,7 @@ class TestProductionMonitor:
 
     def test_record_protocol_metric(self):
         """Test recording protocol-specific metrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record protocol metric
         monitor.record_protocol_metric("kad", "requests", 10, {"peer_id": "peer1"})
@@ -71,7 +71,7 @@ class TestProductionMonitor:
 
     def test_record_resource_usage(self):
         """Test recording resource usage metrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record resource usage
         monitor.record_resource_usage("memory", 1024, 2048, {"peer_id": "peer1"})
@@ -81,7 +81,7 @@ class TestProductionMonitor:
 
     def test_record_error(self):
         """Test recording error metrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record error
         monitor.record_error("connection_failed", "timeout", {"peer_id": "peer1"})
@@ -91,7 +91,7 @@ class TestProductionMonitor:
 
     def test_export_openmetrics(self):
         """Test OpenMetrics export."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record some metrics
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -154,7 +154,7 @@ class TestProductionMonitor:
 
     def test_monitor_with_custom_settings(self):
         """Test monitor with custom settings."""
-        monitor = ProductionMonitor(
+        monitor = Monitor(
             buffer_size=500,
             alert_thresholds={"memory_warning": 70.0, "memory_critical": 90.0},
             enable_connection_tracking=False,
@@ -169,7 +169,7 @@ class TestProductionMonitor:
 
     def test_metrics_summary(self):
         """Test getting metrics summary."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record some metrics
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -184,7 +184,7 @@ class TestProductionMonitor:
 
     def test_connection_durations(self):
         """Test getting connection duration statistics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record connection establishment
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -200,7 +200,7 @@ class TestProductionMonitor:
 
     def test_protocol_metrics(self):
         """Test getting protocol-specific metrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record protocol metrics
         monitor.record_protocol_metric("kad", "requests", 10, {"peer_id": "peer1"})
@@ -214,7 +214,7 @@ class TestProductionMonitor:
 
     def test_clear_old_metrics(self):
         """Test clearing old metrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record some metrics
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -231,7 +231,7 @@ class TestProductionMonitor:
 
     def test_monitor_reset(self):
         """Test monitor reset."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record some metrics
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -247,7 +247,7 @@ class TestProductionMonitor:
 
     def test_metric_aggregation(self):
         """Test metric aggregation across multiple peers."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record metrics for multiple peers
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -273,7 +273,7 @@ class TestProductionMonitor:
 
     def test_timestamp_accuracy(self):
         """Test timestamp accuracy."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record metric with known timestamp
         start_time = time.time()
@@ -287,7 +287,7 @@ class TestProductionMonitor:
 
     def test_label_escaping(self):
         """Test label value escaping in OpenMetrics."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record metric with special characters in labels
         monitor.record_error(
@@ -304,7 +304,7 @@ class TestProductionMonitor:
 
     def test_alert_thresholds(self):
         """Test alert threshold functionality."""
-        monitor = ProductionMonitor(
+        monitor = Monitor(
             alert_thresholds={"memory_warning": 70.0, "memory_critical": 90.0}
         )
 
@@ -317,7 +317,7 @@ class TestProductionMonitor:
 
     def test_connection_tracking_disabled(self):
         """Test monitor with connection tracking disabled."""
-        monitor = ProductionMonitor(enable_connection_tracking=False)
+        monitor = Monitor(enable_connection_tracking=False)
 
         # Record connection establishment
         monitor.record_connection_establishment("conn1", "peer1", "tcp", "inbound")
@@ -327,7 +327,7 @@ class TestProductionMonitor:
 
     def test_protocol_metrics_disabled(self):
         """Test monitor with protocol metrics disabled."""
-        monitor = ProductionMonitor(enable_protocol_metrics=False)
+        monitor = Monitor(enable_protocol_metrics=False)
 
         # Record protocol metric
         monitor.record_protocol_metric("kad", "requests", 10, {"peer_id": "peer1"})
@@ -340,7 +340,7 @@ class TestProductionMonitor:
         """Test concurrent metric recording."""
         import threading
 
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         def record_metrics():
             for i in range(10):
@@ -382,7 +382,7 @@ class TestProductionMonitor:
 
     def test_monitor_with_large_buffer(self):
         """Test monitor with large buffer."""
-        monitor = ProductionMonitor(buffer_size=10000)
+        monitor = Monitor(buffer_size=10000)
 
         # Record many metrics
         for i in range(5000):
@@ -396,7 +396,7 @@ class TestProductionMonitor:
 
     def test_metric_with_complex_labels(self):
         """Test metric with complex labels."""
-        monitor = ProductionMonitor()
+        monitor = Monitor()
 
         # Record metric with complex labels
         complex_labels = {
