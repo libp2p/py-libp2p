@@ -48,7 +48,7 @@ from libp2p.network.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
-    StreamReset,
+    StreamError,
 )
 from libp2p.peer.id import (
     ID,
@@ -439,7 +439,7 @@ class Pubsub(Service, IPubsub):
 
         try:
             await self.continuously_read_stream(stream)
-        except (StreamEOF, StreamReset, ParseError, IncompleteReadError) as error:
+        except (StreamError, ParseError, IncompleteReadError) as error:
             logger.debug(
                 "fail to read from peer %s, error=%s,"
                 "closing the stream and remove the peer from record",
