@@ -7,7 +7,10 @@ backend, similar to the pstoreds implementation in go-libp2p.
 
 from collections import defaultdict
 from collections.abc import AsyncIterable, Sequence
+import logging
 import pickle
+from queue import Empty, Queue
+import threading
 from typing import Any
 
 from multiaddr import Multiaddr
@@ -26,6 +29,8 @@ from .peerstore import (
     PeerRecordState,
     PeerStoreError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PersistentPeerStore(IPeerStore):
@@ -63,6 +68,13 @@ class PersistentPeerStore(IPeerStore):
         self.PEER_RECORD_PREFIX = b"peer_record:"
         self.LOCAL_RECORD_KEY = b"local_record"
 
+        # Background persistence infrastructure
+        self._persistence_queue: Queue[tuple[ID, PeerData]] = Queue()
+        self._persistence_thread: threading.Thread | None = None
+        self._persistence_stop_event = threading.Event()
+        self._persistence_lock = threading.Lock()
+        self._start_persistence_thread()
+
     def _get_addr_key(self, peer_id: ID) -> bytes:
         """Get the datastore key for peer addresses."""
         return self.ADDR_PREFIX + peer_id.to_bytes()
@@ -87,12 +99,91 @@ class PersistentPeerStore(IPeerStore):
         """Get the datastore key for additional peer data fields."""
         return b"additional:" + peer_id.to_bytes()
 
+    def _start_persistence_thread(self) -> None:
+        """Start the background persistence thread."""
+        if self._persistence_thread is None or not self._persistence_thread.is_alive():
+            self._persistence_stop_event.clear()
+            self._persistence_thread = threading.Thread(
+                target=self._persistence_worker, daemon=True
+            )
+            self._persistence_thread.start()
+
+    def _persistence_worker(self) -> None:
+        """Background worker that persists data from the queue."""
+        while not self._persistence_stop_event.is_set():
+            try:
+                # Wait for data with timeout to allow checking stop event
+                peer_id, peer_data = self._persistence_queue.get(timeout=1.0)
+
+                # Retry persistence with exponential backoff
+                max_retries = 3
+                retry_count = 0
+                success = False
+
+                while retry_count < max_retries and not success:
+                    try:
+                        # Use trio.run to create a new trio context for persistence
+                        trio.run(self._save_peer_data, peer_id, peer_data)
+                        logger.debug(f"Successfully persisted data for peer {peer_id}")
+                        success = True
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            wait_time = 2**retry_count  # Exponential backoff
+                            logger.warning(
+                                f"Failed to persist data for peer {peer_id} "
+                                f"(attempt {retry_count}/{max_retries}): {e}. "
+                                f"Retrying in {wait_time} seconds..."
+                            )
+                            import time
+
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(
+                                f"Failed to persist data for peer {peer_id} "
+                                f"after {max_retries} attempts: {e}"
+                            )
+                            # Data is still in memory, so it's not completely lost
+                            # The next async operation will attempt to persist it
+
+                # Mark task as done after all retry attempts
+                self._persistence_queue.task_done()
+
+            except Empty:
+                # Timeout reached, continue loop to check stop event
+                continue
+            except Exception as e:
+                logger.error(f"Error in persistence worker: {e}")
+
     def _persist_peer_data_sync(self, peer_id: ID, peer_data: PeerData) -> None:
         """Synchronously persist peer data to the datastore."""
-        # Schedule persistence for the next async operation
-        # This is a workaround for the sync/async split
-        # The data will be persisted when the next async method is called
-        pass
+        # Queue the data for background persistence
+        try:
+            # Check if queue is getting too full (prevent memory issues)
+            if self._persistence_queue.qsize() > 1000:
+                logger.warning(
+                    f"Persistence queue is getting full"
+                    f"({self._persistence_queue.qsize()} items). "
+                    f"Consider reducing write frequency or"
+                    f"increasing persistence thread capacity."
+                )
+
+            self._persistence_queue.put_nowait((peer_id, peer_data))
+            logger.debug(f"Queued peer data for persistence: {peer_id}")
+        except Exception as e:
+            logger.error(f"Failed to queue peer data for persistence: {e}")
+            # If queuing fails, we still have the data in memory
+            # The next async operation will attempt to persist it
+
+    def get_persistence_status(self) -> dict[str, Any]:
+        """Get status information about the persistence system."""
+        return {
+            "queue_size": self._persistence_queue.qsize(),
+            "thread_alive": self._persistence_thread.is_alive()
+            if self._persistence_thread
+            else False,
+            "stop_event_set": self._persistence_stop_event.is_set(),
+        }
 
     async def _persist_all_pending_changes(self) -> None:
         """Persist all pending changes to the datastore."""
@@ -185,6 +276,39 @@ class PersistentPeerStore(IPeerStore):
             await self.datastore.put(additional_key, pickle.dumps(additional_data))
         except Exception as e:
             raise PeerStoreError(f"Failed to save peer data for {peer_id}") from e
+
+    def _save_peer_data_sync(self, peer_id: ID, peer_data: PeerData) -> None:
+        """Synchronously save peer data to datastore."""
+        try:
+            # For synchronous persistence, we need to handle the datastore differently
+            # This is a simplified version that works with thread-safe datastores
+
+            # Check if datastore supports synchronous operations
+            if hasattr(self.datastore, "put_sync"):
+                # Use synchronous put if available
+                addr_key = self._get_addr_key(peer_id)
+                self.datastore.put_sync(addr_key, pickle.dumps(peer_data.addrs))
+
+                metadata_key = self._get_metadata_key(peer_id)
+                self.datastore.put_sync(metadata_key, pickle.dumps(peer_data.metadata))
+
+                additional_key = self._get_additional_key(peer_id)
+                additional_data = {
+                    "last_identified": peer_data.last_identified,
+                    "ttl": peer_data.ttl,
+                    "latmap": peer_data.latmap,
+                }
+                self.datastore.put_sync(additional_key, pickle.dumps(additional_data))
+            else:
+                # For async-only datastores, we'll rely on background persistence
+                logger.debug(
+                    f"Datastore doesn't support sync operations, "
+                    f"using background persistence for {peer_id}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to save peer data synchronously for {peer_id}: {e}")
+            # Don't raise here, as background persistence will handle it
 
     async def _load_peer_record(self, peer_id: ID) -> PeerRecordState | None:
         """Load peer record from datastore."""
@@ -676,6 +800,19 @@ class PersistentPeerStore(IPeerStore):
 
     async def close(self) -> None:
         """Close the persistent peerstore and underlying datastore."""
+        # Stop the persistence thread
+        self._persistence_stop_event.set()
+        if self._persistence_thread and self._persistence_thread.is_alive():
+            self._persistence_thread.join(timeout=5.0)
+
+        # Wait for any remaining persistence operations to complete
+        try:
+            while not self._persistence_queue.empty():
+                await trio.sleep(0.1)
+        except Exception as e:
+            logger.warning(f"Error waiting for persistence queue to empty: {e}")
+
+        # Close the datastore
         if hasattr(self.datastore, "close"):
             await self.datastore.close()
 
