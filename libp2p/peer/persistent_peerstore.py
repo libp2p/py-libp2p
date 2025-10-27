@@ -280,31 +280,11 @@ class PersistentPeerStore(IPeerStore):
     def _save_peer_data_sync(self, peer_id: ID, peer_data: PeerData) -> None:
         """Synchronously save peer data to datastore."""
         try:
-            # For synchronous persistence, we need to handle the datastore differently
-            # This is a simplified version that works with thread-safe datastores
-
-            # Check if datastore supports synchronous operations
-            if hasattr(self.datastore, "put_sync"):
-                # Use synchronous put if available
-                addr_key = self._get_addr_key(peer_id)
-                self.datastore.put_sync(addr_key, pickle.dumps(peer_data.addrs))
-
-                metadata_key = self._get_metadata_key(peer_id)
-                self.datastore.put_sync(metadata_key, pickle.dumps(peer_data.metadata))
-
-                additional_key = self._get_additional_key(peer_id)
-                additional_data = {
-                    "last_identified": peer_data.last_identified,
-                    "ttl": peer_data.ttl,
-                    "latmap": peer_data.latmap,
-                }
-                self.datastore.put_sync(additional_key, pickle.dumps(additional_data))
-            else:
-                # For async-only datastores, we'll rely on background persistence
-                logger.debug(
-                    f"Datastore doesn't support sync operations, "
-                    f"using background persistence for {peer_id}"
-                )
+            # Since the datastore interface only supports async operations,
+            # we rely entirely on background persistence for synchronous operations
+            logger.debug(
+                f"Using background persistence for synchronous save of {peer_id}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to save peer data synchronously for {peer_id}: {e}")
