@@ -76,12 +76,6 @@ PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
 
 
-# Direction enum for data piping
-class Pipe(Enum):
-    SRC_TO_DST = auto()
-    DST_TO_SRC = auto()
-
-
 # Default limits for relay resources
 DEFAULT_RELAY_LIMITS = RelayLimits(
     duration=DEFAULT_MAX_CIRCUIT_DURATION,
@@ -705,7 +699,6 @@ class CircuitV2Protocol(Service):
         src_stream: INetStream,
         dst_stream: INetStream,
         peer_id: ID,
-        direction: Pipe,
     ) -> None:
         """
         Relay data between two streams.
@@ -718,17 +711,13 @@ class CircuitV2Protocol(Service):
             Destination stream to write to
         peer_id : ID
             ID of the peer being relayed
-
-        direction : Pipe
-            Direction of data flow (``Pipe.SRC_TO_DST`` or ``Pipe.DST_TO_SRC``)
-
         """
         try:
             while True:
                 # Read data with retries
                 data = await self._read_stream_with_retry(src_stream)
                 if not data:
-                    logger.info("%s closed/reset", direction.name)
+                    logger.info("Source stream closed/reset")
                     break
 
                 # Write data with timeout
@@ -736,10 +725,10 @@ class CircuitV2Protocol(Service):
                     with trio.fail_after(self.write_timeout):
                         await dst_stream.write(data)
                 except trio.TooSlowError:
-                    logger.error("Timeout writing in %s", direction.name)
+                    logger.error("Timeout writing to destination stream")
                     break
                 except Exception as e:
-                    logger.error("Error writing in %s: %s", direction.name, str(e))
+                    logger.error("Error writing to destination stream: %s", str(e))
                     break
 
                 # Update resource usage

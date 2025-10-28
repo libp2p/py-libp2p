@@ -227,13 +227,6 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
-            # # Send HOP CONNECT message
-            # hop_msg = HopMessage(
-            #     type=HopMessage.CONNECT,
-            #     peer=peer_info.peer_id.to_bytes(),
-            # )
-            # await relay_stream.write(hop_msg.SerializeToString())
-
             connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
                 peer=dest_info.peer_id.to_bytes(),
