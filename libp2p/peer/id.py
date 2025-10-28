@@ -30,9 +30,11 @@ if ENABLE_INLINING:
         def digest(self) -> bytes:
             return self._digest
 
-    multihash.FuncReg.register(
-        IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
-    )
+    # Register identity hash function if FuncReg is available
+    if hasattr(multihash, "FuncReg"):
+        multihash.FuncReg.register(
+            IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
+        )
 
 
 class ID:
