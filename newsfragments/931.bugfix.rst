@@ -1,0 +1,1 @@
+Handle FLAG_FIN & FLAG_RST in TYPE_WINDOW_UPDATE frames
