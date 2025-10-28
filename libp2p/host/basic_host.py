@@ -379,7 +379,7 @@ class BasicHost(IHost):
         """
         return len(self._network.get_connections(peer_id)) > 0
 
-    def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
+    def get_peer_connection_info(self, peer_id: ID) -> list[INetConn] | None:
         """
         Get connection information for a specific peer if connected.
 

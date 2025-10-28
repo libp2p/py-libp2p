@@ -163,7 +163,7 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
             # Create and register the transport
             CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized |" ,
+                "Circuit relay transport initialized |",
                 "enable_hop=%r enable_stop=%r enable_client=%r",
                 bool(relay_config.enable_hop),
                 bool(relay_config.enable_stop),
@@ -343,7 +343,7 @@ async def setup_source_node(
     # Initialize the protocol
     protocol = CircuitV2Protocol(host, limits=limits, allow_hop=False)
     logger.debug(
-        "[SRC] CircuitV2Protocol initialized | allow_hop=%s |" ,
+        "[SRC] CircuitV2Protocol initialized | allow_hop=%s |",
         "limits(duration=%d, data=%d, max_circuit_conns=%d, max_reservations=%d)",
         False,
         limits.duration,
@@ -372,7 +372,7 @@ async def setup_source_node(
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized |" ,
+                "Circuit relay transport initialized |",
                 "enable_hop=%r enable_stop=%r enable_client=%r",
                 bool(relay_config.enable_hop),
                 bool(relay_config.enable_stop),

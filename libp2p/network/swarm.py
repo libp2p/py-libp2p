@@ -352,7 +352,7 @@ class Swarm(Service, INetworkService):
 
     async def upgrade_outbound_raw_conn(
         self, raw_conn: IRawConnection, peer_id: ID
-    ) -> INetConn:
+    ) -> SwarmConn:
         """
         Secure the outgoing raw connection and upgrade it to a multiplexed connection.
 

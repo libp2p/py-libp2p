@@ -5,7 +5,6 @@ This module implements the Circuit Relay v2 protocol as specified in:
 https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
-from enum import Enum, auto
 import logging
 import time
 from typing import (
@@ -711,6 +710,7 @@ class CircuitV2Protocol(Service):
             Destination stream to write to
         peer_id : ID
             ID of the peer being relayed
+
         """
         try:
             while True:

@@ -4,6 +4,7 @@ import logging
 import time
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.custom_types import TProtocol
@@ -11,19 +12,16 @@ from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamReset,
 )
-from libp2p.relay.circuit_v2.config import (
-    RelayConfig,
-    RelayRole
-)
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
     RelayInfo,
 )
 from libp2p.relay.circuit_v2.protocol import (
-    CircuitV2Protocol,
-    RelayLimits,
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
+    CircuitV2Protocol,
+    RelayLimits,
 )
 from libp2p.relay.circuit_v2.transport import (
     CircuitV2Transport,
@@ -37,7 +35,7 @@ from libp2p.tools.utils import (
 from tests.utils.factories import (
     HostFactory,
 )
-from multiaddr import Multiaddr
+
 logger = logging.getLogger(__name__)
 
 # Test timeouts
@@ -261,8 +259,12 @@ async def test_circuit_v2_transport_message_routing_through_relay():
     """
     async with HostFactory.create_batch_and_listen(3) as hosts:
         client_host, relay_host, target_host = hosts
-        logger.debug("Test hosts: client_host=%s relay_host=%s target_host=%s",
-                    client_host.get_id(), relay_host.get_id(), target_host.get_id())
+        logger.debug(
+            "Test hosts: client_host=%s relay_host=%s target_host=%s",
+            client_host.get_id(),
+            relay_host.get_id(),
+            target_host.get_id(),
+        )
 
         # Configure relay
         limits = RelayLimits(
@@ -271,11 +273,15 @@ async def test_circuit_v2_transport_message_routing_through_relay():
             max_circuit_conns=10,
             max_reservations=5,
         )
-        relay_config = RelayConfig(roles=RelayRole.HOP | RelayRole.STOP | RelayRole.CLIENT, limits=limits)
+        relay_config = RelayConfig(
+            roles=RelayRole.HOP | RelayRole.STOP | RelayRole.CLIENT, limits=limits
+        )
         relay_protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
         CircuitV2Transport(relay_host, relay_protocol, relay_config)
         relay_host.set_stream_handler(PROTOCOL_ID, relay_protocol._handle_hop_stream)
-        relay_host.set_stream_handler(STOP_PROTOCOL_ID, relay_protocol._handle_stop_stream)
+        relay_host.set_stream_handler(
+            STOP_PROTOCOL_ID, relay_protocol._handle_stop_stream
+        )
 
         client_limits = RelayLimits(
             duration=3600,  # 1 hour
@@ -283,9 +289,13 @@ async def test_circuit_v2_transport_message_routing_through_relay():
             max_circuit_conns=10,
             max_reservations=5,
         )
-        client_config = RelayConfig(roles=RelayRole.CLIENT | RelayRole.STOP, limits=client_limits)
+        client_config = RelayConfig(
+            roles=RelayRole.CLIENT | RelayRole.STOP, limits=client_limits
+        )
         client_protocol = CircuitV2Protocol(client_host, client_limits, allow_hop=False)
-        client_transport = CircuitV2Transport(client_host, client_protocol, client_config)
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
         client_discovery = RelayDiscovery(
             host=client_host,
             auto_reserve=False,
@@ -298,11 +308,15 @@ async def test_circuit_v2_transport_message_routing_through_relay():
             max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
             max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
         )
-        dest_config = RelayConfig(roles=RelayRole.STOP | RelayRole.CLIENT, limits=dest_limits)
+        dest_config = RelayConfig(
+            roles=RelayRole.STOP | RelayRole.CLIENT, limits=dest_limits
+        )
         dest_protocol = CircuitV2Protocol(target_host, dest_limits, allow_hop=False)
         CircuitV2Transport(target_host, dest_protocol, dest_config)
         target_host.set_stream_handler(PROTOCOL_ID, dest_protocol._handle_hop_stream)
-        target_host.set_stream_handler(STOP_PROTOCOL_ID, dest_protocol._handle_stop_stream)
+        target_host.set_stream_handler(
+            STOP_PROTOCOL_ID, dest_protocol._handle_stop_stream
+        )
 
         # Register echo protocol handler on destination
         test_protocol = TProtocol("/test/echo/1.0.0")
@@ -312,7 +326,7 @@ async def test_circuit_v2_transport_message_routing_through_relay():
         async def app_echo_handler(stream):
             try:
                 msg = await stream.read(1024)
-                received_message['msg'] = msg
+                received_message["msg"] = msg
                 await stream.write(b"echo:" + msg)
                 message_received.set()
             finally:
@@ -341,15 +355,13 @@ async def test_circuit_v2_transport_message_routing_through_relay():
         # Step 3: Source tries to dial the destination via p2p-circuit and opens stream
         relay_addr = relay_host.get_addrs()[0]
         dest_id = target_host.get_id()
-        p2p_circuit_addr = Multiaddr(
-                        f"{relay_addr}/p2p-circuit/p2p/{dest_id}"
-                    )
+        p2p_circuit_addr = Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{dest_id}")
         # Register the relay address for the destination on the client peerstore
         client_host.peerstore.add_addr(dest_id, p2p_circuit_addr, 3600)
 
         with trio.fail_after(CONNECT_TIMEOUT * 2):
             # Actually dial the destination through relay using client_transport
-            conn = await client_transport.dial(p2p_circuit_addr)
+            await client_transport.dial(p2p_circuit_addr)
 
             # Next, open a stream on the test protocol
             stream = await client_host.new_stream(dest_id, [test_protocol])
@@ -363,7 +375,7 @@ async def test_circuit_v2_transport_message_routing_through_relay():
             await message_received.wait()
 
         # Assertions
-        assert received_message['msg'] == test_msg, "Destination received wrong message"
+        assert received_message["msg"] == test_msg, "Destination received wrong message"
         assert echo_reply == b"echo:" + test_msg, "Client did not get echo response"
 
         logger.info("Relay message transfer test passed: echoed %s", test_msg)
