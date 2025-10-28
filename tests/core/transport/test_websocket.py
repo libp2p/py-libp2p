@@ -5,12 +5,6 @@ import logging
 from typing import Any
 
 import pytest
-
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup  # type: ignore[misc]
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception  # type: ignore[misc]
 from multiaddr import Multiaddr
 import trio
 
@@ -30,6 +24,10 @@ from libp2p.transport.websocket.multiaddr_utils import (
 from libp2p.transport.websocket.transport import WebsocketTransport
 
 logger = logging.getLogger(__name__)
+
+# ExceptionGroup type handling for Python 3.11+ compatibility
+# Use getattr to avoid type checker errors on Python 3.10
+ExceptionGroupType: type[BaseException] = getattr(builtins, "ExceptionGroup", Exception)
 
 PLAINTEXT_PROTOCOL_ID = "/plaintext/1.0.0"
 

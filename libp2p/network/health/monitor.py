@@ -277,40 +277,25 @@ class ConnectionHealthMonitor(Service):
     async def _replace_unhealthy_connection(
         self, peer_id: ID, old_conn: INetConn
     ) -> None:
-        """Replace an unhealthy connection with a new one."""
+        """
+        Replace an unhealthy connection with a new one.
+
+        This method establishes a new connection BEFORE closing the old one
+        to avoid dropping below minimum connection threshold.
+        """
         try:
             logger.info(f"Replacing unhealthy connection for peer {peer_id}")
 
-            # Check if we have enough connections remaining
+            # Check current connection count
             current_connections = self.swarm.connections.get(peer_id, [])
-            remaining_after_removal = len(current_connections) - 1
+            current_count = len(current_connections)
 
-            # Only remove if we have more than the minimum required
-            if remaining_after_removal < self.config.min_connections_per_peer:
-                logger.warning(
-                    f"Not replacing connection to {peer_id}: would go below minimum "
-                    f"({remaining_after_removal} < "
-                    f"{self.config.min_connections_per_peer})"
-                )
-                return
+            # Strategy: Try to establish new connection first, then close
+            # old one. This prevents us from being stuck with a bad
+            # connection at minimum threshold
 
-            # Clean up health tracking first
-            self.swarm.cleanup_connection_health(peer_id, old_conn)
-
-            # Remove from active connections
-            if (
-                peer_id in self.swarm.connections
-                and old_conn in self.swarm.connections[peer_id]
-            ):
-                self.swarm.connections[peer_id].remove(old_conn)
-
-            # Close the unhealthy connection
-            try:
-                await old_conn.close()
-            except Exception as e:
-                logger.debug(f"Error closing unhealthy connection: {e}")
-
-            # Try to establish a new connection to maintain connectivity
+            # First, try to establish a new connection
+            new_conn = None
             try:
                 logger.info(f"Attempting to dial replacement connection to {peer_id}")
                 new_conn = await self.swarm.dial_peer_replacement(peer_id)
@@ -322,10 +307,37 @@ class ConnectionHealthMonitor(Service):
                     logger.warning(
                         f"Failed to establish replacement connection to {peer_id}"
                     )
-
             except Exception as e:
                 logger.error(
                     f"Error establishing replacement connection to {peer_id}: {e}"
+                )
+
+            # If we successfully established a new connection, or if we have enough
+            # connections to safely remove the bad one, proceed with cleanup
+            if new_conn or current_count > self.config.min_connections_per_peer:
+                # Clean up health tracking
+                self.swarm.cleanup_connection_health(peer_id, old_conn)
+
+                # Remove from active connections
+                if (
+                    peer_id in self.swarm.connections
+                    and old_conn in self.swarm.connections[peer_id]
+                ):
+                    self.swarm.connections[peer_id].remove(old_conn)
+
+                # Close the unhealthy connection
+                try:
+                    await old_conn.close()
+                    logger.info(f"Closed unhealthy connection to {peer_id}")
+                except Exception as e:
+                    logger.debug(f"Error closing unhealthy connection: {e}")
+            else:
+                # We couldn't establish a new connection and we're at minimum
+                # Keep the unhealthy connection rather than having no connection
+                logger.warning(
+                    f"Keeping unhealthy connection to {peer_id}: "
+                    f"failed to establish replacement and at minimum threshold "
+                    f"({current_count} connections)"
                 )
 
         except Exception as e:

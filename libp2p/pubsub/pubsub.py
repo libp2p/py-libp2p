@@ -53,7 +53,6 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamError,
-    StreamReset,
 )
 from libp2p.peer.id import (
     ID,

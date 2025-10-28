@@ -1581,6 +1581,7 @@ class INetwork(ABC):
 
         """
 
+    @abstractmethod
     def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
         """
         Get health summary for a specific peer.
@@ -1599,6 +1600,7 @@ class INetwork(ABC):
         """
         return {}
 
+    @abstractmethod
     def get_global_health_summary(self) -> dict[str, Any]:
         """
         Get global health summary across all peers.
@@ -1612,6 +1614,7 @@ class INetwork(ABC):
         """
         return {}
 
+    @abstractmethod
     def export_health_metrics(self, format: str = "json") -> str:
         """
         Export health metrics in specified format.
@@ -1630,6 +1633,7 @@ class INetwork(ABC):
         """
         return "{}" if format == "json" else ""
 
+    @abstractmethod
     async def get_health_monitor_status(self) -> dict[str, Any]:
         """
         Get status information about the health monitoring service.
@@ -1967,6 +1971,7 @@ class IHost(ABC):
             Returns empty dict if health monitoring is disabled or peer not found.
 
         """
+        ...
 
     @abstractmethod
     def get_network_health_summary(self) -> dict[str, Any]:
@@ -1980,6 +1985,7 @@ class IHost(ABC):
             Returns empty dict if health monitoring is disabled.
 
         """
+        ...
 
     @abstractmethod
     def export_health_metrics(self, format: str = "json") -> str:
@@ -1998,6 +2004,7 @@ class IHost(ABC):
             Returns empty string or object if health monitoring is disabled.
 
         """
+        ...
 
     @abstractmethod
     async def get_health_monitor_status(self) -> dict[str, Any]:
@@ -2018,6 +2025,7 @@ class IHost(ABC):
             Returns {"enabled": False} if health monitoring is disabled.
 
         """
+        ...
 
 
 # -------------------------- peer-record interface.py --------------------------
