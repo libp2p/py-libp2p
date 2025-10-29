@@ -1750,7 +1750,7 @@ class IHost(ABC):
 
         Returns
         -------
-        Any
+        Multiselect
             The muxer instance of the host.
 
         """
