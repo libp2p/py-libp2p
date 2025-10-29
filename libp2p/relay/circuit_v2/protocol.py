@@ -39,6 +39,7 @@ from libp2p.stream_muxer.mplex.exceptions import (
 from libp2p.tools.async_service import (
     Service,
 )
+from libp2p.tools.constants import MAX_READ_LEN
 
 from .config import (
     DEFAULT_MAX_CIRCUIT_BYTES,
@@ -312,12 +313,20 @@ class CircuitV2Protocol(Service):
 
             logger.debug("Handling hop stream from %s", remote_id)
 
+            # If this stream is part of a pending relay (registered as source),
+            # do not read anything; STOP side will complete the handshake.
+            for _pid, (registered_src, _dst) in list(self._active_relays.items()):
+                if registered_src is stream:
+                    logger.debug(
+                        "Deferring HOP processing for %s to STOP side (pending relay)",
+                        remote_id,
+                    )
+                    return
+
             # First, handle the read timeout gracefully
             try:
-                with trio.fail_after(
-                    self.read_timeout * 2
-                ):  # Double the timeout for reading
-                    msg_bytes = await stream.read()
+                with trio.fail_after(self.read_timeout):
+                    msg_bytes = await stream.read(MAX_READ_LEN)
                     if not msg_bytes:
                         logger.error(
                             "Empty read from stream from %s",
@@ -462,7 +471,7 @@ class CircuitV2Protocol(Service):
         try:
             # Read the incoming message with timeout
             with trio.fail_after(self.read_timeout):
-                msg_bytes = await stream.read()
+                msg_bytes = await stream.read(MAX_READ_LEN)
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
@@ -506,10 +515,16 @@ class CircuitV2Protocol(Service):
             # Get the source peer's SPR to send to destination
             src_peer_id = src_stream.muxed_conn.peer_id
             src_peer_envelope = self.host.get_peerstore().get_peer_record(src_peer_id)
+            if src_peer_envelope is None:
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                src_peer_envelope = unmarshal_envelope(relay_envelope_bytes)
 
             # Get the destination peer's SPR to send to source
             dst_peer_id = stream.muxed_conn.peer_id
             dst_peer_envelope = self.host.get_peerstore().get_peer_record(dst_peer_id)
+            if dst_peer_envelope is None:
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                dst_peer_envelope = unmarshal_envelope(relay_envelope_bytes)
 
             # Send success status to both sides
             await self._send_status(
@@ -885,7 +900,7 @@ class CircuitV2Protocol(Service):
         """Send a status message."""
         try:
             logger.debug("Sending status message with code %s: %s", code, message)
-            with trio.fail_after(self.write_timeout * 2):  # Double the timeout
+            with trio.fail_after(self.write_timeout):
                 # Create a proto Status directly
                 pb_status = PbStatus()
                 pb_status.code = cast(
@@ -905,11 +920,7 @@ class CircuitV2Protocol(Service):
                 logger.debug("Status message serialized (%d bytes)", len(msg_bytes))
 
                 await stream.write(msg_bytes)
-                logger.debug("Status message sent, waiting for processing")
-
-                # Wait longer to ensure the message is sent
-                await trio.sleep(1.5)
-                logger.debug("Status message sending completed")
+                logger.debug("Status message sent")
         except trio.TooSlowError:
             logger.error(
                 "Timeout sending status message: code=%s, message=%s", code, message
@@ -927,7 +938,7 @@ class CircuitV2Protocol(Service):
         """Send a status message on a STOP stream."""
         try:
             logger.debug("Sending stop status message with code %s: %s", code, message)
-            with trio.fail_after(self.write_timeout * 2):  # Double the timeout
+            with trio.fail_after(self.write_timeout):
                 # Create a proto Status directly
                 pb_status = PbStatus()
                 pb_status.code = cast(
