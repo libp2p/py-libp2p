@@ -79,6 +79,13 @@ class ResourceManager:
     Manages connections, memory usage, and streams with configurable limits.
     """
 
+    # Class-level attribute declarations for type checker
+    _current_connections: int
+    _current_memory: int
+    _current_streams: int
+    _lock: threading.RLock
+    _closed: bool
+
     def __init__(
         self,
         limits: ResourceLimits | None = None,
@@ -133,12 +140,12 @@ class ResourceManager:
 
         # Thread safety
         self._lock = threading.RLock()
-        self._closed: bool = False
+        self._closed = False
 
         # Resource tracking
-        self._current_connections: int = 0
-        self._current_memory: int = 0
-        self._current_streams: int = 0
+        self._current_connections = 0
+        self._current_memory = 0
+        self._current_streams = 0
 
         # Connection tracking
         self.connection_tracker: ConnectionTracker | None = None
@@ -346,7 +353,8 @@ class ResourceManager:
     def release_memory(self, size: int) -> None:
         """Release memory resource"""
         with self._lock:
-            self._current_memory = max(0, self._current_memory - size)
+            current_memory: int = self._current_memory  # type: ignore
+            self._current_memory = max(0, current_memory - size)
 
             if self.metrics:
                 self.metrics.release_memory(size)

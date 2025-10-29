@@ -1,4 +1,4 @@
-from __future__ import annotations  
+from __future__ import annotations
 
 from collections.abc import (
     AsyncIterator,
@@ -11,13 +11,9 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
-    Optional,
 )
 
 import multiaddr
-
-if TYPE_CHECKING:
-    from libp2p.rcmgr.manager import ResourceManager
 
 from libp2p.abc import (
     IHost,
@@ -63,6 +59,7 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+from libp2p.rcmgr import ResourceManager
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -105,10 +102,22 @@ class BasicHost(IHost):
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
-        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
+        default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
-        resource_manager: Optional["libp2p.rcmgr.manager.ResourceManager"] = None,
+        resource_manager: ResourceManager | None = None,
     ) -> None:
+        """
+        Initialize a BasicHost instance.
+
+        :param network: Network service implementation
+        :param enable_mDNS: Enable mDNS discovery
+        :param enable_upnp: Enable UPnP port mapping
+        :param bootstrap: Bootstrap peer addresses
+        :param default_protocols: Default protocol handlers
+        :param negotiate_timeout: Protocol negotiation timeout
+        :param resource_manager: Optional resource manager instance
+        :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore

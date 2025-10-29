@@ -1,4 +1,5 @@
-from __future__ import annotations  
+from __future__ import annotations
+
 from libp2p.abc import (
     INetworkService,
     IPeerRouting,
@@ -12,15 +13,17 @@ from libp2p.host.exceptions import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from typing import TYPE_CHECKING, Optional
-
-if TYPE_CHECKING:
-    from libp2p.rcmgr.manager import ResourceManager
+from libp2p.rcmgr import ResourceManager
 
 
 # RoutedHost is a p2p Host that includes a routing system.
 # This allows the Host to find the addresses for peers when it does not have them.
 class RoutedHost(BasicHost):
+    """
+    RoutedHost is a p2p Host that includes a routing system.
+
+    This allows the Host to find the addresses for peers when it does not have them.
+    """
     _router: IPeerRouting
 
     def __init__(
@@ -30,8 +33,19 @@ class RoutedHost(BasicHost):
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
-    resource_manager: Optional["libp2p.rcmgr.manager.ResourceManager"] = None,
+        resource_manager: ResourceManager | None = None,
     ):
+        """
+        Initialize a RoutedHost instance.
+
+        :param network: Network service implementation
+        :param router: Peer routing implementation
+        :param enable_mDNS: Enable mDNS discovery
+        :param enable_upnp: Enable UPnP port mapping
+        :param bootstrap: Bootstrap peer addresses
+        :param resource_manager: Optional resource manager instance
+        :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        """
         super().__init__(
             network,
             enable_mDNS,

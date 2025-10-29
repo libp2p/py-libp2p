@@ -700,14 +700,11 @@ class Swarm(Service, INetworkService):
         and start to monitor the connection for its new streams and
         disconnection.
         """
-        # If QUIC and resource manager is present, attach a connection scope
-        if (
-            isinstance(muxed_conn, QUICConnection)
-            and self._resource_manager is not None
-        ):
+        # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
+        conn_scope = None
+        if self._resource_manager is not None:
             try:
-                # We don't currently use the `direction` variable here but
-                # keep the peer id for opening a connection scope.
+                # Extract peer_id from any muxed connection type
                 peer_id_for_scope = muxed_conn.peer_id
                 conn_scope = self._resource_manager.open_connection(
                     peer_id=peer_id_for_scope,
@@ -721,7 +718,8 @@ class Swarm(Service, INetworkService):
                     )
                 # QUICConnection provides a hook to set scope and ensure cleanup
                 if hasattr(muxed_conn, "set_resource_scope"):
-                    muxed_conn.set_resource_scope(conn_scope)
+                    # Type ignore: we've checked the attribute exists
+                    muxed_conn.set_resource_scope(conn_scope)  # type: ignore
             except Exception as e:
                 # If resource guard denies, close connection and rethrow
                 try:
@@ -736,6 +734,10 @@ class Swarm(Service, INetworkService):
             muxed_conn,
             self,
         )
+
+        # For non-QUIC connections, set the resource scope on SwarmConn
+        if conn_scope is not None and not hasattr(muxed_conn, "set_resource_scope"):
+            swarm_conn.set_resource_scope(conn_scope)  # type: ignore
         logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()

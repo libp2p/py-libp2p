@@ -1,5 +1,7 @@
 """Libp2p Python implementation."""
 
+from __future__ import annotations
+
 import logging
 import ssl
 
@@ -27,6 +29,7 @@ from libp2p.abc import (
     ISecureTransport,
     ITransport,
 )
+from libp2p.rcmgr import ResourceManager
 from libp2p.crypto.keys import (
     KeyPair,
 )
@@ -182,6 +185,7 @@ def new_swarm(
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    resource_manager: ResourceManager | None = None,
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -195,6 +199,8 @@ def new_swarm(
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
     :param quic_transport_opt: options for transport
+    :param resource_manager: optional resource manager for connection/stream limits
+    :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -294,7 +300,7 @@ def new_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
-    return Swarm(
+    swarm = Swarm(
         id_opt,
         peerstore,
         upgrader,
@@ -302,6 +308,12 @@ def new_swarm(
         retry_config=retry_config,
         connection_config=connection_config
     )
+
+    # Set resource manager if provided
+    if resource_manager is not None:
+        swarm.set_resource_manager(resource_manager)
+
+    return swarm
 
 
 def new_host(
@@ -320,6 +332,7 @@ def new_host(
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    resource_manager: ResourceManager | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -337,6 +350,8 @@ def new_host(
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
+    :param resource_manager: optional resource manager for connection/stream limits
+    :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :return: return a host instance
     """
 
@@ -353,7 +368,8 @@ def new_host(
         listen_addrs=listen_addrs,
         connection_config=quic_transport_opt if enable_quic else None,
         tls_client_config=tls_client_config,
-        tls_server_config=tls_server_config
+        tls_server_config=tls_server_config,
+        resource_manager=resource_manager,
     )
 
     if disc_opt is not None:
